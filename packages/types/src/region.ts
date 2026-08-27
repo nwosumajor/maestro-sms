@@ -128,6 +128,30 @@ export function countryProfile(code: string | null | undefined): CountryProfile 
   return COUNTRIES[(code ?? DEFAULT_COUNTRY).toUpperCase()] ?? COUNTRIES[DEFAULT_COUNTRY];
 }
 
+/**
+ * Resolve a free-text country — as typed on the PUBLIC onboarding form — to a
+ * catalogue code, or null when it is not one we can be sure about.
+ *
+ * The public intake asks for a country in words ("Ghana"), because a prospect
+ * filling in a marketing form should not have to know ISO 3166. Provisioning
+ * needs the CODE, and every region fact follows from it. This is the join, and
+ * it is the only place the two representations meet.
+ *
+ * EXACT, case-insensitive, on the code or the catalogue name — deliberately no
+ * fuzzy matching. "Republic of Ghana" resolves to null and the operator picks
+ * the country themselves; a near-match that guessed wrong would stamp a school
+ * with another country's currency, tax rules and privacy regime while looking
+ * configured, which is worse than leaving it unset.
+ */
+export function countryCodeFor(input: string | null | undefined): string | null {
+  const q = (input ?? "").trim().toLowerCase();
+  if (!q) return null;
+  for (const c of Object.values(COUNTRIES)) {
+    if (c.code.toLowerCase() === q || c.name.toLowerCase() === q) return c.code;
+  }
+  return null;
+}
+
 /** A school's effective region — explicit columns win over the country default,
  *  so a British school billing in USD is expressible. */
 export interface RegionProfile {

@@ -2024,6 +2024,59 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The country the prospect typed, and the school that never heard it
+Found by driving the funnel the user asked about — public form -> operator
+review -> provision -> pay — with a school that is not Nigerian.
+The public intake asks for a country in WORDS, because a prospect filling in a
+marketing form should not have to know ISO 3166. Provisioning wants the CODE,
+and `resolveRegion` derives EVERYTHING from it: the fee currency, the timezone
+that decides which DAY a register belongs to, the privacy regime, the month the
+academic year opens in, and the statutory payroll pack. **Nothing joined the
+two.** The console had no country field at all, and the service — which already
+falls back to the linked request for `referralCode`, `agentCode`, `ownerName`,
+`ownerPhone` and `address` — did not fall back for the one field that decides
+all of that. So every school provisioned through the console was created with
+`country` NULL and silently became a school in the platform's home country.
+**THE API AUTHOR HAD ALREADY THOUGHT ABOUT IT AND WRITTEN DOWN WHY.** The
+provisioning schema carries `country` with the comment "Set the region UP FRONT
+so the calendar we create opens in the right month. Southern-hemisphere schools
+run January to December; provisioning one as September puts its first term half
+a year out." The endpoint accepted it, and the screen next to it never sent one
+— the same shape as the meeting-requests `?open=1` filter that existed and whose
+only caller ignored it.
+Measured live, two schools provisioned by the console's own call:
+```
+Ghana        -> country NULL, year opens 2026-09-01   (before)
+South Africa -> country ZA,   year opens 2026-01-01   (after)
+```
+and the term POINTER moved with it — the South African school is correctly in
+Third Term as at today rather than First, which is what the register lock, the
+filing and the report-card headers all read.
+// THE PAYROLL CONSEQUENCE IS THE SHARPEST, because the missing country INVERTS
+a fail-safe. A country with no `PAYROLL_PACK` makes `createRun` REFUSE — the
+deliberate rule that "a payslip wrong about tax goes to an employee and a
+revenue authority". Ghana's pack is null, so a Ghanaian school is protected;
+resolving to the home country supplies a pack that DOES exist, so payroll RUNS
+and computes Nigerian PAYE for Ghanaian staff instead of refusing. The gap did
+not merely lose a setting, it removed the guard that exists for the setting.
+// `countryCodeFor` MATCHES EXACTLY, case-insensitively, on the code or the
+catalogue name, and returns NULL when unsure — deliberately no fuzzy matching.
+"Republic of Ghana" resolves to nothing and the operator picks the country
+themselves; a near-match that guessed wrong would stamp a school with another
+country's currency, tax rules and privacy regime while LOOKING configured, which
+is worse than leaving it unset. Null is also what the console shows as "Not set
+— uses the platform's home country", so the honest outcome is the visible one.
+// FIXED AT BOTH ENDS ON PURPOSE. The service fallback covers every provisioning
+call including one made without the console; the console's own select is what
+makes a wrong or missing country visible BEFORE the school exists, since the
+region is otherwise only settable afterwards through a different screen behind a
+different permission (`platform.tenants.region`) that a provisioning manager may
+not hold.
+Gate: `the-country-the-prospect-told-us.spec.ts` pins all three seams — the
+resolver, the service fallback (and that the RESOLVED local is what gets
+written, not the raw input), and that the form both offers the country and
+SENDS it. Mutation-validated three ways, one per seam.
+
 ### A salary rendered in a currency the school does not pay in
 `money` from `apps/web/lib/format.ts` defaults to `PLATFORM_REGION.currency`.
 That is CORRECT for platform money — a subscription charge, a message-credit

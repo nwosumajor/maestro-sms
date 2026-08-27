@@ -74,6 +74,8 @@ export default async function OperatorPage({
         contactEmail: provisionReq.contactEmail,
         desiredPlan: provisionReq.desiredPlan,
         desiredModules: provisionReq.desiredModules,
+        // Free text as the prospect typed it; the form resolves it to a code.
+        country: provisionReq.country,
       }
     : null;
 

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { MODULE_CATALOG, PLANS, PLAN_MODULES, resolveModules, type ModuleKey, type Plan } from "@sms/types";
+import { COUNTRIES, MODULE_CATALOG, PLANS, PLAN_MODULES, countryCodeFor, resolveModules, type ModuleKey, type Plan } from "@sms/types";
 import { postWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,10 @@ export type ProvisionPrefill = {
   contactEmail: string;
   desiredPlan: string | null;
   desiredModules: string[] | null;
+  /** Country as typed on the public form ("Ghana") — free text, not a code. */
+  country: string | null;
 };
+const COUNTRY_LIST = Object.values(COUNTRIES).sort((a, b) => a.name.localeCompare(b.name));
 const ROLES = ["school_admin", "principal", "head_admin", "hr_manager"] as const;
 const PLAN_LIST: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
 const isPlanKey = (s: string | null): s is Plan => !!s && (PLAN_LIST as string[]).includes(s);
@@ -84,6 +87,21 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
     if (!pEmailTouched) setPEmail(`principal@${nextSlug}.school`);
   };
 
+  // THE COUNTRY, WHICH DECIDES NEARLY EVERYTHING ELSE ABOUT THE SCHOOL.
+  //
+  // This form had no country field at all, so every school provisioned through
+  // the console was created with none — and a school with no country silently
+  // takes the platform's home one: its fee currency, the timezone that decides
+  // which DAY a register belongs to, its privacy regime, the month its academic
+  // year opens in, and which statutory payroll pack applies.
+  //
+  // Prefilled from what the prospect typed, resolved through the catalogue by
+  // exact match. Shown rather than inferred silently: an unmatched name lands on
+  // "not set" so the operator picks it, which is the honest outcome — the API
+  // resolves the same free text server-side, and this is where a wrong or
+  // missing one becomes visible before the school exists.
+  const [country, setCountry] = React.useState<string>(countryCodeFor(prefill?.country ?? null) ?? "");
+
   // Plan tier + extra add-on modules (force-on beyond the plan bundle).
   const [plan, setPlan] = React.useState<Plan>(isPlanKey(prefill?.desiredPlan ?? null) ? (prefill!.desiredPlan as Plan) : PLANS.ENTERPRISE);
   const [extras, setExtras] = React.useState<Set<ModuleKey>>(() => {
@@ -138,6 +156,7 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
       plan,
       overrides: { enabled: [...extras], disabled: [] },
       admins,
+      ...(country ? { country } : {}),
       // Provisioning from a public request flips it to APPROVED server-side.
       ...(prefill ? { onboardingRequestId: prefill.requestId } : {}),
     });
@@ -266,6 +285,28 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
               temporary passwords appear only here, never in email.
             </p>
           )}
+
+          {/* The country. Everything regional follows from it, and it cannot be
+              inferred safely from a school's name, so it is asked here. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="pv-country">Country</Label>
+            <select
+              id="pv-country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">Not set &mdash; uses the platform&rsquo;s home country</option>
+              {COUNTRY_LIST.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {prefill?.country
+                ? country
+                  ? `Requested \u201c${prefill.country}\u201d.`
+                  : `The request said \u201c${prefill.country}\u201d, which is not in the catalogue \u2014 pick the country.`
+                : "Decides the fee currency, timezone, privacy regime, academic-year start and statutory payroll."}
+            </p>
+          </div>
 
           {/* Subscription tier + extra add-on modules (what the school pays for). */}
           <div className="space-y-2 rounded-md border border-border p-3">

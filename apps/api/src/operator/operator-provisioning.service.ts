@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
 import type { MisplacedPlatformRoleDto, OnboardingRequestDto, PlatformStaffDutyDto, PlatformStaffInviteDto } from "@sms/types";
-import { MAX_SCHOOL_SLUG_LENGTH, defaultSessionFor, generateCalendar, pickOpeningTerm, countryProfile } from "@sms/types";
+import { MAX_SCHOOL_SLUG_LENGTH, countryCodeFor, defaultSessionFor, generateCalendar, pickOpeningTerm, countryProfile } from "@sms/types";
 import { allocateSchoolSlug } from "../foundation/login-email";
 import {
   PLATFORM_TIER_ROLES,
@@ -183,6 +183,7 @@ export class OperatorProvisioningService {
     let ownerName = input.ownerName?.trim() || null;
     let ownerPhone = input.ownerPhone?.trim() || null;
     let address = input.address?.trim() || null;
+    let country = input.country?.trim() ? input.country.trim().toUpperCase() : null;
     if (input.onboardingRequestId) {
       const req = await db.onboardingRequest.findFirst({
         where: { id: input.onboardingRequestId },
@@ -197,6 +198,7 @@ export class OperatorProvisioningService {
           address: true,
           city: true,
           state: true,
+          country: true,
         },
       });
       referralCode = referralCode ?? req?.referralCode ?? null;
@@ -206,6 +208,23 @@ export class OperatorProvisioningService {
       ownerPhone = ownerPhone ?? req?.ownerPhone ?? (contactIsOwner ? req?.contactPhone ?? null : null);
       address =
         address ?? (req?.address ? [req.address, req.city, req.state].filter(Boolean).join(", ") : null);
+      // THE COUNTRY THE PROSPECT TOLD US, carried across like every other field
+      // beside it. Without this the intake collected a country, displayed it to
+      // the operator inside an address line, and dropped it: the school was
+      // created with no country and every region fact silently fell back to the
+      // platform's home one — the fee currency, the timezone that decides which
+      // DAY a register belongs to, the privacy regime, and the month the
+      // academic year opens in.
+      //
+      // The payroll consequence is the sharpest, because the missing country
+      // INVERTS a fail-safe. A country with no PAYROLL_PACK makes createRun
+      // REFUSE, precisely so a payslip is never wrong about tax. Resolving to
+      // the platform's home country supplies a pack that DOES exist, so payroll
+      // runs and computes the wrong country's PAYE instead of refusing.
+      //
+      // Free text in, exact match only, null when unsure — an operator setting
+      // it deliberately is a better outcome than a guess that looks configured.
+      country = country ?? countryCodeFor(req?.country);
     }
     const referrer = referralCode
       ? await db.schoolReferralCode.findFirst({ where: { code: referralCode }, select: { schoolId: true } })
@@ -227,11 +246,11 @@ export class OperatorProvisioningService {
     // Pure catalogue lookup — the country decides the year's START MONTH, its
     // SHAPE, and the template stamped on the school row. Resolved before the
     // transaction because the school row is written first and needs it.
-    const profile = countryProfile(input.country);
+    const profile = countryProfile(country);
 
     const result = await db.$transaction(async (tx) => {
       const school = await tx.school.create({
-        data: { name: input.name, slug, ownerName, ownerPhone, address, ...(input.country ? { country: input.country.toUpperCase(), calendarTemplate: profile.calendarTemplate } : {}) },
+        data: { name: input.name, slug, ownerName, ownerPhone, address, ...(country ? { country, calendarTemplate: profile.calendarTemplate } : {}) },
       });
       // Provision on a TRIAL: ACTIVE now, but with a period end so the dunning
       // sweep will flip an unpaid school to PAST_DUE when the trial elapses
