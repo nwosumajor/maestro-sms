@@ -13,7 +13,9 @@ interface Fakes {
   taughtClasses?: { classId: string }[];
   myStudents?: { studentId: string }[];
   guardian?: { id: string } | null;
-  recipientUser?: { id: string; email?: string } | null;
+  /** A stubbed `user` row carries `status`, as every real one does — the
+   *  delivery worker now re-asks it at the wire (see the recovery window). */
+  recipientUser?: { id: string; email?: string; status?: string } | null;
   pendingDeliveries?: { id: string; channel: string }[];
   notificationRow?: { id: string; recipientId: string; title: string; body: string; data: unknown } | null;
 }
@@ -138,7 +140,7 @@ describe("NotificationService", () => {
     const { service, tx } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", email: "kid.parent@demo.school" },
+        recipientUser: { id: "r-1", status: "ACTIVE", email: "kid.parent@demo.school" },
         pendingDeliveries: [{ id: "del-1", channel: "EMAIL" }],
       },
       provider,
@@ -163,7 +165,7 @@ describe("NotificationService", () => {
     const { service } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        recipientUser: { id: "r-1", status: "ACTIVE", phone: "+2348000000000" } as never,
         pendingDeliveries: [{ id: "del-1", channel: "SMS" }],
       },
       provider,
@@ -194,7 +196,7 @@ describe("NotificationService", () => {
     const { service } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        recipientUser: { id: "r-1", status: "ACTIVE", phone: "+2348000000000" } as never,
         pendingDeliveries: [
           { id: "del-1", channel: "SMS" },
           { id: "del-2", channel: "SMS" },
@@ -216,7 +218,7 @@ describe("NotificationService", () => {
     const { service, tx } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        recipientUser: { id: "r-1", status: "ACTIVE", phone: "+2348000000000" } as never,
         pendingDeliveries: [{ id: "del-1", channel: "SMS" }],
       },
       provider,
@@ -237,7 +239,7 @@ describe("NotificationService", () => {
     const { service, tx } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        recipientUser: { id: "r-1", status: "ACTIVE", phone: "+2348000000000" } as never,
         pendingDeliveries: [{ id: "del-1", channel: "SMS" }],
       },
       provider,
@@ -259,7 +261,7 @@ describe("NotificationService", () => {
     const { service } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", email: "kid.parent@demo.school" },
+        recipientUser: { id: "r-1", status: "ACTIVE", email: "kid.parent@demo.school" },
         pendingDeliveries: [{ id: "del-1", channel: "EMAIL" }],
       },
       provider,
@@ -326,7 +328,7 @@ describe("delivery does not hold a transaction open across the network", () => {
     const { service } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", phone: "+2348000000000", contactEmail: "p@x.test" } as never,
+        recipientUser: { id: "r-1", status: "ACTIVE", phone: "+2348000000000", contactEmail: "p@x.test" } as never,
         pendingDeliveries: [
           { id: "d-1", channel: "SMS" },
           { id: "d-2", channel: "WHATSAPP" },
@@ -349,7 +351,7 @@ describe("delivery does not hold a transaction open across the network", () => {
     const { service } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
-        recipientUser: { id: "r-1", phone: "+2348000000000", contactEmail: "p@x.test" } as never,
+        recipientUser: { id: "r-1", status: "ACTIVE", phone: "+2348000000000", contactEmail: "p@x.test" } as never,
         pendingDeliveries: [
           { id: "d-1", channel: "SMS" },
           { id: "d-2", channel: "WHATSAPP" },

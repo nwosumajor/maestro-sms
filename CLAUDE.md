@@ -2075,6 +2075,39 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The guard was at creation; the bytes leave up to a day later
+`NotificationService.persist` drops EXTERNAL channels for a departed recipient
+and for a school that is switched off, and its own comment says it checks "once,
+HERE, rather than at each of the ~40 producers: a rule that has to be remembered
+at every call site is one that will be missed." Right about the producers — and
+it is CREATION time, which is not when the bytes leave.
+A delivery row sits PENDING until the worker runs, and a STRANDED one is
+re-queued by `NotificationRecoveryService` for up to `GIVE_UP_AFTER_HOURS` (24),
+swept hourly. **Inside that window the operator can SUSPEND the school, or the
+recipient can EXIT, and the row — written when both were fine — was still sent.**
+An email in the name of a school its owner had switched off; an SMS spending a
+paid message credit on somebody who no longer works there and cannot open the
+inbox it lands in. CLAUDE.md states the property as "Nothing reaches a
+switched-off school"; the funnel enforced it and the QUEUE went around it.
+Re-asked at the wire now, in `runDeliveries` — the one place every send passes,
+normal path and recovery alike. Cheap: the recipient row was already being read,
+so `status` is one more column, and school status is a 15s-cached lookup.
+Live, staging the exact race — write a PENDING email delivery, THEN switch the
+school off, then run the shipped worker: `{"sent":0,"failed":1}` and the row
+reads **`FAILED — school is not active`**. It records WHY rather than reporting a
+quiet zero, the same rule the "no target" and "no credits" arms already follow.
+// WRITTEN TO MIRROR `persist` EXACTLY — `recipient && status !== "ACTIVE"`, not
+`status === "ACTIVE"`. The difference is a row whose status cannot be read:
+persist lets that through, and a guard at the wire that blocked it would refuse
+mail the guard at creation had allowed. Two spellings of one rule is how a pair
+drifts, which is the whole reason this defect existed.
+// FAILS OPEN on an unreadable school status, for the reason `persist` already
+gives: an absent dependency must not silently stop every school's mail.
+// GOTCHA, and the precedent was already recorded: the check fails CLOSED on a
+stubbed `user` row carrying no `status` at all, which broke six existing worker
+fixtures and no real path — every `user` row has the column. Same trap
+`still-here.ts` documents; same answer, the stubs gained the column.
+
 ### Wait for the timer, read the answer, post it back
 Found by driving a path that had never executed: `live_quiz_session`,
 `live_quiz_participant` and `live_quiz_answer` all had zero rows, so the Live

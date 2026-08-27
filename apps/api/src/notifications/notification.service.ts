@@ -474,7 +474,7 @@ export class NotificationService {
       if (!notification) return null;
       const recipient = await tx.user.findFirst({
         where: { id: notification.recipientId },
-        select: { email: true, contactEmail: true, phone: true },
+        select: { email: true, contactEmail: true, phone: true, status: true },
       });
       const pending = await tx.notificationDelivery.findMany({
         where: { notificationId: job.notificationId, status: "PENDING" },
@@ -496,9 +496,49 @@ export class NotificationService {
         return allowance;
       };
 
+      // RE-ASKED AT THE WIRE, not only when the row was written.
+      //
+      // `persist` drops external channels for a departed recipient and for a
+      // school that is switched off, and says it checks "once, HERE, rather
+      // than at each of the ~40 producers". That is the right place for the
+      // PRODUCERS — and it is creation time, which is not when the bytes leave.
+      //
+      // A delivery row sits PENDING until this worker runs, and when one is
+      // STRANDED the recovery sweep re-queues it for up to
+      // GIVE_UP_AFTER_HOURS (24). Inside that window the school can be
+      // SUSPENDED by the operator, or the recipient can EXIT — and the row,
+      // written when both were fine, would still be sent: an email in the name
+      // of a school its owner has switched off, or an SMS spending a paid
+      // message credit on somebody who no longer works there.
+      //
+      // Cheap: the recipient row is already being read, so `status` is one more
+      // column, and school status is a 15s-cached lookup. Fails OPEN on an
+      // unreadable status, exactly as `persist` does — an absent dependency
+      // must not silently stop every school's mail.
+      // Written to MIRROR `persist` exactly — `recipient && status !== ACTIVE`,
+      // not `status === ACTIVE`. The difference is a row whose status cannot be
+      // read: persist lets that through, and a guard at the wire that blocked it
+      // would refuse mail the guard at creation had allowed. Two spellings of
+      // one rule is how the pair drifts.
+      const departed = Boolean(recipient) && recipient!.status !== "ACTIVE";
+      const stillDeliverable = !departed && (await this.schoolIsActive(job.schoolId));
+
       const attempts: Array<{ id: string; channel: NotificationChannelValue; target: string; metered: boolean }> = [];
       let failed = 0;
       for (const d of pending as Array<{ id: string; channel: NotificationChannelValue }>) {
+        if (!stillDeliverable) {
+          // Recorded, not silently dropped: "0 sent" with no reason is the
+          // shape of failure this service already refuses elsewhere.
+          await tx.notificationDelivery.update({
+            where: { id: d.id },
+            data: {
+              status: "FAILED",
+              error: departed ? "recipient has left the school" : "school is not active",
+            },
+          });
+          failed++;
+          continue;
+        }
         // SAFETY: never deliver to a GENERATED login identifier — it has no
         // mailbox, so sending there drops receipts and reset links silently.
         // deliverableEmail() returns the real contactEmail, or null.
