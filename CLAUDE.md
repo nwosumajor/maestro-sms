@@ -2075,6 +2075,38 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A NGN 350 library fine billed as USD 350.00
+Found by SWEEPING the class rather than waiting to trip over it again: every
+`*Minor` column on a table with no `currency` of its own — nineteen of them.
+Most inherit an unambiguous parent (line items, instalments and payments take the
+INVOICE's; payroll and fares are the school's own). One does not.
+`fineMinor` is days x `effectiveLibraryFinePerDayMinor`, a figure in the SCHOOL's
+currency, and `billFine` attached it to **the most recent live invoice whatever
+it was raised in**. Measured live — a book seven days late at NGN 50/day, for a
+pupil whose latest live invoice was USD:
+```
+before   invoice 99ce66b2  USD   amountMinor 35000  ->  $350.00   ~550x
+after    invoice cb6730d8  NGN   amountMinor 35000  ->  NGN 350.00
+```
+**SIXTH INSTANCE**, and the same file already worried about it: ten lines above
+the lookup sits *"settlement refuses a charge whose currency differs from the
+invoice, so a fine raised in the column default could never be paid online"* —
+and the `create` branch below sets `school.currency` correctly. Only the branch
+that PREFERS an existing invoice never asked. Somebody reasoned the whole thing
+through for the invoice they might CREATE and not for the one they might REUSE.
+// FILTERED, NOT SKIPPED — deliberately the opposite of the late-fee sweep one
+entry up. A late fee is about an invoice that is ALREADY late, so nothing
+matching means there is nothing to do. A library fine is a NEW charge that must
+land somewhere, and the create path beside it raises one in the right currency.
+Same class, opposite remedy, because the question each answers is different.
+// The live-debt rule it already had is untouched: ISSUED or PARTIALLY_PAID, never
+DRAFT (not a bill) and never PAID (adding a line would silently reopen it). The
+currency filter is an addition, and the test asserts both halves so the next
+change cannot trade one for the other.
+// `schoolCurrency` is resolved ONCE now — the same `?? "NGN"` default was written
+twice in one method, which is how a pair drifts. The test pins that there is
+exactly one.
+
 ### A NGN 2,500 late-fee policy that charged a family USD 2,500.00
 Found by verifying the ONE property of the late-fee sweep that matters to a
 family — that it charges once — and reading what it actually wrote.

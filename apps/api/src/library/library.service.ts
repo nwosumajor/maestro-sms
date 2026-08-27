@@ -447,6 +447,7 @@ export class LibraryService {
     // from the invoice, so a fine raised in the column default could never be
     // paid online by a school billing in anything else.
     const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
+    const schoolCurrency = school?.currency ?? "NGN";
     // A FINE IS DUE THE MOMENT THE BOOK IS LATE, so it goes onto a LIVE debt.
     //
     // This used to attach the fine to a DRAFT invoice, or create one — and a
@@ -467,8 +468,30 @@ export class LibraryService {
     //
     // PARTIALLY_PAID counts as a live debt and PAID deliberately does not:
     // adding a line to a settled invoice would silently reopen it as underpaid.
+    // AND IT MUST BE AN INVOICE IN THE SAME MONEY THE FINE IS IN.
+    //
+    // `fineMinor` is days x `effectiveLibraryFinePerDayMinor`, a figure in the
+    // SCHOOL's currency. This took the most recent live invoice WHATEVER it was
+    // raised in — and invoices carry their own currency per row, because the
+    // platform bills USD through Stripe alongside a school's local rail.
+    //
+    // Measured live: a book seven days late at NGN 50/day billed 35,000 onto a
+    // pupil's live USD invoice — **$350.00** on a family's bill, about 550x the
+    // NGN 350 intended. The comment ten lines above worried about exactly this
+    // ("settlement refuses a charge whose currency differs from the invoice")
+    // and the `create` branch below sets `school.currency` correctly; only the
+    // branch that PREFERS an existing invoice never asked.
+    //
+    // Filtered rather than skipped, unlike the late-fee sweep: a late fee is
+    // about an invoice that is already late, so there is nothing to do if none
+    // matches — but a library fine is a NEW charge that must land somewhere, and
+    // the create path beside this raises one in the right currency.
     let invoice = await tx.invoice.findFirst({
-      where: { studentId: loan.borrowerId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
+      where: {
+        studentId: loan.borrowerId,
+        status: { in: ["ISSUED", "PARTIALLY_PAID"] },
+        currency: schoolCurrency,
+      },
       orderBy: { createdAt: "desc" },
     });
     if (!invoice) {
@@ -480,7 +503,7 @@ export class LibraryService {
           reference: `FINE-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           status: "ISSUED",
           totalMinor: 0,
-          currency: school?.currency ?? "NGN",
+          currency: schoolCurrency,
           dueDate: new Date(),
         },
       });
