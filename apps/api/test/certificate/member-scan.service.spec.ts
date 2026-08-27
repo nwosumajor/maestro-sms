@@ -5,6 +5,8 @@ import type { Principal, TenantContext, TenantTx } from "../../src/integrity/int
 function makeService(over: {
   user?: Record<string, unknown> | null;
   enrolment?: { classId: string; class: { name: string } } | null;
+  holiday?: { name: string } | null;
+  term?: { startDate: Date } | null;
 }) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const scanEventCreate = jest.fn().mockResolvedValue({ id: "se-1" });
@@ -15,6 +17,13 @@ function makeService(over: {
     enrollment: { findFirst: jest.fn().mockResolvedValue(over.enrolment ?? null) },
     scanEvent: { create: scanEventCreate },
     attendanceSession: { upsert: sessionUpsert },
+    // A REAL TenantTx ALWAYS HAS THESE. The scan desk now asks whether today is
+    // a day a register may be taken at all (holiday / closed term), the same
+    // question the register screen asks — a stub without them models something
+    // the database cannot produce. Defaults are the fail-open case: no holiday
+    // declared and no term configured.
+    schoolHoliday: { findFirst: jest.fn().mockResolvedValue(over.holiday ?? null) },
+    term: { findFirst: jest.fn().mockResolvedValue(over.term ?? null) },
     $executeRaw: execRaw,
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

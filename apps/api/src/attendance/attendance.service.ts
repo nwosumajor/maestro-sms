@@ -26,6 +26,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { currentTermStartInTx, holidayOn } from "./register-window";
 import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
@@ -528,11 +529,10 @@ export class AttendanceService {
    * column's midnight endDate.
    */
   private async assertNotHoliday(tx: TenantTx, date: Date): Promise<void> {
-    const d = new Date(dayUtc(date));
-    const hit = await tx.schoolHoliday.findFirst({
-      where: { startDate: { lte: d }, endDate: { gte: d } },
-      select: { name: true },
-    });
+    // ONE definition, shared with the ID-card scan desk — the other writer of
+    // this table, which asked neither this nor the term lock. See
+    // `attendance/register-window.ts`.
+    const hit = await holidayOn(tx, date);
     if (hit) {
       throw new BadRequestException(`This date is a school holiday (${hit.name}) — no register is taken. Remove the holiday if this is a school day.`);
     }
@@ -546,16 +546,9 @@ export class AttendanceService {
    * school must never have attendance blocked).
    */
   private async currentTermStart(tx: TenantTx, schoolId: string): Promise<Date | null> {
-    const marked = await tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true } });
-    if (marked?.startDate) return marked.startDate;
     // The school's day, so a term boundary flips at midnight WHERE THE SCHOOL IS.
     const today = await this.region.todayInTx(tx, schoolId);
-    const containing = await tx.term.findFirst({
-      where: { startDate: { lte: today }, endDate: { gte: today } },
-      orderBy: { startDate: "desc" },
-      select: { startDate: true },
-    });
-    return containing?.startDate ?? null;
+    return currentTermStartInTx(tx, today);
   }
 
   /**

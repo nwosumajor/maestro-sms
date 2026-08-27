@@ -18,13 +18,19 @@
 //  * PERMISSION-GATED at the controller with `member.scan`.
 // =============================================================================
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { MemberScanDto, ScanEventDto, ScanPurpose, ScanRecordResultDto } from "@sms/types";
+import type {
+  MemberScanDto,
+  ScanEventDto,
+  ScanPurpose,
+  ScanRecordResultDto,
+} from "@sms/types";
 import { isScanPurpose, schoolToday } from "@sms/types";
 
 /** A movement log is read to answer a question, not to be scrolled. Bounded on
  *  the largest table the platform stores. */
 const SCAN_HISTORY_CAP = 200;
 import { randomUUID } from "node:crypto";
+import { registerClosedReason } from "../attendance/register-window";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -50,7 +56,9 @@ export class MemberScanService {
 
   /** Resolve a scanned code to a member of the caller's school, or 404. */
   async resolve(p: Principal, rawCode: string): Promise<MemberScanDto> {
-    return this.db.runAsTenant(this.ctx(p), (tx) => this.resolveInTx(tx, p, rawCode, true));
+    return this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.resolveInTx(tx, p, rawCode, true),
+    );
   }
 
   /**
@@ -85,7 +93,8 @@ export class MemberScanService {
       // this bypasses the per-class teacher restriction; takenById records who.
       if (purpose === "CHECK_IN") {
         if (member.role !== "student") {
-          attendanceNote = "Not a student — movement recorded, no register marked.";
+          attendanceNote =
+            "Not a student — movement recorded, no register marked.";
         } else {
           const enrolment = await tx.enrollment.findFirst({
             where: { studentId: member.userId, status: "ACTIVE" },
@@ -98,19 +107,48 @@ export class MemberScanService {
             // 23:30 the previous day in UTC — it was marking pupils present for
             // yesterday, on the one record that says who was physically there.
             const today = await this.region.todayInTx(tx, p.schoolId);
-            const session = await tx.attendanceSession.upsert({
-              where: { classId_date: { classId: enrolment.classId, date: today } },
-              update: {},
-              create: { schoolId: p.schoolId, classId: enrolment.classId, date: today, takenById: p.userId },
-              select: { id: true },
-            });
-            await tx.$executeRaw`
-              INSERT INTO "attendance_record" ("id","schoolId","sessionId","studentId","status","note","createdAt","updatedAt")
-              VALUES (${randomUUID()}::uuid, ${p.schoolId}::uuid, ${session.id}::uuid, ${member.userId}::uuid, 'PRESENT'::"AttendanceStatus", 'scan check-in', now(), now())
-              ON CONFLICT ("sessionId","studentId")
+            // IS TODAY A DAY A REGISTER MAY BE TAKEN AT ALL?
+            //
+            // The register screen asks this on two adjacent lines and the scan
+            // desk asked neither, so a gate scan wrote a register on a declared
+            // holiday, and on a day outside the current term — both of which
+            // `markAttendance` refuses outright.
+            //
+            // RECORDED, NOT REFUSED. The movement is the thing a gate terminal
+            // exists to capture and it must survive whatever the calendar says;
+            // the note explains why no register was marked, in the same shape as
+            // the "Not a student" and "No active class" arms above.
+            const closed = await registerClosedReason(tx, today, today);
+            if (closed) {
+              attendanceNote = `${closed.reason} Movement recorded.`;
+            } else {
+              const session = await tx.attendanceSession.upsert({
+                where: {
+                  classId_date: { classId: enrolment.classId, date: today },
+                },
+                update: {},
+                create: {
+                  schoolId: p.schoolId,
+                  classId: enrolment.classId,
+                  date: today,
+                  takenById: p.userId,
+                },
+                select: { id: true },
+              });
+              // `date` IS NOT OPTIONAL HERE. attendance_record is RANGE-partitioned
+              // on it, so Postgres forces the partition key into the unique
+              // constraint: the target is (sessionId, studentId, date). This upsert
+              // was a copy of the register's own, named neither, and every student
+              // check-in failed 42P10 — inside runAsTenant, so the scan_event and
+              // the audit row rolled back with it and the desk recorded nothing.
+              await tx.$executeRaw`
+              INSERT INTO "attendance_record" ("id","schoolId","sessionId","studentId","status","note","date","createdAt","updatedAt")
+              VALUES (${randomUUID()}::uuid, ${p.schoolId}::uuid, ${session.id}::uuid, ${member.userId}::uuid, 'PRESENT'::"AttendanceStatus", 'scan check-in', ${today}::date, now(), now())
+              ON CONFLICT ("sessionId","studentId","date")
               DO UPDATE SET "status" = 'PRESENT', "updatedAt" = now()
             `;
-            attendanceMarkedClass = enrolment.class?.name ?? null;
+              attendanceMarkedClass = enrolment.class?.name ?? null;
+            }
           }
         }
       }
@@ -122,12 +160,22 @@ export class MemberScanService {
           entity: "scan_event",
           entityId: member.userId,
           schoolId: p.schoolId,
-          metadata: { uniqueId: member.uniqueId, purpose, attendanceMarkedClass },
+          metadata: {
+            uniqueId: member.uniqueId,
+            purpose,
+            attendanceMarkedClass,
+          },
         },
         tx,
       );
 
-      return { member, purpose, recorded: true as const, attendanceMarkedClass, attendanceNote };
+      return {
+        member,
+        purpose,
+        recorded: true as const,
+        attendanceMarkedClass,
+        attendanceNote,
+      };
     });
   }
 
@@ -215,11 +263,18 @@ export class MemberScanService {
    * "everything for this pupil" is not a query anyone should be able to ask by
    * accident.
    */
-  async history(p: Principal, memberId: string, days = 30): Promise<ScanEventDto[]> {
+  async history(
+    p: Principal,
+    memberId: string,
+    days = 30,
+  ): Promise<ScanEventDto[]> {
     const window = Math.min(Math.max(days, 1), 180);
     const since = new Date(Date.now() - window * 86_400_000);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const member = await tx.user.findFirst({ where: { id: memberId }, select: { id: true } });
+      const member = await tx.user.findFirst({
+        where: { id: memberId },
+        select: { id: true },
+      });
       // 404-not-403: whether a member of another school exists is not something
       // this answers.
       if (!member) throw new NotFoundException("Member not found");
@@ -292,7 +347,14 @@ export class MemberScanService {
   /** Names for the two people on each row, in ONE lookup rather than per row. */
   private async decorate(
     tx: TenantTx,
-    rows: Array<{ id: string; memberId: string; scannedById: string; purpose: string; note: string | null; createdAt: Date }>,
+    rows: Array<{
+      id: string;
+      memberId: string;
+      scannedById: string;
+      purpose: string;
+      note: string | null;
+      createdAt: Date;
+    }>,
   ): Promise<ScanEventDto[]> {
     if (rows.length === 0) return [];
     const ids = [...new Set(rows.flatMap((r) => [r.memberId, r.scannedById]))];
@@ -307,10 +369,11 @@ export class MemberScanService {
       memberName: nameOf.get(r.memberId) ?? "Unknown",
       scannedById: r.scannedById,
       scannedByName: nameOf.get(r.scannedById) ?? "Unknown",
-      purpose: (isScanPurpose(r.purpose) ? r.purpose : "CHECK_IN") as ScanPurpose,
+      purpose: (isScanPurpose(r.purpose)
+        ? r.purpose
+        : "CHECK_IN") as ScanPurpose,
       note: r.note,
       at: r.createdAt,
     }));
   }
-
 }

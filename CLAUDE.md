@@ -2024,6 +2024,54 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Every check-in at the scan desk was a 500, and recorded nothing at all
+`member-scan.service.ts`. The ID-card desk marks a pupil PRESENT on CHECK_IN,
+with a raw upsert written as a COPY of `AttendanceService.applyRegister`. When
+`attendance_record` was RANGE-partitioned on `date`, the register's own upsert
+was updated — `date` added to the column list AND to the conflict target, with a
+comment saying Postgres forces the partition key into the unique constraint. The
+copy at the scan desk was not touched, and named `date` in NEITHER place.
+Measured live, principal scanning a real enrolled pupil:
+```
+POST /members/scan/VOLS00002 {"purpose":"CHECK_IN"}   ->  HTTP 500
+42P10  there is no unique or exclusion constraint matching the ON CONFLICT specification
+```
+**AND IT LOST MORE THAN THE ATTENDANCE.** The whole method runs inside
+`runAsTenant`, and `scanEvent.create` + the audit row are written BEFORE the
+failing insert — so they rolled back with it. A check-in recorded NOTHING: no
+attendance, no movement, no trail, on the busiest desk in the school.
+`scan_event` stayed at 0 across the probe and read 1 afterwards.
+Proved against the real partitioned table, both statements rolled back: the old
+form errors 42P10, the new one inserts, and a replay leaves exactly ONE record
+for that pupil that day — the idempotence that matters when a child is scanned
+twice.
+// **A UNIT TEST ASSERTED THE OPPOSITE AND PASSED THROUGHOUT.**
+`member-scan.service.spec` has a case named "CHECK_IN marks a student present in
+their class and records a scan_event", green the entire time, because
+`$executeRaw` is a `jest.fn()` and a stub never validates SQL. The new spec
+asserts the STATEMENT — the conflict target and the presence of the `date`
+column — which is the only part a stub can still get wrong.
+// THE SAME COPY HAD DRIFTED ON THE RULES, NOT ONLY THE SQL. The register screen
+asks two questions on adjacent lines — is this a declared HOLIDAY, and is the
+date inside the CURRENT TERM — and the scan desk asked neither, so once the
+insert was fixed it would have written registers on days `markAttendance`
+refuses outright. Both rules now live in `attendance/register-window.ts` and
+BOTH writers call it; a second copy of a rule is what caused this.
+// RECORDED, NOT REFUSED, and the two callers differ deliberately. The register
+screen REFUSES (a teacher naming a specific day must be told why); the scan desk
+records the movement and simply does not mark the register, with the reason in
+`attendanceNote` — the same shape as the "Not a student" and "No active class"
+arms already beside it. A gate terminal must never lose the fact that somebody
+walked in because of what the calendar says.
+// Live after: the same scan returns **201** with
+`attendanceNote: "This register is locked: it falls in a term that has ended.
+Movement recorded."` — the demo school is between terms today, so the guard is
+visibly doing its job — and the `scan_event` row survives.
+// GOTCHA: the existing fixture had no `schoolHoliday` or `term` on its `tx`, so
+the new lookups threw `Cannot read properties of undefined`. Same trap this repo
+already records three times — a stub describing something the database cannot
+produce. Every real `TenantTx` has both.
+
 ### A lead that never said how long it had waited
 Same funnel, one screen earlier. The operator's onboarding review card rendered
 the school, its type, its size, its address, its website and its contacts — and
