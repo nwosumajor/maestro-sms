@@ -12,6 +12,26 @@ type Req = Serialized<OnboardingRequestDto>;
 
 const MODULE_LABEL = new Map(MODULE_CATALOG.map((m) => [m.key as string, m.label]));
 
+// A REQUEST THAT HAS WAITED THIS LONG IS SAID SO PLAINLY.
+//
+// This card showed the school, its size, its address and its contacts — and no
+// date at all. The queue is ordered oldest-first, so the longest wait is already
+// at the top, but nothing on the row said it WAS a long wait: a lead submitted
+// three weeks ago looked exactly like one submitted this morning. Every other
+// waiting thing in this product states its age, and this is the one queue where
+// the wait is a school deciding the platform never answered.
+//
+// Three working days: long enough not to nag an owner about this morning's
+// request, short enough that a lead is still warm when it is called.
+const STALE_LEAD_DAYS = 3;
+const UNDECIDED = new Set(["NEW", "REVIEWING"]);
+
+/** Whole days a request has been waiting, from the browser's own clock. */
+function daysWaiting(createdAt: string): number {
+  const ms = Date.now() - new Date(createdAt).getTime();
+  return Math.max(0, Math.floor(ms / 86_400_000));
+}
+
 export function OnboardingRequests({ requests }: { requests: Req[] }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -59,6 +79,25 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
                   {r.schoolType ? `· ${r.schoolType.replaceAll("_", " ").toLowerCase()} ` : ""}
                   {r.desiredSlug ? `· wants /${r.desiredSlug}` : ""}
                 </span>
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {UNDECIDED.has(r.status) ? (
+                  <>
+                    {(() => {
+                      const d = daysWaiting(r.createdAt);
+                      const wait = d === 0 ? "today" : d === 1 ? "1 day" : `${d} days`;
+                      return d >= STALE_LEAD_DAYS ? (
+                        <span className="font-medium text-destructive">
+                          Waiting {wait} &mdash; not yet answered
+                        </span>
+                      ) : (
+                        <>Received {d === 0 ? "today" : `${wait} ago`}</>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  <>Received {new Date(r.createdAt).toLocaleDateString()}</>
+                )}
               </p>
               {(r.city || r.state || r.studentCount != null || r.staffCount != null) && (
                 <p className="mt-0.5 text-xs text-muted-foreground">

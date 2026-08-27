@@ -2024,6 +2024,32 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A lead that never said how long it had waited
+Same funnel, one screen earlier. The operator's onboarding review card rendered
+the school, its type, its size, its address, its website and its contacts — and
+NO DATE. The list is already ordered oldest-first, so the longest wait sits at
+the top; nothing on the row said it WAS a long wait, so a request submitted
+three weeks ago looked exactly like one submitted this morning.
+`createdAt` was on the DTO and reaching the browser the whole time. The defect
+was in the drawing, not the data — which is why no API test could have found it.
+// EVERY OTHER WAITING THING IN THIS PRODUCT STATES ITS AGE: an overdue library
+book, a boarder signed out too long, a staff certificate expiring in 30 days, a
+breach past its statutory deadline, an invoice past due. This is the one queue
+where the thing waiting is a school deciding the platform never answered, and it
+is the only unanswered thing here that is REVENUE.
+// SAID ONLY WHILE THE REQUEST IS UNDECIDED. "Waiting 40 days" on a request that
+was answered on day one is a false statement about the platform's own
+responsiveness, and it would teach an owner to ignore the marker on the rows
+where it is true — the same reasoning the breach sweep uses for sending at most
+two notices per incident. A decided request shows its date and nothing more.
+// DELIBERATELY NOT A NEW SWEEP. The owner is already notified in-app AND by
+email when a request arrives, and the prospect is already acknowledged by email;
+what was missing was the AGE on the screen an owner actually works from. Adding
+an eighteenth timer to chase what a screen could simply say would be the more
+elaborate answer to the smaller problem.
+Gate: `a-lead-that-says-how-long-it-waited.test.ts`, mutation-validated two ways
+(show the wait on decided rows; allow a negative day count from a skewed clock).
+
 ### The country the prospect typed, and the school that never heard it
 Found by driving the funnel the user asked about — public form -> operator
 review -> provision -> pay — with a school that is not Nigerian.
