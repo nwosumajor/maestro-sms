@@ -1,4 +1,5 @@
 import type { AdmissionApplicationPageDto, DocumentRequirementDto, Serialized } from "@sms/types";
+import { MODULES } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -35,14 +36,25 @@ export default async function AdminAdmissionsPage({
     const v = searchParams?.[key];
     if (v) qs.set(key, v);
   }
+  // ADMISSIONS is a ULTIMATE add and this page is reachable on permission
+  // alone. Without the module every call below answers 404, `apiGet` returns
+  // null for that exactly as for a real failure, and the page rendered a RED
+  // alert reading "Applications could not be loaded ... applicants are waiting
+  // on a decision". Nobody was waiting and reloading could never help.
+  //
+  // Gate BEFORE fetching, as the dashboard now does for analytics: a module the
+  // plan does not include is not a failure to report.
+  const hasAdmissions = !user.modules || user.modules.includes(MODULES.ADMISSIONS);
   const [appPage, formFee, requirements, classes] = await Promise.all([
     // Every filter narrows the QUERY. The list is paged, so the family that
     // applied first is reachable by status, by name or by stepping back a page
     // — it used to be the 200 most recent and nothing else.
-    apiGet<Omit<Serialized<AdmissionApplicationPageDto>, "items"> & { items: Application[] }>(
-      `/admissions${qs.toString() ? `?${qs}` : ""}`,
-    ),
-    apiGet<{ formFeeMinor: number }>("/admissions/settings/form-fee"),
+    hasAdmissions
+      ? apiGet<Omit<Serialized<AdmissionApplicationPageDto>, "items"> & { items: Application[] }>(
+          `/admissions${qs.toString() ? `?${qs}` : ""}`,
+        )
+      : Promise.resolve(null),
+    hasAdmissions ? apiGet<{ formFeeMinor: number }>("/admissions/settings/form-fee") : Promise.resolve(null),
     canManageDocs
       ? apiGet<Serialized<DocumentRequirementDto>[]>("/documents/requirements?scope=STUDENT_ADMISSION")
       : Promise.resolve(null),
@@ -155,7 +167,17 @@ export default async function AdminAdmissionsPage({
         {/* A failed read used to render "No applications — none recorded for
             this school", and an admissions officer who believes that stops
             looking. A family waiting on a decision is the cost. */}
-        {apps === null ? (
+        {!hasAdmissions ? (
+          // NOT a failure, and not "no applications": the school does not have
+          // the module, so there is no public form and no queue to be clear.
+          <Alert variant="info">
+            <AlertTitle>Admissions is not part of your plan</AlertTitle>
+            <AlertDescription>
+              The public application form is not open for your school, so there are no applications to review. Ask your
+              administrator about adding Admissions if you would like to take enrolments online.
+            </AlertDescription>
+          </Alert>
+        ) : apps === null ? (
           <Alert variant="destructive">
             <AlertTitle>Applications could not be loaded</AlertTitle>
             <AlertDescription>

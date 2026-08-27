@@ -2024,6 +2024,55 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Every always-on page audited for calls into gated modules
+The dashboard defect one entry down was the second in two rounds caused by an
+always-on surface consuming a module-gated endpoint, so the seam was swept
+properly rather than waited on. `always-on-pages-into-gated-modules.spec.ts`
+cross-references every `apiGet` in every `app/(app)/**/page.tsx` against the
+module each endpoint requires, resolved from the shared route extractor.
+**59 raw calls -> 28 after the nav's own guarantee -> 2 actionable.** The two
+filters are the whole method:
+- A page's real guarantee is usually its NAV ENTRY, not its body: `/classes` is
+  gated on LMS, so calling `/classes/mine` is not a cross-module call at all.
+  Without this the audit reports every page against its own module and drowns.
+- Everything in STANDARD is present on EVERY paying plan, so a call into LMS,
+  FEES, MESSAGING, CALENDAR, TIMETABLE, SIS, LIBRARY, GRADEBOOK, ATTENDANCE or
+  DOCUMENTS can only 404 under a deliberate operator override. The actionable
+  set is calls into modules a paying school may genuinely LACK.
+Both survivors were the same defect as the dashboard — a 404 for "you do not
+have this" rendered as "something failed":
+```
+/admin/admissions   RED alert: "Applications could not be loaded ... Reload
+                    before treating the queue as clear — applicants are waiting
+                    on a decision."   (ADMISSIONS is a ULTIMATE add)
+/admin/privacy      RED: "The retention history could not be loaded ..."
+                    (INTEGRITY is a PREMIUM add)
+```
+Nobody was waiting and nothing had failed. The admissions one is the sharper:
+`/admin` offered an "Admissions — Review public applications" tile filtered on
+PERMISSION ALONE, so a STANDARD principal was invited into a page that told them
+applicants were waiting.
+// FIXED AT BOTH ENDS: the tile is not offered for a module the school lacks
+(do not offer what it has not bought), and the page gates its fetches and says
+"Admissions is not part of your plan ... there are no applications to review".
+Privacy says "no behavioural telemetry about pupils is collected and there is
+nothing to purge" instead of asking the reader to work out which happened.
+// CREDIT WHERE DUE: the privacy page's old copy already MENTIONED the
+possibility ("If your plan does not include Assessment Integrity there is no
+telemetry to purge; otherwise retry"). It was honest and still wrong-shaped —
+the page KNOWS which it is, and making the reader disambiguate, in red, is not
+the same as answering.
+// **GOTCHA, AND THE GATE WAS WORTHLESS UNTIL IT WAS CAUGHT.** Guard detection
+was FILE-level: it collected every `mod()` and `MODULES.X` in the page. The
+"not on your plan" COPY mentions the module, so removing the guard from the
+FETCH left the page still looking guarded — mutation-tested, and it passed with
+all three fixes reverted. It now asks whether THIS CALL is conditional, reading
+only the 200 characters before it. Re-validated: all three reverts fail.
+// The gate asserts an EMPTY list rather than printing one. Two were found and
+both are fixed; a third would be the same defect again, and a page that
+legitimately needs a gated endpoint proves it by gating the call — which is the
+fix, not an exemption.
+
 ### A warning the entry tier could never clear
 Found by smoke-testing a tier nobody had: the route smoke has only ever run
 against the demo school on ENTERPRISE. Set to STANDARD, all 107 routes still

@@ -1,3 +1,4 @@
+import { MODULES } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -25,7 +26,13 @@ export default async function AdminPrivacyPage() {
   // STANDARD plan does not include — so on a STANDARD school this 404s, and
   // saying "no purge has run" there is a guess dressed as a record.
   const canReadRuns = hasPermission(user.permissions, "integrity.retention.run");
-  const runs = canReadRuns
+  // INTEGRITY is a PREMIUM add and this page is an always-on privacy
+  // obligation, so on a plan without it `/integrity/retention/runs` answers 404
+  // and `apiGet` returns null exactly as for a real failure. The copy below was
+  // careful enough to mention the possibility, but it still asked the READER to
+  // work out which had happened, in red. The page knows; it should say.
+  const hasIntegrity = !user.modules || user.modules.includes(MODULES.INTEGRITY);
+  const runs = canReadRuns && hasIntegrity
     ? await apiGet<
         { id: string; retentionDays: number; cutoff: string; signalsDeleted: number; draftsDeleted: number; telemetryDeleted: number; xapiDeleted: number; scansDeleted: number; trigger: string; createdAt: string }[]
       >("/integrity/retention/runs")
@@ -56,11 +63,15 @@ export default async function AdminPrivacyPage() {
             <p className="text-xs text-muted-foreground">
               Your role cannot read the retention history — ask a principal or school administrator.
             </p>
+          ) : !hasIntegrity ? (
+            <p className="text-xs text-muted-foreground">
+              Your plan does not include Assessment Integrity, so no behavioural telemetry about pupils is collected
+              and there is nothing to purge.
+            </p>
           ) : runs === null ? (
             <p className="text-xs text-destructive">
               The retention history could not be loaded, so this is <strong>not</strong> a record that nothing was
-              deleted. If your plan does not include Assessment Integrity there is no telemetry to purge; otherwise
-              retry, and report it if it persists.
+              deleted. Retry, and report it if it persists.
             </p>
           ) : runs.length === 0 ? (
             <p className="text-xs text-muted-foreground">

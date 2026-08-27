@@ -1,4 +1,5 @@
 import type { InvoiceSummaryDto, WorkflowSummaryDto, Serialized } from "@sms/types";
+import { MODULES } from "@sms/types";
 import { hasPermission, type Permission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -99,10 +100,17 @@ export default async function AdminPage() {
     { label: "Bulk student onboarding", href: "/admin/import", perm: "student.import", desc: "SIS roster upload (maker-checker)" },
     { label: "Parent onboarding", href: "/admin/parents", perm: "parent.import", desc: "Create guardian logins + link children" },
     { label: "Finance reports", href: "/fees/reports", perm: "fee.manage", desc: "Receivables aging + collection" },
-    { label: "Admissions", href: "/admin/admissions", perm: "admission.review", desc: "Review public applications" },
+    // ADMISSIONS is a ULTIMATE add. Offered on permission alone, this tile
+    // invited a STANDARD principal into a page that answered with a red
+    // "Applications could not be loaded — applicants are waiting on a decision".
+    // Nothing had failed and nobody was waiting: the school does not have the
+    // module. Do not offer what the school has not bought.
+    { label: "Admissions", href: "/admin/admissions", perm: "admission.review", module: MODULES.ADMISSIONS, desc: "Review public applications" },
     { label: "School branding", href: "/admin/branding", perm: "school.branding.manage", desc: "Logo + brand colour (login, certificates, ID cards)" },
-  ] satisfies { label: string; href: string; perm: Permission; desc: string; download?: boolean }[]).filter(
-    (a) => user.permissions.includes(a.perm),
+  ] satisfies { label: string; href: string; perm: Permission; desc: string; download?: boolean; module?: string }[]).filter(
+    // Permission AND entitlement. A module the plan does not include is not a
+    // refusal to explain, it is a destination not to offer.
+    (a) => user.permissions.includes(a.perm) && (!("module" in a) || !user.modules || user.modules.includes(a.module as string)),
   );
 
   return (
