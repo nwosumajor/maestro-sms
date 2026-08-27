@@ -2024,6 +2024,57 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A control the product imposes and gives no way to finish
+`WorkflowController` was gated, at the CLASS level, on `MODULES.WORKFLOW` — a
+PREMIUM add. Five producers can RAISE a maker-checker request on STANDARD,
+because their controllers are gated on modules STANDARD HAS or are not gated at
+all: ATTENDANCE_AMENDMENT (attendance), CONTENT_PUBLISH (lms), and GRADE_PUBLISH,
+STUDENT_EXIT and ADMIN_APPOINTMENT (all always-on).
+Measured live with the demo school set to STANDARD:
+```
+POST /admin/users/:id/roles junior_admin   201 {"pendingApproval":true,...}
+     workflow_request                      ADMIN_APPOINTMENT / PENDING_REVIEW
+GET  /workflows                            404      (module-gated)
+     AppShell nav                          hidden   (module: MODULES.WORKFLOW)
+GET  /approvals/pending                    0 items  (never aggregated workflows)
+```
+The request was RAISED, UNDECIDABLE and INVISIBLE. The role grant never lands,
+the register correction is never applied, and the school is told "pending
+approval" with no surface in their tier that can complete it.
+**THE SPLIT IS BY WHAT THE ROUTE IS, NOT BY WHAT IT TOUCHES.** Authoring a
+request — the workflow engine sold as a feature — stays PREMIUM
+(`POST /workflows`, `POST :id/submit`, `GET approvers`). DECIDING one the
+platform's own controls already raised is part of the always-on control spine,
+exactly like `ApprovalsController` beside it (`POST :id/review`, `POST :id/veto`,
+`GET`, `GET :id`). No module moves between tiers, so pricing is untouched.
+Live after, on STANDARD: raise 201, **decide 201 `state: APPROVED`**, the grant
+lands — and `POST /workflows` still answers **404**, so the engine is still paid
+for.
+// WEAKENING THE CONTROL TO FIT THE PACKAGING was the other option and is the
+wrong direction: applying the change directly where a school lacks the module
+means a stale register corrected with no second pair of eyes, which is what the
+rule exists to prevent. Golden Rule #7 takes the more restrictive branch.
+// THE NAV GATE WAS THE SAME BUG IN THE UI, and its own comment said so: the
+entry lists `anyPerm` of seven approving permissions "otherwise an accountant
+holding only fee.approve would never see the page listing their own queue" — and
+then gated the whole thing on `MODULES.WORKFLOW`, which hid it from every
+STANDARD school. The module gate is gone; the permission list stays.
+// **AND A CHANGE I MADE AND REVERTED, because driving it found the flaw.** I
+added workflow requests to `PendingApprovalsService` so they would show on the
+always-on queue. They already show: `/workflows` renders the native list AND
+`OtherApprovals` (fed by `/approvals/pending`) on the SAME PAGE, so every
+pending request would have appeared twice. The aggregator is deliberately the
+OTHER-sources surface — its consumer is named `OtherApprovals`. Reverted before
+committing; the controller split is the whole fix.
+Gate: `every-controller-declares-its-module` pins the split ROUTE BY ROUTE —
+authoring tagged, deciding untagged, and no class-level tag (which would
+override every method). Mutation-validated both ways: restoring the class tag
+fails, and dropping the tag from `POST /` fails.
+// GOTCHA in that gate: a window bounded by "the next `@`" closes on the very
+decorator being looked for, since `@RequireModule` sits directly below
+`@Post()`. Bounded by the next ROUTE decorator — the same
+bound-the-decorator-RUN lesson the public-routes gate already records.
+
 ### A pure solver that spent the transaction on arithmetic
 `TimetableService.generate`. `generateTimetable` is a SYNCHRONOUS backtracking
 search with a 200,000-step budget that touches no database — and it ran INSIDE

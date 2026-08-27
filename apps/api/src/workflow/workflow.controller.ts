@@ -34,12 +34,38 @@ const listQuerySchema = z.object({
   mine: z.string().optional(),
 });
 
-@RequireModule(MODULES.WORKFLOW)
+/**
+ * THE ENGINE IS A PRODUCT; THE APPROVALS ARE A CONTROL.
+ *
+ * This whole controller was gated on MODULES.WORKFLOW, which is a PREMIUM add —
+ * and a STANDARD school can RAISE five maker-checker requests, because their
+ * producers are gated on modules STANDARD has or are not gated at all:
+ * ATTENDANCE_AMENDMENT (attendance), CONTENT_PUBLISH (lms), GRADE_PUBLISH,
+ * STUDENT_EXIT and ADMIN_APPOINTMENT (all always-on).
+ *
+ * Measured live on the demo school set to STANDARD: granting `junior_admin`
+ * answered 201 `{pendingApproval:true}` and wrote a PENDING_REVIEW row, while
+ * `GET /workflows` answered 404, the nav hid the section, and
+ * `/approvals/pending` did not list it. The request was raised, UNDECIDABLE and
+ * INVISIBLE — a two-person rule the product imposes and gives no way to finish.
+ *
+ * So the split is by what the route IS, not by what it touches: AUTHORING a
+ * request (the workflow engine sold as a feature) stays PREMIUM; DECIDING one
+ * the platform's own controls have already raised is part of the always-on
+ * control spine, exactly like `ApprovalsController` beside it.
+ *
+ * Weakening the control to fit the packaging — applying the change directly
+ * where a school lacks the module — was the other option and is the wrong
+ * direction: Golden Rule #7 takes the more restrictive branch, and a stale
+ * register corrected with no second pair of eyes is what the rule exists to
+ * prevent.
+ */
 @Controller("workflows")
 export class WorkflowController {
   constructor(private readonly workflow: WorkflowService) {}
 
   @Post()
+  @RequireModule(MODULES.WORKFLOW)
   @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
   create(
     @CurrentPrincipal() p: Principal,
@@ -62,6 +88,7 @@ export class WorkflowController {
   }
 
   @Post(":id/submit")
+  @RequireModule(MODULES.WORKFLOW)
   @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
   submit(
     @CurrentPrincipal() p: Principal,
@@ -112,7 +139,10 @@ export class WorkflowController {
 
   /** Senior staff the caller may route approval stages to. MUST be declared
    *  before the :id route or "approvers" would be captured as an id. */
+  // Authoring aid: it answers "who could decide this if I raised it", so it
+  // belongs with the create form rather than with the decision.
   @Get("approvers")
+  @RequireModule(MODULES.WORKFLOW)
   @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
   approvers(@CurrentPrincipal() p: Principal): Promise<WorkflowApproverOptionDto[]> {
     return this.workflow.listEligibleApprovers(p);

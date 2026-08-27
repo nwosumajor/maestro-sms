@@ -231,7 +231,12 @@ const NAV: {
       "admission.review",
       "privacy.erasure.review",
     ],
-    module: MODULES.WORKFLOW,
+    // NO `module` GATE, deliberately, and the comment above is why: this entry
+    // exists so anyone holding ANY approving permission can reach their queue.
+    // Gating it on MODULES.WORKFLOW (a PREMIUM add) hid it from every STANDARD
+    // school — which can still RAISE five maker-checker requests — so the page
+    // that lists them was unreachable and the requests were undecidable. The
+    // AUTHORING routes behind it stay module-gated in the API.
   },
   { key: "tasks", label: "Tasks", icon: ListTodoIcon, href: "/tasks", perm: "task.participate", module: MODULES.TASK },
   { key: "polls", label: "Polls", icon: BarChartHorizontalIcon, href: "/polls", perm: "poll.vote", module: MODULES.POLL },

@@ -29,6 +29,14 @@ import { join } from "node:path";
 const API_SRC = join(__dirname, "../../src");
 
 const ALWAYS_ON: Record<string, string> = {
+  // The CLASS is always-on and its authoring routes carry their own tag — see
+  // the split pinned in the test below. Deciding a request the platform's own
+  // maker-checker controls raised is part of the control spine; AUTHORING one
+  // is the workflow engine sold as a PREMIUM feature.
+  WorkflowController:
+    "Approval decisions span modules a school may or may not have. Gating the whole controller on " +
+    "MODULES.WORKFLOW left STANDARD schools able to RAISE five maker-checker requests and unable to see " +
+    "or decide any of them. Authoring routes are tagged individually.",
   HealthController: "Liveness probe. No session, no tenant, no entitlement to resolve.",
   MetricsController: "Prometheus scrape, gated by METRICS_TOKEN rather than by a subscription.",
   AuthController: "Login and session refresh. A school must be able to sign in to discover it owes money.",
@@ -112,6 +120,36 @@ describe("every controller", () => {
   it("either declares its module or is named always-on with a reason", () => {
     const offenders = all.filter((c) => !c.tagged && !(c.cls in ALWAYS_ON)).map((c) => `${c.cls}  [${c.file}]`);
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps the workflow ENGINE paid and the DECISION always-on", () => {
+    // The split, pinned route by route. Getting it wrong in either direction is
+    // a real defect: gate the decision and a STANDARD school cannot finish a
+    // control the product imposed on it; ungate authoring and the workflow
+    // engine — a PREMIUM module — is free.
+    const src = readFileSync(join(API_SRC, "workflow/workflow.controller.ts"), "utf8");
+    // Bound by the next ROUTE decorator, not the next decorator of any kind:
+    // `@RequireModule` sits on the line immediately below `@Post()`, so a naive
+    // "to the next @" window closes before the thing being looked for. The same
+    // bound-the-decorator-RUN lesson the public-routes gate already records.
+    const ROUTE = /\n  @(?:Get|Post|Put|Patch|Delete)\(/g;
+    const routeOf = (decorator: string) => {
+      const i = src.indexOf(`\n  ${decorator}`);
+      expect(i).toBeGreaterThan(-1);
+      ROUTE.lastIndex = i + decorator.length + 3;
+      const m = ROUTE.exec(src);
+      return src.slice(i, m ? m.index : src.length);
+    };
+    // Authoring: PAID.
+    for (const r of ['@Post()', '@Post(":id/submit")', '@Get("approvers")']) {
+      expect(routeOf(r)).toMatch(/@RequireModule\(MODULES\.WORKFLOW\)/);
+    }
+    // Deciding and reading: ALWAYS-ON.
+    for (const r of ['@Post(":id/review")', '@Post(":id/veto")', '@Get()', '@Get(":id")']) {
+      expect(routeOf(r)).not.toMatch(/@RequireModule/);
+    }
+    // And no class-level tag, which would override every one of them.
+    expect(src).not.toMatch(/@RequireModule\(MODULES\.WORKFLOW\)\n@Controller/);
   });
 
   it("gates the ID-card scan desk, which was a PREMIUM feature given away", () => {
