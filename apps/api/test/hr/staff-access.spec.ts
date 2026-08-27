@@ -74,12 +74,58 @@ describe("revoking access", () => {
   });
 });
 
+describe("whose day decides that access ends", () => {
+  // The behaviour, driven rather than grepped. Toronto is UTC-4: at 21:00 on a
+  // leaver's last working day the SERVER's date has already rolled to tomorrow,
+  // so a UTC comparison ends their access while they are still at work.
+  const LAST_DAY = new Date("2026-08-28T00:00:00Z");
+
+  it("keeps access on the last working day, west of UTC", () => {
+    const torontoToday = new Date("2026-08-28T00:00:00Z"); // the school's day
+    const serverInstant = new Date("2026-08-29T01:00:00Z"); // 21:00 in Toronto
+    expect(endsOnOrBefore(LAST_DAY, torontoToday)).toBe(true); // their last day: ends today
+    // What the bug did: the server's day had already advanced, and the pupil-
+    // facing consequence is the same either way — the comparison must be told
+    // the school's day, which is what the call sites now pass.
+    expect(endsOnOrBefore(new Date("2026-08-29T00:00:00Z"), serverInstant)).toBe(true);
+    expect(endsOnOrBefore(new Date("2026-08-29T00:00:00Z"), torontoToday)).toBe(false);
+  });
+
+  it("does not end access early for a day that has not arrived at the school", () => {
+    const torontoToday = new Date("2026-08-27T00:00:00Z");
+    expect(endsOnOrBefore(LAST_DAY, torontoToday)).toBe(false);
+  });
+});
+
 describe("the exit path is wired to it", () => {
   const src = readFileSync(join(__dirname, "../../src/hr/exit.service.ts"), "utf8");
 
   it("approving an exit revokes access once the last working day has passed", () => {
-    expect(src).toMatch(/endsOnOrBefore\(row\.lastWorkingDay, new Date\(\)\)/);
+    // The PROPERTY, not the literal call. This asserted
+    // `endsOnOrBefore(row.lastWorkingDay, new Date())` and went red on the
+    // change that replaced the server's UTC day with the SCHOOL's — a
+    // fixed-text assertion firing on an improvement, the failure mode this repo
+    // keeps recording.
+    expect(src).toMatch(/endsOnOrBefore\(row\.lastWorkingDay,/);
     expect(src).toMatch(/revokeStaffAccessInTx\(tx, row\.userId\)/);
+  });
+
+  it("decides on the SCHOOL's day, never the server's", () => {
+    // West of UTC the server's date rolls over while the school is still open,
+    // so a leaver was locked out during the final hours of their own last
+    // working day. Both the per-school path and the fleet-wide sweep resolve
+    // the school's day now.
+    expect(src).toMatch(/endsOnOrBefore\(row\.lastWorkingDay, await this\.region\.todayInTx/);
+    expect(src).not.toMatch(/endsOnOrBefore\([^)]*new Date\(\)\)/);
+    const sweep = readFileSync(join(__dirname, "../../src/hr/staff-reminder.service.ts"), "utf8");
+    expect(sweep).toMatch(/schoolToday\(\(await this\.region\.forSchool\(schoolId\)\)\.timezone\)/);
+    // Once per DISTINCT school, not once per row: this is a fleet-wide nightly
+    // job over every school's whole staff history.
+    expect(sweep).toMatch(/new Set\(elapsed\.map\(\(e\) => e\.schoolId\)\)/);
+    // AND THE RESOLVED DAY IS THE ONE COMPARED. Asserting only that it is
+    // looked up passes against a sweep that resolves it and then filters on the
+    // server's `now` anyway — caught by mutation, not by reading.
+    expect(sweep).toMatch(/endsOnOrBefore\(e\.lastWorkingDay, todayBySchool\.get\(e\.schoolId\)/);
   });
 
   it("does it in the SAME transaction as the employment change", () => {

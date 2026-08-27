@@ -12,6 +12,8 @@ import { NotificationService } from "../notifications/notification.service";
 import { HR_NOTIFY_ROLES, HR_REMINDER_DATABASE } from "./hr.constants";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { endsOnOrBefore } from "./staff-access";
+import { schoolToday } from "@sms/types";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 export interface ReminderResult {
   reminded: number;
@@ -28,6 +30,9 @@ export class StaffReminderService {
   constructor(
     @Inject(HR_REMINDER_DATABASE) private readonly db: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
+    // @Global and 60s-cached: resolving each school's day costs one lookup per
+    // DISTINCT school with an elapsed exit, not one per row.
+    private readonly region: SchoolRegionService,
   ) {}
 
   async sweep(): Promise<ReminderResult> {
@@ -151,7 +156,17 @@ export class StaffReminderService {
       if (elapsed.length === 0) return 0;
       // One statement, not one per person: this is a fleet-wide nightly job and
       // the candidate set grows with every school's whole staff history.
-      const stillActive = elapsed.filter((e) => endsOnOrBefore(e.lastWorkingDay, now));
+      // EACH SCHOOL'S OWN DAY. The rows already carry `schoolId`, and the
+      // fleet-wide sweep had everything it needed to ask and did not — so a
+      // leaver west of UTC lost access during their final working day. Resolved
+      // once per DISTINCT school (60s-cached), not once per row.
+      const todayBySchool = new Map<string, Date>();
+      for (const schoolId of new Set(elapsed.map((e) => e.schoolId))) {
+        todayBySchool.set(schoolId, schoolToday((await this.region.forSchool(schoolId)).timezone));
+      }
+      const stillActive = elapsed.filter((e) =>
+        endsOnOrBefore(e.lastWorkingDay, todayBySchool.get(e.schoolId) ?? now),
+      );
       const result = await client.user.updateMany({
         where: { id: { in: [...new Set(stillActive.map((e) => e.userId))] }, status: "ACTIVE" },
         data: { status: "EXITED", exitedAt: now },

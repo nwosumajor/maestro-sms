@@ -36,12 +36,30 @@ import type { TenantTx } from "../integrity/integrity.foundation";
  * timetable for their whole notice period. Compared by DAY, not instant: an exit
  * dated today ends access today, not at midnight tonight.
  */
-export function endsOnOrBefore(lastWorkingDay: Date | string, now: Date): boolean {
+export function endsOnOrBefore(lastWorkingDay: Date | string, todayAtTheSchool: Date): boolean {
+  // BOTH SIDES ARE CALENDAR DAYS, and the second must be the SCHOOL's.
+  //
+  // This compared a `@db.Date` last working day against the SERVER's UTC day,
+  // on the one decision that ends a person's access. West of UTC that day rolls
+  // over while the school is still open: in Toronto the UTC date advances at
+  // 20:00 local, so a leaver was locked out during the final hours of their own
+  // last working day — writing their handover notes. East of UTC it is correct
+  // by accident, which is why nothing ever showed it.
+  //
+  // The caller resolves the school's day (`region.todayInTx` / `forSchool`),
+  // exactly as the register, the gate scan, the term lock and the staff
+  // clock-in already do. The parameter is NAMED for it so a future caller
+  // passing a bare `new Date()` reads wrong at the call site.
   const d = new Date(lastWorkingDay);
   const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const today = Date.UTC(
+    todayAtTheSchool.getUTCFullYear(),
+    todayAtTheSchool.getUTCMonth(),
+    todayAtTheSchool.getUTCDate(),
+  );
   return day <= today;
 }
+
 
 /**
  * End a departed staff member's access, in the caller's transaction.

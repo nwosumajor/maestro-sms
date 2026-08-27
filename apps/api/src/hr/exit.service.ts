@@ -198,7 +198,7 @@ export class ExitService {
         // out of their own classes for their whole notice period. So access
         // ends ON the last working day: immediately if that day has passed,
         // otherwise the daily sweep does it (StaffReminderService.sweep).
-        if (endsOnOrBefore(row.lastWorkingDay, new Date())) {
+        if (endsOnOrBefore(row.lastWorkingDay, await this.region.todayInTx(tx, p.schoolId))) {
           await revokeStaffAccessInTx(tx, row.userId);
         }
         // Recover loans against the settlement (order: oldest first), posting
@@ -306,14 +306,17 @@ export class ExitService {
    */
   async revokeElapsed(p: Principal): Promise<{ revoked: number; scanned: number }> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // The SCHOOL's day, not the server's. The `lte` prefilter stays on `now`
+      // — it only has to be generous — and `endsOnOrBefore` makes the decision.
       const now = new Date();
+      const today = await this.region.todayInTx(tx, p.schoolId);
       const rows = (await tx.staffExit.findMany({
         where: { status: "APPROVED", lastWorkingDay: { lte: now } },
         select: { userId: true, lastWorkingDay: true },
       })) as Array<{ userId: string; lastWorkingDay: Date }>;
       let revoked = 0;
       for (const r of rows) {
-        if (!endsOnOrBefore(r.lastWorkingDay, now)) continue;
+        if (!endsOnOrBefore(r.lastWorkingDay, today)) continue;
         if (await revokeStaffAccessInTx(tx, r.userId)) revoked += 1;
       }
       if (revoked > 0) {

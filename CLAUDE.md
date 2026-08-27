@@ -2024,6 +2024,49 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Locked out during their own last working day
+`endsOnOrBefore` (`hr/staff-access.ts`) decides when a departed member of staff
+loses access, and compared a `@db.Date` last working day against the SERVER's
+UTC day. West of UTC that date rolls over while the school is still open — in
+Toronto at 20:00 local, in Los Angeles at 16:00 — so a leaver was locked out
+during the final hours of their own last working day, writing their handover
+notes. East of UTC it is correct by accident, which is why nothing ever showed
+it. Eighth surface in the class this file already records for the register, the
+gate scan, the term lock, the staff clock-in, the letter date and the withdrawn
+cover notice.
+BOTH paths had it: the per-school revocation and the FLEET-WIDE nightly sweep —
+and the sweep already selected `schoolId` on every row, so it had everything it
+needed to ask and did not. It now resolves once per DISTINCT school (60s-cached),
+not once per row, because it runs over every school's whole staff history.
+// THE PARAMETER IS NAMED `todayAtTheSchool`, so a future caller passing a bare
+`new Date()` reads wrong at the call site rather than compiling silently.
+// **FOUND BY DRIVING A PATH THAT HAD NEVER RUN.** `staff_exit` had no rows, so
+the whole chain — initiate, settle, approve, revoke, hand over — had never once
+been exercised. Everything else on it HELD, and the parts worth recording as
+verified rather than asserted:
+  - `finalMonthAlreadyPaid` WORKS, live, for the first time (it was unit-tested
+    only). August 2026 has a FINALIZED MONTHLY run containing the leaver, so an
+    exit dated 28 August returned `proRataMinor: 0, finalMonthAlreadyPaid: true`
+    — the double-payment this file records is really prevented.
+  - The settlement RECONCILES against the database: 16 leave days = 20 entitled
+    − 4 used, and a payout of 10,666,667 = 16 x (20,000,000 / 30), matching the
+    payslip's ₦200,000 base to the kobo.
+  - Step-up is enforced (403 `STEPUP_REQUIRED` without it, 201 with).
+  - Approval marks the EMPLOYEE exited and deliberately leaves the USER ACTIVE
+    until the last working day — which is the whole reason the day comparison
+    above matters.
+  - The handover notice fires: "Demo Teacher still holds 4 duties — Their exit
+    is approved. Nothing has been reassigned".
+// GOTCHA: the existing spec asserted the LITERAL source
+`endsOnOrBefore(row.lastWorkingDay, new Date())` and went red on the change that
+replaced the server's day with the school's — a fixed-text assertion firing on
+an improvement, for the third time in this file. Re-anchored to the property,
+and given behavioural cases that drive the function rather than grep for it.
+// GOTCHA, caught by MUTATION and not by reading: my first sweep assertion
+checked only that the school's day is RESOLVED, so a sweep that resolved it and
+then filtered on `now` anyway stayed green. It asserts the resolved day is the
+one COMPARED — the same "computed and then ignored" trap the country fix names.
+
 ### A record store that only ever showed the recent page
 `listStatements` (the xAPI LRS). `xapi_statement` is APPEND-ONLY — the app role
 holds INSERT and SELECT and no DELETE — and a statement is emitted automatically
