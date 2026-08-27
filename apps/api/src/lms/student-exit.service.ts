@@ -462,11 +462,9 @@ export class StudentExitService {
               where: { studentId: { in: ids }, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
               _sum: { totalMinor: true },
             }),
-            tx.payment.groupBy({
-              by: ["invoiceId"],
-              where: { invoice: { studentId: { in: ids } }, status: "POSTED", kind: "PAYMENT" },
-              _sum: { amountMinor: true },
-            }),
+            netPaidByInvoice(tx, { invoice: { studentId: { in: ids } } }).then((m) =>
+              [...m].map(([invoiceId, amt]) => ({ invoiceId, _sum: { amountMinor: amt } })),
+            ),
           ])
         : [[], []];
       // Payments group by invoice, so map them back to the pupil AND to the

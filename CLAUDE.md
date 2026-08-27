@@ -2116,6 +2116,28 @@ PRE-SUMMED total — a shape the database never returns for this question. They
 model the ROWS now, which is what makes them able to see a refund at all.
 // Mutation-validated against all three shipped shapes: refunds positive, refunds
 excluded, and the POSTED filter dropped so a pending payment moves a balance.
+// **THERE WERE FOUR, AND I FIXED THREE.** `student-exit.service.ts` has TWO
+balance reads — the exit PREVIEW and the LEAVERS LIST that feeds the bursar's
+chase — and I corrected the preview and left the list, whose own comment already
+said *"the same defect as the exit preview above"* about an EARLIER divergence
+between exactly those two. That is the whole argument for a gate rather than a
+sweep, made against myself.
+Gate: `a-balance-a-sum-cannot-express.spec.ts` refuses any `payment.aggregate` /
+`payment.groupBy` summing `amountMinor`, with two named exemptions that say why
+the sign does not apply to them — `heldByPlatformMinor` (money awaiting a
+settlement RELEASE, where a refund to the payer is not a release to the school)
+and the maker-checker WINDOW total (a refund does not create headroom under the
+threshold, and letting it subtract would reopen that hole).
+// GOTCHA, caught by the gate against its own author: my first exemption list
+named `operator-payments` and `growth`, which aggregate
+`platform_subscription_payment`, `message_credit_entry` and `agent_commission` —
+DIFFERENT TABLES, none with a REFUND kind. The gate found two sites where the
+list claimed four. An exemption for a rule something was never subject to is
+noise that makes the next reader trust the list less.
+// Every one of the fifteen HAND-WRITTEN copies was checked and is correct,
+including the three raw-SQL ones and both scholarship reads (which filter POSTED
+on the reduce rather than in the query, which is why a grep of the `where` looks
+alarming and is not). The defect was confined to the shape that cannot say it.
 
 ### A renewal erased the fine that had already accrued
 The overdue fine is computed ONLY at return, from the loan's CURRENT `dueAt`:
