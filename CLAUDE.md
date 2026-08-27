@@ -2075,6 +2075,41 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A pupil told the classmate in front of them is "not in this school"
+Found by driving a path that had never executed — `discipline_complaint`,
+`discipline_entry`, `discipline_evidence` and `discipline_assignee` were all
+empty, so the pupil-facing safeguarding flow had never once been used.
+**THE CONFIDENTIALITY CHAIN HOLDS**, verified rather than assumed. A case filed
+against a pupil: the ACCUSED gets `404` and an empty list, an uninvolved pupil
+`404`, the accused's own PARENT `403`, and only staff holding
+`discipline.manage` see the allegation text. The fix this file already records —
+*"the accused read and dismissed the case"* — is intact.
+**WHAT WAS WRONG WAS THE REFUSAL.** A pupil may only file against a CLASSMATE:
+`listFileTargets` scopes STUDENT targets to their own classes, deliberately, so
+that filing does not hand every child a searchable roster of 900 minors. Measured
+live, a pupil with no classmates got `0 target(s)`, and naming a real pupil of
+the same school answered
+**`404 "The named person is not in this school"`** — about somebody standing in
+front of them.
+// A REFUSAL MAY DECLINE TO CONFIRM WHAT IT HIDES; IT MUST NOT MAKE A POSITIVE
+CLAIM THAT IS UNTRUE. Same defect as the `403 "Invoice not found"` recorded here,
+pointing the other way — that one denied a record it had just confirmed, this one
+asserted a fact about school membership that is false.
+// THE TWO BRANCHES STAY INDISTINGUISHABLE — "out of your scope" and "no such id"
+must read identically or a pupil can probe ids for who exists — so a non-manager
+gets ONE message for both. It is true in either case, discloses nothing (it
+describes the CALLER's scope, not the target's existence), and NAMES THE WAY OUT:
+*"You can only report someone in your own classes. Ask a teacher or the school
+office to file this for you."* A manager, who has no scope to leak, gets the
+plain "No such person in this school".
+// THAT LAST CLAUSE IS THE POINT, not politeness. The classmate restriction means
+**a child bullied by someone in another year, on the bus, or in the boarding house
+cannot file at all** — and the refusal was the only place they would ever learn
+that. Widening the target list would expose a roster of minors and allowing an
+UNNAMED report is a schema change (`againstId` is required); both are product
+decisions and neither is taken here. Telling the child there is a human who can
+do it for them is the part that was missing and costs nothing.
+
 ### Global search — the probes' blind spot, checked and sound
 All four probes are ID-ADDRESSED: they ask what happens when a caller already
 knows a valid id. `GET /search?q=` is QUERY-addressed — you type a name and need

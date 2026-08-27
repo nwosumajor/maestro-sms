@@ -154,8 +154,33 @@ export class DisciplineService {
     input: { subject: string; details?: string; againstId: string; againstType: "STUDENT" | "TEACHER" },
   ): Promise<DisciplineComplaintDto> {
     const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      /**
+       * ONE refusal for a filer who may not name this person, whether the id is
+       * out of their scope or resolves to nobody at all.
+       *
+       * They must stay indistinguishable — telling the two apart lets a pupil
+       * probe ids for who exists. But the message they shared ASSERTED SOMETHING
+       * FALSE: "The named person is not in this school", said to a pupil about a
+       * classmate-of-the-school standing in front of them. A refusal may decline
+       * to confirm what it hides; it should not make a positive claim that is
+       * untrue, which is the same defect as the `403 "Invoice not found"` this
+       * repo already records, pointing the other way.
+       *
+       * What replaces it is true in BOTH cases, discloses nothing (it describes
+       * the CALLER's scope, not the target's existence) — and names the way out.
+       * That matters here more than tidiness: a pupil may only report a
+       * CLASSMATE, so a child bullied by someone in another year, on the bus or
+       * in the boarding house cannot file at all, and the refusal was the only
+       * place they would ever learn that.
+       */
+      const outOfReach = () =>
+        this.canManage(p)
+          ? new NotFoundException("No such person in this school")
+          : new NotFoundException(
+              "You can only report someone in your own classes. Ask a teacher or the school office to file this for you.",
+            );
       const against = await tx.user.findFirst({ where: { id: input.againstId }, select: { id: true } });
-      if (!against) throw new NotFoundException("The named person is not in this school");
+      if (!against) throw outOfReach();
       // A complaint about yourself is either a mistake or an attempt to create a
       // case the scope below then hides from you.
       if (input.againstId === p.userId) throw new BadRequestException("You cannot file a complaint against yourself");
@@ -165,7 +190,7 @@ export class DisciplineService {
       // can't name an arbitrary in-school user by guessing an id. 404-not-403 so
       // an out-of-scope target is indistinguishable from a non-existent one.
       if (!this.canManage(p) && !(await this.isAllowedTarget(tx, p, input.againstId, input.againstType))) {
-        throw new NotFoundException("The named person is not in this school");
+        throw outOfReach();
       }
       const c = await tx.disciplineComplaint.create({
         data: {
