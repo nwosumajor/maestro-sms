@@ -2075,6 +2075,41 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A NGN 2,500 late-fee policy that charged a family USD 2,500.00
+Found by verifying the ONE property of the late-fee sweep that matters to a
+family — that it charges once — and reading what it actually wrote.
+`school.lateFeeFlatMinor` is a figure in the SCHOOL's own currency; an INVOICE
+carries its own, because this platform bills USD through Stripe alongside a
+school's local rail. The sweep applied the flat fee to **every overdue invoice
+whatever it was raised in**. Measured live on one school with a policy of 250,000
+minor (NGN 2,500):
+```
+invoice e7c39f10  NGN   late fee 250000  ->  NGN 2,500.00   as intended
+invoice 99ce66b2  USD   late fee 250000  ->  USD 2,500.00   ~1,600x, on a family's bill
+```
+After, same data, same sweep: NGN charged NGN 2,500, **USD not charged at all**,
+and the NGN invoice still inside its 3-day grace untouched.
+**FIFTH INSTANCE** of "A NAIRA CONSTANT IS NOT A RULE FOR EVERY SCHOOL", and the
+sharpest, because this one is a PER-SCHOOL setting — correct for the school's own
+currency and wrong for every invoice raised in another. Making the figure
+per-school fixed who decides it; it did not fix which invoices it applies to.
+Same answer as the other four: there is no FX rate in this platform, so an
+invoice in a currency the policy does not describe is SKIPPED — never converted,
+never guessed at. **An unset charge goes to zero, because a charge that guesses
+bills a family.**
+// FILTERED IN THE QUERY, not skipped in Node afterwards — the same ordering rule
+the marker check beside it already follows, and for the same reason: a skip in
+Node makes `take` bound the CANDIDATES rather than the WORK.
+// `resolveRegion(school).currency`, not the raw column, so a school that
+predates the region model keeps billing in the platform's home currency — exactly
+how the `timezone` two lines above already behaves.
+// GOTCHA that nearly hid this: the marker is a PREFIX. The line reads
+`"Late payment fee (overdue past 3 days)"`, so my first check —
+`description = 'Late payment fee'` — reported ZERO late-fee lines on an invoice
+that had just been charged, and I almost concluded the sweep had missed it. Match
+the marker the way the QUERY does (`startsWith`), or the probe disagrees with the
+code it is probing.
+
 ### The meeting-request chain, and the paging change tested against itself
 `meeting_request` had no rows, so the parent-teacher request chain had never been
 driven — including the queue paging changed earlier in this same session. Driven

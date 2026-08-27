@@ -444,7 +444,16 @@ export class FeeOpsService {
       where: { isPlatform: false, status: "ACTIVE", lateFeeFlatMinor: { gt: 0 } },
       // The TIMEZONE comes along because grace is counted in the school's own
       // days — see the cutoff below.
-      select: { id: true, lateFeeFlatMinor: true, lateFeeGraceDays: true, country: true, timezone: true },
+      // `currency` comes along for the same reason `timezone` does: the fee is a
+      // figure in the SCHOOL's money, and an invoice carries its own.
+      select: {
+        id: true,
+        lateFeeFlatMinor: true,
+        lateFeeGraceDays: true,
+        country: true,
+        timezone: true,
+        currency: true,
+      },
     });
     let feesApplied = 0;
     for (const school of schools) {
@@ -460,6 +469,9 @@ export class FeeOpsService {
       // the region model behaves everywhere else.
       const today = schoolToday(resolveRegion(school).timezone);
       const cutoff = new Date(today.getTime() - school.lateFeeGraceDays * 86_400_000);
+      // Same resolver as the timezone above: a null column means the platform's
+      // home currency, which is what an unset school has always billed in.
+      const schoolCurrency = resolveRegion(school).currency;
       try {
         // ALREADY-DONE INVOICES ARE EXCLUDED IN THE QUERY, not skipped in Node
         // afterwards. That ordering is the whole bug: the marker check used to
@@ -477,6 +489,25 @@ export class FeeOpsService {
                 status: { in: ["ISSUED", "PARTIALLY_PAID"] },
                 dueDate: { lt: cutoff },
                 lineItems: { none: { description: { startsWith: LATE_FEE_MARKER } } },
+                // THE FEE IS A FIGURE IN THE SCHOOL'S OWN CURRENCY, and an
+                // invoice carries ITS OWN — this platform bills USD through
+                // Stripe alongside a school's local rail.
+                //
+                // `lateFeeFlatMinor` was applied to every overdue invoice
+                // whatever it was raised in. Measured live on one school with a
+                // policy of 250,000 minor (NGN 2,500): the NGN invoice was
+                // charged NGN 2,500 and the USD invoice beside it was charged
+                // **USD 2,500.00** — about 1,600x the intended fee, on a
+                // family's bill.
+                //
+                // Fifth instance of the class this file records under "A NAIRA
+                // CONSTANT IS NOT A RULE FOR EVERY SCHOOL", and the same answer
+                // as the other four: there is no FX rate in this platform, so
+                // an invoice in a currency the policy does not describe is
+                // SKIPPED, never converted and never guessed at. An unset
+                // charge goes to zero, because a charge that guesses bills a
+                // family.
+                currency: schoolCurrency,
               },
               select: {
                 id: true,
