@@ -28,6 +28,19 @@ import {
 
 const STUDENT_SIDE_ROLES = new Set(["student", "parent"]);
 
+/**
+ * Midnight UTC of a timestamp's own day.
+ *
+ * Deliberately UTC rather than the school's timezone: this exists to REMOVE
+ * precision, a day either side is no loss, and reaching for the region service
+ * here would add a dependency to buy nothing. It also lands on the exact-UTC-
+ * midnight shape the web already renders as a calendar date rather than
+ * converting.
+ */
+function startOfUtcDay(at: Date): Date {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
+}
+
 @Injectable()
 export class FormService {
   constructor(
@@ -170,7 +183,19 @@ export class FormService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const form = await tx.form.findFirst({ where: { id: formId } });
       if (!form) throw new NotFoundException("Form not found");
-      const rows = await tx.formResponse.findMany({ where: { formId }, orderBy: { createdAt: "desc" }, take: 1000 });
+      /**
+       * ORDERED NON-TEMPORALLY FOR AN ANONYMOUS FORM.
+       *
+       * `createdAt: "desc"` reconstructs the ARRIVAL SEQUENCE, which is a second
+       * correlation handle beside the timestamp itself: the third row is the
+       * third person to answer. Ordering by id gives staff a stable list and
+       * says nothing about when anyone submitted.
+       */
+      const rows = await tx.formResponse.findMany({
+        where: { formId },
+        orderBy: form.anonymous ? { id: "asc" } : { createdAt: "desc" },
+        take: 1000,
+      });
       await this.log(tx, p, "form.responses.read", formId, { count: rows.length });
       let nameOf = new Map<string, string>();
       if (!form.anonymous) {
@@ -183,7 +208,23 @@ export class FormService {
         // ANONYMITY: never expose the respondent for an anonymous form.
         respondentName: form.anonymous ? null : (nameOf.get(r.respondentId) ?? ""),
         answers: (r.answers ?? {}) as Record<string, string | number>,
-        createdAt: r.createdAt,
+        // ANONYMITY, SECOND HALF. Hiding the NAME is not enough while the row
+        // carries the instant it arrived.
+        //
+        // This repo already measured the same channel on the poll: a vote row
+        // and a request-log line "thirteen milliseconds apart, so log + database
+        // recovers not just WHO voted but WHAT THEY CHOSE". That was closed by
+        // withholding `user_id` from the log ON THE VOTE ROUTE — and every OTHER
+        // request the same pupil makes still carries their id, so a response
+        // stamped to the millisecond is the same join from the other end.
+        //
+        // Polls are safe from it because their read returns per-option TALLIES.
+        // A form cannot: the answers are free text and staff genuinely need each
+        // one. So the precision goes instead — truncated to the DAY, which is
+        // what "when was this survey answered" actually needs. Measured live
+        // before this: a child's report of being bullied, returned with
+        // `createdAt: 2026-08-27T10:18:12.351Z`.
+        createdAt: form.anonymous ? startOfUtcDay(r.createdAt) : r.createdAt,
       }));
     });
   }

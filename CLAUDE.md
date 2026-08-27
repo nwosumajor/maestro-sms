@@ -2075,6 +2075,40 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### Hiding the name is not enough while the row carries the instant
+Found by driving a path that had never executed: `form` and `form_response` were
+both empty, so the anonymous-survey flow had never once been used.
+**MOST OF IT WAS ALREADY RIGHT**, and checked rather than assumed: an anonymous
+form returns `respondentName: null`, the mapper never puts `respondentId` in the
+DTO at all, and the audit row is written under `SYSTEM_ACTOR_ID` — the same care
+the poll module took. `respondentId` being NOT NULL in the table is deliberate
+and correct: it is what the UNIQUE `(formId, respondentId)` uses to enforce one
+response per person, and it is never read back.
+**WHAT IT ALSO RETURNED WAS `createdAt` AT MILLISECOND PRECISION**, one row per
+respondent. This file already measured that exact channel on the poll — a vote
+row and a request-log line *"thirteen milliseconds apart, so log + database
+recovers not just WHO voted but WHAT THEY CHOSE"* — and closed it by withholding
+`user_id` from the log ON THE VOTE ROUTE. Every OTHER request the same pupil
+makes still carries their id, so a response stamped to the millisecond is the
+same join from the other end.
+Measured live, on a form asking pupils how safe they feel:
+`{"respondentName":null,"answers":{"q1":"Not very — a boy in Year 10 keeps taking
+my things."},"createdAt":"2026-08-27T10:18:12.351Z"}`. After:
+`"createdAt":"2026-08-27T00:00:00.000Z"`.
+// **POLLS ARE SAFE FROM THIS AND FORMS CANNOT BE, WHICH IS WHY THEY DIVERGED.**
+A poll read returns per-option TALLIES — there is no per-vote row to stamp. A
+form's answers are free text and staff genuinely need each one, so the ROW has to
+stay and the PRECISION goes instead. Truncated to the day, which is what "when
+was this survey answered" actually needs.
+// THE ORDER WAS A SECOND HANDLE. `orderBy: { createdAt: "desc" }` reconstructs
+the ARRIVAL SEQUENCE — the third row is the third person to answer — so an
+anonymous form is ordered by `id` instead. A named form keeps newest-first,
+which is what staff want there.
+// UTC midnight DELIBERATELY, not the school's day: this exists to REMOVE
+precision, a day either side is no loss, and reaching for the region service
+would add a dependency to buy nothing. It also lands on the exact-UTC-midnight
+shape `isCalendarDate` already renders as a calendar date rather than converting.
+
 ### A pupil told the classmate in front of them is "not in this school"
 Found by driving a path that had never executed — `discipline_complaint`,
 `discipline_entry`, `discipline_evidence` and `discipline_assignee` were all
