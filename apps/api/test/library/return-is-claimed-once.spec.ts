@@ -103,7 +103,7 @@ function makeService(loan: { id: string; status: string; renewedCount: number; d
 const ISSUED = () => ({
   id: "l-1",
   status: "ISSUED",
-  renewedCount: 0,
+  renewedCount: 0, lateDaysCarried: 0,
   dueAt: new Date(Date.now() + 3 * DAY),
 });
 

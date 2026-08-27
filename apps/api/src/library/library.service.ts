@@ -249,6 +249,12 @@ export class LibraryService {
     });
   }
 
+  /** Whole days a loan is past `dueAt` — never negative. One definition, read by
+   *  the renewal (which banks them) and the return (which charges them). */
+  private lateDaysAt(dueAt: Date, at: Date): number {
+    return Math.max(0, Math.floor((at.getTime() - dueAt.getTime()) / DAY_MS));
+  }
+
   async renew(p: Principal, loanId: string): Promise<BookLoanDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const loan = await tx.bookLoan.findFirst({ where: { id: loanId } });
@@ -262,16 +268,37 @@ export class LibraryService {
       if (loan.status !== "ISSUED") throw new BadRequestException("Loan is not active");
       if (loan.renewedCount >= MAX_RENEWALS) throw new BadRequestException("Maximum renewals reached");
       const dueAt = new Date(Math.max(loan.dueAt.getTime(), Date.now()) + RENEW_DAYS * DAY_MS);
+      // BANK THE DAYS ALREADY LATE BEFORE MOVING THE DUE DATE.
+      //
+      // The fine is computed at RETURN from `dueAt`, and this line moves `dueAt`
+      // into the future — so without carrying them, the days already late simply
+      // stopped existing. `library.borrow` is held by STUDENT and the check above
+      // lets a borrower renew their OWN loan, so this needed no staff: measured
+      // live, a 30-day-overdue loan returned without renewing charged NGN
+      // 1,500.00, and the same loan renewed by the pupil charged NGN 0.00.
+      //
+      // Days already late are a fact about a loan; a renewal is not a reason for
+      // a fact to stop being true.
+      const alreadyLate = this.lateDaysAt(loan.dueAt, new Date());
       const claimed = await tx.bookLoan.updateMany({
         where: { id: loanId, status: "ISSUED", renewedCount: { lt: MAX_RENEWALS } },
-        data: { dueAt, renewedCount: { increment: 1 } },
+        data: {
+          dueAt,
+          renewedCount: { increment: 1 },
+          ...(alreadyLate > 0 ? { lateDaysCarried: { increment: alreadyLate } } : {}),
+        },
       });
       if (claimed.count === 0) {
         // The row moved between the read and the write — another renewal or a
         // return landed first.
         throw new BadRequestException("This loan changed while you were renewing it — reload and try again");
       }
-      await this.log(tx, p, "library.renew", loanId, { renewedCount: loan.renewedCount + 1 });
+      await this.log(tx, p, "library.renew", loanId, {
+        renewedCount: loan.renewedCount + 1,
+        // Recorded, so a fine that survives a renewal can be explained from the
+        // trail rather than looking like a mistake at the desk.
+        lateDaysCarried: alreadyLate,
+      });
       return this.loanDto(tx, loanId);
     });
   }
@@ -311,7 +338,11 @@ export class LibraryService {
       if (!loan) throw new NotFoundException("Loan not found");
       if (loan.status !== "ISSUED") throw new BadRequestException("Loan already returned");
       const now = new Date();
-      const daysLate = Math.max(0, Math.floor((now.getTime() - loan.dueAt.getTime()) / DAY_MS));
+      // The days late SINCE the current due date, plus any banked by a renewal.
+      // `?? 0` is arithmetic hygiene, not a fallback with an opinion: the column
+      // is NOT NULL DEFAULT 0, so it is only ever absent on a hand-built stub —
+      // and `undefined + n` is NaN, which would reach a fine and an invoice.
+      const daysLate = (loan.lateDaysCarried ?? 0) + this.lateDaysAt(loan.dueAt, now);
       // The school's own daily rate, in the school's own currency.
       const school = await tx.school.findFirst({
         where: { id: p.schoolId },

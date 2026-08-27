@@ -52,7 +52,7 @@ function makeService() {
     bookId: "book-1",
     status: "ISSUED",
     dueAt: new Date(Date.now() - 3 * 86_400_000), // three days overdue
-    renewedCount: 0,
+    renewedCount: 0, lateDaysCarried: 0,
     fineMinor: 0,
   };
   const tx = {

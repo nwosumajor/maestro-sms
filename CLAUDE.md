@@ -2075,6 +2075,44 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A renewal erased the fine that had already accrued
+The overdue fine is computed ONLY at return, from the loan's CURRENT `dueAt`:
+`max(0, floor((now - dueAt) / day)) * perDay`. And `renew` sets
+`dueAt = max(dueAt, now) + RENEW_DAYS`. So renewing an overdue loan pushed the
+due date into the future and the days already late stopped existing.
+**`library.borrow` is held by STUDENT, and `renew` accepts the borrower
+themselves** (`loan.borrowerId === p.userId`), so this needed no staff at all —
+a pupil clears their own fine by pressing Renew. Measured live, twice on the
+same 30-day-overdue loan of the same book:
+```
+returned without renewing        fine NGN 1,500.00
+pupil renews their own, returns  fine NGN     0.00
+```
+After: **NGN 1,500.00**, with `lateDaysCarried=30` on the row.
+`book_loan.lateDaysCarried` (migration `20270112000000`) banks the days already
+late IN THE SAME conditional write that moves `dueAt`, and the return charges
+`carried + since the new due date`. Days already late are a FACT about a loan,
+and a renewal is not a reason for a fact to stop being true.
+// DELIBERATELY NOT A REFUSAL TO RENEW WHILE OVERDUE. Whether a school extends an
+overdue loan is its own policy, and a librarian granting one to an ill pupil is
+legitimate; what must not happen is the charge quietly disappearing when they do.
+The renewal still succeeds — only the fine survives it.
+// The audit row carries `lateDaysCarried`, because a fine that outlives a
+renewal has to be explainable from the trail or it reads as a mistake at the desk.
+// GOTCHA, and MUTATION TESTING is the only thing that caught it: the first four
+tests all watched the RENEWAL banking the days, and deleting the carried term
+from the RETURN's fine calculation left every one of them green. Two halves, and
+I had guarded one — the same seam that hid the CBT score and the report-card
+promotion line. The return is now driven through the real service too.
+// GOTCHA in my own arithmetic: `loan.lateDaysCarried` is `undefined` on a
+hand-built stub and `undefined + n` is **NaN**, which would reach a fine and an
+invoice. `?? 0` is hygiene there, not a fallback with an opinion — the column is
+NOT NULL DEFAULT 0, so it is only ever absent on a stub, and three fixture files
+gained it.
+// SCALE: on the demo tenant, 26 loans, 1 renewal, and the one renewed loan was
+returned with a fine — so nothing needs correcting. This would have gone wrong
+the first time a pupil noticed the button.
+
 ### The guard was at creation; the bytes leave up to a day later
 `NotificationService.persist` drops EXTERNAL channels for a departed recipient
 and for a school that is switched off, and its own comment says it checks "once,

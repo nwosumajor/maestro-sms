@@ -18,6 +18,7 @@
 // =============================================================================
 
 import { GIVE_UP_AFTER_HOURS, STRANDED_AFTER_MINUTES } from "../../src/notifications/notification-recovery.service";
+import { NotificationService } from "../../src/notifications/notification.service";
 
 describe("a suspension the queue never heard about", () => {
   it("leaves a window long enough to matter", () => {
@@ -58,7 +59,6 @@ describe("a suspension the queue never heard about", () => {
 });
 
 async function run(opts: { recipientStatus: string; schoolActive: boolean | null }) {
-  const { NotificationService } = await import("../../src/notifications/notification.service");
   const outcomes: Array<{ status: string; error?: string }> = [];
   const tx = {
     notification: { findFirst: async () => ({ id: "n1", recipientId: "r1", title: "t", body: "b", type: "GENERAL" }) },

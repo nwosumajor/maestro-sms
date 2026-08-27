@@ -42,7 +42,7 @@ function makeTx(over: Record<string, unknown> = {}) {
     })(),
     bookLoan: {
       findFirst: jest.fn().mockResolvedValue(over.loan ?? null),
-      findFirstOrThrow: jest.fn().mockResolvedValue(over.loanRow ?? { id: "l1", bookId: "b1", borrowerId: "stu1", status: "ISSUED", issuedAt: new Date(), dueAt: new Date(Date.now() + 14 * DAY), returnedAt: null, renewedCount: 0, fineMinor: 0, finePaid: false }),
+      findFirstOrThrow: jest.fn().mockResolvedValue(over.loanRow ?? { id: "l1", bookId: "b1", borrowerId: "stu1", status: "ISSUED", issuedAt: new Date(), dueAt: new Date(Date.now() + 14 * DAY), returnedAt: null, renewedCount: 0, lateDaysCarried: 0, fineMinor: 0, finePaid: false }),
       create: jest.fn(() => { calls.loanCreate++; return Promise.resolve({ id: "l1" }); }),
       update: jest.fn().mockResolvedValue({}),
       // returnLoan/renew CLAIM the row with a conditional updateMany now (#250),
@@ -92,7 +92,7 @@ describe("LibraryService", () => {
 
   it("computes an overdue fine on return (5 days late -> 25000)", async () => {
     const overdueLoan = { id: "l1", bookId: "b1", borrowerId: "stu1", status: "ISSUED", dueAt: new Date(Date.now() - 5 * DAY) };
-    const { tx } = makeTx({ loan: overdueLoan, loanRow: { id: "l1", bookId: "b1", borrowerId: "stu1", status: "RETURNED", issuedAt: new Date(), dueAt: overdueLoan.dueAt, returnedAt: new Date(), renewedCount: 0, fineMinor: 25000, finePaid: false } });
+    const { tx } = makeTx({ loan: overdueLoan, loanRow: { id: "l1", bookId: "b1", borrowerId: "stu1", status: "RETURNED", issuedAt: new Date(), dueAt: overdueLoan.dueAt, returnedAt: new Date(), renewedCount: 0, lateDaysCarried: 0, fineMinor: 25000, finePaid: false } });
     const dto = await svc(tx).returnLoan(librarian, "l1");
     expect(dto.fineMinor).toBe(25000);
   });
@@ -112,9 +112,9 @@ describe("LibraryService", () => {
   it("listLoans batches book + borrower lookups (no per-loan N+1) and maps them", async () => {
     const now = Date.now();
     const loans = [
-      { id: "l1", bookId: "b1", borrowerId: "u1", status: "ISSUED", issuedAt: new Date(now), dueAt: new Date(now - DAY), returnedAt: null, renewedCount: 0, fineMinor: 0, finePaid: false },
+      { id: "l1", bookId: "b1", borrowerId: "u1", status: "ISSUED", issuedAt: new Date(now), dueAt: new Date(now - DAY), returnedAt: null, renewedCount: 0, lateDaysCarried: 0, fineMinor: 0, finePaid: false },
       { id: "l2", bookId: "b2", borrowerId: "u2", status: "RETURNED", issuedAt: new Date(now), dueAt: new Date(now + DAY), returnedAt: new Date(now), renewedCount: 1, fineMinor: 0, finePaid: false },
-      { id: "l3", bookId: "b1", borrowerId: "u1", status: "ISSUED", issuedAt: new Date(now), dueAt: new Date(now + DAY), returnedAt: null, renewedCount: 0, fineMinor: 0, finePaid: false },
+      { id: "l3", bookId: "b1", borrowerId: "u1", status: "ISSUED", issuedAt: new Date(now), dueAt: new Date(now + DAY), returnedAt: null, renewedCount: 0, lateDaysCarried: 0, fineMinor: 0, finePaid: false },
     ];
     const bookFindMany = jest.fn().mockResolvedValue([
       { id: "b1", title: "Algebra", barcode: "BC1" },

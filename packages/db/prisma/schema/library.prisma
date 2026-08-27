@@ -41,6 +41,13 @@ model BookLoan {
   dueAt        DateTime
   returnedAt   DateTime?
   renewedCount Int       @default(0)
+  /// Days this loan was ALREADY late at the moment it was renewed.
+  ///
+  /// The fine is computed at return from `dueAt`, and a renewal moves `dueAt`
+  /// forward — so without this the days already late simply stopped existing,
+  /// and a borrower could clear their own fine by renewing (they hold
+  /// `library.borrow` and may renew their own loan). Carried, not recomputed.
+  lateDaysCarried Int    @default(0)
   /// Overdue fine accrued on return, in MINOR units. finePaid records the receipt.
   fineMinor    Int       @default(0)
   finePaid     Boolean   @default(false)
