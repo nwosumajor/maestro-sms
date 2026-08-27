@@ -49,7 +49,22 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const WEB = process.env.WEB_URL ?? "http://localhost:3000";
+/**
+ * Where the stack is.
+ *
+ * // GOTCHA, and it is the same one `publicWebUrl()` records for the API's
+ * twelve copies: `http://localhost:3000` is the NEXT DEV SERVER, and
+ * `docker compose up` serves the stack through NGINX ON PORT 80. Defaulting to
+ * 3000 meant the command the incident runbook tells you to run answered
+ * "PROBE ERROR: fetch failed" against a perfectly healthy stack — on the
+ * control that runbook calls "the most important test category". The API's
+ * default was corrected and these four were not, because they live in another
+ * package.
+ *
+ * Defaults to the compose stack, which is what an on-call reader has. Running
+ * against `next dev` is a WEB_URL away, and the failure below says so.
+ */
+const WEB = process.env.WEB_URL ?? "http://localhost";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "password123";
 /** Ordinary family accounts — the position a real parent and pupil are in. */
 const AS = (process.env.PROBE_FAMILY ?? "parent@demo.school,student@demo.school").split(",");

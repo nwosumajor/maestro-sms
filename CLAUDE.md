@@ -2075,6 +2075,44 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The runbook's most important command, pointed at the wrong port
+Four probes exist and each answers a question the unit tests cannot: route smoke
+(SSR 500s), isolation (school A reaching school B BY ID through the real front
+door), family scope (one parent reaching another family's child) and the
+permission matrix (a role served rows from an endpoint whose permission it
+lacks). **None of them is in CI** — they need a running stack and sign in through
+the front door — so they are run by hand or not at all.
+All four defaulted to `WEB_URL ?? "http://localhost:3000"`. **That is the NEXT
+DEV SERVER; `docker compose up` serves the stack through NGINX ON PORT 80.** So
+the command the incident runbook tells an on-call engineer to run —
+`pnpm --filter @sms/web isolation:probe`, for the control it itself calls "the
+most important test category" — answered **`PROBE ERROR: fetch failed`** against
+a perfectly healthy stack, with nothing saying why.
+// EXACTLY THE TRAP `publicWebUrl()` ALREADY RECORDS, for the API's twelve copies
+of the same literal: *"the code assumed `http://localhost:3000` (Next dev) while
+docker-compose sets `http://localhost` (nginx)"*. That was fixed in `apps/api`
+and these four were not, because they live in another package. `seed-modules.mjs`
+carried it too. Sibling asymmetry across a package boundary, which is the kind a
+sweep of one directory never finds.
+Now they default to the compose stack, and a connection failure NAMES the
+variable and both candidate URLs instead of only "fetch failed". Verified by
+running the runbook's command verbatim with nothing set: **ISOLATION PROBE PASSED
+— all 14 probes denied**; the other two likewise (`3440 role/route pairs`, and
+the family probe green after its own fix directly above).
+// THE RUNBOOK LISTED ONE OF THE FOUR, with a stale count ("18 roles × 91
+routes"). It lists all four now, and states the two things that make their output
+readable: they need a running stack and are not in CI, and `POST /auth/login` is
+rate-limited 10/min per IP — so **two runs back to back fail on the LIMITER**,
+which reads as a broken stack and is not. A probe may also report a role or route
+SKIPPED for the same reason; it says how many, and **a skipped role is not a
+passed one**.
+// The served copy is generated: `pnpm --filter @sms/web build:runbooks` after
+editing, the same rule the onboarding manual already carries, and
+`runbook-freshness.test.ts` fails if it is not.
+// THIS IS WHY THE PROBE ONE ENTRY UP HAD ROTTED. A false positive survives
+indefinitely in a tool nothing runs — and the reason nothing ran it starts with
+the documented command not working.
+
 ### The family-scope probe cried wolf about the one case it never tested
 Ran the probe rather than reasoning about scoping, and it reported
 **`LEAK their invoice — real 200 vs non-existent 404`**. The API is CORRECT:

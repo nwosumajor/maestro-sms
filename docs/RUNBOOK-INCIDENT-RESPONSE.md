@@ -890,12 +890,30 @@ The controls already in place, so you know what you are relying on:
 | Deployment circuit breaker + auto-rollback | `ecs.tf` | Bad releases that fail health checks |
 | RLS coverage meta-test | `apps/api/test/rls.e2e-spec.ts` | A new tenant table with no isolation test |
 | Pricing consistency test | `apps/web/lib/__tests__/` | Owner-facing docs drifting from real pricing |
-| Route smoke, 18 roles × 91 routes | `pnpm smoke:routes` | SSR 500s that unit tests miss |
+| Route smoke, every role × every route | `pnpm --filter @sms/web smoke:routes` | SSR 500s that unit tests miss |
 | Cross-tenant isolation probe | `pnpm --filter @sms/web isolation:probe` | A school reaching another school's records BY ID through the real front door |
+| Family-scope probe | `pnpm --filter @sms/web probe:family` | One parent or pupil reaching another family's child |
+| Permission matrix | `pnpm --filter @sms/web probe:permissions` | A role served rows from an endpoint whose permission it lacks |
 | Restore drill | `infrastructure/scripts/restore-drill.sh` | Backups that don't actually restore |
 | Fail-closed demo seeding | `packages/db/prisma/seed.ts` | Demo credentials reaching production |
 | 12 CloudWatch alarms → SNS | `alarms.tf` | Infrastructure symptoms |
 | WAF managed rules + rate limit | `waf.tf` | Common attack traffic |
+
+**The four probes need a RUNNING STACK and are not in CI.** They sign in through
+the real front door, so nothing runs them for you — run them by hand after a
+release and when triaging anything that smells like a scoping or isolation
+problem. Two things to know before you do:
+
+- They default to `http://localhost`, the compose stack behind nginx. Point them
+  elsewhere with `WEB_URL=`; a dev server is `http://localhost:3000`. If nothing
+  answers they now say so and name the variable, rather than only
+  `PROBE ERROR: fetch failed`.
+- `POST /auth/login` is rate-limited to 10/min per IP and each probe signs in as
+  several accounts, so **running two back to back fails on the limiter**, not on
+  a broken stack. The message reads "could not sign in as staff to build the
+  roster — is the stack up and seeded?". Wait a minute between runs. A probe may
+  also report a role or route SKIPPED for the same reason; it says how many, and
+  a skipped role is not a passed one.
 
 **Rehearse the restore drill quarterly.** A backup you have never restored is not
 a backup — and an incident is the worst possible moment to discover that.

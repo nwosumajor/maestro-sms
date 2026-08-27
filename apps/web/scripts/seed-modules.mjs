@@ -25,7 +25,9 @@
 //   WEB_URL=http://localhost pnpm --filter @sms/web seed:modules
 // =============================================================================
 
-const WEB = process.env.WEB_URL ?? "http://localhost:3000";
+// The compose stack is nginx on port 80; 3000 is the Next dev server. Same
+// default trap the four probes carried — see isolation-probe.mjs.
+const WEB = process.env.WEB_URL ?? "http://localhost";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "password123";
 const AS = process.env.SEED_AS ?? "admin@demo.school";
 const TAG = "SEED";
