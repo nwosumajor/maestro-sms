@@ -2024,6 +2024,39 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The hall shrank under the candidates already seated in it
+`updateSitting` (`exam.service.ts`). The SIBLING of the bus fix below, found by
+asking the same question of the other two modules that enforce a capacity rather
+than stopping at the one that hurt.
+`seat` refuses to place more candidates than the hall holds (409). The sitting's
+own `capacity` is editable afterwards — directly, or by MOVING THE SITTING TO A
+SMALLER ROOM, which resolves that room's capacity — and neither was checked.
+Measured live: a class of 59 seated in a hall of 60, then set to capacity 5,
+returned **HTTP 200**, leaving 59 candidates holding seat numbers 1..59 in a
+hall of five, each still told their seat on `/exams/mine`. After: **409**
+naming both numbers.
+// THE ROOM MOVE IS THE REALISTIC ACTION and a capacity-only check would miss
+it, which is why the guard sits on the RESOLVED venue rather than on
+`patch.capacity`.
+// **THE THIRD MODULE, AND THE HOSTEL HAD IT RIGHT ALL ALONG.**
+`updateRoom` refuses to shrink a room below its occupancy and says why —
+"Shrinking capacity below the current occupancy would strand allocations."
+The bus and the hall, written later, each guarded one side of the same
+comparison. Sibling asymmetry with the CORRECT one written first, for the third
+time in this file.
+// THE EXAM-DAY BOARD ALREADY WARNED, and that is not a reason to leave it: its
+own comment says the warning exists for sittings that "predate the check" — a
+backstop for legacy rows, not a licence to create the state fresh — and it
+appears only on the DAY, far too late to move a hall.
+// THE ONE WAY THIS GUARD COULD DO HARM is pinned by a test: a sitting that is
+ALREADY over capacity must still be renameable and re-timeable, or the guard
+freezes exactly the legacy records somebody is trying to put right. Only a
+venue-touching edit is checked.
+// GOTCHA in my own test, corrected rather than worked around: I asserted that a
+non-venue edit does not count seats, and it does — the DTO builder counts them
+regardless, so the premise was wrong and there was no extra cost to protect. The
+assertion was replaced with the legacy-row property above, which is real.
+
 ### The bus shrank under the children already on it
 `updateVehicle`. Assigning a passenger counts the seats and ROW-LOCKS the route
 first, with a comment saying why — "these are physical seats on a bus, and a

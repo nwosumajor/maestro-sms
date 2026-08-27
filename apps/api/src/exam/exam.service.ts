@@ -340,6 +340,32 @@ export class ExamService {
         : { roomId: current.roomId, hall: current.hall, capacity: current.capacity };
       if (patch.classId !== undefined) await this.assertClass(tx, patch.classId);
 
+      // A HALL CANNOT SHRINK BELOW THE CANDIDATES ALREADY SEATED IN IT.
+      //
+      // `seat` refuses to place more students than the hall holds (409). Nothing
+      // guarded the other side of that comparison: the sitting's own capacity is
+      // editable afterwards — directly, or by MOVING THE SITTING TO A SMALLER
+      // ROOM, which resolves that room's capacity — so the check was bypassed by
+      // changing the number it compares against. Measured live: a class of 59
+      // seated in a hall of 60, then set to 5, returned 200 and left 59
+      // candidates holding seat numbers 1..59 in a hall of five.
+      //
+      // The exam-day board already WARNS on this ("59 seated in a hall of 5"),
+      // and its own comment says that warning is there for sittings which
+      // "predate the check" — a backstop for legacy rows, not a licence to
+      // create the state fresh. It also only appears on the DAY, which is far
+      // too late to move a hall.
+      //
+      // Zero still means no limit, exactly as `seat` treats it.
+      if (roomTouched && venue.capacity > 0) {
+        const seated = await tx.examSeat.count({ where: { sittingId: id } });
+        if (seated > venue.capacity) {
+          throw new ConflictException(
+            `${seated} candidate(s) are already seated for this sitting, so it cannot be set to ${venue.capacity} seat(s). Re-seat or move them first.`,
+          );
+        }
+      }
+
       await this.assertNoHallClash(tx, { date, startsAt, endsAt, hall: venue.hall }, id);
 
       const data = {
