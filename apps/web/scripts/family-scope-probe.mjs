@@ -209,15 +209,49 @@ async function ownFamily(c) {
  * which records they cannot see would assume the answer.
  */
 async function foreignRecords(staff, ownIds) {
-  const pick = (text, key) => {
+  // A STUDENT row's own id is the thing to compare against `ownIds`.
+  const pickStudent = (text) => {
     for (const m of text.matchAll(/"id":"([0-9a-f-]{36})"/g)) if (!ownIds.has(m[1])) return m[1];
     return null;
   };
+
+  /**
+   * An INVOICE is foreign when its `studentId` is not one of MINE — not when
+   * its own id is not.
+   *
+   * // GOTCHA, and it made this case a false positive that reported a LEAK
+   * against a correct API: the original picked the first `"id":"…"` in the
+   * invoice list and asked whether it was in `ownIds`, a set of STUDENT ids.
+   * An invoice id is never a student id, so "not mine" was vacuously true and
+   * it returned whichever invoice happened to be FIRST — including one of the
+   * probing parent's own. The parent then legitimately got 200 where the ghost
+   * got 404, and the probe called it a leak.
+   *
+   * Worse than a missed finding: a probe that cries wolf is one whose next
+   * report gets waved through. And the invoice case was never really tested —
+   * it passed only when the arbitrary pick happened to be somebody else's.
+   */
+  const pickInvoice = (text) => {
+    let rows;
+    try {
+      const parsed = JSON.parse(text);
+      rows = Array.isArray(parsed) ? parsed : (parsed.items ?? []);
+    } catch {
+      return null;
+    }
+    for (const r of rows) {
+      if (r && typeof r.id === "string" && typeof r.studentId === "string" && !ownIds.has(r.studentId)) {
+        return r.id;
+      }
+    }
+    return null;
+  };
+
   const students = await staff.get("/students?kind=student");
   const invoices = await staff.get("/invoices");
   return {
-    studentId: students.status === 200 ? pick(students.text) : null,
-    invoiceId: invoices.status === 200 ? pick(invoices.text) : null,
+    studentId: students.status === 200 ? pickStudent(students.text) : null,
+    invoiceId: invoices.status === 200 ? pickInvoice(invoices.text) : null,
     ghost: "00000000-0000-4000-8000-0000000000ff",
   };
 }

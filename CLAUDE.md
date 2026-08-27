@@ -2075,6 +2075,38 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The family-scope probe cried wolf about the one case it never tested
+Ran the probe rather than reasoning about scoping, and it reported
+**`LEAK their invoice — real 200 vs non-existent 404`**. The API is CORRECT:
+`getInvoice` calls `assertCanAccessStudent`, and a parent asking about another
+family's real invoice and about a random uuid gets byte-identical
+`404 {"message":"Invoice not found"}` — verified directly before touching
+anything.
+The defect was in the PROBE. `foreignRecords` picked a record with
+`for (const m of text.matchAll(/"id":"([0-9a-f-]{36})"/g)) if (!ownIds.has(m[1])) return m[1];`
+and used it for BOTH the student list and the invoice list. `ownIds` is a set of
+STUDENT ids, so for invoices it asked whether an INVOICE id was a student id —
+never true — and "not mine" was VACUOUSLY SATISFIED. It returned whichever
+invoice happened to be first, including one of the probing parent's OWN. The
+parent then legitimately got 200 where the ghost got 404, and the probe called it
+a leak. (The unused `key` parameter was the tell.)
+// **A FALSE POSITIVE IS WORSE THAN A MISSED ONE HERE**, and that is why this is
+a fix rather than a note: this probe's entire value is that its output is
+believed. One cried-wolf finding and the next real one gets waved through.
+// AND THE INVOICE CASE WAS NEVER ACTUALLY TESTED. It passed only when the
+arbitrary pick happened to belong to somebody else — right by luck, which is the
+standing `a-gate-must-not-pass-by-finding-nothing` already records for a walk
+that finds no files. An invoice is foreign when its `studentId` is not one of
+mine, so it parses the rows and asks that.
+// VALIDATED BY MAKING IT FIRE, both ways, on the running stack: with
+`assertCanAccessStudent` deleted from `getInvoice` it reports the LEAK and exits
+non-zero; with it restored, `PASS`. The same discipline the probe's own header
+already describes for its body comparison.
+// GOTCHA when running it repeatedly: `POST /auth/login` is rate-limited 10/min
+per IP and the probe signs in as several accounts, so two runs back to back fail
+with "could not sign in as staff to build the roster — is the stack up and
+seeded?", which reads like a broken stack and is not.
+
 ### A three-stage chain approving "Leave: Annual" and nothing else
 The workflow inbox renders ONE field from a request's payload — `summary`, a
 string a SERVICE wrote — and never the raw payload, deliberately: payloads carry
