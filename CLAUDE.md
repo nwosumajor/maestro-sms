@@ -2024,6 +2024,39 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A bill the family was told about, withdrawn in silence
+`cancelInvoice`. Issuing emails the guardians "Invoice X for Y is due on Z";
+cancelling told them nothing. So the family's last word was that they owed money
+the school had since withdrawn — and because paying a CANCELLED invoice is
+already refused, a parent acting on the message they DO have meets a refusal
+with no explanation. Measured live: the invoice read CANCELLED and the family
+received zero notices.
+Fourth instance of the class in this file — a withdrawn duty, a retracted bus
+boarding, a corrected absence, and now a cancelled bill — and the sweep found it
+by asking the question of MONEY rather than stopping at the second find. Refunds
+were already covered ("Approved payments AND refunds both notify"); only
+cancellation was not.
+// SILENT FOR A DRAFT, deliberately. Issuing is what announces a bill; a DRAFT
+is where a bursar assembles one, so "your invoice is cancelled" for a bill they
+never heard of would be the first they knew of any of it. Same
+retract-only-what-was-sent rule as the bus boarding.
+// IT SAYS NOTHING ABOUT MONEY ALREADY PAID. A PARTIALLY_PAID invoice can be
+cancelled, and whether that becomes a credit or a refund is decided elsewhere —
+promising an outcome here would be a statement the ledger has not made, so it
+points the family at the office instead. The test asserts the message does NOT
+contain the word refund.
+// It rides the ESSENTIAL `INVOICE_ISSUED` type, so a family that muted billing
+mail cannot keep the demand and miss the cancellation — the same reasoning as
+the attendance correction one entry up.
+// **GOTCHA, AND I COMMITTED THE VERY DEFECT I HAD JUST FIXED.** Cancelling is
+not blocked on an already-CANCELLED invoice, and my first version keyed the
+notice on the OUTCOME (`status !== "DRAFT"`), so pressing Cancel twice sent two
+identical withdrawals. Found because the live probe happened to run twice — not
+by reading, and not by the five tests I had already written. The notice keys on
+the TRANSITION now. The duplicate-alert defect and the missing-retraction defect
+are the same defect seen from two sides, which is why they keep arriving
+together.
+
 ### The same absence, emailed twice, and the correction never sent
 `applyRegister`. Marking a pupil ABSENT or LATE emails their guardians. The
 alert list was built from the SUBMITTED records alone — filtered by status, with

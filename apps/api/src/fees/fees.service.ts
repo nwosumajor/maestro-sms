@@ -347,14 +347,51 @@ export class FeesService {
   }
 
   async cancelInvoice(p: Principal, id: string) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { updated, wasAnnounced } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id } });
       if (!inv) throw new NotFoundException("Invoice not found");
       if (inv.status === "PAID") throw new BadRequestException("Cannot cancel a paid invoice");
-      const updated = await tx.invoice.update({ where: { id }, data: { status: "CANCELLED" } });
+      const row = await tx.invoice.update({ where: { id }, data: { status: "CANCELLED" } });
       await this.log(tx, p, "fee.invoice.cancel", "invoice", id);
-      return updated;
+      // RETRACT ONLY WHAT WAS SENT, AND ONLY ONCE.
+      //
+      // Issuing is what emails the family; a DRAFT is where a bursar assembles a
+      // bill and was never announced, so cancelling one stays silent — a "your
+      // invoice is cancelled" for a bill they never heard of would be the first
+      // they knew of any of it.
+      //
+      // And cancelling is not blocked on an already-CANCELLED invoice, so the
+      // notice keys on the TRANSITION rather than on the outcome: pressing
+      // Cancel twice sent the family two identical withdrawals. Caught by the
+      // live probe re-running, not by reading — the same duplicate-alert defect
+      // the register beside it has just been fixed for.
+      return { updated: row, wasAnnounced: inv.status !== "DRAFT" && inv.status !== "CANCELLED" };
     });
+
+    // A BILL WITHDRAWN IS WITHDRAWN OUT LOUD.
+    //
+    // Issuing emails the guardians "Invoice X for Y is due on Z"; cancelling
+    // told them nothing, so the family's last word was that they owed money the
+    // school had since withdrawn. Paying it is already refused, so a parent
+    // acting on that message meets a refusal with no explanation.
+    //
+    // Third instance of this class here after a withdrawn duty and a retracted
+    // bus boarding, and the second on a notice a family acts on.
+    if (wasAnnounced) {
+      await this.notifyGuardians(p, updated.studentId, {
+        // The ESSENTIAL invoice type, so a family that muted billing mail cannot
+        // keep the demand and miss the cancellation.
+        type: "INVOICE_ISSUED",
+        title: "Invoice cancelled",
+        // Deliberately says nothing about money ALREADY PAID: a part-paid
+        // invoice can be cancelled, and whether that becomes a credit or a
+        // refund is a decision made elsewhere. Promising an outcome here would
+        // be a statement the ledger has not made.
+        body: `Invoice ${updated.reference} for ${this.money(updated.totalMinor, updated.currency)} has been cancelled by the school and is no longer due. If you have already paid it, please contact the school office.`,
+        data: { invoiceId: updated.id, reference: updated.reference },
+      });
+    }
+    return updated;
   }
 
   /**
