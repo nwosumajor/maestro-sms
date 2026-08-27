@@ -54,7 +54,13 @@ function makeService(f: Fakes) {
     },
   } as unknown as TenantTx;
 
-  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    // A real TenantDatabase always has BOTH. `generate` reads its inputs in a
+    // read-only transaction, solves OUTSIDE any transaction, then writes — a
+    // stub with only `runAsTenant` models something the runtime cannot produce.
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new TimetableService(db as never, audit as never, coverStub());
   return { service, tx };

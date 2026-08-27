@@ -45,7 +45,12 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
-import { generateTimetable, unavailableKey, type Offering, type Slot } from "./auto-timetable";
+import {
+  generateTimetable,
+  unavailableKey,
+  type Offering,
+  type Slot,
+} from "./auto-timetable";
 import { LessonCoverService } from "./lesson-cover.service";
 import { createPdfDocument } from "../common/pdf-document";
 
@@ -54,9 +59,20 @@ import { createPdfDocument } from "../common/pdf-document";
 // the auto-generator (generate) and teacher-availability (setUnavailability)
 // gate on staff-wide — so those were dead for it. Add it for consistency.
 // Mirrors the SIS fix.
-const STAFF_WIDE_ROLES = new Set(["school_admin", "principal", "board", "junior_admin"]);
+const STAFF_WIDE_ROLES = new Set([
+  "school_admin",
+  "principal",
+  "board",
+  "junior_admin",
+]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-const WEEKDAYS: DayOfWeekValue[] = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
+const WEEKDAYS: DayOfWeekValue[] = [
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+];
 
 /** A timetable entry row as the grid/view queries select it (period + room joined). */
 type EntryRow = {
@@ -128,7 +144,12 @@ export class TimetableService {
             endTime: input.endTime,
           },
         })
-        .catch((e) => this.rethrowUniqueViolation(e, "Another period already uses that position in the day"));
+        .catch((e) =>
+          this.rethrowUniqueViolation(
+            e,
+            "Another period already uses that position in the day",
+          ),
+        );
       await this.log(tx, p, "timetable.period.create", "period", period.id);
       return period;
     });
@@ -151,7 +172,12 @@ export class TimetableService {
       await this.assertNoPeriodOverlap(tx, startTime, endTime, id);
       const period = await tx.period
         .update({ where: { id }, data: input })
-        .catch((e) => this.rethrowUniqueViolation(e, "Another period already uses that position in the day"));
+        .catch((e) =>
+          this.rethrowUniqueViolation(
+            e,
+            "Another period already uses that position in the day",
+          ),
+        );
       await this.log(tx, p, "timetable.period.update", "period", id);
       return period;
     });
@@ -172,7 +198,10 @@ export class TimetableService {
    */
   async deletePeriod(p: Principal, id: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const existing = await tx.period.findFirst({ where: { id }, select: { id: true, name: true } });
+      const existing = await tx.period.findFirst({
+        where: { id },
+        select: { id: true, name: true },
+      });
       if (!existing) throw new NotFoundException("Period not found");
       const placed = await tx.timetableEntry.count({ where: { periodId: id } });
       if (placed > 0) {
@@ -182,7 +211,9 @@ export class TimetableService {
       }
       await tx.teacherUnavailability.deleteMany({ where: { periodId: id } });
       await tx.period.delete({ where: { id } });
-      await this.log(tx, p, "timetable.period.delete", "period", id, { name: existing.name });
+      await this.log(tx, p, "timetable.period.delete", "period", id, {
+        name: existing.name,
+      });
       return { id, deleted: true };
     });
   }
@@ -202,7 +233,9 @@ export class TimetableService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const placed = await tx.timetableEntry.count();
       if (placed > 0) {
-        throw new ConflictException("Clear the placed timetable first — lessons are scheduled against the current periods.");
+        throw new ConflictException(
+          "Clear the placed timetable first — lessons are scheduled against the current periods.",
+        );
       }
       // Old periods (and any teacher-availability tied to them) are replaced.
       await tx.teacherUnavailability.deleteMany({});
@@ -228,14 +261,27 @@ export class TimetableService {
 
   // --- rooms -----------------------------------------------------------------
   async listRooms(p: Principal) {
-    return this.db.runAsTenant(this.ctx(p), (tx) => tx.room.findMany({ orderBy: { name: "asc" } }));
+    return this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.room.findMany({ orderBy: { name: "asc" } }),
+    );
   }
 
   async createRoom(p: Principal, input: RoomInput) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const room = await tx.room
-        .create({ data: { schoolId: p.schoolId, name: input.name, capacity: input.capacity ?? null } })
-        .catch((e) => this.rethrowUniqueViolation(e, "A room with that name already exists"));
+        .create({
+          data: {
+            schoolId: p.schoolId,
+            name: input.name,
+            capacity: input.capacity ?? null,
+          },
+        })
+        .catch((e) =>
+          this.rethrowUniqueViolation(
+            e,
+            "A room with that name already exists",
+          ),
+        );
       await this.log(tx, p, "timetable.room.create", "room", room.id);
       return room;
     });
@@ -243,11 +289,22 @@ export class TimetableService {
 
   async updateRoom(p: Principal, id: string, input: Partial<RoomInput>) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const existing = await tx.room.findFirst({ where: { id }, select: { id: true } });
+      const existing = await tx.room.findFirst({
+        where: { id },
+        select: { id: true },
+      });
       if (!existing) throw new NotFoundException("Room not found");
       const room = await tx.room
-        .update({ where: { id }, data: { name: input.name, capacity: input.capacity ?? undefined } })
-        .catch((e) => this.rethrowUniqueViolation(e, "A room with that name already exists"));
+        .update({
+          where: { id },
+          data: { name: input.name, capacity: input.capacity ?? undefined },
+        })
+        .catch((e) =>
+          this.rethrowUniqueViolation(
+            e,
+            "A room with that name already exists",
+          ),
+        );
       await this.log(tx, p, "timetable.room.update", "room", id);
       return room;
     });
@@ -264,7 +321,10 @@ export class TimetableService {
    */
   async deleteRoom(p: Principal, id: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const existing = await tx.room.findFirst({ where: { id }, select: { id: true, name: true } });
+      const existing = await tx.room.findFirst({
+        where: { id },
+        select: { id: true, name: true },
+      });
       if (!existing) throw new NotFoundException("Room not found");
       const [placed, preferred] = await Promise.all([
         tx.timetableEntry.count({ where: { roomId: id } }),
@@ -281,7 +341,9 @@ export class TimetableService {
         );
       }
       await tx.room.delete({ where: { id } });
-      await this.log(tx, p, "timetable.room.delete", "room", id, { name: existing.name });
+      await this.log(tx, p, "timetable.room.delete", "room", id, {
+        name: existing.name,
+      });
       return { id, deleted: true };
     });
   }
@@ -310,12 +372,22 @@ export class TimetableService {
         // WHICH of class/teacher/room without a query, and the transaction is
         // already aborted — so say the true thing rather than guess.
         .catch((e) =>
-          this.rethrowUniqueViolation(e, "That slot was taken while you were saving. Check the grid and try again."),
+          this.rethrowUniqueViolation(
+            e,
+            "That slot was taken while you were saving. Check the grid and try again.",
+          ),
         );
-      await this.log(tx, p, "timetable.entry.create", "timetable_entry", entry.id, {
-        classId: input.classId,
-        dayOfWeek: input.dayOfWeek,
-      });
+      await this.log(
+        tx,
+        p,
+        "timetable.entry.create",
+        "timetable_entry",
+        entry.id,
+        {
+          classId: input.classId,
+          dayOfWeek: input.dayOfWeek,
+        },
+      );
       return this.loadEntry(tx, entry.id);
     });
   }
@@ -330,67 +402,162 @@ export class TimetableService {
    *  constraint + preflight overload diagnostics, all with display names. */
   async generate(
     p: Principal,
-    input: { classIds?: string[]; lessonsPerSubject?: number; days?: DayOfWeekValue[]; replace?: boolean },
+    input: {
+      classIds?: string[];
+      lessonsPerSubject?: number;
+      days?: DayOfWeekValue[];
+      replace?: boolean;
+    },
   ): Promise<TimetableGenerateResultDto> {
     if (!this.isStaffWide(p)) throw new ForbiddenException();
     const days = input.days?.length ? input.days : WEEKDAYS;
+    // THREE PHASES: read, solve, write. The solve sits BETWEEN two transactions
+    // rather than inside one — see the note above `generateTimetable` below.
+    const prepared = await this.db.runAsTenantReadOnly(
+      this.ctx(p),
+      async (tx) => {
+        const allPeriods = await tx.period.findMany({
+          orderBy: { sequence: "asc" },
+          select: { id: true, isBreak: true },
+        });
+        // Break slots are never schedulable — the solver only fills teaching periods.
+        const periods = (
+          allPeriods as Array<{ id: string; isBreak: boolean }>
+        ).filter((pr) => !pr.isBreak);
+        if (periods.length === 0)
+          throw new BadRequestException(
+            "Define at least one teaching period first",
+          );
+        const slots: Slot[] = [];
+        for (const day of days)
+          for (const period of periods)
+            slots.push({ day, periodId: period.id });
+
+        // Offerings: class-subject-teacher rows (optionally a subset of classes).
+        const cstWhere = input.classIds?.length
+          ? { classId: { in: input.classIds } }
+          : {};
+        const cst = await tx.classSubjectTeacher.findMany({ where: cstWhere });
+        if (cst.length === 0)
+          throw new BadRequestException(
+            "No class-subject-teacher offerings to schedule",
+          );
+        const subjectIds = [...new Set(cst.map((c) => c.subjectId))];
+        const subjects = await tx.subject.findMany({
+          where: { id: { in: subjectIds } },
+          select: { id: true, name: true },
+        });
+        const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
+        const offerings: Offering[] = cst.map((c) => ({
+          classId: c.classId,
+          subjectId: c.subjectId,
+          subject: subjectName.get(c.subjectId) ?? "Subject",
+          teacherId: c.teacherId,
+          // The explicit bulk knob (legacy) overrides per-offering quotas when sent.
+          lessonsPerWeek: input.lessonsPerSubject ?? c.lessonsPerWeek,
+          preferredRoomId: c.preferredRoomId,
+        }));
+        const targetClassIds = [...new Set(offerings.map((o) => o.classId))];
+
+        // Seed busy-sets from any entries we are KEEPING (other classes / not replaced).
+        const keep = await tx.timetableEntry.findMany({
+          where: input.replace ? { classId: { notIn: targetClassIds } } : {},
+          select: {
+            classId: true,
+            teacherId: true,
+            dayOfWeek: true,
+            periodId: true,
+            roomId: true,
+          },
+        });
+        const classBusy: Record<string, Set<string>> = {};
+        const teacherBusy: Record<string, Set<string>> = {};
+        const roomBusy: Record<string, Set<string>> = {};
+        for (const e of keep) {
+          const k = `${e.dayOfWeek}|${e.periodId}`;
+          (classBusy[k] ??= new Set()).add(e.classId);
+          (teacherBusy[k] ??= new Set()).add(e.teacherId);
+          if (e.roomId) (roomBusy[k] ??= new Set()).add(e.roomId);
+        }
+
+        // Teacher availability: unavailable (day, period) slots are hard constraints.
+        const teacherIds = [...new Set(offerings.map((o) => o.teacherId))];
+        const unavailRows = await tx.teacherUnavailability.findMany({
+          where: { teacherId: { in: teacherIds } },
+        });
+        const unavailable = new Set(
+          unavailRows.map((r) =>
+            unavailableKey(r.teacherId, r.dayOfWeek, r.periodId),
+          ),
+        );
+
+        return {
+          slots,
+          offerings,
+          targetClassIds,
+          teacherIds,
+          classBusy,
+          teacherBusy,
+          roomBusy,
+          unavailable,
+        };
+      },
+    );
+    const {
+      slots,
+      offerings,
+      targetClassIds,
+      teacherIds,
+      classBusy,
+      teacherBusy,
+      roomBusy,
+      unavailable,
+    } = prepared;
+
+    // THE SOLVE IS PURE, AND IT DOES NOT BELONG IN THE TRANSACTION.
+    //
+    // `generateTimetable` is a backtracking search with a step budget and it
+    // touches no database. Running it inside `runAsTenant` spent the 5-second
+    // interactive-transaction cap on ARITHMETIC, and the bulk insert that
+    // followed then failed on an expired transaction. Measured live on the
+    // demo school's whole roll — 271 offerings, four lessons each — the
+    // request answered **500 after 9.5 seconds**:
+    //
+    //   Transaction already closed: the timeout for this transaction was
+    //   5000 ms, however 9322 ms passed since the start of the transaction
+    //
+    // So the flagship action of this module — generate a timetable for the
+    // school — failed with an internal error, while three classes at a time
+    // succeeded in 189 ms and hid it.
+    //
+    // Raising the timeout was the other option and is worse: a long
+    // transaction holds a snapshot open and blocks vacuum, which is why
+    // `runAsTenantReadOnly`'s `timeoutMs` is opt-in per call. Nothing here
+    // needs the solve to be transactional — the guarantee that matters is
+    // stated below and comes from the unique CONSTRAINTS, not the snapshot.
+    const result = generateTimetable(
+      offerings,
+      slots,
+      { classBusy, teacherBusy, roomBusy },
+      unavailable,
+    );
+
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const allPeriods = await tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true, isBreak: true } });
-      // Break slots are never schedulable — the solver only fills teaching periods.
-      const periods = (allPeriods as Array<{ id: string; isBreak: boolean }>).filter((pr) => !pr.isBreak);
-      if (periods.length === 0) throw new BadRequestException("Define at least one teaching period first");
-      const slots: Slot[] = [];
-      for (const day of days) for (const period of periods) slots.push({ day, periodId: period.id });
-
-      // Offerings: class-subject-teacher rows (optionally a subset of classes).
-      const cstWhere = input.classIds?.length ? { classId: { in: input.classIds } } : {};
-      const cst = await tx.classSubjectTeacher.findMany({ where: cstWhere });
-      if (cst.length === 0) throw new BadRequestException("No class-subject-teacher offerings to schedule");
-      const subjectIds = [...new Set(cst.map((c) => c.subjectId))];
-      const subjects = await tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } });
-      const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
-      const offerings: Offering[] = cst.map((c) => ({
-        classId: c.classId,
-        subjectId: c.subjectId,
-        subject: subjectName.get(c.subjectId) ?? "Subject",
-        teacherId: c.teacherId,
-        // The explicit bulk knob (legacy) overrides per-offering quotas when sent.
-        lessonsPerWeek: input.lessonsPerSubject ?? c.lessonsPerWeek,
-        preferredRoomId: c.preferredRoomId,
-      }));
-      const targetClassIds = [...new Set(offerings.map((o) => o.classId))];
-
-      // Optionally clear the targeted classes' existing entries first.
+      // Optionally clear the targeted classes' existing entries first. Delete and
+      // insert stay in ONE transaction, so a partly-applied generation is still
+      // impossible — that is the atomicity that matters, and it never needed the
+      // solve inside it.
       if (input.replace) {
-        await tx.timetableEntry.deleteMany({ where: { classId: { in: targetClassIds } } });
+        await tx.timetableEntry.deleteMany({
+          where: { classId: { in: targetClassIds } },
+        });
       }
-
-      // Seed busy-sets from any entries we are KEEPING (other classes / not replaced).
-      const keep = await tx.timetableEntry.findMany({
-        where: input.replace ? { classId: { notIn: targetClassIds } } : {},
-        select: { classId: true, teacherId: true, dayOfWeek: true, periodId: true, roomId: true },
-      });
-      const classBusy: Record<string, Set<string>> = {};
-      const teacherBusy: Record<string, Set<string>> = {};
-      const roomBusy: Record<string, Set<string>> = {};
-      for (const e of keep) {
-        const k = `${e.dayOfWeek}|${e.periodId}`;
-        (classBusy[k] ??= new Set()).add(e.classId);
-        (teacherBusy[k] ??= new Set()).add(e.teacherId);
-        if (e.roomId) (roomBusy[k] ??= new Set()).add(e.roomId);
-      }
-
-      // Teacher availability: unavailable (day, period) slots are hard constraints.
-      const teacherIds = [...new Set(offerings.map((o) => o.teacherId))];
-      const unavailRows = await tx.teacherUnavailability.findMany({ where: { teacherId: { in: teacherIds } } });
-      const unavailable = new Set(unavailRows.map((r) => unavailableKey(r.teacherId, r.dayOfWeek, r.periodId)));
-
-      const result = generateTimetable(offerings, slots, { classBusy, teacherBusy, roomBusy }, unavailable);
       // One bulk insert for all generated lessons (not one INSERT per lesson).
-      // The solver planned against the grid as it was READ at the top of this
-      // transaction. If someone placed a lesson meanwhile, the constraints
-      // reject the whole insert — correctly, since a partly-applied generation
-      // is worse than none. Say so rather than surfacing a raw P2002.
+      // The solver planned against the grid as it was READ IN THE PHASE ABOVE.
+      // That window is now the solve time rather than zero, and it does not
+      // weaken anything: if someone placed a lesson meanwhile, the unique
+      // constraints reject the whole insert — correctly, since a partly-applied
+      // generation is worse than none. Say so rather than surfacing a raw P2002.
       await tx.timetableEntry
         .createMany({
           data: result.placed.map((lesson) => ({
@@ -405,7 +572,10 @@ export class TimetableService {
           })),
         })
         .catch((e) => {
-          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          if (
+            e instanceof Prisma.PrismaClientKnownRequestError &&
+            e.code === "P2002"
+          ) {
             throw new ConflictException(
               "The timetable changed while this was generating — nothing was saved. Review the grid and run it again.",
             );
@@ -414,25 +584,42 @@ export class TimetableService {
         });
 
       // Resolve ids -> display names so unplaced/diagnostics read as evidence.
-      const classRows = await tx.class.findMany({ where: { id: { in: targetClassIds } }, select: { id: true, name: true } });
+      const classRows = await tx.class.findMany({
+        where: { id: { in: targetClassIds } },
+        select: { id: true, name: true },
+      });
       const className = new Map(classRows.map((c) => [c.id, c.name]));
-      const teacherRows = await tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, name: true } });
+      const teacherRows = await tx.user.findMany({
+        where: { id: { in: teacherIds } },
+        select: { id: true, name: true },
+      });
       const teacherName = new Map(teacherRows.map((t) => [t.id, t.name]));
-      const roomIds = [...new Set(offerings.flatMap((o) => (o.preferredRoomId ? [o.preferredRoomId] : [])))];
+      const roomIds = [
+        ...new Set(
+          offerings.flatMap((o) =>
+            o.preferredRoomId ? [o.preferredRoomId] : [],
+          ),
+        ),
+      ];
       const roomRows = roomIds.length
-        ? await tx.room.findMany({ where: { id: { in: roomIds } }, select: { id: true, name: true } })
+        ? await tx.room.findMany({
+            where: { id: { in: roomIds } },
+            select: { id: true, name: true },
+          })
         : [];
       const roomName = new Map(roomRows.map((r) => [r.id, r.name]));
-      const diagnostics: TimetableDiagnosticDto[] = result.diagnostics.map((d) => ({
-        kind: d.kind,
-        name: d.teacherId
-          ? teacherName.get(d.teacherId) ?? d.teacherId
-          : d.classId
-            ? className.get(d.classId) ?? d.classId
-            : roomName.get(d.roomId ?? "") ?? d.roomId ?? "?",
-        demand: d.demand,
-        capacity: d.capacity,
-      }));
+      const diagnostics: TimetableDiagnosticDto[] = result.diagnostics.map(
+        (d) => ({
+          kind: d.kind,
+          name: d.teacherId
+            ? (teacherName.get(d.teacherId) ?? d.teacherId)
+            : d.classId
+              ? (className.get(d.classId) ?? d.classId)
+              : (roomName.get(d.roomId ?? "") ?? d.roomId ?? "?"),
+          demand: d.demand,
+          capacity: d.capacity,
+        }),
+      );
 
       await this.log(tx, p, "timetable.generate", "timetable", "auto", {
         classes: targetClassIds.length,
@@ -460,14 +647,25 @@ export class TimetableService {
   /** List unavailable slots. School-wide staff see any teacher's (or all);
    *  teachers see only their OWN — the filter narrows silently (404-not-403
    *  posture: no existence leak about other teachers). */
-  async listUnavailability(p: Principal, teacherId?: string): Promise<TeacherUnavailabilityDto[]> {
+  async listUnavailability(
+    p: Principal,
+    teacherId?: string,
+  ): Promise<TeacherUnavailabilityDto[]> {
     const effectiveTeacherId = this.isStaffWide(p) ? teacherId : p.userId;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const rows = await tx.teacherUnavailability.findMany({
         where: effectiveTeacherId ? { teacherId: effectiveTeacherId } : {},
-        orderBy: [{ teacherId: "asc" }, { dayOfWeek: "asc" }, { periodId: "asc" }],
+        orderBy: [
+          { teacherId: "asc" },
+          { dayOfWeek: "asc" },
+          { periodId: "asc" },
+        ],
       });
-      return rows.map((r) => ({ teacherId: r.teacherId, dayOfWeek: r.dayOfWeek, periodId: r.periodId }));
+      return rows.map((r) => ({
+        teacherId: r.teacherId,
+        dayOfWeek: r.dayOfWeek,
+        periodId: r.periodId,
+      }));
     });
   }
 
@@ -479,12 +677,18 @@ export class TimetableService {
   ) {
     if (!this.isStaffWide(p)) throw new ForbiddenException();
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const teacher = await tx.user.findFirst({ where: { id: teacherId }, select: { id: true } });
+      const teacher = await tx.user.findFirst({
+        where: { id: teacherId },
+        select: { id: true },
+      });
       if (!teacher) throw new NotFoundException("Teacher not found");
       const periodIds = [...new Set(slots.map((s) => s.periodId))];
       if (periodIds.length > 0) {
-        const known = await tx.period.count({ where: { id: { in: periodIds } } });
-        if (known !== periodIds.length) throw new BadRequestException("Unknown period in availability set");
+        const known = await tx.period.count({
+          where: { id: { in: periodIds } },
+        });
+        if (known !== periodIds.length)
+          throw new BadRequestException("Unknown period in availability set");
       }
       await tx.teacherUnavailability.deleteMany({ where: { teacherId } });
       if (slots.length > 0) {
@@ -498,9 +702,16 @@ export class TimetableService {
           skipDuplicates: true,
         });
       }
-      await this.log(tx, p, "timetable.availability.set", "teacher_unavailability", teacherId, {
-        slots: slots.length,
-      });
+      await this.log(
+        tx,
+        p,
+        "timetable.availability.set",
+        "teacher_unavailability",
+        teacherId,
+        {
+          slots: slots.length,
+        },
+      );
       return { ok: true, slots: slots.length };
     });
   }
@@ -563,13 +774,21 @@ export class TimetableService {
       // which east of UTC is yesterday.
       const covers = await this.cover.coversAheadInTx(tx, p.schoolId, id);
       const className =
-        ((await tx.class.findFirst({ where: { id: existing.classId }, select: { name: true } })) as { name: string } | null)
-          ?.name ?? "";
+        (
+          (await tx.class.findFirst({
+            where: { id: existing.classId },
+            select: { name: true },
+          })) as { name: string } | null
+        )?.name ?? "";
       await tx.timetableEntry.delete({ where: { id } });
       await this.log(tx, p, "timetable.entry.delete", "timetable_entry", id, {
         coverAssignmentsRemoved: covers.length,
       });
-      return covers.map((c) => ({ ...c, subject: existing.subject, className }));
+      return covers.map((c) => ({
+        ...c,
+        subject: existing.subject,
+        className,
+      }));
     });
     // One shared notice with the explicit removal path, so a reliever is told
     // the same thing whichever way the duty disappeared.
@@ -596,7 +815,9 @@ export class TimetableService {
         const classIds = await this.visibleClassIds(tx, p);
         if (classIds.length === 0) return [];
         where.classId =
-          opts?.classId && classIds.includes(opts.classId) ? opts.classId : { in: classIds };
+          opts?.classId && classIds.includes(opts.classId)
+            ? opts.classId
+            : { in: classIds };
       }
       return tx.timetableEntry.findMany({
         where,
@@ -610,7 +831,10 @@ export class TimetableService {
   /** A single class's weekly grid (scoped). Maps to the DTO — including the
    *  teacherId/roomId the web needs to PREFILL an edit form, and the resolved
    *  teacher name (teacherId is a scalar FK, so names are batch-resolved). */
-  async getClassTimetable(p: Principal, classId: string): Promise<TimetableEntryDto[]> {
+  async getClassTimetable(
+    p: Principal,
+    classId: string,
+  ): Promise<TimetableEntryDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanViewClass(tx, p, classId);
       const rows = await tx.timetableEntry.findMany({
@@ -630,15 +854,24 @@ export class TimetableService {
    * the User model lean), so the names come from two batched lookups — never one
    * query per row.
    */
-  private async toEntryDtos(tx: TenantTx, rows: EntryRow[]): Promise<TimetableEntryDto[]> {
+  private async toEntryDtos(
+    tx: TenantTx,
+    rows: EntryRow[],
+  ): Promise<TimetableEntryDto[]> {
     const teacherIds = [...new Set(rows.map((e) => e.teacherId))];
     const classIds = [...new Set(rows.map((e) => e.classId))];
     const [users, classes] = await Promise.all([
       teacherIds.length
-        ? (tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, name: true } }) as Promise<Array<{ id: string; name: string }>>)
+        ? (tx.user.findMany({
+            where: { id: { in: teacherIds } },
+            select: { id: true, name: true },
+          }) as Promise<Array<{ id: string; name: string }>>)
         : Promise.resolve([] as Array<{ id: string; name: string }>),
       classIds.length
-        ? (tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } }) as Promise<Array<{ id: string; name: string }>>)
+        ? (tx.class.findMany({
+            where: { id: { in: classIds } },
+            select: { id: true, name: true },
+          }) as Promise<Array<{ id: string; name: string }>>)
         : Promise.resolve([] as Array<{ id: string; name: string }>),
     ]);
     const nameById = new Map(users.map((u) => [u.id, u.name]));
@@ -691,7 +924,10 @@ export class TimetableService {
       } else {
         const classIds = await this.visibleClassIds(tx, p);
         if (classIds.length === 0) return [];
-        where.classId = opts.classId && classIds.includes(opts.classId) ? opts.classId : { in: classIds };
+        where.classId =
+          opts.classId && classIds.includes(opts.classId)
+            ? opts.classId
+            : { in: classIds };
       }
 
       const rows = (await tx.timetableEntry.findMany({
@@ -727,19 +963,41 @@ export class TimetableService {
   ): Promise<{ csv: string; filename: string }> {
     const rows = await this.getTimetableView(p, opts);
     const periods = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
-      tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true, name: true, startTime: true, endTime: true } }),
+      tx.period.findMany({
+        orderBy: { sequence: "asc" },
+        select: { id: true, name: true, startTime: true, endTime: true },
+      }),
     );
     const periodById = new Map(
-      (periods as Array<{ id: string; name: string; startTime: string; endTime: string }>).map((x) => [x.id, x]),
+      (
+        periods as Array<{
+          id: string;
+          name: string;
+          startTime: string;
+          endTime: string;
+        }>
+      ).map((x) => [x.id, x]),
     );
     const order = new Map(WEEKDAYS.map((d, i) => [d, i]));
 
-    const header = ["Day", "Period", "Start", "End", "Class", "Subject", "Teacher", "Room"];
+    const header = [
+      "Day",
+      "Period",
+      "Start",
+      "End",
+      "Class",
+      "Subject",
+      "Teacher",
+      "Room",
+    ];
     const lines = [header.map((h) => csvCell(h)).join(",")];
     for (const r of [...rows].sort(
       (a, b) =>
-        (order.get(a.dayOfWeek as DayOfWeekValue) ?? 99) - (order.get(b.dayOfWeek as DayOfWeekValue) ?? 99) ||
-        (periodById.get(a.periodId)?.startTime ?? "").localeCompare(periodById.get(b.periodId)?.startTime ?? "") ||
+        (order.get(a.dayOfWeek as DayOfWeekValue) ?? 99) -
+          (order.get(b.dayOfWeek as DayOfWeekValue) ?? 99) ||
+        (periodById.get(a.periodId)?.startTime ?? "").localeCompare(
+          periodById.get(b.periodId)?.startTime ?? "",
+        ) ||
         a.className.localeCompare(b.className),
     )) {
       const per = periodById.get(r.periodId);
@@ -758,7 +1016,13 @@ export class TimetableService {
           .join(","),
       );
     }
-    const scope = opts.classId ? "class" : opts.teacherId ? "teacher" : opts.roomId ? "room" : "school";
+    const scope = opts.classId
+      ? "class"
+      : opts.teacherId
+        ? "teacher"
+        : opts.roomId
+          ? "room"
+          : "school";
     return { csv: lines.join("\n"), filename: `timetable-${scope}.csv` };
   }
 
@@ -780,48 +1044,87 @@ export class TimetableService {
    */
   async getTeacherLoad(
     p: Principal,
-  ): Promise<Array<{ teacherId: string; teacherName: string; assigned: number; capacity: number; percent: number }>> {
+  ): Promise<
+    Array<{
+      teacherId: string;
+      teacherName: string;
+      assigned: number;
+      capacity: number;
+      percent: number;
+    }>
+  > {
     if (!this.isStaffWide(p)) throw new ForbiddenException();
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const [periods, entryCounts, unavail] = await Promise.all([
-        tx.period.findMany({ select: { id: true, isBreak: true } }) as Promise<Array<{ id: string; isBreak: boolean }>>,
+        tx.period.findMany({ select: { id: true, isBreak: true } }) as Promise<
+          Array<{ id: string; isBreak: boolean }>
+        >,
         // One grouped count for the whole school, not a query per teacher.
-        tx.timetableEntry.groupBy({ by: ["teacherId"], _count: { _all: true } } as never) as unknown as Promise<
+        tx.timetableEntry.groupBy({
+          by: ["teacherId"],
+          _count: { _all: true },
+        } as never) as unknown as Promise<
           Array<{ teacherId: string; _count: { _all: number } }>
         >,
-        tx.teacherUnavailability.findMany({ select: { teacherId: true } }) as Promise<Array<{ teacherId: string }>>,
+        tx.teacherUnavailability.findMany({
+          select: { teacherId: true },
+        }) as Promise<Array<{ teacherId: string }>>,
       ]);
       const teachingPeriods = periods.filter((pr) => !pr.isBreak).length;
       const grid = teachingPeriods * WEEKDAYS.length;
 
       const blockedByTeacher = new Map<string, number>();
-      for (const u of unavail) blockedByTeacher.set(u.teacherId, (blockedByTeacher.get(u.teacherId) ?? 0) + 1);
+      for (const u of unavail)
+        blockedByTeacher.set(
+          u.teacherId,
+          (blockedByTeacher.get(u.teacherId) ?? 0) + 1,
+        );
 
       // Everyone who either teaches something or has declared unavailability. A
       // teacher with zero lessons is exactly who a head teacher is looking for, so
       // they must not be omitted just for having no entries.
-      const ids = [...new Set([...entryCounts.map((e) => e.teacherId), ...blockedByTeacher.keys()])];
+      const ids = [
+        ...new Set([
+          ...entryCounts.map((e) => e.teacherId),
+          ...blockedByTeacher.keys(),
+        ]),
+      ];
       if (ids.length === 0) return [];
-      const users = (await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })) as Array<{
+      const users = (await tx.user.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true },
+      })) as Array<{
         id: string;
         name: string;
       }>;
-      const assignedBy = new Map(entryCounts.map((e) => [e.teacherId, e._count._all]));
+      const assignedBy = new Map(
+        entryCounts.map((e) => [e.teacherId, e._count._all]),
+      );
 
-      return users
-        .map((u) => {
-          const assigned = assignedBy.get(u.id) ?? 0;
-          const capacity = Math.max(0, grid - (blockedByTeacher.get(u.id) ?? 0));
-          return {
-            teacherId: u.id,
-            teacherName: u.name,
-            assigned,
-            capacity,
-            percent: capacity > 0 ? Math.round((assigned / capacity) * 100) : 0,
-          };
-        })
-        // Heaviest first: the ones at risk are what the panel is for.
-        .sort((a, b) => b.percent - a.percent || a.teacherName.localeCompare(b.teacherName));
+      return (
+        users
+          .map((u) => {
+            const assigned = assignedBy.get(u.id) ?? 0;
+            const capacity = Math.max(
+              0,
+              grid - (blockedByTeacher.get(u.id) ?? 0),
+            );
+            return {
+              teacherId: u.id,
+              teacherName: u.name,
+              assigned,
+              capacity,
+              percent:
+                capacity > 0 ? Math.round((assigned / capacity) * 100) : 0,
+            };
+          })
+          // Heaviest first: the ones at risk are what the panel is for.
+          .sort(
+            (a, b) =>
+              b.percent - a.percent ||
+              a.teacherName.localeCompare(b.teacherName),
+          )
+      );
     });
   }
 
@@ -842,7 +1145,8 @@ export class TimetableService {
     p: Principal,
     opts: { classId?: string; teacherId?: string },
   ): Promise<{ buffer: Buffer; filename: string }> {
-    if (!opts.classId && !opts.teacherId) throw new BadRequestException("Give a classId or a teacherId");
+    if (!opts.classId && !opts.teacherId)
+      throw new BadRequestException("Give a classId or a teacherId");
     // A TEACHER's sheet is for staff, or for that teacher themselves.
     //
     // The row scoping below would already keep a parent from SEEING lessons they are
@@ -851,40 +1155,87 @@ export class TimetableService {
     // That is not a leak; it is a partial document labelled as a complete one, which
     // someone will print and act on. A teacher's week is not a parent-facing artefact
     // in the first place, so the axis itself is gated.
-    if (opts.teacherId && opts.teacherId !== p.userId && !this.isStaffWide(p) && !p.roles.includes("teacher")) {
-      throw new ForbiddenException("A teacher's timetable is available to staff, or to that teacher");
+    if (
+      opts.teacherId &&
+      opts.teacherId !== p.userId &&
+      !this.isStaffWide(p) &&
+      !p.roles.includes("teacher")
+    ) {
+      throw new ForbiddenException(
+        "A teacher's timetable is available to staff, or to that teacher",
+      );
     }
     const entries = await this.getTimetableView(p, opts);
-    const { periods, schoolName, subjectLabel } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const [rows, school, cls, teacher] = await Promise.all([
-        tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true, name: true, startTime: true, endTime: true, isBreak: true } }) as Promise<
-          Array<{ id: string; name: string; startTime: string; endTime: string; isBreak: boolean }>
-        >,
-        tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } }) as Promise<{ name: string } | null>,
-        opts.classId
-          ? (tx.class.findFirst({ where: { id: opts.classId }, select: { name: true } }) as Promise<{ name: string } | null>)
-          : Promise.resolve(null),
-        opts.teacherId
-          ? (tx.user.findFirst({ where: { id: opts.teacherId }, select: { name: true } }) as Promise<{ name: string } | null>)
-          : Promise.resolve(null),
-      ]);
-      // 404 rather than an empty sheet: printing a blank grid for an id that does not
-      // exist in this tenant would look like "there are no lessons".
-      if (opts.classId && !cls) throw new NotFoundException("Class not found");
-      if (opts.teacherId && !teacher) throw new NotFoundException("Teacher not found");
-      return { periods: rows, schoolName: school?.name ?? "", subjectLabel: cls?.name ?? teacher?.name ?? "" };
-    });
+    const { periods, schoolName, subjectLabel } =
+      await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+        const [rows, school, cls, teacher] = await Promise.all([
+          tx.period.findMany({
+            orderBy: { sequence: "asc" },
+            select: {
+              id: true,
+              name: true,
+              startTime: true,
+              endTime: true,
+              isBreak: true,
+            },
+          }) as Promise<
+            Array<{
+              id: string;
+              name: string;
+              startTime: string;
+              endTime: string;
+              isBreak: boolean;
+            }>
+          >,
+          tx.school.findFirst({
+            where: { id: p.schoolId },
+            select: { name: true },
+          }) as Promise<{ name: string } | null>,
+          opts.classId
+            ? (tx.class.findFirst({
+                where: { id: opts.classId },
+                select: { name: true },
+              }) as Promise<{ name: string } | null>)
+            : Promise.resolve(null),
+          opts.teacherId
+            ? (tx.user.findFirst({
+                where: { id: opts.teacherId },
+                select: { name: true },
+              }) as Promise<{ name: string } | null>)
+            : Promise.resolve(null),
+        ]);
+        // 404 rather than an empty sheet: printing a blank grid for an id that does not
+        // exist in this tenant would look like "there are no lessons".
+        if (opts.classId && !cls)
+          throw new NotFoundException("Class not found");
+        if (opts.teacherId && !teacher)
+          throw new NotFoundException("Teacher not found");
+        return {
+          periods: rows,
+          schoolName: school?.name ?? "",
+          subjectLabel: cls?.name ?? teacher?.name ?? "",
+        };
+      });
 
     await this.db.runAsTenant(this.ctx(p), (tx) =>
-      this.log(tx, p, "timetable.print", "timetable", opts.classId ?? opts.teacherId ?? "", {
-        axis: opts.classId ? "class" : "teacher",
-        lessons: entries.length,
-      }),
+      this.log(
+        tx,
+        p,
+        "timetable.print",
+        "timetable",
+        opts.classId ?? opts.teacherId ?? "",
+        {
+          axis: opts.classId ? "class" : "teacher",
+          lessons: entries.length,
+        },
+      ),
     );
 
     const buffer = await this.renderTimetablePdf({
       schoolName,
-      title: opts.classId ? `Timetable — ${subjectLabel}` : `Teaching timetable — ${subjectLabel}`,
+      title: opts.classId
+        ? `Timetable — ${subjectLabel}`
+        : `Teaching timetable — ${subjectLabel}`,
       byTeacher: !!opts.teacherId,
       periods,
       entries,
@@ -897,14 +1248,24 @@ export class TimetableService {
     schoolName: string;
     title: string;
     byTeacher: boolean;
-    periods: Array<{ id: string; name: string; startTime: string; endTime: string; isBreak: boolean }>;
+    periods: Array<{
+      id: string;
+      name: string;
+      startTime: string;
+      endTime: string;
+      isBreak: boolean;
+    }>;
     entries: TimetableEntryDto[];
   }): Promise<Buffer> {
     const { default: PDFDocument } = await import("pdfkit");
     return new Promise<Buffer>((resolve, reject) => {
       // LANDSCAPE: five weekday columns beside a period column do not fit portrait
       // without shrinking the text past the point of being readable on a wall.
-      const doc = createPdfDocument({ margin: 30, size: "A4", layout: "landscape" });
+      const doc = createPdfDocument({
+        margin: 30,
+        size: "A4",
+        layout: "landscape",
+      });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -915,10 +1276,17 @@ export class TimetableService {
       doc.moveDown(0.5);
 
       const left = doc.page.margins.left;
-      const usable = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const usable =
+        doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const periodW = 90;
       const dayW = (usable - periodW) / WEEKDAYS.length;
-      const rowH = Math.max(30, Math.min(52, (doc.page.height - doc.y - 60) / Math.max(1, d.periods.length + 1)));
+      const rowH = Math.max(
+        30,
+        Math.min(
+          52,
+          (doc.page.height - doc.y - 60) / Math.max(1, d.periods.length + 1),
+        ),
+      );
 
       let y = doc.y;
       // Header row.
@@ -928,14 +1296,26 @@ export class TimetableService {
       WEEKDAYS.forEach((day, i) => {
         const x = left + periodW + i * dayW;
         doc.rect(x, y, dayW, rowH * 0.7).stroke();
-        doc.text(day.charAt(0) + day.slice(1).toLowerCase(), x + 4, y + 6, { width: dayW - 8 });
+        doc.text(day.charAt(0) + day.slice(1).toLowerCase(), x + 4, y + 6, {
+          width: dayW - 8,
+        });
       });
       y += rowH * 0.7;
 
       for (const pr of d.periods) {
         doc.rect(left, y, periodW, rowH).stroke();
-        doc.fontSize(8.5).text(pr.name, left + 4, y + 5, { width: periodW - 8, ellipsis: true });
-        doc.fontSize(7).fillColor("#666").text(`${pr.startTime}–${pr.endTime}`, left + 4, y + 16, { width: periodW - 8 });
+        doc
+          .fontSize(8.5)
+          .text(pr.name, left + 4, y + 5, {
+            width: periodW - 8,
+            ellipsis: true,
+          });
+        doc
+          .fontSize(7)
+          .fillColor("#666")
+          .text(`${pr.startTime}–${pr.endTime}`, left + 4, y + 16, {
+            width: periodW - 8,
+          });
         doc.fillColor("#000");
 
         WEEKDAYS.forEach((day, i) => {
@@ -944,19 +1324,36 @@ export class TimetableService {
           // A break spans the row as a labelled band — leaving it blank makes a
           // printed timetable look like it has a hole in it.
           if (pr.isBreak) {
-            doc.fontSize(7.5).fillColor("#888").text("break", x + 4, y + rowH / 2 - 4, { width: dayW - 8, align: "center" });
+            doc
+              .fontSize(7.5)
+              .fillColor("#888")
+              .text("break", x + 4, y + rowH / 2 - 4, {
+                width: dayW - 8,
+                align: "center",
+              });
             doc.fillColor("#000");
             return;
           }
-          const e = d.entries.find((x2) => x2.periodId === pr.id && x2.dayOfWeek === day);
+          const e = d.entries.find(
+            (x2) => x2.periodId === pr.id && x2.dayOfWeek === day,
+          );
           if (!e) return;
-          doc.fontSize(8.5).text(e.subject, x + 4, y + 5, { width: dayW - 8, ellipsis: true });
+          doc
+            .fontSize(8.5)
+            .text(e.subject, x + 4, y + 5, { width: dayW - 8, ellipsis: true });
           // On a TEACHER's sheet the class is the useful line; on a CLASS's sheet it
           // is the teacher. Printing both would not fit and would bury the one that
           // matters.
           const second = d.byTeacher ? e.className : e.teacherName;
-          doc.fontSize(7).fillColor("#555").text(second, x + 4, y + 16, { width: dayW - 8, ellipsis: true });
-          if (e.room) doc.text(e.room.name, x + 4, y + 25, { width: dayW - 8, ellipsis: true });
+          doc
+            .fontSize(7)
+            .fillColor("#555")
+            .text(second, x + 4, y + 16, { width: dayW - 8, ellipsis: true });
+          if (e.room)
+            doc.text(e.room.name, x + 4, y + 25, {
+              width: dayW - 8,
+              ellipsis: true,
+            });
           doc.fillColor("#000");
         });
         y += rowH;
@@ -966,11 +1363,14 @@ export class TimetableService {
         doc.fontSize(9).text("No periods defined yet.", left, y + 10);
       }
 
-      doc.fontSize(7).fillColor("#888").text(
-        `${d.entries.length} lesson${d.entries.length === 1 ? "" : "s"} · printed ${new Date().toISOString().slice(0, 10)}`,
-        left,
-        doc.page.height - doc.page.margins.bottom - 12,
-      );
+      doc
+        .fontSize(7)
+        .fillColor("#888")
+        .text(
+          `${d.entries.length} lesson${d.entries.length === 1 ? "" : "s"} · printed ${new Date().toISOString().slice(0, 10)}`,
+          left,
+          doc.page.height - doc.page.margins.bottom - 12,
+        );
 
       doc.end();
     });
@@ -990,14 +1390,21 @@ export class TimetableService {
    * already aborted the surrounding transaction, so any follow-up read fails too.
    */
   private rethrowUniqueViolation(e: unknown, message: string): never {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002"
+    ) {
       throw new ConflictException(message);
     }
     throw e;
   }
 
   // --- conflict detection ----------------------------------------------------
-  private async assertNoConflict(tx: TenantTx, e: EntryInput, excludeId?: string) {
+  private async assertNoConflict(
+    tx: TenantTx,
+    e: EntryInput,
+    excludeId?: string,
+  ) {
     const slot = { dayOfWeek: e.dayOfWeek, periodId: e.periodId };
     const not = excludeId ? { id: { not: excludeId } } : {};
 
@@ -1005,20 +1412,27 @@ export class TimetableService {
       where: { ...slot, classId: e.classId, ...not },
       select: { id: true },
     });
-    if (classClash) throw new ConflictException("This class already has a lesson in that slot");
+    if (classClash)
+      throw new ConflictException(
+        "This class already has a lesson in that slot",
+      );
 
     const teacherClash = await tx.timetableEntry.findFirst({
       where: { ...slot, teacherId: e.teacherId, ...not },
       select: { id: true },
     });
-    if (teacherClash) throw new ConflictException("That teacher is already booked in that slot");
+    if (teacherClash)
+      throw new ConflictException(
+        "That teacher is already booked in that slot",
+      );
 
     if (e.roomId) {
       const roomClash = await tx.timetableEntry.findFirst({
         where: { ...slot, roomId: e.roomId, ...not },
         select: { id: true },
       });
-      if (roomClash) throw new ConflictException("That room is already booked in that slot");
+      if (roomClash)
+        throw new ConflictException("That room is already booked in that slot");
     }
   }
 
@@ -1034,7 +1448,12 @@ export class TimetableService {
    * Half-open intervals: a period ending 09:00 and one starting 09:00 do not
    * overlap, which is the normal back-to-back case.
    */
-  private async assertNoPeriodOverlap(tx: TenantTx, start: string, end: string, excludeId?: string) {
+  private async assertNoPeriodOverlap(
+    tx: TenantTx,
+    start: string,
+    end: string,
+    excludeId?: string,
+  ) {
     const clash = (await tx.period.findFirst({
       where: {
         ...(excludeId ? { id: { not: excludeId } } : {}),
@@ -1055,13 +1474,17 @@ export class TimetableService {
     if (!HHMM.test(start) || !HHMM.test(end)) {
       throw new BadRequestException("startTime/endTime must be HH:MM (24h)");
     }
-    if (start >= end) throw new BadRequestException("startTime must be before endTime");
+    if (start >= end)
+      throw new BadRequestException("startTime must be before endTime");
   }
 
   /** The registry name for a subject — the ONLY source of a lesson's label, so a
    *  timetable can never display a subject that isn't in the catalog. */
   private async subjectLabel(tx: TenantTx, subjectId: string): Promise<string> {
-    const s = await tx.subject.findFirst({ where: { id: subjectId }, select: { name: true } });
+    const s = await tx.subject.findFirst({
+      where: { id: subjectId },
+      select: { name: true },
+    });
     if (!s) throw new NotFoundException("Subject not found");
     return s.name;
   }
@@ -1069,24 +1492,39 @@ export class TimetableService {
   private async assertReferencesExist(tx: TenantTx, e: EntryInput) {
     const [cls, period, teacher, subject] = await Promise.all([
       tx.class.findFirst({ where: { id: e.classId }, select: { id: true } }),
-      tx.period.findFirst({ where: { id: e.periodId }, select: { id: true, isBreak: true } }),
+      tx.period.findFirst({
+        where: { id: e.periodId },
+        select: { id: true, isBreak: true },
+      }),
       tx.user.findFirst({ where: { id: e.teacherId }, select: { id: true } }),
-      tx.subject.findFirst({ where: { id: e.subjectId }, select: { id: true } }),
+      tx.subject.findFirst({
+        where: { id: e.subjectId },
+        select: { id: true },
+      }),
     ]);
     if (!subject) throw new NotFoundException("Subject not found");
     if (!cls) throw new NotFoundException("Class not found");
     if (!period) throw new NotFoundException("Period not found");
     // A break is a non-teaching slot — no lesson may be placed in it.
-    if ((period as { isBreak?: boolean }).isBreak) throw new BadRequestException("This is a break period — no lesson can be scheduled in it.");
+    if ((period as { isBreak?: boolean }).isBreak)
+      throw new BadRequestException(
+        "This is a break period — no lesson can be scheduled in it.",
+      );
     if (!teacher) throw new NotFoundException("Teacher not found");
     if (e.roomId) {
-      const room = await tx.room.findFirst({ where: { id: e.roomId }, select: { id: true } });
+      const room = await tx.room.findFirst({
+        where: { id: e.roomId },
+        select: { id: true },
+      });
       if (!room) throw new NotFoundException("Room not found");
     }
   }
 
   private async loadEntry(tx: TenantTx, id: string) {
-    return tx.timetableEntry.findFirst({ where: { id }, include: { period: true, room: true } });
+    return tx.timetableEntry.findFirst({
+      where: { id },
+      include: { period: true, room: true },
+    });
   }
 
   private async taughtClassIds(tx: TenantTx, p: Principal): Promise<string[]> {
@@ -1112,7 +1550,11 @@ export class TimetableService {
     });
     if (children.length > 0) {
       const enr = await tx.enrollment.findMany({
-        where: { studentId: { in: children.map((c: { studentId: string }) => c.studentId) } },
+        where: {
+          studentId: {
+            in: children.map((c: { studentId: string }) => c.studentId),
+          },
+        },
         select: { classId: true },
       });
       enr.forEach((e: { classId: string }) => ids.add(e.classId));
@@ -1120,8 +1562,15 @@ export class TimetableService {
     return [...ids];
   }
 
-  private async assertCanViewClass(tx: TenantTx, p: Principal, classId: string) {
-    const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
+  private async assertCanViewClass(
+    tx: TenantTx,
+    p: Principal,
+    classId: string,
+  ) {
+    const cls = await tx.class.findFirst({
+      where: { id: classId },
+      select: { id: true },
+    });
     if (!cls) throw new NotFoundException("Class not found");
     if (this.isStaffWide(p)) return;
     if (p.roles.includes("teacher")) {
@@ -1146,7 +1595,14 @@ export class TimetableService {
     metadata?: Record<string, unknown>,
   ) {
     await this.audit.record(
-      { actorId: p.userId, action, entity, entityId, schoolId: p.schoolId, metadata },
+      {
+        actorId: p.userId,
+        action,
+        entity,
+        entityId,
+        schoolId: p.schoolId,
+        metadata,
+      },
       tx,
     );
   }

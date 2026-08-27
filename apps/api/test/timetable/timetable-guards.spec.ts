@@ -107,7 +107,13 @@ function harness(opts: {
     user: { findFirst: jest.fn().mockResolvedValue({ id: "t1" }) },
   } as unknown as TenantTx;
 
-  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    // A real TenantDatabase always has BOTH. `generate` reads its inputs in a
+    // read-only transaction, solves OUTSIDE any transaction, then writes — a
+    // stub with only `runAsTenant` models something the runtime cannot produce.
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
   const svc = new TimetableService(db as never, { record: jest.fn().mockResolvedValue(undefined) } as never, coverStub());
   return { svc, tx, deleted };
 }

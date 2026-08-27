@@ -2024,6 +2024,56 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A pure solver that spent the transaction on arithmetic
+`TimetableService.generate`. `generateTimetable` is a SYNCHRONOUS backtracking
+search with a 200,000-step budget that touches no database — and it ran INSIDE
+`runAsTenant`, so the 5-second interactive-transaction cap was spent on
+arithmetic and the bulk insert that followed died on an expired transaction.
+Measured live on the demo school's whole roll — 271 offerings, four lessons each:
+```
+before   HTTP 500 after 9,469 ms
+         Transaction already closed: the timeout for this transaction was
+         5000 ms, however 9322 ms passed since the start of the transaction
+after    HTTP 201 in 5,825 ms, placed 364, complete false
+```
+**The flagship action of the module — generate a timetable for the school —
+failed with an internal error**, while three classes at a time succeeded in
+189 ms and hid it. Nothing in the suite could see it: the solver is
+exhaustively unit-tested as a PURE function, and a fixture never has 271
+offerings.
+// THREE PHASES NOW: read (read-only tx), solve (no tx at all), write (tx). The
+atomicity that actually matters is untouched — the DELETE and the INSERT stay in
+ONE transaction, so a partly-applied generation is still impossible — and the
+guarantee against a concurrent placement was never the snapshot but the UNIQUE
+CONSTRAINTS plus the P2002 translation, both kept. The stale-read window widens
+from zero to the solve time and the constraints still reject the whole insert.
+// RAISING THE TIMEOUT was the other option and is worse: a long transaction
+holds a snapshot open and blocks vacuum, which is exactly why
+`runAsTenantReadOnly`'s `timeoutMs` is opt-in per call in the archive fix.
+// THE DIAGNOSTICS WERE ALWAYS THERE AND THE 500 HID THEM. It now returns
+`complete: false` with a per-lesson reason naming the class, the subject, the
+teacher and the cause — "no free slot (of 40: 40 by the teacher's other
+lessons)" — which is the operator evidence this module was designed around.
+Output verified valid at that scale: 364 placed, ZERO teacher clashes, ZERO
+class clashes, and the two pre-existing lessons for classes outside the run were
+respected rather than clashed with.
+// **STILL A SYNCHRONOUS ~6-SECOND SOLVE**, and that is recorded rather than
+claimed fixed: `generateTimetable` blocks the Node event loop for the duration,
+so a whole-school generation makes the API unresponsive for every tenant on the
+task. Bounding that means chunking or yielding inside an exhaustively-tested
+pure solver, or accepting worse plans — a real design decision, not a tidy-up.
+// GOTCHA, three times on ONE assertion, each found by mutation and not by
+reading: (1) the method slice ran to `clearTimetable`, which does not exist, so
+`indexOf` returned -1 and the window swallowed three later methods that
+legitimately use `runAsTenantReadOnly` — a window one scope too WIDE fails
+exactly like one too narrow; (2) with that fixed it still passed, because the
+COMMENT explaining this fix mentions `runAsTenantReadOnly` — this repo records
+gates that FAIL on the prose of their own fix, and this is the same trap
+inverted, prose making one PASS, so the gate strips comments now; (3) position
+ordering cannot tell "after the read transaction" from "inside its callback",
+since the solve sits between the two `runAsTenant` calls either way — it asserts
+the NESTING DEPTH of the call instead.
+
 ### A raise dated for October, paid from August
 `salary_change_request.effectiveDate` was accepted by the API, stored on the
 row, returned in the DTO and rendered on the screen — and consulted by NOTHING.
