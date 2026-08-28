@@ -112,6 +112,41 @@ const EXCLUDED_SECTIONS: ReadonlyArray<{ section: string; reason: string }> = [
       "carries no bytes. Download them from the Document Vault.",
   },
   {
+    section: "teachingMaterial",
+    reason:
+      "Lesson content, materials, quizzes, syllabi and CBT question banks are the school's OWN authored material and can be substantial. They are not in this file. Ask the school's data controller for an export before the account closes — this platform's rule elsewhere is that a question bank outlives the teacher who wrote it, and the same reasoning makes it the school's to take away.",
+  },
+  {
+    section: "libraryAndAssets",
+    reason:
+      "The book catalogue and borrowing history are held by the library module. Ask the data controller.",
+  },
+  {
+    section: "boardingAndTransport",
+    reason:
+      "Hostel allocations and roll calls, bus routes and daily boarding scans are held by the boarding house and the transport office. Ask the data controller.",
+  },
+  {
+    section: "communications",
+    reason:
+      "Message threads, announcements and calendar events are conversations and notices rather than the institutional record. A pupil's own threads are in their NDPR export bundle; ask the data controller for the rest.",
+  },
+  {
+    section: "hrBeyondEmployment",
+    reason:
+      "Leave, appraisals, staff documents, training and disciplinary files sit behind HR permissions. The employment records and payroll runs this file DOES carry are listed in `snapshotSections`; ask the data controller for the rest.",
+  },
+  {
+    section: "examLogistics",
+    reason:
+      "Exam sittings, seat allocations and invigilator rosters are operational scheduling records. The RESULTS are in `subjectResults`.",
+  },
+  {
+    section: "feeConfiguration",
+    reason:
+      "The fee catalogue, adjustments, instalment plans and credit ledgers are configuration and workings behind the invoices. The INVOICES themselves, with their line items and payments, are carried in full.",
+  },
+  {
     section: "disciplineAndRemarks",
     reason:
       "Discipline records, class-teacher remarks and character ratings are OPINION " +
@@ -398,6 +433,42 @@ export class SchoolArchiveService {
     // month prunes to one partition and reads it whole — no sort, no offset,
     // and the cost is O(rows) instead of O(pages x rows).
     const attendance = await this.byMonth(tx, "attendance", sections, truncated, window);
+    // THE ARCHIVE HAS TO BE READABLE ON ITS OWN.
+    //
+    // Every row this file carries is keyed on opaque UUIDs — a `subject_result`
+    // names a `classId`, a `subjectId`, a `termId` and a `sessionId` and not one
+    // of them resolved to anything inside the archive. So the school's academic
+    // record, the thing it most needs to keep, was a table of scores against
+    // identifiers with no lookup: you could not tell Mathematics from History,
+    // or which class or year a mark belonged to.
+    //
+    // These are REFERENCE data, bounded by the school's STRUCTURE rather than
+    // its lifetime, and they are tiny beside what they explain — 11 subjects,
+    // 31 classes, 2 sessions and 4 terms against 24,302 results in the demo
+    // school. A snapshot, never scoped: bounding the subject list to one term
+    // would leave marks in the archive that its own lookup could not name.
+    const subjects = await take("subjects", (skip, n) =>
+      tx.subject.findMany({ skip, take: n, orderBy: { name: "asc" } }),
+    );
+    const classes = await take("classes", (skip, n) =>
+      tx.class.findMany({ skip, take: n, orderBy: { name: "asc" } }),
+    );
+    const academicSessions = await take("academicSessions", (skip, n) =>
+      tx.academicSession.findMany({ skip, take: n, orderBy: { startDate: "asc" } }),
+    );
+    const terms = await take("terms", (skip, n) =>
+      tx.term.findMany({ skip, take: n, orderBy: { startDate: "asc" } }),
+    );
+    // The register's own header: which CLASS a day's attendance belongs to.
+    // `attendance_record` carries a denormalised `date`, so the day already
+    // resolves; without this the class does not. Scoped like the records it
+    // explains — 5,791 rows against 173,701.
+    const attendanceSessions = await take("attendanceSessions", (skip, n) =>
+      tx.attendanceSession.findMany({
+        where: window ? { date: { gte: window.from, lte: window.to } } : {},
+        skip, take: n, orderBy: { date: "asc" },
+      }),
+    );
     // Scoped on its OWN columns, not on a date window: a result carries the
     // term and session it belongs to, so this is exact rather than inferred
     // from when somebody happened to enter the mark.
@@ -472,7 +543,7 @@ export class SchoolArchiveService {
           coversLabel: window ? window.label : "whole school",
           /** Bounded to the window above. */
           scopedSections: window
-            ? ["enrollments", "attendance", "subjectResults", "invoices", "workflowRequests", "auditLog"]
+            ? ["enrollments", "attendance", "attendanceSessions", "subjectResults", "invoices", "workflowRequests", "auditLog"]
             : [],
           /**
            * NOT bounded — a point-in-time picture as at `producedAt`, and said
@@ -480,7 +551,11 @@ export class SchoolArchiveService {
            * record have no term: scoping them to one would produce an archive
            * missing the very people its other sections are about.
            */
-          snapshotSections: ["students", "studentProfiles", "staff", "payrollRuns"],
+          snapshotSections: [
+            "students", "studentProfiles", "staff", "payrollRuns",
+            // The lookups that make everything else readable.
+            "subjects", "classes", "academicSessions", "terms",
+          ],
           // Named loudly: whoever opens this in ten years must know what is in it
           // before they forward it to anyone.
           contains: "Whole institutional record, INCLUDING staff employment records and decrypted salaries.",
@@ -504,6 +579,7 @@ export class SchoolArchiveService {
           sectionCounts: sections,
         },
         students, studentProfiles: profiles, enrollments, attendance,
+        attendanceSessions, subjects, classes, academicSessions, terms,
         subjectResults: results, invoices, workflowRequests: workflows,
         auditLog, staff, payrollRuns: payroll,
       },

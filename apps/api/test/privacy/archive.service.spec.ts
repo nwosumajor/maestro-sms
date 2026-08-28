@@ -47,6 +47,7 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
         const t = ((over as { terms?: Array<Record<string, unknown>> }).terms ?? []).find((x) => x.id === where.id);
         return t ?? { name: "First Term", startDate: new Date("2025-09-01"), endDate: new Date("2026-01-01") };
       }),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     academicSession: {
       findFirst: jest.fn().mockResolvedValue({
@@ -54,6 +55,7 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
         startDate: new Date("2025-09-01"),
         endDate: new Date("2026-07-31"),
       }),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     user: table("user"),
     studentProfile: table("studentProfile"),
@@ -73,6 +75,13 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
         (rows["attendanceRecord"] ?? []).slice(0, take),
       ),
     },
+    // THE LOOKUPS THAT MAKE THE ARCHIVE READABLE. Every carried row is keyed on
+    // opaque UUIDs; without these the school's academic record is a table of
+    // scores against identifiers that resolve to nothing. A real TenantTx
+    // always has them.
+    subject: table("subject"),
+    class: table("class"),
+    attendanceSession: table("attendanceSession"),
     subjectResult: table("subjectResult"),
     invoice: table("invoice"),
     workflowRequest: table("workflowRequest"),

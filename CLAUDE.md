@@ -2053,6 +2053,53 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### An archive of scores against identifiers that resolve to nothing
+`SchoolArchiveService` + `an-archive-says-what-it-leaves-out.spec.ts`. The pupil
+bundle's sibling, asked the same question one artifact over — and the finding is
+not "tables are missing" but that what the file DOES carry could not be read.
+Every row is keyed on opaque UUIDs. A `subject_result` names a `classId`, a
+`subjectId`, a `termId` and a `sessionId`:
+```
+{"classId":"57336a6c-…","subjectId":"005672fc-…","termId":"11110000-…",
+ "exam":59,"midterm":14,"total":87,"grade":"A"}
+```
+and NOT ONE of them resolved to anything inside the archive. The school's
+academic record — the thing "can we keep our record if we leave" is actually
+about — was 24,302 marks against identifiers with no lookup. **You could not
+tell Mathematics from History**, or which class or year a mark belonged to. The
+register was the same: `attendance_record` carries a denormalised `date` so the
+DAY resolved, and without `attendance_session` the CLASS did not.
+// THE LOOKUPS ARE REFERENCE DATA, bounded by the school's STRUCTURE rather than
+its lifetime, and tiny beside what they explain: **11 subjects, 31 classes, 2
+sessions, 4 terms** against 24,302 results. A SNAPSHOT, never scoped — bounding
+the subject list to one term would leave marks the archive's own lookup could
+not name. Live: 90.6 MB -> 97.6 MB in 10.9 s, and every mark now names its
+subject and class.
+// SEVEN MORE CATEGORIES ARE NOW DECLARED rather than silently absent —
+teaching material, library, boarding and transport, communications, HR beyond
+employment, exam logistics, fee configuration. `teachingMaterial` is the one
+worth reading: CBT question banks and lesson content are the school's OWN
+authored material, and this file already argues elsewhere that "a question bank
+outlives the teacher who wrote it". The same reasoning makes it the school's to
+take away, and the archive neither carried it nor said so.
+// **THE GATE HAD THE SAME BLIND SPOT AS THE BUNDLE'S** — five assertions about
+whether exclusions have reasons, and nothing asking whether the artifact is
+usable. It now derives the carried sections from the source and requires a
+lookup for every kind of id the carried rows are keyed on. Not "carry every
+table": whatever IS carried must be readable without a database nobody has any
+more.
+// GOTCHA I chose deliberately: the gate demanded every exclusion reason match
+`/Ask|Download|export bundle|Vault/`, and two of mine point INSIDE the file
+("the RESULTS are in `subjectResults`"). That is the better sentence for a
+reader in ten years, so the RULE was widened rather than the reason worsened —
+the alternative is pushing a worse artifact out to satisfy a test.
+// GOTCHA, seventh time: the fixture's `term` and `academicSession` stubs had
+only `findFirst` (they were used to label a window), and the archive now reads
+them as sections — ten tests failed on `findMany is not a function`. And my
+first patch re-declared both, which TypeScript caught as duplicate keys rather
+than a test.
+Mutation-validated two ways: drop the subject lookup, drop the register header.
+
 ### The bundle said COMPLETE again, and a pupil is also a USER
 `collectStudentBundle` + `every-student-table-is-accounted-for.spec.ts`. Found by
 continuing the reconciliation: for one real pupil, counting the rows every table

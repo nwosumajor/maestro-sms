@@ -28,6 +28,15 @@ import { join } from "path";
 
 const SRC = readFileSync(join(__dirname, "../../src/privacy/archive.service.ts"), "utf8");
 
+const SCOPED = (): string[] => {
+  const m = /scopedSections: window\s*\?\s*\[([\s\S]*?)\]/.exec(SRC);
+  return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [];
+};
+const SNAPSHOT = (): string[] => {
+  const m = /snapshotSections: \[([\s\S]*?)\]/.exec(SRC);
+  return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [];
+};
+
 /** The manifest's own declaration, read out of the source it is declared in. */
 function excluded(): Array<{ section: string; reason: string }> {
   const block = SRC.slice(SRC.indexOf("const EXCLUDED_SECTIONS"), SRC.indexOf("@Injectable()"));
@@ -55,7 +64,14 @@ describe("an archive says what it leaves out", () => {
     // in ten years has a next step.
     for (const e of excluded()) {
       expect(e.reason.length).toBeGreaterThan(40);
-      expect(e.reason).toMatch(/Ask|Download|export bundle|Vault/i);
+      // A reason must tell the reader where to go instead. Usually that is
+      // OUTSIDE the file — the data controller, the Document Vault, a pupil's
+      // own NDPR bundle. It can also be a section this archive DOES carry, and
+      // that is the better answer where it applies: "the results are in
+      // `subjectResults`" is more use to a reader in ten years than "ask the
+      // school", and pretending otherwise would push a worse sentence into the
+      // artifact to satisfy a test.
+      expect(e.reason).toMatch(/Ask|Download|export bundle|Vault|are (in|carried)/i);
     }
   });
 
@@ -73,5 +89,52 @@ describe("an archive says what it leaves out", () => {
     for (const field of ["scopedSections", "snapshotSections", "truncatedSections", "sectionCounts"]) {
       expect(SRC).toContain(`${field}:`);
     }
+  });
+});
+
+// =============================================================================
+// An archive you can actually READ
+// =============================================================================
+// Every row the archive carries is keyed on opaque UUIDs. A `subject_result`
+// names a `classId`, a `subjectId`, a `termId` and a `sessionId`, and not one of
+// them resolved to anything inside the file — so the school's academic record,
+// the thing it most needs to keep, was a table of scores against identifiers
+// with no lookup. You could not tell Mathematics from History.
+//
+// The lookups are REFERENCE data, bounded by the school's structure rather than
+// its lifetime, and tiny beside what they explain: 11 subjects, 31 classes,
+// 2 sessions and 4 terms against 24,302 results in the demo school.
+//
+// This is not "carry every table". It is: whatever the archive DOES carry must
+// be readable without a database nobody has any more.
+// =============================================================================
+
+describe("an archive you can actually read", () => {
+  const carried = () => new Set([...SCOPED(), ...SNAPSHOT()]);
+
+  it("carries a lookup for every kind of id its rows are keyed on", () => {
+    // Each foreign key that appears in the carried rows, and the section that
+    // resolves it. `studentId` was always resolvable; the other four were not.
+    const RESOLVERS: Record<string, string> = {
+      studentId: "students",
+      subjectId: "subjects",
+      classId: "classes",
+      sessionId: "academicSessions",
+      termId: "terms",
+    };
+    const missing = Object.entries(RESOLVERS)
+      .filter(([, section]) => !carried().has(section))
+      .map(([key, section]) => `${key} -> ${section}`);
+    expect(missing).toEqual([]);
+  });
+
+  it("carries the register header, so a day of attendance has a class", () => {
+    // `attendance_record` carries a denormalised `date`, so the DAY already
+    // resolves. Without the session the CLASS does not.
+    expect(carried().has("attendanceSessions")).toBe(true);
+  });
+
+  it("found the section lists at all", () => {
+    expect(carried().size).toBeGreaterThan(8);
   });
 });
