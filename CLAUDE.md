@@ -2087,6 +2087,38 @@ them returned would record something that did not happen and close the school's
 only claim on the copy. And there is no bulk tuition run to bill a leaver —
 the only fee runs are hostel and transport, both of which bill on the ACTIVE
 rows the exit has just closed.
+// **THE WHOLE CLASS WAS THEN SWEPT, and the rest is sound** — recorded because
+this hole had already survived one sweep of exactly this class (the one that
+fixed guardian links and enrolment), which is the argument for measuring rather
+than assuming. Eight routes take a list of PERSON ids in the body: task
+assignment checks existence-in-school AND departure and names everyone who has
+left at once; promotion derives its list from enrolment and refuses "a decision
+[that] names a student who is not in this class batch"; `applyLmsGrades` uses
+the ids only as a FILTER over gradebook rows, so a ghost selects nothing; both
+enrol paths share `requireStudents`, which reaches for the same
+`ON_ROLL_STUDENT` with the same reasoning ("a decision about the PRESENT"); the
+duty roster resolves through `employee.status`; and the operator's cross-tenant
+export runs under the target school's GUC, so a foreign id returns nothing —
+and deliberately does NOT use ON_ROLL, because an export owes a leaver their
+records. Seating was the only one that asked nothing.
+// A GATE WAS PROTOTYPED AND NOT SHIPPED, which is worth saying. Keying on a
+handler that NAMES the field (`body.studentIds`) found 4 of the 8 routes: the
+others spread `body` into the service, so the field never appears in the
+handler. A gate that misses the commonest form is the blind gate
+`a-gate-must-not-pass-by-finding-nothing` exists to name, and an over-wide
+replacement teaches its reader to add exemptions. Left unwritten rather than
+written badly.
+// **THE ROOT ENABLER IS MEASURED AND LATENT.** `exam_seat.studentId` has no FK
+to `user`, which is why a phantom was STORABLE — and it is not alone: **55 of
+104 person-reference columns** (`studentId`/`userId`/`staffId`/`assigneeId`/
+`passengerId`/`borrowerId`/`teacherId`) carry no foreign key, against a repo
+that documents "scalar column + DB FK, no Prisma relation" as its pattern and
+closed exactly this gap for `schoolId` across 176 tables. Checked rather than
+assumed: **every one of those 55 columns holds zero orphan ids today**, so this
+is latent. Users are never hard-deleted here (an exit sets a status), so the
+risk is not a dangling reference — it is precisely the write above. Closing it
+declaratively is a real migration with lock implications on the largest tables
+and belongs to a schema pass, not to this fix.
 // GOTCHA in my own fixture: a stub that returns every id it is asked for models
 something Postgres cannot produce and would pass against a service that had
 stopped filtering. It applies the caller's own `where` to a small table instead.
