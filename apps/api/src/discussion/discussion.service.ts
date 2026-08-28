@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { isStaffRoles } from "@sms/types";
 import type { DiscussionGroupDto, DiscussionPostDto, PageDto } from "@sms/types";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import { DisciplineService } from "../discipline/discipline.service";
@@ -21,7 +22,6 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const STUDENT_SIDE_ROLES = new Set(["student", "parent"]);
 const TOMBSTONE = "[removed by a moderator]";
 
 @Injectable()
@@ -42,7 +42,7 @@ export class DiscussionService {
     return p.permissions.includes("discussion.moderate");
   }
   private audiences(p: Principal): string[] {
-    const studentSideOnly = p.roles.every((r) => STUDENT_SIDE_ROLES.has(r));
+    const studentSideOnly = !isStaffRoles(p.roles);
     return studentSideOnly ? ["ALL", "STUDENTS"] : ["ALL", "STUDENTS", "STAFF"];
   }
 

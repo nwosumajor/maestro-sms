@@ -13,6 +13,7 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
+import { isStaffRoles } from "@sms/types";
 import type { PageDto, FormDto, FormFieldDef, FormResponseDto } from "@sms/types";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
@@ -26,7 +27,6 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const STUDENT_SIDE_ROLES = new Set(["student", "parent"]);
 
 /**
  * Midnight UTC of a timestamp's own day.
@@ -55,7 +55,7 @@ export class FormService {
     return p.permissions.includes("form.manage");
   }
   private audiences(p: Principal): string[] {
-    const studentSideOnly = p.roles.every((r) => STUDENT_SIDE_ROLES.has(r));
+    const studentSideOnly = !isStaffRoles(p.roles);
     return studentSideOnly ? ["ALL", "STUDENTS"] : ["ALL", "STUDENTS", "STAFF"];
   }
 

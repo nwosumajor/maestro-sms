@@ -17,6 +17,7 @@
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
+import { isStaffRoles } from "@sms/types";
 import type { PageDto, PollDto } from "@sms/types";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
@@ -30,7 +31,6 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const STUDENT_SIDE_ROLES = new Set(["student", "parent"]);
 
 @Injectable()
 export class PollService {
@@ -47,7 +47,7 @@ export class PollService {
   }
   /** Audiences the caller belongs to (mirrors announcements). */
   private callerAudiences(p: Principal): Set<string> {
-    const studentSideOnly = p.roles.every((r) => STUDENT_SIDE_ROLES.has(r));
+    const studentSideOnly = !isStaffRoles(p.roles);
     return new Set(studentSideOnly ? ["ALL", "STUDENTS"] : ["ALL", "STUDENTS", "STAFF"]);
   }
 

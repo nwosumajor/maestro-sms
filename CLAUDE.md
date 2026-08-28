@@ -2090,6 +2090,33 @@ question was different — "is this person staff at all" — and only that quest
 is defined by exclusion.
 // A PRINCIPAL WITH NO ROLES IS NOT STAFF: the restrictive answer, and the one
 that keeps an unroled account out of staff-only content.
+// **THE SWEEP, not just the one that hurt.** FIVE surfaces filter by a
+STAFF-vs-family audience — the calendar, announcements, forms, polls and
+discussion groups — and the other four each carried their OWN identical
+`STUDENT_SIDE_ROLES = new Set(["student","parent"])` with the same `every()`
+over it. All four were CORRECT; that is the point. Six spellings of one rule,
+five right and one wrong, is the shape this file already records for the CSV
+formula guard ("existed 9x under 4 names"). All five call `isStaffRoles` now.
+// **A GATE I BUILT, RAN, AND THEN DELETED HALF OF.** The first version also
+tried to spot a hand-rolled staff set by its BREADTH — a role Set naming
+`teacher` alongside a back-office role. It flagged exactly one thing:
+`REACHABLE_BY_ANYONE` in messaging, which is legitimate and carefully reasoned
+("who may a pupil or parent open a channel to ... about a PASTORAL OR OFFICE
+relationship with families, not about seniority") and deliberately excludes the
+HR manager and the drivers. A 100% false-positive rate, so the heuristic was
+DELETED rather than exempted: this file's own rule is that an over-wide gate is
+the same failure as a blind one, because it teaches whoever meets it to add an
+exemption, and an exemption granted for a false positive is a hole with a note
+on it. What is left names the five surfaces and asserts each resolves staffness
+through the shared helper.
+// GOTCHA, and this is the fourth time in this file: `invariants-that-were-
+checked.spec` asserted the LITERAL source `p.roles.every((r) =>
+STUDENT_SIDE_ROLES.has(r))` to prove "a role-less principal is student-side" —
+and went red on the consolidation, a change that strengthened the property it
+guards. Its own header says "Each assertion below is written to fail if the
+property is removed — not to restate that some code exists", and that one
+restated code. Re-anchored to the ANSWER, and mutation-validated with an
+`isStaffRoles` that makes an unroled principal staff.
 // THE TEST IS DRIVEN FROM `ROLE_PERMISSIONS`, not from a list written in the
 test — a list in a gate rots exactly like the one it guards. It asserts that
 every seeded role except student and parent is staff, and drives the REAL

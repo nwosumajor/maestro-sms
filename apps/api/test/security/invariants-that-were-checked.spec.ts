@@ -13,6 +13,7 @@
 // restate that some code exists.
 // =============================================================================
 
+import { isStaffRoles } from "@sms/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -86,10 +87,18 @@ describe("an announcement reaches only its audience", () => {
   const CODE = strip(SRC);
 
   it("defaults to student-side when the caller holds NO roles", () => {
-    // `every()` over an empty set is true, so a role-less principal is treated
-    // as student-side. That is the least-privilege direction, and it is the
-    // direction a negated check would have got wrong.
-    expect(CODE).toMatch(/p\.roles\.every\(\(r\) => STUDENT_SIDE_ROLES\.has\(r\)\)/);
+    // A role-less principal is treated as student-side: the least-privilege
+    // direction, and the one a negated check would have got wrong.
+    //
+    // ANCHORED TO THE PROPERTY, NOT THE SPELLING. This asserted the literal
+    // source `p.roles.every((r) => STUDENT_SIDE_ROLES.has(r))` and went red when
+    // four services were consolidated onto the shared `isStaffRoles` — a
+    // fixed-text assertion firing on a change that STRENGTHENED what it guards,
+    // which this repo has now recorded several times. The invariant is about
+    // the answer, so the test asks for the answer.
+    expect(isStaffRoles([])).toBe(false);
+    expect(isStaffRoles(["student", "parent"])).toBe(false);
+    expect(isStaffRoles(["librarian"])).toBe(true);
     expect(CODE).toMatch(/studentSideOnly \? \["ALL", "STUDENTS"\]/);
   });
 

@@ -10,6 +10,7 @@
 // =============================================================================
 
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { isStaffRoles } from "@sms/types";
 import type { AnnouncementDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -20,7 +21,6 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 
-const STUDENT_SIDE_ROLES = new Set(["student", "parent"]);
 
 interface AnnouncementRow {
   id: string;
@@ -100,7 +100,7 @@ export class AnnouncementsService {
    *  side, the least-privilege default); anyone with ANY staff role also sees
    *  STAFF notices. Positive check — no double negation. */
   private audiencesFor(p: Principal): ("ALL" | "STUDENTS" | "STAFF")[] {
-    const studentSideOnly = p.roles.every((r) => STUDENT_SIDE_ROLES.has(r));
+    const studentSideOnly = !isStaffRoles(p.roles);
     return studentSideOnly ? ["ALL", "STUDENTS"] : ["ALL", "STUDENTS", "STAFF"];
   }
 
