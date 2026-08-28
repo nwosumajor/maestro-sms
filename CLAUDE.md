@@ -2063,6 +2063,47 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### An alumni broadcast that reached nobody and said it had
+`AlumniService.broadcast` / `fanOutBroadcast`. Found by driving a path that had
+never executed: `alumnus` had no rows.
+`queued` counted alumni with a LINKED ACCOUNT and `unreachable` counted those
+without one. But `NotificationService.persist` drops every EXTERNAL channel for a
+recipient whose status is not ACTIVE — **and an alumnus has left by definition**,
+so their account is exactly that. They cannot open the in-app copy either,
+because a non-ACTIVE user cannot sign in.
+```
+before   {"queued":1,"unreachable":0}    1 in-app row, 0 email deliveries
+after    {"queued":0,"unreachable":1,"closedAccounts":1}   nothing written
+```
+The field that exists to report who was NOT reached counted the wrong
+population — and the larger one, since the account is closed for every alumnus
+the school ever exited properly.
+// **THE UI HAD ALREADY BEEN THROUGH THE FIRST LAYER**, and says so: "This used
+to say 'it goes out to the alumni body' ... A school with fifty on file and
+three linked accounts was told it had gone out." The second layer is the
+majority case and was left — fixed where it hurt, sibling untouched.
+// TWO REASONS, REPORTED SEPARATELY, because they need different actions: "no
+account — add one" versus "the account is closed and the school's messaging will
+not write to a departed one".
+// **NOT FIXED, AND IT IS A DECISION**: the alumni module exists to contact
+people who have left, and the notification funnel refuses to contact people who
+have left. `deliverableEmail()` uses a real `contactEmail`, so the mail COULD go
+out — whether alumni are exempt from the departed-recipient rule is a question
+about mailing former pupils, not a bug to fix quietly. Until it is answered the
+count tells the truth instead of claiming a delivery.
+// **THE EXISTING SUITE CAUGHT TWO REGRESSIONS IN MY OWN FIX**, and both were
+real. (1) The first version loaded every alumnus to ask three questions —
+against a test guarding "counts without loading every alumnus", on a register
+that only ever grows, which is the "count in the database, never
+findMany().length" rule this file already states. It is a raw join now, because
+`alumnus.userId` is a scalar with a DB FK and has no Prisma relation. (2) A
+splice while rewriting that block DROPPED THE AUDIT CALL, so the broadcast
+stopped leaving a trail; the test that asserts the audit row carries the
+shortfall went red.
+// GOTCHA in my own test: I asserted the UI contained "has no account", and the
+source reads `${n === 1 ? "has" : "have"} no account` — a phrase the ternary
+splits. A correct UI failed a brittle pattern.
+
 ### A scheme of work whose rows lost their identity
 `SyllabusService.upsert` + `SyllabusPanel`. Found by driving a path that had
 never executed: `subject_syllabus` had no rows, so no scheme of work had ever

@@ -40,7 +40,7 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
   const sendBroadcast = async () => {
     setBusy(true);
     setMsg(null);
-    const res = await postSms<{ queued: number; unreachable: number }>("alumni/broadcast", {
+    const res = await postSms<{ queued: number; unreachable: number; closedAccounts: number }>("alumni/broadcast", {
       title: bTitle,
       body: bBody,
     });
@@ -51,10 +51,24 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
     }
     const queued = res.data?.queued ?? 0;
     const unreachable = res.data?.unreachable ?? 0;
+    const closed = res.data?.closedAccounts ?? 0;
+    const noAccount = Math.max(0, unreachable - closed);
     setMsg(
-      `Queued for ${queued} alumn${queued === 1 ? "us" : "i"} with an account.` +
-        (unreachable > 0
-          ? ` ${unreachable} more ${unreachable === 1 ? "has" : "have"} no account and were not written to — add one to reach them.`
+      `Queued for ${queued} alumn${queued === 1 ? "us" : "i"} the school can still write to.` +
+        (noAccount > 0
+          ? ` ${noAccount} ${noAccount === 1 ? "has" : "have"} no account — add one to reach them.`
+          : "") +
+        /*
+          THE SECOND REASON, and it is the commoner one. A broadcast is a
+          notification addressed to a user account, and the notification funnel
+          drops every external channel for a recipient whose status is not
+          ACTIVE — which an alumnus is BY DEFINITION. Measured live: one alumna
+          with a linked account gave {"queued":1,"unreachable":0}, one in-app row
+          and zero emails, to somebody who cannot sign in to read it.
+        */
+        (closed > 0
+          ? ` ${closed} ${closed === 1 ? "has a closed account" : "have closed accounts"} and cannot be written to at all —` +
+            ` the school's messaging does not deliver to a departed account.`
           : ""),
     );
     setBTitle("");

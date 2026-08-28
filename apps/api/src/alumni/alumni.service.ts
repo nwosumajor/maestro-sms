@@ -139,16 +139,61 @@ export class AlumniService {
   async broadcast(
     p: Principal,
     input: { title: string; body: string; year?: number },
-  ): Promise<{ queued: number; unreachable: number }> {
-    const { queued, unreachable } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+  ): Promise<{ queued: number; unreachable: number; closedAccounts: number }> {
+    const { queued, unreachable, closedAccounts } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const audience: Record<string, unknown> = {};
       if (input.year) audience.graduationYear = input.year;
-      const [count, missing] = await Promise.all([
+      // HAVING AN ACCOUNT IS NOT THE SAME AS BEING REACHABLE.
+      //
+      // `queued` counted alumni with a linked account, and `unreachable` counted
+      // those without one. But `NotificationService.persist` drops every
+      // EXTERNAL channel for a recipient whose status is not ACTIVE — and an
+      // alumnus has LEFT by definition, so their account is exactly that.
+      //
+      // Measured live: broadcast to one alumna linked to a departed pupil ->
+      // `{"queued":1,"unreachable":0}`, ONE in-app row, and ZERO email
+      // deliveries. She cannot open the inbox either, because a non-ACTIVE user
+      // cannot sign in. The field that exists to report who was not reached
+      // counted the wrong population, and the larger one.
+      //
+      // The UI already went through the first layer of this — "a school with
+      // fifty on file and three linked accounts was told it had gone out" — and
+      // the second layer is the majority case.
+      // COUNTED IN THE DATABASE, never by loading the register.
+      //
+      // An alumni roll only ever grows — nobody stops being an alumnus — so
+      // hydrating every row to answer a question about three numbers is exactly
+      // the "count in the database, never findMany().length" rule this codebase
+      // already states for the dashboard headcount. An existing test guards it,
+      // and it caught a first version of this fix that loaded every row.
+      //
+      // The raw count carries the join the schema has no Prisma relation for:
+      // `alumnus.userId` is a scalar with a DB FK, the documented pattern that
+      // keeps the User model lean.
+      const year = input.year ?? null;
+      const [linkedTotal, missing] = await Promise.all([
         tx.alumnus.count({ where: { ...audience, userId: { not: null } } }),
         tx.alumnus.count({ where: { ...audience, userId: null } }),
       ]);
-      await this.log(tx, p, "alumni.broadcast", "broadcast", { year: input.year, count, unreachable: missing });
-      return { queued: count, unreachable: missing };
+      const reachable = (await tx.$queryRaw`
+        SELECT count(*) AS n
+        FROM "alumnus" a
+        JOIN "user" u ON u.id = a."userId"
+        WHERE u.status = 'ACTIVE'
+          AND (${year}::int IS NULL OR a."graduationYear" = ${year}::int)
+      `) as Array<{ n: bigint }>;
+      const active = Number(reachable[0]?.n ?? 0);
+      const closed = Math.max(0, linkedTotal - active);
+      // The screen is read once; the audit row is what answers "why did the
+      // class of 2015 never hear from us" a year later — and it now records the
+      // reason, not just the shortfall.
+      await this.log(tx, p, "alumni.broadcast", "broadcast", {
+        year: input.year,
+        count: active,
+        unreachable: missing + closed,
+        closedAccounts: closed,
+      });
+      return { queued: active, unreachable: missing + closed, closedAccounts: closed };
     });
     if (queued > 0) {
       await this.queue.add(
@@ -157,7 +202,7 @@ export class AlumniService {
         { removeOnComplete: true, removeOnFail: 50 },
       );
     }
-    return { queued, unreachable };
+    return { queued, unreachable, closedAccounts };
   }
 
   /**
@@ -178,7 +223,15 @@ export class AlumniService {
       const where: Record<string, unknown> = { userId: { not: null } };
       if (input.year) where.graduationYear = input.year;
       const rows = await tx.alumnus.findMany({ where, select: { userId: true } });
-      return rows.map((r: { userId: string | null }) => r.userId).filter((u): u is string => Boolean(u));
+      const linked = rows.map((r: { userId: string | null }) => r.userId).filter((u): u is string => Boolean(u));
+      if (linked.length === 0) return [];
+      // ONLY THOSE THE FUNNEL WILL ACTUALLY DELIVER TO, so `sent` is a true
+      // number and no message is written into an inbox its owner cannot open.
+      const active = (await tx.user.findMany({
+        where: { id: { in: linked }, status: "ACTIVE" },
+        select: { id: true },
+      })) as Array<{ id: string }>;
+      return active.map((u) => u.id);
     });
     let sent = 0;
     for (let i = 0; i < recipients.length; i += BROADCAST_CHUNK) {

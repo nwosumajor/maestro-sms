@@ -36,6 +36,14 @@ function makeService(count: number) {
         Promise.resolve(where?.userId === null ? 0 : count),
       ),
     },
+    // A REAL TenantTx always has this. The fan-out now asks which of the linked
+    // accounts is still ACTIVE, because the notification funnel refuses to
+    // deliver to a departed one — and an alumnus has departed by definition.
+    // This fixture keeps every account open, which is the case these chunking
+    // tests are about.
+    user: { findMany: jest.fn().mockResolvedValue(rows.map((r) => ({ id: r.userId }))) },
+    // The reachable count is a raw join; every account is open in this fixture.
+    $queryRaw: jest.fn().mockResolvedValue([{ n: BigInt(count) }]),
   };
   const svc = Object.create(AlumniService.prototype) as AlumniService;
   Object.assign(svc, {
@@ -114,7 +122,7 @@ describe("the request itself", () => {
     expect(enqueueMany).not.toHaveBeenCalled();
     // `unreachable` rides alongside since a broadcast now says how much of the
     // register it could NOT write to; this stub links every alumnus.
-    expect(out).toEqual({ queued: 2000, unreachable: 0 });
+    expect(out).toEqual({ queued: 2000, unreachable: 0, closedAccounts: 0 });
   });
 
   it("counts without loading every alumnus to do it", async () => {
@@ -129,7 +137,7 @@ describe("the request itself", () => {
 
   it("queues nothing when there is nobody to write to", async () => {
     const { svc, add } = makeService(0);
-    expect(await svc.broadcast(p, msg)).toEqual({ queued: 0, unreachable: 0 });
+    expect(await svc.broadcast(p, msg)).toEqual({ queued: 0, unreachable: 0, closedAccounts: 0 });
     expect(add).not.toHaveBeenCalled();
   });
 });
