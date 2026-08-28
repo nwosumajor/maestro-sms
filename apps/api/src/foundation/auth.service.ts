@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { prisma } from "@sms/db";
-import { effectivePermissions, resolveRegion } from "@sms/types";
+import { effectivePermissions, isStaffRoles, resolveRegion } from "@sms/types";
 import { verifyTotp } from "../auth/totp";
 import { activeGrantPermissions } from "../auth/active-grants";
 import { ModuleEntitlementService } from "./module-entitlement.service";
@@ -274,7 +274,7 @@ export class AuthService {
         const elevated = (await activeGrantPermissions(tx, user.id)).filter((perm) => !permissions.includes(perm));
         // School policy: staff (any role but student/parent) must enrol MFA.
         // super_admin is exempt (the owner's lock/exempt posture elsewhere).
-        const isStaff = roles.some((r) => r !== "student" && r !== "parent");
+        const isStaff = isStaffRoles(roles);
         if (school?.requireStaffMfa && isStaff && !roles.includes("super_admin") && !sec?.mfaEnabled) {
           mfaEnrollRequired = true;
         }

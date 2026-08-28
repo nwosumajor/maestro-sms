@@ -6,6 +6,28 @@
  *  driver, librarian, hr_clerk, …) is a staff role. */
 export const NON_STAFF_ROLE_NAMES = ["student", "parent"] as const;
 
+/**
+ * Is this principal a member of staff?
+ *
+ * The one answer to a question three files spelled three ways. Two of the
+ * spellings were exclusions and equivalent; the third was an ALLOW-LIST of six
+ * role names in the calendar, and it had rotted exactly as the header above
+ * predicts — nine staff roles (head_teacher, hr_manager, librarian, warden,
+ * head_warden, driver, head_driver, junior_admin, head_admin) were added to the
+ * platform after it was written and none was added to it, so a STAFF-audience
+ * calendar event was invisible to all of them.
+ *
+ * An allow-list has to be edited when a role is added and nothing makes that
+ * happen. An exclusion does not, which is the whole reason this module defines
+ * staff by exclusion in the first place.
+ *
+ * A principal holding NO roles is not staff — the restrictive answer, and the
+ * one that keeps an unroled account out of staff-only content.
+ */
+export function isStaffRoles(roles: readonly string[]): boolean {
+  return roles.some((r) => !(NON_STAFF_ROLE_NAMES as readonly string[]).includes(r));
+}
+
 /** Platform-level roles: they belong to the operator's own org, never to a
  *  customer school, so a school's headcount must never include them. */
 export const PLATFORM_ROLE_NAMES = ["super_admin", "manager_admin"] as const;

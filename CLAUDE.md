@@ -724,9 +724,12 @@ cross-tenant case, a scoping e2e, and role-gated web UI:
   EXTERNAL-channel toggles (email/SMS/WhatsApp) + per-type mutes. The in-app
   inbox is ALWAYS created; the delivery producer filters channels through the
   pure `allowedChannels()` in `@sms/types` — ESSENTIAL types
-  (PAYMENT_RECEIVED / INVOICE_ISSUED / BILLING / OPERATOR_ALERT /
-  ADMIN_APPOINTMENT / ONBOARDING) ignore per-type mute but still respect channel
-  toggles; NO preference row = deliver all (historical default). `/account` card.
+  (`ESSENTIAL_NOTIFICATION_TYPES` — six billing/platform types plus
+  DISCIPLINE_OUTCOME and ATTENDANCE_ABSENCE, each added later with its reason
+  beside it) ignore per-type mute but still respect channel toggles. Read the
+  constant, not this sentence: an earlier version of this line listed the first
+  six as if they were all of them, having been written before the two that
+  matter most to a family were added; NO preference row = deliver all (historical default). `/account` card.
 - **Teacher cover** (`lesson_cover`, rls/85): joins APPROVED leave × the weekly
   timetable to list each dated lesson whose regular teacher is out (bounded
   62-day window). Assign a reliever — self-cover 400, double-booking (their own
@@ -2049,6 +2052,50 @@ that quietly would be worse than saying so.
 // The refactor is not dead code: `renderPdf` routes through `renderPack`, both
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
+
+### A staff calendar the staff could not see
+`isStaffRoles` (`@sms/types/roles.ts`), `listEvents`
+(`communication/events.service.ts`). Found by carrying the defect class from the
+probe fix into application code: a HAND-KEPT ALLOW-LIST that has to be edited
+when a role is added, and nothing makes that happen.
+`listEvents` hides STAFF-audience events from families and decided staffness
+with six role names:
+```
+const STAFF = new Set(["school_admin","principal","accountant","hr_clerk","board","teacher"]);
+```
+NINE staff roles had been added to the platform since it was written and none
+was added to it. Measured live on a STAFF-audience event, ten roles:
+```
+before   teacher SEES it, school_admin SEES it
+         head_teacher / hr_manager / librarian / warden / driver / junior_admin
+           -> cannot see it          (student and parent correctly cannot either)
+after    all eight staff roles SEE it; student and parent still cannot
+```
+A staff meeting, an INSET day or an inspection invisible to the head teacher —
+who is a stage-1 approver in the staff-request chain — and to the whole boarding
+and transport staff.
+// **THE ANSWER WAS ALREADY WRITTEN DOWN, IN THE FILE THAT DEFINES ROLES.**
+`roles.ts` opens with "staff is defined by EXCLUSION: any role that isn't a
+learner/guardian role. **A new staff role added in the seed is automatically
+staff — no code change**", and six other services use `NON_STAFF_ROLE_NAMES`
+that way. The calendar was the one place asking the question with a list.
+// THREE SPELLINGS, now one. Two were exclusions and equivalent; `auth.service`
+hand-rolled `r !== "student" && r !== "parent"` for the MFA policy — correct,
+but the third spelling of a rule is how the fourth goes wrong. All use
+`isStaffRoles` now.
+// NOT THE SAME AS `SCHOOL_WIDE_ROLES`, and the sweep says so rather than
+changing them: twenty-odd services keep a narrow "sees EVERY pupil" set, which
+is deliberately restrictive and correct AS an allow-list. The calendar's
+question was different — "is this person staff at all" — and only that question
+is defined by exclusion.
+// A PRINCIPAL WITH NO ROLES IS NOT STAFF: the restrictive answer, and the one
+that keeps an unroled account out of staff-only content.
+// THE TEST IS DRIVEN FROM `ROLE_PERMISSIONS`, not from a list written in the
+test — a list in a gate rots exactly like the one it guards. It asserts that
+every seeded role except student and parent is staff, and drives the REAL
+service for each, because a test on a helper proves nothing about its caller.
+Mutation-validated both ways: restoring the six-name set fails the staff case,
+and treating everyone as staff fails the family case.
 
 ### The role most likely to be over-exposed was the one never tested
 `EMAIL` / `emailFor` (`scripts/permission-matrix.mjs`). Straight after fixing the

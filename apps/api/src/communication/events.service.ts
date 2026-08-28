@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import { expandOccurrences } from "@sms/types";
+import { expandOccurrences, isStaffRoles } from "@sms/types";
 import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
@@ -13,7 +13,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { dateWindow } from "../common/status-filter";
 
-const STAFF = new Set(["school_admin", "principal", "accountant", "hr_clerk", "board", "teacher"]);
+
 /** Default calendar window when the caller doesn't name one. */
 const DEFAULT_WINDOW_DAYS = 120;
 /** How far before the window a one-off event may start and still overlap it. */
@@ -73,7 +73,15 @@ export class EventsService {
    * carries the series id plus its own start/end.
    */
   async listEvents(p: Principal, opts: { from?: string; to?: string } = {}) {
-    const staff = p.roles.some((r) => STAFF.has(r));
+    // STAFF IS DECIDED BY EXCLUSION, not by a list kept here.
+    //
+    // This was an allow-list of six role names, and nine staff roles had been
+    // added to the platform since it was written. Measured live on a
+    // STAFF-audience event: teacher and school_admin saw it; head_teacher,
+    // hr_manager, librarian, warden, driver and junior_admin did not — a staff
+    // meeting invisible to the head teacher, who is a stage-1 approver in the
+    // staff-request chain.
+    const staff = isStaffRoles(p.roles);
     // Shared with every other dated list. This one refused correctly and said
     // "Invalid window"; two siblings said "Invalid date range" and "from/to
     // must be YYYY-MM-DD"; six more did not refuse at all. Three hand-rolled
