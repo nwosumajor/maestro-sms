@@ -2087,6 +2087,26 @@ them returned would record something that did not happen and close the school's
 only claim on the copy. And there is no bulk tuition run to bill a leaver —
 the only fee runs are hostel and transport, both of which bill on the ACTIVE
 rows the exit has just closed.
+// **AND THE PHANTOM DID MORE THAN SIT THERE — proved afterwards, on the same
+stack.** `exam_attendance.studentId` HAS a foreign key to `user`;
+`exam_seat.studentId`, in the same module, has none. So a phantom is STORABLE
+as a seat and UNMARKABLE as a candidate — and the invigilator submits the
+register for the WHOLE HALL as one `createMany`, so the phantom's row fails the
+entire insert. Demonstrated in a rolled-back transaction: seat the ghost beside
+a real pupil (2 seats), submit the hall's register, and Postgres answers
+`violates foreign key constraint "exam_attendance_studentId_fkey"`. P2003 is not
+translated by `MalformedIdFilter` (which handles P2002 and P2023), so it reaches
+the invigilator as an **HTTP 500** — and the natural response, retrying, fails
+identically. One mistyped id in the seating list and that hall's register cannot
+be taken at all, on exam morning. Schema-level sibling asymmetry inside one
+module, and a concrete instance of the FK class measured below.
+// THE REGISTER ITSELF IS SOUND, driven end to end for the first time
+(`exam_attendance` had never held a row): an unseated pupil reads `(unmarked)`
+rather than being assumed present; ABSENT is recorded; a CORRECTION to PRESENT
+takes effect, so the append-only fold ("newest first, first row per student
+wins") really does resolve the latest mark in both readers; and marking somebody
+not seated is a 400. Recorded as a clean negative so the append-only design is
+not re-litigated.
 // **THE WHOLE CLASS WAS THEN SWEPT, and the rest is sound** — recorded because
 this hole had already survived one sweep of exactly this class (the one that
 fixed guardian links and enrolment), which is the argument for measuring rather
