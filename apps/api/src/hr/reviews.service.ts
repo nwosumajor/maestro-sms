@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { isStaffRoles } from "@sms/types";
 import type { AppraisalDto, DisciplinaryCaseDto, DisciplinaryEntryDto } from "@sms/types";
 import { NotificationService } from "../notifications/notification.service";
 import {
@@ -42,10 +43,43 @@ export class HrReviewsService {
   }
 
   // --- appraisals ------------------------------------------------------------
+
+  /**
+   * The HR module is for STAFF, and it never said so.
+   *
+   * `openCase` and `createAppraisal` both checked only that the target EXISTS in
+   * the tenant, so a disciplinary case or an appraisal could be opened against a
+   * PUPIL — measured live, 201 for both.
+   *
+   * That is not a tidy-up. A child's disciplinary record belongs in the student
+   * discipline module, which has a confidentiality chain built for it: the
+   * accused gets a 404, their guardian a 403, and the reporter is protected. The
+   * HR file has none of that and a different readership (`hr.disciplinary.manage`
+   * — principal, school_admin, hr_manager). And it is INVISIBLE to the pupil's
+   * NDPR export bundle, whose gate derives student-keyed models: this table is
+   * keyed on `userId`, so a child's record here would appear in no section and in
+   * no exclusion — the exact defect that bundle's manifest exists to prevent.
+   *
+   * Found by asserting the property in that gate ("staff-only: a pupil can hold
+   * no row here") and then checking whether anything made it true.
+   */
+  private async assertStaff(tx: TenantTx, userId: string, what: string): Promise<{ name: string }> {
+    const user = (await tx.user.findFirst({
+      where: { id: userId },
+      select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } },
+    })) as { id: string; name: string; roles: Array<{ role: { name: string } }> } | null;
+    if (!user) throw new NotFoundException("User not found");
+    if (!isStaffRoles(user.roles.map((r) => r.role.name))) {
+      throw new BadRequestException(
+        `${user.name} is not a member of staff, so no ${what} can be opened here. A pupil's record belongs in the student discipline area.`,
+      );
+    }
+    return { name: user.name };
+  }
+
   async createAppraisal(p: Principal, userId: string, input: AppraisalInput): Promise<AppraisalDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const user = await tx.user.findFirst({ where: { id: userId }, select: { id: true, name: true } });
-      if (!user) throw new NotFoundException("User not found");
+      const user = await this.assertStaff(tx, userId, "appraisal");
       const a = await tx.appraisal.create({
         data: {
           schoolId: p.schoolId,
@@ -183,8 +217,7 @@ export class HrReviewsService {
     input: { title: string; category?: string | null; severity?: string },
   ): Promise<DisciplinaryCaseDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const user = await tx.user.findFirst({ where: { id: userId }, select: { id: true, name: true } });
-      if (!user) throw new NotFoundException("User not found");
+      const user = await this.assertStaff(tx, userId, "disciplinary case");
       const c = await tx.disciplinaryCase.create({
         data: { schoolId: p.schoolId, userId, title: input.title, category: input.category ?? null, severity: input.severity ?? "LOW", status: "OPEN", openedById: p.userId },
       });

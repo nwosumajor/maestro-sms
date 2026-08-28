@@ -2053,6 +2053,44 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### A pupil with a staff disciplinary file
+`assertStaff` (`hr/reviews.service.ts`). Found by asserting a property and then
+checking whether anything made it true. Extending the NDPR export gate to
+classify person-keyed models (entry below) required writing down what
+`DisciplinaryCase` and `Appraisal` are, and both were recorded as
+**"(staff-only: a pupil can hold no row here)"**. Nothing enforced that.
+`openCase` and `createAppraisal` checked only that the target EXISTS in the
+tenant. Measured live:
+```
+disciplinary case against a member of STAFF   201
+disciplinary case against a PUPIL             201     <- and an appraisal too
+after:  400 "Volume Pupil 2 is not a member of staff, so no disciplinary case
+        can be opened here. A pupil's record belongs in the student discipline area."
+```
+// **THIS IS NOT A TIDY-UP.** A child's disciplinary record belongs in the
+STUDENT discipline module, which has a confidentiality chain built for it and
+recorded in this file: the accused gets a 404, their guardian a 403, and the
+reporter is protected. The HR file has none of that and a different readership
+(`hr.disciplinary.manage` — principal, school_admin, hr_manager).
+// **AND IT WOULD BE INVISIBLE TO THE CHILD'S OWN NDPR EXPORT.** That bundle's
+gate derives STUDENT-KEYED models; `disciplinary_case` is keyed on `userId`, so
+a pupil's record here would appear in no section and in no exclusion while the
+artifact said `complete: true` — precisely the defect the manifest exists to
+prevent, arriving through a door the manifest cannot see.
+// THE CLAIM WAS RIGHT AND THE CODE MOVED. Weakening the gate's classification
+to match the code was the other option and the wrong one: the HR module is
+`hr.*`, its screens are `/hr/staff/[userId]`, and a separate module exists for
+pupils.
+// Reuses `isStaffRoles` — the shared predicate added earlier the same day for
+the staff calendar — rather than a seventh spelling of "who is staff".
+// GOTCHA: the first mutation (`if (false)`) failed to COMPILE, so jest reported
+`Tests: 0 total`, which is not a pass — this file already records that trap from
+the bus-capacity fix. Re-run with a condition that compiles and never fires:
+three tests fail, as intended.
+// GOTCHA: the existing fixture's user row had no `roles`, which every real
+`user` row carries — the eighth instance of a stub describing something the
+database cannot produce.
+
 ### An invite link that was a session
 `verifyToken` (`auth/jwt.ts`). Found by asking what ELSE this platform signs
 with `AUTH_SECRET`, after checking that the step-up token is properly bound to
