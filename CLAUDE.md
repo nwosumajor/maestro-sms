@@ -2063,6 +2063,33 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### Two more claims checked: game secrets, and medical ciphertext
+Continuing the "assert a property, then ask what makes it true" pass.
+**"Secrets stored server-side only and NEVER sent to an opponent's client"
+HOLDS.** No DTO in `@sms/types` carries a field named `secret`, and none of the
+five game services selects or returns one.
+**"Medical fields are ciphertext at rest" HOLDS — and measuring it first read
+like a defect.** The demo database shows **150 medical rows in PLAINTEXT and one
+encrypted**, while `employee.salaryEnc` beside it is `enc:v1:…`. The product is
+correct: there is exactly ONE writer, `SisService.upsertMedical`, and it passes
+every sensitive column through `encryptField`. The 150 come from
+`scripts/seed-volume.sql`, which writes rows directly — and **that file already
+says so**: "NOTE: seeded as PLAINTEXT ... this does NOT exercise the decrypt cost
+that real, app-written records carry." I measured before reading it.
+// ASKING WHICH WRITER PRODUCED THE ROWS is what separates a fixture artefact
+from a product defect, and it is the check I nearly skipped — three probe
+mistakes this session had the same shape (a tenant-less pupil lookup, a wrong
+response shape, a hand-built client payload), and all three looked like serious
+findings for a minute.
+// A GATE ALL THE SAME, because the reason the naming gives no help is recorded
+here already: these columns are NOT `*Enc`-suffixed like the HR ones, so a
+`%Enc` search under-reports what is protected and somebody adding a bulk import
+or an admissions conversion has no cue that the column is encrypted at all.
+`a-medical-column-is-written-encrypted.spec.ts` requires EVERY sensitive column
+of EVERY writer to go through `encryptField` — five of six is the shape it
+exists to catch — and keeps the volume seed's own note from being deleted.
+Mutation-validated two ways.
+
 ### A withdrawn consent that never left the cross-school arena
 `setConsent` + `leaderboard` (`game/ultimate.service.ts`), migration
 `20270115000000`. Found by checking a CLAIM this file makes about its ONE
