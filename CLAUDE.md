@@ -2095,10 +2095,26 @@ remove, one module over.
 DTO failed the build at both operator mappers — the review queue and the single-
 application read — which is the type-safety spine's whole argument, and why the
 field went on the DTO rather than being computed in the component.
-// NOT FIXED, and stated rather than quietly left: nothing retries a pending
-award when the pupil's fees are finally raised. Making it visible is the honest
-minimum and is a decision a human can act on; a sweep that posts credits later
-is a product change, not a correctness fix.
+// **NOT FIXED, AND THE SWEEP THAT FOLLOWED MAKES IT SHARPER THAN "nothing
+retries".** Every OTHER path that moves money against a pupil handles the
+no-open-invoice case, and each in a way already documented here:
+```
+library / hostel / transport   CREATE an invoice when none exists (1 invoice.create each)
+dedicated-account transfer     posts to the CREDIT LEDGER and tells finance:
+                               "added to their credit balance. Apply it from the
+                                next invoice's page."
+scholarship award              gives up. 0 invoice.create, no credit entry.
+```
+So the mechanism for "money arrived and there is no invoice yet" was built, is
+in use one module away, and the scholarship is the single path that does not
+reach for it. That makes this a CONSISTENCY gap rather than a missing feature —
+but posting a platform-funded award into a tenant's credit ledger changes what
+`disbursed` means and needs a column to link the entry back, so it is a money
+decision to take rather than a correctness fix to slip in. The state is visible
+now and nothing is lost; the build is scoped and waiting.
+// The `currency_mismatch` arm must NOT be folded into that: it already refuses
+loudly with a manual path, and there is no FX rate here — the same line this
+file draws five other times.
 
 ### The exam hall, driven for the first time — and a false finding of my own
 `exam_attendance` had never held a row, so the hall register had never been
