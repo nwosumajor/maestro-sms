@@ -1797,6 +1797,44 @@ const documentSubmissionA = randomUUID();
     expect([...documented].filter((t) => !actual.has(t))).toEqual([]);
   });
 
+  it("every tenant table's schoolId is NOT NULL (Golden Rule #1, the other half)", async () => {
+    // The FK test below checks the CONSTRAINT and its ON DELETE — and it uses
+    // nullability to decide what to expect (`nullable ? "n" : "r"`), so it
+    // ACCOMMODATES a nullable schoolId rather than challenging one. Nothing
+    // asserted the rule itself: "EVERY tenant-scoped table has a non-null
+    // school_id. No exceptions."
+    //
+    // It matters because of how RLS reads a NULL. Every policy is
+    // `USING (schoolId = current_setting('app.current_school_id')::uuid)`, and
+    // `NULL = anything` is NULL, which is not TRUE — so a row with no schoolId is
+    // invisible to EVERY tenant. Not a leak (that is the safe direction) but a
+    // silent orphan: written, acknowledged, and readable by nobody.
+    const { rows } = await adminPool.query<{ relname: string }>(`
+      SELECT c.relname
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN information_schema.columns col
+        ON col.table_schema = 'public' AND col.table_name = c.relname
+       AND col.column_name = 'schoolId' AND col.is_nullable = 'YES'
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relispartition = false
+      ORDER BY 1`);
+
+    // THE ONE documented exception, and it is named here rather than left to be
+    // discovered: a verified gateway webhook is RECORDED BEFORE its tenant is
+    // resolved from the event's own metadata, so `gateway_event` cannot have a
+    // schoolId at insert time. Its schema says so, and its RLS is written for it
+    // (INSERT with no GUC, tenant SELECT). An unresolved row is deliberately
+    // invisible until resolution fills the column in.
+    //
+    // A NEW nullable schoolId is not an exception to add here — it is a table
+    // whose rows no school will ever be able to read.
+    const documented = new Set(["gateway_event"]);
+    expect(rows.map((r) => r.relname).filter((t) => !documented.has(t))).toEqual([]);
+    // Guard the guard: the exception must still exist, or this is asserting
+    // nothing about a table that has been renamed away.
+    expect(rows.map((r) => r.relname)).toContain("gateway_event");
+  });
+
   it("every tenant table has a validated FK to school with the right ON DELETE (Golden Rule #1)", async () => {
     const { rows } = await adminPool.query<{
       relname: string;

@@ -11,7 +11,17 @@ This file is durable project context. Follow it on every task. If a request
 conflicts with it, flag the conflict before proceeding.
 
 ## Golden rules (non-negotiable)
-1. EVERY tenant-scoped table has a non-null `school_id`. No exceptions.
+1. EVERY tenant-scoped table has a non-null `school_id`. ONE named exception,
+   `gateway_event`, because a verified webhook is RECORDED BEFORE its tenant is
+   resolved from the event's own metadata; its RLS is written for that (INSERT
+   with no GUC, tenant SELECT) and an unresolved row is invisible until
+   resolution fills the column in. The rule is enforced, not merely stated:
+   `rls.e2e-spec` fails on any OTHER nullable `schoolId`, and requires that one
+   to still exist so the carve-out cannot go stale. A new nullable `schoolId` is
+   not an exception to add — every RLS policy reads
+   `schoolId = current_setting(...)`, and `NULL = anything` is NULL rather than
+   TRUE, so such a row is invisible to every tenant: written, acknowledged and
+   readable by nobody.
 2. Tenant isolation is enforced at THREE layers: JWT claim → NestJS guard →
    Postgres Row-Level Security. Never rely on a single layer.
 3. Never trust `school_id` from the request body or query params. It comes only
@@ -2052,6 +2062,31 @@ that quietly would be worse than saying so.
 // The refactor is not dead code: `renderPdf` routes through `renderPack`, both
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
+
+### The Golden Rules, checked against the running database
+Same technique as the entry below — assert a property, then ask what makes it
+true — turned on this file's own non-negotiables.
+**GOLDEN RULE #4 HOLDS, measured rather than asserted.** The app role holds
+`DELETE, INSERT, SELECT, UPDATE` and nothing else — no TRUNCATE, REFERENCES or
+TRIGGER — and `super=false createdb=false bypassrls=false createrole=false`.
+**GOLDEN RULE #1 SAID "NO EXCEPTIONS" AND HAD ONE.** `gateway_event.schoolId` is
+nullable, and correctly so: a verified webhook is recorded BEFORE its tenant is
+resolved from the event's own metadata. The schema says so and the RLS is
+written for it. What was missing was the rule being ENFORCED rather than stated
+— and the existing Golden Rule #1 gate does not enforce it. That test checks the
+FK to `school` and its ON DELETE, and it USES nullability to decide what to
+expect (`nullable ? "n" : "r"`), so it ACCOMMODATES a nullable `schoolId` rather
+than challenging one. A new tenant table could ship `schoolId String?` and pass.
+// WHY IT MATTERS, and it is not a leak: every policy reads
+`schoolId = current_setting('app.current_school_id')::uuid`, and `NULL =
+anything` is NULL rather than TRUE — so such a row is invisible to EVERY tenant.
+Written, acknowledged, readable by nobody. The safe direction, and still a
+silent orphan.
+// THE CARVE-OUT IS NAMED IN BOTH PLACES NOW — in Golden Rule #1 itself and in
+the gate — and the gate REQUIRES it to still exist, so an exemption cannot
+outlive the table it was granted for. Same treatment the seven RLS-exempt
+globals already get. Mutation-validated two ways: empty the documented set (it
+names `gateway_event`), and invert the query (the guard-the-guard fires).
 
 ### A pupil with a staff disciplinary file
 `assertStaff` (`hr/reviews.service.ts`). Found by asserting a property and then
