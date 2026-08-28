@@ -56,6 +56,10 @@ model Employee {
   probationEndsAt        DateTime? @db.Date
   gradeLevel             String?
   contractReminderSentAt DateTime?
+  /// EXPIRING | EXPIRED — which contract notice has gone. Same two-notice rule
+  /// as StaffDocument.expiryNoticeStage: announced before it ends, and again
+  /// when it has.
+  contractNoticeStage String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -361,8 +365,12 @@ model StaffDocument {
   name           String
   documentId     String?   @db.Uuid
   expiresAt      DateTime? @db.Date
-  /// Set when an expiry reminder has been sent (idempotency).
+  /// Set when an expiry notice was last sent.
   reminderSentAt DateTime?
+  /// EXPIRING | EXPIRED — which notice has gone. A notice is sent only when
+  /// this CHANGES, so a document is announced at most twice: once before it
+  /// lapses and once when it does. Null means nothing has been sent yet.
+  expiryNoticeStage String?
   createdById    String    @db.Uuid
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

@@ -20,6 +20,13 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
+import {
+  type DocumentExpiryStage,
+  documentExpiryNotice,
+  expiryStage,
+  expiryCandidateWhere,
+} from "./document-expiry";
 
 const DEFAULT_ITEMS: Record<string, string[]> = {
   ONBOARDING: [
@@ -43,7 +50,6 @@ const DEFAULT_ITEMS: Record<string, string[]> = {
   ],
 };
 const HR_ROLES = ["hr_clerk", "hr_manager", "school_admin", "principal"];
-const REMINDER_WINDOW_DAYS = 30;
 
 @Injectable()
 export class StaffLifecycleService {
@@ -51,6 +57,7 @@ export class StaffLifecycleService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -172,38 +179,50 @@ export class StaffLifecycleService {
     });
   }
 
-  /** Notify HR of documents expiring within the window (idempotent via reminderSentAt). */
+  /**
+   * Notify HR of documents approaching expiry AND of documents that have since
+   * lapsed. Announced at most twice, on a STAGE CHANGE — the same rule and the
+   * same pure helpers as the nightly fleet sweep, because two spellings of one
+   * rule is how a pair drifts, and this pair already had.
+   */
   async runDocumentReminders(p: Principal): Promise<{ reminded: number }> {
     const due = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const cutoff = new Date(Date.now() + REMINDER_WINDOW_DAYS * 86_400_000);
-      const docs = await tx.staffDocument.findMany({
-        where: { reminderSentAt: null, expiresAt: { not: null, lte: cutoff } },
-      });
+      const today = await this.region.todayInTx(tx, p.schoolId);
+      const candidates = await tx.staffDocument.findMany({ where: expiryCandidateWhere(new Date()) });
+      const docs = candidates
+        .map((d) => ({ row: d, stage: expiryStage(d.expiresAt, today) }))
+        .filter((c): c is { row: (typeof candidates)[number]; stage: DocumentExpiryStage } =>
+          c.stage !== null && c.stage !== c.row.expiryNoticeStage,
+        );
       if (docs.length === 0) return [];
-      const users = await tx.user.findMany({ where: { id: { in: docs.map((d) => d.userId) } }, select: { id: true, name: true } });
+      const users = await tx.user.findMany({ where: { id: { in: docs.map((d) => d.row.userId) } }, select: { id: true, name: true } });
       const nameById = new Map(users.map((u) => [u.id, u.name]));
       const hrRoles = await tx.role.findMany({ where: { name: { in: HR_ROLES } }, select: { id: true } });
       const hrUserRoles = await tx.userRole.findMany({ where: { roleId: { in: hrRoles.map((r) => r.id) } }, select: { userId: true } });
       const recipients = [...new Set(hrUserRoles.map((ur) => ur.userId))];
       const now = new Date();
       for (const d of docs) {
-        await tx.staffDocument.update({ where: { id: d.id }, data: { reminderSentAt: now } });
+        await tx.staffDocument.update({
+          where: { id: d.row.id },
+          data: { reminderSentAt: now, expiryNoticeStage: d.stage },
+        });
       }
       await this.audit.record(
         { actorId: p.userId, action: "hr.document.reminders.run", entity: "staff_document", entityId: p.schoolId, schoolId: p.schoolId, metadata: { count: docs.length } },
         tx,
       );
-      return docs.map((d) => ({ name: d.name, kind: d.kind, who: nameById.get(d.userId) ?? "a staff member", expiresAt: d.expiresAt, recipients }));
+      return docs.map((d) => ({
+        notice: documentExpiryNotice(
+          { who: nameById.get(d.row.userId) ?? "A staff member", kind: d.row.kind, name: d.row.name, expiresAt: d.row.expiresAt },
+          d.stage,
+        ),
+        recipients,
+      }));
     });
     // Enqueue notifications OUTSIDE the tenant tx (the notifier opens its own).
     for (const d of due) {
       for (const recipientId of d.recipients) {
-        await this.notifications.enqueue(this.ctx(p), {
-          recipientId,
-          type: "GENERIC",
-          title: "Staff document expiring soon",
-          body: `${d.who}'s ${d.kind} (“${d.name}”) expires on ${d.expiresAt ? new Date(d.expiresAt).toISOString().slice(0, 10) : "soon"}.`,
-        });
+        await this.notifications.enqueue(this.ctx(p), { recipientId, type: "GENERIC", ...d.notice });
       }
     }
     return { reminded: due.length };

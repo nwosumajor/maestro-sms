@@ -42,7 +42,14 @@ function make(over: {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue };
-  return { service: new StaffLifecycleService(db as never, audit as never, notifications as never), itemCreate, checklistUpdate, docUpdate, enqueue };
+  // A REAL TenantTx-backed service always has the region: `expiresAt` is a
+  // `@db.Date`, so which side of expiry a document falls on is a question about
+  // the SCHOOL's calendar day. `today` is fixed so the cases are deterministic.
+  const region = { todayInTx: jest.fn(async () => new Date("2026-08-28T00:00:00.000Z")) };
+  return {
+    service: new StaffLifecycleService(db as never, audit as never, notifications as never, region as never),
+    itemCreate, checklistUpdate, docUpdate, enqueue, region,
+  };
 }
 
 const p = (userId = "hr1"): Principal => ({ schoolId: "A", userId, roles: [], permissions: [] });

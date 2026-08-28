@@ -28,7 +28,10 @@ function makeSweep(opts: { due: Array<{ id: string; effectiveDate: Date }>; clai
       ),
       updateMany: salaryUpdateMany,
     },
-    employee: { update: employeeUpdate },
+    // A REAL privileged client always has this: the contract arm now runs on
+    // every sweep (it used to sit behind an early return in the document arm),
+    // so a fixture without it models something the database cannot produce.
+    employee: { update: employeeUpdate, findMany: jest.fn().mockResolvedValue([]) },
     staffDocument: { findMany: jest.fn().mockResolvedValue([]) },
     employmentChangeRequest: { findMany: jest.fn().mockResolvedValue([]) },
   };

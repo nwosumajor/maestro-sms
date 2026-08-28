@@ -2050,6 +2050,77 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### A certificate that expired, and a sweep that stopped mentioning it
+`hr/document-expiry.ts` (`expiryStage` / `documentExpiryNotice` /
+`contractEndNotice`, migration `20270114000000`). Found by driving a path that
+had never executed: `staff_document` had no rows, so the expiry sweep had never
+once run. This platform runs SEVENTEEN scheduled sweeps and chases an overdue
+library book, a boarder signed out too long and an invoice past due. It
+announced a staff certificate ONCE, up to 30 days before expiry, stamped
+`reminderSentAt` and never looked at that row again.
+Measured live, one sweep, two documents:
+```
+before   PROBE licence    expired 2026-08-23   "expires on 2026-08-23"   (5 days AGO)
+         PROBE DBS check  expires 2026-09-07   "expires on 2026-09-07"
+         second run                            {"reminded":0}
+after    the lapsed one   "Staff document has EXPIRED ... expired on 2026-08-23
+                           and is no longer valid. Record the renewal, or check
+                           whether they may continue in duties that require it."
+         the DBS check, once its day passed -> announced. Before: silence.
+```
+Two defects in that output. The wording is the FUTURE TENSE about a licence that
+had already lapsed — the window is `<= now + 30d`, which admits an
+already-expired document, and the message never asked. And the safeguarding
+check would lapse in ten days with nothing left to mention it. The one deadline
+with a child-protection consequence was the one the product stopped chasing at
+the moment it started to matter.
+// TWO NOTICES AT MOST, and the STAGE is what bounds it — exactly
+`deadlineNoticeStage` on the breach register, which this repo already records:
+sent only when the stage CHANGES, because a notice per night is one people learn
+to ignore, including on the document where it mattered.
+// A DOCUMENT ALREADY EXPIRED WHEN FIRST SEEN goes straight to `EXPIRED` and
+never gets an "expiring soon". A warning about something that has already
+happened is not a warning, and it is how the wrong tense reached HR.
+// DAY AGAINST DAY. `expiresAt` is a `@db.Date`, and a certificate is valid
+THROUGH the day it names — so `expired` is `expiresAt < today`, against the
+SCHOOL's day, not `<=` against a UTC instant. Eleventh surface in that class.
+// THE BACKFILL IS A DECISION AND THE MIGRATION SAYS SO: an already-notified row
+becomes `EXPIRING`, so the first sweep after deploy announces every document a
+school has already let lapse. That burst is one-time and every notice in it is
+TRUE and currently unreported, which is the defect. Stamping them terminal would
+suppress it by permanently concealing the lapses.
+// COUNTED, NOT ASSUMED: the candidate set is a superset, so `scanned` and
+`reminded` are different questions and are returned separately — `reminded` used
+to be `due.length`, an operator reading "3 reminded" for a night that sent
+nothing.
+// THE CANDIDATE QUERY IS BOUNDED. Without excluding the terminal stage, every
+document a school ever let expire is re-read every night for ever to be skipped
+— the O(the school's lifetime) shape. The ceiling is two days generous on
+purpose: the fleet sweep runs before any school's own day is known.
+**AND THE SIBLING WAS THE SAME DEFECT, ONE METHOD DOWN.** `sweepContracts`
+announced a contract once before it ended, stamped `contractReminderSentAt`, and
+said nothing on the day it did — while the employee stayed ACTIVE. Somebody
+working past the end of their contract is a fact a school has to act on. Fixed
+in the same commit rather than left, which is the rule this file keeps recording
+against itself. Live: "Contract has ENDED ... and they are still recorded as
+active staff."
+// **AND A THIRD BUG THE SIBLING'S TEST SURFACED, PRE-EXISTING: the contract arm
+had never run at all.** `sweepContracts` is called at the END of `sweep()`,
+behind `if (due.length === 0) return` in the DOCUMENT arm — so a school with no
+expiring document never had its expiring contracts looked at, and
+`staff_document` was empty across the whole tenant. The two arms above it each
+carry a comment explaining why they are independent ("a failed document reminder
+must never leave an approved raise unpaid"); the third was guarded behind the
+first's early exit. Proved live after: a fleet sweep reporting `scanned: 0` —
+precisely the night that used to return early — sent the contract notice.
+// GOTCHA: two fixtures broke because they had no `employee.findMany`, which
+every real privileged client has. Same stub-models-an-impossible-database trap
+this file records four times; the failure is the suite doing its job.
+// GOTCHA in my own mutation run: `cd apps/api` from inside `apps/api` fails, so
+the `&&`-chained backups were never taken and three mutations stacked. Each
+step's NEW failure was still its intended assertion, so all three are validated
+— but check the shell succeeded before trusting a mutation result.
+
 ### A front door for printing a class's report cards
 `/reportcards` (`ReportCardConsole`, nav "Report cards"). Asked for, and it is a
 FRONT DOOR rather than new capability: the API could always print any term, and
