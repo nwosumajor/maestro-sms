@@ -2063,6 +2063,44 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### "Overdue" told to the person who had already finished it
+`isOverdue` (`components/task/TaskBoard.tsx`). Found by driving a path that had
+never executed — `task_assignment` had no rows, so the task board had never once
+been used, including the overdue marker added for it.
+The rule was written down correctly: *"SAID ONLY WHILE THE TASK IS OPEN.
+'Overdue' on work somebody finished is a false statement about them, and it
+teaches a reader to ignore the marker on the rows where it is true."* It was then
+applied to the TASK's status — and a task stays OPEN until the ASSIGNER closes
+it. A task has TWO statuses and the fix used the wrong one:
+```
+task.status   OPEN | IN_PROGRESS | COMPLETED | CANCELLED   (the assigner's)
+myStatus      ASSIGNED | IN_PROGRESS | SUBMITTED | DONE     (the viewer's own)
+```
+Driven live: the assignee marks their part DONE -> `status=OPEN
+myStatus=DONE`, and the board still read **"overdue — was due 1 Aug"** to the
+person who had done it.
+// **THE ASSIGNER IS DELIBERATELY UNAFFECTED.** `myStatus` is null for them, and
+a task with an outstanding assignee IS overdue from where they sit — the whole
+point of the marker is that somebody chases it. A fix that silenced it for
+everyone would have removed the feature while looking like a correction, and a
+test pins that direction.
+// SUBMITTED counts as finished: the assignee has handed it over and what
+remains is somebody else's review.
+// **THE DTO ALREADY CARRIED THE ANSWER.** `myStatus` has been on `TaskDto` all
+along and the component simply did not ask — the same shape as the lead-age and
+task-due-date fixes themselves, where the data was on the row and the defect was
+in the drawing.
+// GOTCHA: the existing test asserted the LITERAL source
+`function isOverdue(dueAt: string, status: string)` and went red on the change
+that strengthened it — the fixed-text failure mode, again. Rather than
+re-anchoring the grep, `isOverdue` is now EXPORTED and DRIVEN: six behavioural
+cases, with only the two assertions a behavioural test cannot make (that the
+call drives the branch, and that a future date still renders plainly) left
+reading the source.
+// VERIFIED IN THE SAME PASS, first time live: `assertStillHere` refuses a task
+for a departed member of staff — *"Games Smoke Peer has left the school and
+cannot be given a task."*
+
 ### Four scholarships awarded, none credited, and a screen saying otherwise
 `ScholarshipApplicationDto.disbursed`, `ScholarshipAdmin`. Found by an invariant
 sweep over modules this session had not touched: **4 AWARDED applications with

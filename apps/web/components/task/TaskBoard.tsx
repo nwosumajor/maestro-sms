@@ -39,8 +39,24 @@ type Person = { id: string; name: string; roles?: string[] };
  * to chase what the screen can simply say is the more elaborate answer to the
  * smaller problem, exactly as the onboarding-lead fix concluded.
  */
-function isOverdue(dueAt: string, status: string): boolean {
+export function isOverdue(dueAt: string, status: string, myStatus: string | null): boolean {
   if (status === "COMPLETED" || status === "CANCELLED") return false;
+  // THE VIEWER'S OWN PART, not just the task's.
+  //
+  // The rule above was written as "said only while the task is OPEN — 'overdue'
+  // on work somebody finished is a false statement about them, and it teaches a
+  // reader to ignore the marker on the rows where it is true". Right rule,
+  // applied to the wrong status: a task stays OPEN until the ASSIGNER closes it,
+  // so an assignee who has finished kept being told their work was overdue.
+  //
+  // Driven live: assignee marks their part DONE -> task OPEN, myStatus DONE, and
+  // the board still read "overdue — was due 1 Aug" to the person who did it.
+  //
+  // The ASSIGNER is deliberately unaffected — `myStatus` is null for them, and a
+  // task with one of three assignees outstanding IS overdue from where they sit.
+  // SUBMITTED counts as finished for this purpose: the assignee has handed it
+  // over and what remains is somebody else's review.
+  if (myStatus === "DONE" || myStatus === "SUBMITTED") return false;
   return new Date(dueAt).getTime() < Date.now();
 }
 
@@ -127,7 +143,7 @@ export function TaskBoard({
             <CardTitle className="text-base flex items-center gap-2">
               {t.title} <Badge variant={t.status === "COMPLETED" ? "outline" : "secondary"}>{t.status}</Badge>
               {t.dueAt &&
-                (isOverdue(t.dueAt, t.status) ? (
+                (isOverdue(t.dueAt, t.status, t.myStatus) ? (
                   <span className="text-xs font-medium text-destructive">
                     overdue &mdash; was due {shortDate(t.dueAt)}
                   </span>
