@@ -228,6 +228,9 @@ export class ScholarshipAdminService {
       programId: r.programId,
       programTitle: prog.get(r.programId)?.title ?? "Scholarship",
       awardMinorOffered: prog.get(r.programId)?.awardMinor ?? 0,
+      // Granted is not CREDITED — see the DTO. This is the operator's own
+      // review queue, so it is the screen that most needs to say so.
+      disbursed: r.status === "AWARDED" ? Boolean(r.disbursementPaymentId) : null,
       schoolId: r.schoolId,
       schoolName: school.get(r.schoolId) ?? null,
       studentId: r.studentId,
@@ -973,6 +976,7 @@ export class ScholarshipAdminService {
     ]);
     return [{
       id: r.id, programId: r.programId, programTitle: program?.title ?? "Scholarship", awardMinorOffered: program?.awardMinor ?? 0,
+      disbursed: r.status === "AWARDED" ? Boolean(r.disbursementPaymentId) : null,
       schoolId: r.schoolId, schoolName: school?.name ?? null, studentId: r.studentId, studentName: student?.name ?? "Student",
       applicantId: r.applicantId, applicantName: applicant?.name ?? "Applicant", applicantRole: r.applicantRole,
       answers: r.answers ?? null, signals: (r.signals as ScholarshipApplicationDto["signals"]) ?? null, status: r.status,

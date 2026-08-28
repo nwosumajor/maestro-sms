@@ -342,9 +342,29 @@ export function ScholarshipAdmin() {
                       </div>
                     )}
                     {a.status === "AWARDED" && a.awardMinor != null && (
-                      <p className="mt-1 text-xs text-primary">
+                      /*
+                        GRANTED IS NOT CREDITED, and this line used to assert the
+                        second unconditionally: "fees credit posted." on every
+                        awarded row, whether or not anything had posted.
+
+                        An award is disbursed as a fees credit against the pupil's
+                        OPEN invoice. With no open invoice — the ordinary case when
+                        an award is decided before the term's fees are raised —
+                        nothing posts and nothing retries. Measured on the demo
+                        tenant: four AWARDED applications totalling NGN 800,000
+                        with no payment, every one of them reading "fees credit
+                        posted".
+
+                        The award standing is correct (a decision is not thrown
+                        away over a posting problem) and the family is told the
+                        truth; it was the FUNDER's own screen that was wrong.
+                      */
+                      <p className={`mt-1 text-xs ${a.disbursed === false ? "text-amber-600 dark:text-amber-400" : "text-primary"}`}>
                         {a.awardPosition ? `${a.awardPosition === 1 ? "🥇 1st" : a.awardPosition === 2 ? "🥈 2nd" : "🥉 3rd"} place — ` : ""}
-                        Awarded {money(a.awardMinor)} · fees credit posted.
+                        Awarded {money(a.awardMinor)} ·{" "}
+                        {a.disbursed === false
+                          ? "NOT yet credited — the pupil had no open invoice when this was awarded. Post the credit once their fees are raised."
+                          : "fees credit posted."}
                       </p>
                     )}
                   </div>

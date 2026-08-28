@@ -209,6 +209,27 @@ export interface ScholarshipApplicationDto {
   /** 1 | 2 | 3 when AWARDED — each position granted once per program. */
   awardPosition: number | null;
   awardMinor: number | null;
+  /**
+   * Did the award actually reach the pupil's bill?
+   *
+   * An award is granted and then DISBURSED as a fees credit against the pupil's
+   * open invoice. When there is no open invoice — the commonest case, because an
+   * award can be decided before the term's fees are raised — nothing posts,
+   * nothing retries, and `disbursementPaymentId` stays null for ever. The
+   * decision is sound (the award stands rather than being thrown away over a
+   * posting problem) and the family is told correctly; what was missing is that
+   * the FUNDER could not see it.
+   *
+   * `disbursementPaymentId` was written to the row and appeared in no DTO, no
+   * endpoint and no screen — the same shape as `payment.platformFeeMinor`, which
+   * this codebase already records as "the owner who sets the rate had no way to
+   * see what it earned". Measured: four AWARDED applications totalling NGN
+   * 800,000 with nothing posted, and every screen reading simply "AWARDED".
+   *
+   * Null when the application is not AWARDED. False means granted and not yet
+   * credited — a state a human needs to resolve, not an error.
+   */
+  disbursed: boolean | null;
   reviewNote: string | null;
   createdAt: Date;
   updatedAt: Date;

@@ -2063,6 +2063,43 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### Four scholarships awarded, none credited, and a screen saying otherwise
+`ScholarshipApplicationDto.disbursed`, `ScholarshipAdmin`. Found by an invariant
+sweep over modules this session had not touched: **4 AWARDED applications with
+no `disbursementPaymentId`**, totalling NGN 800,000, and every one of their
+pupils holding ZERO open invoices.
+An award is disbursed as a fees credit against the pupil's OPEN invoice.
+`disburseFeesCredit` returns `{ ok: false, reason: "no_open_invoice" }` when
+there is none — the ORDINARY case, because an award can be decided before the
+term's fees are raised — so nothing posts and **nothing retries**. That decision
+is right and already reasoned: the award STANDS rather than being thrown away
+over a posting problem, the audit row carries the reason, and the family is told
+what actually happened.
+// **THE FUNDER'S OWN SCREEN WAS THE ONE THAT LIED.**
+```
+{a.status === "AWARDED" && a.awardMinor != null && (
+   … Awarded {money(a.awardMinor)} · fees credit posted.
+```
+Unconditional. Four awards where nothing posted, all four reading "fees credit
+posted". Live after: `disbursed=false` on all four, and the row says "NOT yet
+credited — the pupil had no open invoice when this was awarded."
+// `disbursementPaymentId` was written to the row and appeared in NO DTO, no
+endpoint and no screen — the same shape this file already records for
+`payment.platformFeeMinor`: "the owner who sets the rate had no way to see what
+it earned." Written and never read, on the platform's own money, twice.
+// THREE STATES, NOT TWO: `null` when not awarded, `false` when granted and not
+credited, `true` when posted. Collapsing the first two into one falsy value
+reproduces exactly the ambiguity the export bundle's coverage manifest exists to
+remove, one module over.
+// THE COMPILER FOUND THE SCREEN THAT MATTERED. Adding one required field to the
+DTO failed the build at both operator mappers — the review queue and the single-
+application read — which is the type-safety spine's whole argument, and why the
+field went on the DTO rather than being computed in the component.
+// NOT FIXED, and stated rather than quietly left: nothing retries a pending
+award when the pupil's fees are finally raised. Making it visible is the honest
+minimum and is a decision a human can act on; a sweep that posts credits later
+is a product change, not a correctness fix.
+
 ### The exam hall, driven for the first time — and a false finding of my own
 `exam_attendance` had never held a row, so the hall register had never been
 taken. Driven end to end — create a sitting, auto-seat a class of 30, mark two

@@ -573,6 +573,7 @@ export class ScholarshipService {
       parentNote: string | null; principalById: string | null; principalAt: Date | null; principalNote: string | null;
       rejectedStage: string | null; examScorePct: number | null; awardPosition: number | null;
       awardMinor: number | null; reviewNote: string | null; createdAt: Date; updatedAt: Date;
+      disbursementPaymentId?: string | null;
     }>,
   ): Promise<ScholarshipApplicationDto[]> {
     if (rows.length === 0) return [];
@@ -594,6 +595,11 @@ export class ScholarshipService {
       programId: r.programId,
       programTitle: prog.get(r.programId)?.title ?? "Scholarship",
       awardMinorOffered: prog.get(r.programId)?.awardMinor ?? 0,
+      // Granted is not the same as CREDITED. Null unless the award was made, so
+      // "not awarded" and "awarded but not yet credited" stay distinguishable —
+      // the ambiguity the export bundle's coverage manifest exists to remove,
+      // applied to money.
+      disbursed: r.status === "AWARDED" ? Boolean(r.disbursementPaymentId) : null,
       schoolId: r.schoolId,
       schoolName: null,
       studentId: r.studentId,
