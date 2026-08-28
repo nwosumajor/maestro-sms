@@ -914,6 +914,14 @@ problem. Two things to know before you do:
   roster — is the stack up and seeded?". Wait a minute between runs. A probe may
   also report a role or route SKIPPED for the same reason; it says how many, and
   a skipped role is not a passed one.
+- **A probe that could not sign in now ABORTS rather than passing.** It used to
+  be possible for the isolation probe to print `ISOLATION PROBE PASSED — all 14
+  probes denied` while the attacker account had no session at all: every request
+  answered 401, and 401 was being counted as "refused". A 401 is not a denial —
+  it means nobody asked. Both probes now stop with a non-zero exit
+  (`PROBE ABORTED ... no session, so nothing was tested`) at sign-in and again
+  if the session dies mid-run. If you see that, wait for the limiter and re-run;
+  do not read the earlier lines as a partial pass.
 
 **Rehearse the restore drill quarterly.** A backup you have never restored is not
 a backup — and an incident is the worst possible moment to discover that.

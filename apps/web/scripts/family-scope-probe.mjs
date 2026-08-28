@@ -206,6 +206,27 @@ function client() {
   };
 }
 
+/**
+ * A 401 means the probe never asked the question.
+ *
+ * 403 and 404 are real answers from an authenticated caller and are exactly
+ * what this probe is looking for — the existing comparison is right to treat a
+ * matching 403 as "the permission guard, disclosing nothing". 401 is different:
+ * there is no session at all. A degraded run reported
+ * "PASS — no response carried another family's child" with every single check
+ * reading `(401, same as a non-existent id)`.
+ */
+function abortIfUnauthenticated(status, where) {
+  if (status !== 401) return;
+  console.error(
+    `\nPROBE ABORTED at ${where} — no session, so nothing was tested.\n` +
+    "  POST /auth/login is rate-limited 10/min per IP and this probe signs in as\n" +
+    "  three accounts; running it straight after the route smoke trips the limiter.\n" +
+    "  Wait a minute and re-run.",
+  );
+  process.exit(2);
+}
+
 /** Who is this account's own family? Everything else in the school is foreign. */
 async function ownFamily(c) {
   const me = await c.get("/students");
@@ -300,6 +321,8 @@ const main = async () => {
       console.error(`could not sign in as ${who}`);
       process.exit(2);
     }
+    // Prove the session took before drawing any conclusion from a refusal.
+    abortIfUnauthenticated((await c.get("/notifications")).status, `sign-in as ${who}`);
     const own = await ownFamily(c);
     const foreignIds = allIds.filter((id) => !own.ids.has(id));
     // Longest first: a short name is a substring of a longer one.
@@ -314,6 +337,7 @@ const main = async () => {
     );
     for (const path of probing) {
       const r = await c.get(path);
+      abortIfUnauthenticated(r.status, path);
       if (r.status !== 200) {
         console.log(`  ${r.status} ${path}`);
         continue;
@@ -395,6 +419,8 @@ const main = async () => {
         const ghostPath = path.replace(foreign.studentId, foreign.ghost).replace(foreign.invoiceId ?? "@", foreign.ghost);
         const real = await c.get(path);
         const ghost = await c.get(ghostPath);
+        abortIfUnauthenticated(real.status, label);
+        abortIfUnauthenticated(ghost.status, label);
         // The finding is a DIFFERENCE, never a status on its own: a 403 that a
         // non-existent id also gets is the permission guard, and discloses
         // nothing about whether the record is there.

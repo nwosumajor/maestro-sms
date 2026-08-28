@@ -111,6 +111,16 @@ function makeClient() {
 
 /** Denied = refused outright, or answered with nothing. See the note above. */
 function classify(res) {
+  // A 401 IS NOT A DENIAL — it means nobody asked.
+  //
+  // 403/404 are the SERVER refusing an authenticated caller, which is the thing
+  // this probe exists to confirm. 401 is the server saying there is no session
+  // at all: a rate-limited login (POST /auth/login is 10/min per IP, and this
+  // probe is usually run right after the route smoke's eighteen) or one that
+  // expired mid-run. Counting it as "denied" made every probe pass while the
+  // attacker was never signed in, and printed
+  // "ISOLATION PROBE PASSED — all 14 probes denied".
+  if (res.status === 401) return { denied: false, unauthenticated: true, why: "NO SESSION" };
   if (res.status === 404 || res.status === 403) return { denied: true, why: "refused" };
   if (res.status >= 400) return { denied: true, why: `refused (${res.status})` };
   const body = res.text ?? "";
@@ -176,10 +186,30 @@ async function main() {
     ["impersonating one of them", "POST", `/operator/impersonate`, { schoolId: targetSchool, userId: victim.id }],
   ];
 
+  // Prove the session took BEFORE probing, the way permission-matrix.mjs
+  // already does. Catching it here names the cause; catching it in the loop
+  // only says the run was worthless.
+  if ((await attacker.call("GET", "/notifications")).status === 401) {
+    console.error(
+      "\nPROBE ABORTED — the attacker account has no session, so nothing was tested.\n" +
+      "  POST /auth/login is rate-limited 10/min per IP; this probe is usually run\n" +
+      "  right after the route smoke's eighteen logins. Wait a minute and re-run.",
+    );
+    process.exit(4);
+  }
+
   let leaked = 0;
   for (const [label, method, path, body] of probes) {
     const res = await attacker.call(method, path, body);
-    const { denied, why } = classify(res);
+    const { denied, unauthenticated, why } = classify(res);
+    if (unauthenticated) {
+      console.error(
+        `\nPROBE ABORTED at "${label}" — the session stopped working mid-run, so the\n` +
+        "  remaining probes prove nothing. A PASS here would be a false negative on\n" +
+        "  the most important control this repo has.",
+      );
+      process.exit(4);
+    }
     if (!denied) leaked++;
     console.log(`  ${denied ? "denied " : "LEAK!! "} ${String(res.status).padEnd(4)} ${label}  (${why})`);
     await sleep(60);

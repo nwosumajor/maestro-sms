@@ -2050,6 +2050,54 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### The isolation probe passed while nobody was signed in
+`classify` (`scripts/isolation-probe.mjs`), `abortIfUnauthenticated`
+(`scripts/family-scope-probe.mjs`). Found by RUNNING the four probes to check
+this session's routing and gating changes, rather than reasoning about them.
+The family-scope probe printed
+`PASS — no response carried another family's child` with **every single check
+reading `(401, same as a non-existent id)`**. A signed-in parent asking about
+another family's child gets 404 or 403; 401 means there was no session at all,
+so the probe compared 401 with 401 and called it ok.
+The isolation probe — the one the runbook sends an on-call engineer to and this
+file calls "the most important test category" — had it worse, in one line:
+```
+if (res.status >= 400) return { denied: true, why: `refused (${res.status})` };
+```
+Demonstrated by making only the ATTACKER's session unauthenticated, leaving the
+owner's roster build untouched so the run looks entirely normal:
+```
+denied  401  their student's MEDICAL record  (refused (401))
+...
+ISOLATION PROBE PASSED — all 14 probes denied.     exit 0
+```
+Fourteen probes, a green headline, and the attacker never signed in.
+// **403 AND 404 ARE ANSWERS; 401 IS NOT.** The existing comparison is right that
+"a 403 that a non-existent id also gets is the permission guard, and discloses
+nothing" — that is the SERVER refusing an authenticated caller, which is the
+thing being confirmed. 401 is the server saying nobody asked. Both probes now
+prove the session took BEFORE probing and abort with a non-zero exit if it dies
+mid-run, naming the likely cause.
+// **THE THIRD PROBE ALREADY GOT IT RIGHT**, which is what makes this the
+sibling-asymmetry shape again: `permission-matrix.mjs` carries
+"Prove the session took. A rate-limited or missing account answers 401 to
+everything, which would otherwise read as 'refused' for every route." Somebody
+met this exact failure, wrote the reason down, fixed the probe in front of them
+and left the two next to it — including the one that matters most.
+// THE CAUSE IS ORDINARY AND WILL RECUR: `POST /auth/login` is 10/min per IP,
+these probes sign in as several accounts, and the natural thing is to run them
+one after another — which is exactly what I did. The limiter is not the defect;
+believing the output afterwards is.
+// SECOND TIME THIS SESSION for this probe and the same class: earlier its
+foreign-invoice pick was VACUOUSLY SATISFIED and it cried wolf. That one was a
+false POSITIVE, this one a false NEGATIVE, and a false negative in a control
+nobody runs twice is the worse direction.
+// The route smoke is NOT affected and was checked: it asks whether a page
+RENDERS, where 401/403/404 are all legitimate, and it already counts and reports
+routes the limiter cost it ("2 route(s) NOT CHECKED").
+// Validated by making each failure fire and each fix catch it, and the runbook
+updated in the same commit — it tells people to trust this output.
+
 ### A guardian attached to somebody who is not a pupil
 `resolveChildren` / `link` (`parent/parent-import.service.ts`),
 `IS_STUDENT_ROLE_ROW` (`common/student-scope.ts`). Found by driving a path that
