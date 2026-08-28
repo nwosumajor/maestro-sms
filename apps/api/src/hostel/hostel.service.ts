@@ -582,9 +582,28 @@ export class HostelService {
           })),
         });
       }
+      // SAY WHO IS NOT ACCOUNTED FOR.
+      //
+      // A roll call is the record of who was in the house that night, and this
+      // returned only how many rows it wrote. Two silences, both measured live
+      // on a house of 8 with 5 boarders submitted plus one stray name:
+      // `{"marked":5}` — nothing about the stray being dropped, and nothing
+      // about the THREE boarders left with no row at all. Not present, not
+      // absent, not mentioned.
+      //
+      // The exam-day board already draws this distinction and says why:
+      // "we have not taken the register" and "they did not come" are different
+      // problems with different fixes. A boarding house is the sharper case,
+      // because the missing row is a child nobody has looked for.
       const marked = wanted.length;
-      await this.log(tx, p, "hostel.rollcall", hostelId, { date, marked });
-      return { marked };
+      const seen = new Set(wanted.map((rec) => rec.studentId));
+      // Boarders with no row after this write — the children unaccounted for.
+      const unmarked = [...boarders].filter((id) => !seen.has(id)).length;
+      // Names submitted that are not boarding here, so a warden learns why a
+      // pupil they ticked is absent from the sheet rather than assuming a bug.
+      const skipped = records.length - marked;
+      await this.log(tx, p, "hostel.rollcall", hostelId, { date, marked, unmarked, skipped });
+      return { marked, unmarked, skipped };
     });
   }
 

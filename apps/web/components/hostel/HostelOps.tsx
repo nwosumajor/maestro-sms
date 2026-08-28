@@ -110,7 +110,17 @@ function RollCallPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: strin
   const save = async () => {
     const records = boarders.map((b) => ({ studentId: b.studentId, status: marks[b.studentId] ?? "PRESENT" }));
     const r = await send("POST", `/hostels/${hostelId}/attendance`, { date, records });
-    onMsg(r.ok ? `Roll-call saved (${(r.data as { marked?: number })?.marked ?? 0} marked).` : (r.error ?? "Failed."));
+    // SAY WHO IS UNACCOUNTED FOR, not just how many rows were written.
+    //
+    // "Roll-call saved (5 marked)" reads as done. It was also the whole message
+    // when three boarders in the house had no row at all — neither present nor
+    // absent — and when a name the warden ticked was dropped for no longer
+    // boarding here. A count of what WAS written cannot say either.
+    const d = r.data as { marked?: number; unmarked?: number; skipped?: number } | undefined;
+    const parts = [`${d?.marked ?? 0} marked`];
+    if (d?.unmarked) parts.push(`${d.unmarked} NOT accounted for`);
+    if (d?.skipped) parts.push(`${d.skipped} no longer boarding here`);
+    onMsg(r.ok ? `Roll-call saved (${parts.join(", ")}).` : (r.error ?? "Failed."));
     void load();
   };
   const STATUSES = ["PRESENT", "ABSENT", "EXEAT", "SICK", "LATE"];

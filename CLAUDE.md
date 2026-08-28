@@ -2024,6 +2024,38 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A boarding roll call that named nobody missing
+Found by driving a path that had never executed: `hostel_attendance` had no
+rows, so the roll call — the record of who was in a boarding house that night —
+had never once been taken.
+`rollCall` filters the submitted records down to CURRENT boarders and then
+REPLACES the whole night's sheet. It returned how many rows it wrote and nothing
+else. Measured live on a house of 8, submitting 5 boarders plus one name who no
+longer boards there:
+```
+before   {"marked":5}                            sheet: 5 rows for a house of 8
+after    {"marked":5,"unmarked":3,"skipped":1}
+```
+**THREE CHILDREN IN THAT HOUSE HAD NO ROW AT ALL** — not present, not absent,
+not mentioned — and the stray name was dropped without a word, so a warden who
+ticked them saw a sheet without them and no reason why.
+// THE EXAM-DAY BOARD ALREADY DRAWS THIS DISTINCTION and says why: "we have not
+taken the register" and "they did not come" are different problems with
+different fixes, which is why it reports `unmarked` as its own count rather than
+folding it into `absent`. A boarding house is the sharper case, because the
+missing row is a child nobody has looked for. Same family as the exeat sweep and
+the alumni broadcast: REPORT WHAT YOU DID NOT DO.
+// THE FILTER ITSELF IS RIGHT and a test pins it: a stranger must never get a
+row in this house's roll call. What was missing was saying so.
+// The warden's message says it too — "5 marked, 3 NOT accounted for, 1 no
+longer boarding here" — because a count that only reaches the API response is a
+count nobody acts on, which this file already records twice for `failed` on the
+sweeps.
+// NOT CHANGED, and worth knowing: a roll call is a FULL REPLACEMENT by design,
+so re-submitting a night corrects it. That means a submission naming nobody who
+still boards there DELETES the sheet and writes nothing — now visible as
+`marked: 0, unmarked: <the whole house>` rather than a silent zero.
+
 ### The probe's other blind spot: resources addressed by their OWN id
 The family-scope probe derives its surface from the controllers and probes every
 route taking a `:studentId`, asking about somebody else's child. Resources
