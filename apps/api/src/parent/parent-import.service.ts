@@ -22,6 +22,7 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
+import { IS_STUDENT_ROLE_ROW } from "../common/student-scope";
 import { Prisma } from "@sms/db";
 import type {
   CreateParentResultDto,
@@ -80,6 +81,21 @@ export class ParentImportService {
 
   /** Resolve child references (admission numbers + emails) to in-tenant student
    *  ids. Returns the matched ids and how many refs matched nothing. */
+  /**
+   * Of the given user ids, the ones that actually hold the STUDENT role.
+   *
+   * ONE query, because the bulk path runs this per row over a file that can be
+   * hundreds long.
+   */
+  private async studentIdsAmong(tx: TenantTx, ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = (await tx.userRole.findMany({
+      where: { userId: { in: ids }, ...IS_STUDENT_ROLE_ROW },
+      select: { userId: true },
+    })) as Array<{ userId: string }>;
+    return new Set(rows.map((r) => r.userId));
+  }
+
   private async resolveChildren(
     tx: TenantTx,
     admissionNumbers: string[],
@@ -112,9 +128,21 @@ export class ParentImportService {
         byEmail.set(u.email.toLowerCase(), u.id);
         if (u.contactEmail) byEmail.set(u.contactEmail.toLowerCase(), u.id);
       }
+      // ONLY A PUPIL. The admission-number branch above reads `studentProfile`,
+      // which by construction only exists for a student; this one read `user`
+      // and matched ANYBODY in the school — so a staff or guardian address in
+      // the `studentEmails` column produced a ParentChild row pointing at a
+      // member of staff, and the import reported it as a clean success.
+      // Measured live: `{"linked":1,"errors":0,"unmatchedStudents":0}` for a row
+      // whose "child" was Demo Teacher.
+      const pupils = await this.studentIdsAmong(tx, [...new Set(byEmail.values())]);
       for (const em of emails) {
         const uid = byEmail.get(em.toLowerCase());
-        if (uid) { ids.add(uid); matched++; }
+        // A non-pupil counts as UNMATCHED, not as a link. That is the honest
+        // report — the office asked to attach a guardian to a child and no
+        // child of that description was found — and it is what puts the row in
+        // front of somebody instead of silently attaching the wrong person.
+        if (uid && pupils.has(uid)) { ids.add(uid); matched++; }
       }
     }
     const totalRefs = admissionNumbers.length + emails.length;
@@ -143,6 +171,25 @@ export class ParentImportService {
     studentId: string,
     relationship: string | null,
   ): Promise<boolean> {
+    // THE BACKSTOP, and it is the KIND of thing being attached, not the count.
+    //
+    // This method's own comment reasons about "a column mapped to the wrong
+    // field" and then bounds only how MANY guardians a pupil may have. The
+    // manual link path in LmsService refuses a non-student by name ("X is not a
+    // student") and checks the guardian's role too; neither path here did.
+    // `parent_child` IS the family-scope access table, so a row in it that is
+    // not guardian-of-a-pupil is corrupt authorization data.
+    // The name is read LAZILY, only to word a refusal — the happy path of a
+    // 900-row import must not pay an extra lookup per row for a message nobody
+    // will see.
+    if (!(await this.studentIdsAmong(tx, [studentId])).has(studentId)) {
+      const who = (await tx.user.findFirst({
+        where: { id: studentId },
+        select: { name: true },
+      })) as { name: string } | null;
+      throw new ConflictException(`${who?.name ?? "That person"} is not a student`);
+    }
+
     const existing = (await tx.parentChild.findMany({
       where: { studentId },
       select: { parentId: true },

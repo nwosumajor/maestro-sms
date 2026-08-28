@@ -69,6 +69,25 @@ export const ON_ROLL_STUDENT_ROLE_ROW: Prisma.UserRoleWhereInput = {
 };
 
 /**
+ * IS THIS A PUPIL AT ALL — deliberately without a status filter.
+ *
+ * A different question from the two above, and the difference is load-bearing.
+ * `ON_ROLL_*` answers "who is currently on roll", which is what a headcount and
+ * a bill want. This answers "is this user a pupil", which is what a GUARDIAN
+ * LINK wants: `parent_child` is the family-scope access table, and a link to a
+ * pupil who has since left is legitimate — a leaver keeps their guardians, on
+ * the same reasoning that keeps their name on their own past records.
+ *
+ * Adding `status: ACTIVE` here would refuse a real link, which fails in the
+ * direction of "the child has no guardian" — the failure the check exists to
+ * prevent. It matches LmsService.linkGuardian, which has always checked the
+ * role and not the status; two spellings of one rule is how a pair drifts.
+ */
+export const IS_STUDENT_ROLE_ROW: Prisma.UserRoleWhereInput = {
+  role: { name: STUDENT_ROLE },
+};
+
+/**
  * The billed seat count for one school, in SQL.
  *
  * Counts `user` rather than `user_role` so distinct-user semantics live in the

@@ -2050,6 +2050,66 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### A guardian attached to somebody who is not a pupil
+`resolveChildren` / `link` (`parent/parent-import.service.ts`),
+`IS_STUDENT_ROLE_ROW` (`common/student-scope.ts`). Found by driving a path that
+had never executed: `parent_import_batch` had no rows, so bulk guardian
+onboarding — the highest-consequence RELATIONSHIP write in the product — had
+never once been run.
+`parent_child` IS the family-scope access table. FOUR things write it, and only
+one checked what it was attaching:
+```
+LmsService.linkGuardian     checks BOTH roles -> "X is not a student"
+AdmissionsService.convert   creates the pupil in the same tx -> safe by construction
+ParentImportService.createSingle   ids from the REQUEST BODY, existence checked only
+ParentImportService.approve        bulk rows, nothing checked at all
+```
+The guarded one lives in another MODULE, which is how the asymmetry survived.
+The email branch of `resolveChildren` read `user` and matched ANYBODY in the
+school, while the admission-number branch directly above it reads
+`studentProfile`, which by construction only exists for a pupil. So a staff or
+guardian address in the `studentEmails` column of a spreadsheet attached a
+guardian to a member of staff. Measured live, one row:
+```
+before   {"total":1,"errors":0,"linked":1,"created":1,"unmatchedStudents":0}
+         parent_child: PROBE Guardian -> Demo Teacher (roles: teacher)
+after    {"total":1,"errors":0,"linked":0,"unmatchedStudents":1}
+         and a REAL pupil in the same column still links, linked:1
+```
+// **THE COST IS THE REPORT, NOT ONLY THE ROW.** `linked: 1, errors: 0,
+unmatchedStudents: 0` is a clean import. The office believes the family is
+attached; the actual child has NO guardian, so their absence alerts and invoices
+go nowhere, and nothing anywhere says so. Silent partial success, on a 900-row
+file nobody re-reads.
+// `link()`'s OWN COMMENT reasons about exactly this — "a spreadsheet with a
+repeated admission number, or a column mapped to the wrong field, is exactly how
+one pupil ends up with forty adults attached" — and then bounds how MANY
+guardians a pupil may have. It guarded the COUNT and not the KIND.
+// A NON-PUPIL IS REPORTED AS UNMATCHED, not as an error and not silently
+dropped: the office asked to attach a guardian to a child and no child of that
+description was found, which is what `unmatchedStudents` already means.
+// WHAT THE ACCESS ACTUALLY WAS, measured rather than asserted: `/students`
+returned the teacher by name, and invoices/documents/remarks answered 200 for
+them. Profile, contacts and medical 404 — but only because a teacher happens to
+have no `student_profile`, which is an accident of the data, not a guard.
+// STATUS-AGNOSTIC ON PURPOSE. `IS_STUDENT_ROLE_ROW` has no `status: ACTIVE`,
+unlike its two neighbours: a leaver keeps their guardians, and refusing that
+link would fail in the direction of "the child has no guardian" — the failure
+being fixed. It matches `LmsService.linkGuardian`, which has always checked the
+role and not the status.
+// THE NAME IS READ LAZILY, only to word a refusal — the happy path of a 900-row
+import must not pay a lookup per row for a message nobody will see.
+// GOTCHA, and the gate caught its author: `student-scope.spec` refuses a
+hand-rolled `role: { name: "student" }`, and my first fix wrote one. The right
+answer was not to dodge the literal but to add a NAMED export for a question the
+module did not yet have — "is this a pupil at all", as distinct from "who is on
+roll".
+// GOTCHA in my own probe, and it briefly looked like the fix had broken a real
+link: the SQL that picked a "real pupil" to test with had no school filter, so
+it chose one from ANOTHER TENANT — which `resolveChildren` correctly refused.
+The probe was wrong, not the code. Scope a probe's own fixture query to the
+tenant, or it tests the wrong thing and reports a false regression.
+
 ### A certificate that expired, and a sweep that stopped mentioning it
 `hr/document-expiry.ts` (`expiryStage` / `documentExpiryNotice` /
 `contractEndNotice`, migration `20270114000000`). Found by driving a path that
