@@ -2082,6 +2082,28 @@ than challenging one. A new tenant table could ship `schoolId String?` and pass.
 anything` is NULL rather than TRUE — so such a row is invisible to EVERY tenant.
 Written, acknowledged, readable by nobody. The safe direction, and still a
 silent orphan.
+**GOLDEN RULE #3 HOLDS.** Nothing outside `operator/` and `group/` — the two
+documented cross-tenant surfaces — takes a `schoolId` from a param, query or
+body; every other controller reads it off the Principal. The two SERVICE-level
+takers are the gateway webhook paths, where the tenant comes from a signed
+event's own metadata and RLS then scopes the lookup.
+**GOLDEN RULE #5's READ HALF NOW HAS A GATE.**
+`every-mutation-leaves-a-trail` enforces the WRITE half across 502 routes and
+nothing enforced the read half — the half this file has already been bitten by
+("two cross-tenant reads of minors' data logged nothing"). Checked: all six
+reads of `medical_record` / `emergency_contact` audit, and both callers of
+`collectStudentBundle` audit the disclosure at their own level, so this fixes no
+defect — it makes a verified property hold for the SEVENTH reader.
+// SCOPE DELIBERATELY NARROW, and the narrowness is the design: those two tables
+have no reading that is not a disclosure. A pupil's NAME and CLASS are personal
+data too, and demanding an audit row for every roster render would bury the log
+— the same argument this file already makes for one entry per gate-scan BATCH.
+Widening it to `studentProfile` would do exactly that, which is why
+`profileReviewQueue` (studentId, name, class, stage) is left alone.
+// GOTCHA in my own probe, twice: I grepped for `audit.record` and reported eight
+unaudited PII reads — `SisService` audits through `this.log(...)`, so every one
+was false. And my first window was a fixed 45 lines rather than the enclosing
+METHOD, which is the bound this repo already records twice.
 // THE CARVE-OUT IS NAMED IN BOTH PLACES NOW — in Golden Rule #1 itself and in
 the gate — and the gate REQUIRES it to still exist, so an exemption cannot
 outlive the table it was granted for. Same treatment the seven RLS-exempt
