@@ -196,7 +196,7 @@ export class AttendanceService {
             "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
           );
         }
-        await this.assertAllEnrolled(tx, classId, input.records);
+        await this.assertAllEnrolled(tx, classId, input.records, date, schoolNow);
       });
       const req = (await this.workflow.createRequest(p, {
         type: "ATTENDANCE_AMENDMENT",
@@ -219,7 +219,7 @@ export class AttendanceService {
           "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
         );
       }
-      await this.assertAllEnrolled(tx, classId, input.records);
+      await this.assertAllEnrolled(tx, classId, input.records, date, schoolNow);
       return this.applyRegister(tx, p.schoolId, p.userId, classId, date, input.records, { makerChecker: false });
     });
 
@@ -459,19 +459,49 @@ export class AttendanceService {
   }
 
   /** Every marked student must be enrolled in the class. */
-  private async assertAllEnrolled(tx: TenantTx, classId: string, records: MarkInput["records"]) {
-    // ACTIVE only. A pupil who has left — WITHDRAWN, TRANSFERRED, PROMOTED
-    // out or GRADUATED — must not still appear on today's register for a
-    // teacher to mark present. Every other reader in the app already filters;
-    // these two were missed when enrolment gained a status.
+  private async assertAllEnrolled(
+    tx: TenantTx,
+    classId: string,
+    records: MarkInput["records"],
+    date: Date,
+    schoolNow: Date,
+  ) {
+    // WHO WAS IN THIS CLASS **ON THE DAY THE REGISTER IS FOR**.
+    //
+    // ACTIVE-only is right for TODAY: a pupil who has left — WITHDRAWN,
+    // TRANSFERRED, PROMOTED out or GRADUATED — must not appear on today's
+    // register for a teacher to mark present.
+    //
+    // It is WRONG for a PAST date, and the register is writable up to the term
+    // lock. A pupil who moves class mid-term takes their enrolment row with
+    // them, so the days they DID attend became uncorrectable. Measured live on
+    // one pupil and one date: 201 while ACTIVE, then
+    // `400 "Student … is not enrolled in this class"` after the move — about a
+    // child who was in that class on that day and was marked present.
+    //
+    // That is also a refusal making an untrue POSITIVE claim about the past, the
+    // same shape as the discipline filing that told a pupil their classmate was
+    // "not in this school".
+    //
+    // `enrolledAt <= the register's day` is the most the schema can answer:
+    // an enrolment records when it BEGAN and never when it ended, so a pupil who
+    // joined AFTER that day is still correctly refused, and one who has since
+    // left is not.
+    const isPast = dayUtc(date) < dayUtc(schoolNow);
     const enrolled = await tx.enrollment.findMany({
-      where: { classId, status: "ACTIVE" },
+      where: isPast
+        ? { classId, enrolledAt: { lte: new Date(dayUtc(date) + 86_400_000 - 1) } }
+        : { classId, status: "ACTIVE" },
       select: { studentId: true },
     });
     const ids = new Set(enrolled.map((e: { studentId: string }) => e.studentId));
     for (const r of records) {
       if (!ids.has(r.studentId)) {
-        throw new BadRequestException(`Student ${r.studentId} is not enrolled in this class`);
+        throw new BadRequestException(
+          isPast
+            ? `Student ${r.studentId} was not in this class on that date`
+            : `Student ${r.studentId} is not enrolled in this class`,
+        );
       }
     }
   }

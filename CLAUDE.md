@@ -2024,6 +2024,40 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A register that could not be corrected once the pupil changed class
+`assertAllEnrolled` accepted only ACTIVE enrolments, and its comment gives the
+right reason for the wrong scope: "a pupil who has left must not appear on
+TODAY's register". The register is writable for any date up to the term lock,
+and a pupil who moves class mid-term — streaming, a discipline transfer, a
+withdrawal — takes their single enrolment row with them, so the days they DID
+attend became uncorrectable.
+Measured live, same pupil, same date, one field changed between the two calls:
+```
+enrolment ACTIVE      POST /classes/:id/attendance 2026-08-10  ->  201
+enrolment PROMOTED    same call, same date                     ->  400
+                      "Student … is not enrolled in this class"
+```
+They were in that class on that day and were marked present. It is also a
+refusal making an untrue POSITIVE claim about the past — the same shape as the
+discipline filing that told a pupil their classmate was "not in this school" —
+so the past-date wording is now "was not in this class on that date".
+// **THE QUESTION IS AS AT THE REGISTER'S DAY, NOT NOW.** For a PAST date the
+check is `enrolledAt <= that day`, whatever the enrolment's current status; for
+TODAY it stays ACTIVE-only, and that half is asserted so the original rule
+cannot be lost. Live after: past 201, today still 400.
+// `enrolledAt <= day` IS THE MOST THE SCHEMA CAN ANSWER, and it is worth being
+explicit about the limit: `enrollment` records when it BEGAN and never when it
+ENDED, so a pupil who joined AFTER the day is still correctly refused, and one
+who has since left is not. A pupil who joined ON the day itself is accepted —
+a boundary a `lt` would get wrong, and a test pins it.
+// WHY IT MATTERS BEYOND THE ERROR: attendance feeds the rate printed on a
+report card, and the pupils this hits are exactly the ones whose records get
+scrutinised — a child who moved class or left mid-term.
+// GOTCHA in the probe, and the reason the cleanup was scoped by TIMESTAMP: the
+class already held an unrelated `attendance_session` for 2026-08-18 written by a
+gate scan on that day. Deleting "the sessions for this class" would have taken
+real demo data with it.
+
 ### The receivables aging reconciles, and the refund-sign class is closed
 Two investigations that found nothing, recorded because a negative nobody writes
 down is one the next person repeats.
