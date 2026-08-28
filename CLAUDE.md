@@ -2024,6 +2024,41 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The fee reminder counted a refund as a payment
+`sendFeeReminders` summed every POSTED payment row as a POSITIVE to work out
+what a family still owes. A REFUND is a POSTED payment row. Measured live on an
+invoice of NGN 50,000 with NGN 100 paid and NGN 400 refunded — **NGN 50,300
+genuinely outstanding** — the reminder told the family:
+```
+before   "has an outstanding balance of NGN 49,500.00"
+after    "has an outstanding balance of NGN 50,300.00"
+```
+Short by TWICE the refund: once for not adding it back, once for subtracting it.
+Too low is the dangerous direction, as this file already records — "a balance
+that is too high is an argument at the bursar's desk; one that is too low is
+money the school never asks for" — and this is the message that asks for it.
+// **A FIFTH SITE, AND THE GATE COULD NOT SEE IT.**
+`a-balance-a-sum-cannot-express` refuses a `payment.aggregate`/`groupBy` summing
+`amountMinor`, because `_sum` cannot express a sign. This was a `findMany` with
+a HAND-ROLLED reduce, which the gate never looked at — and the entry claiming
+"every one of the fifteen HAND-WRITTEN copies was checked and is correct" was
+wrong about this one. The gate now also refuses a `payment.findMany` that
+selects `amountMinor` WITHOUT `kind`: selecting the kind is the tell, because a
+caller that has it can express the sign and one that does not cannot, however
+its loop is written. Mutation-validated against the exact shipped reduce, which
+it names by line.
+// A HYPOTHESIS REFUTED BY THE PROBE, recorded so it is not re-chased: the same
+method computes `const today = new Date()` — an INSTANT — and filters
+`dueDate < today` on a `@db.Date`, which looked like "an invoice due TODAY is
+reported overdue". It is not: Prisma coerces the comparison to a DATE, so
+due-today is correctly not overdue. Verified by setting an invoice due today and
+running the overdue-only sweep — it was excluded. The reading was wrong and the
+measurement said so.
+// PROBE ARTEFACT, stated rather than hidden: clearing reminders between runs
+used an UNSCOPED `delete from notification where type = 'FEE_REMINDER'`. Any
+pre-existing fee reminders in the demo data went with it. Scope a cleanup to the
+rows the probe created.
+
 ### A task due date that had passed, in the same grey as one due next week
 `TaskBoard` rendered `due {shortDate(t.dueAt)}` in muted grey whether the date
 was next week or three weeks ago, and nothing else in the product chases a task

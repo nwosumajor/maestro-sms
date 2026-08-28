@@ -47,11 +47,54 @@ const NOT_A_BALANCE: Record<string, string> = {
 
 const AGGREGATE = /\b(?:tx|db|client)\.payment\.(?:aggregate|groupBy)\s*\(/g;
 
+/**
+ * A `payment.findMany` selecting `amountMinor` WITHOUT `kind`.
+ *
+ * The aggregate rule above missed a whole shape: a hand-rolled reduce. The fee
+ * REMINDER summed every POSTED row as a positive, so a refund made a family look
+ * like they owed less — measured live, an invoice with NGN 50,300 outstanding
+ * reminded them of **NGN 49,500**, short by twice the refund, in the message
+ * that asks them to pay.
+ *
+ * Selecting `kind` is the tell: a caller that has it can express the sign, and
+ * `netPaidOf` is what does. A caller that does not select it CANNOT, however its
+ * loop is written.
+ */
+const FIND_MANY = /\b(?:tx|db|client)\.payment\.findMany\s*\(/g;
+
 describe("a balance a _sum cannot express", () => {
   const files = walkSources(SRC);
 
   it("scanned a believable number of sources", () => {
     expect(files.length).toBeGreaterThan(200);
+  });
+
+  it("no payment.findMany sums amountMinor without knowing the kind", () => {
+    const offenders: string[] = [];
+    let seen = 0;
+    for (const file of files) {
+      const src = readFileSync(file, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^[ \t]*\/\/.*$/gm, "");
+      // net-paid.ts is where the sign IS expressed.
+      if (file.endsWith("net-paid.ts")) continue;
+      for (const m of src.matchAll(FIND_MANY)) {
+        seen += 1;
+        // The call's own argument object, to its matching brace.
+        let i = m.index + m[0].length, depth = 0, end = i;
+        for (; end < src.length; end++) {
+          if (src[end] === "(") depth += 1;
+          else if (src[end] === ")") { if (depth === 0) break; depth -= 1; }
+        }
+        const call = src.slice(i, end);
+        if (!/amountMinor/.test(call)) continue;
+        if (/\bkind\b/.test(call)) continue;
+        const line = src.slice(0, m.index).split("\n").length;
+        offenders.push(`${file.replace(SRC + "/", "")}:${line}`);
+      }
+    }
+    expect(seen).toBeGreaterThan(3);
+    expect(offenders).toEqual([]);
   });
 
   it("no aggregate over payment answers 'what has this been paid'", () => {

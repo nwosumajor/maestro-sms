@@ -37,6 +37,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { PaystackService } from "../payments/paystack.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { dateWindow } from "../common/status-filter";
+import { netPaidByInvoice } from "./net-paid";
 
 /** Roles that see ALL billing rows in the tenant. */
 /** Invoices per page. One issue run for a class is ~30-40 rows, so a page shows a
@@ -227,15 +228,25 @@ export class FeesService {
         select: { id: true, studentId: true, reference: true, totalMinor: true, dueDate: true, currency: true },
         take: 2000,
       });
-      // Sum paid per invoice to compute the outstanding balance.
+      // NET paid — POSTED payments MINUS POSTED refunds.
+      //
+      // This summed every POSTED row as a positive, so a refund made the family
+      // look like they owed LESS. Measured live: an invoice of NGN 50,000 with
+      // NGN 100 paid and NGN 400 refunded — NGN 50,300 genuinely outstanding —
+      // reminded the family they owed **NGN 49,500**, short by twice the refund.
+      //
+      // Too low is the dangerous direction, as the fees service already records:
+      // a balance that is too high is an argument at the bursar's desk, one that
+      // is too low is money the school never asks for. And this is the message
+      // that asks for it.
+      //
+      // A FIFTH site for this, and the gate could not see it: it refuses a
+      // `payment.aggregate`/`groupBy` summing amountMinor, and this was a
+      // `findMany` with a hand-rolled reduce.
       const ids = invoices.map((i: { id: string }) => i.id);
-      const payments = ids.length
-        ? await tx.payment.findMany({ where: { invoiceId: { in: ids }, status: "POSTED" }, select: { invoiceId: true, amountMinor: true } })
-        : [];
-      const paidByInvoice = new Map<string, number>();
-      for (const pay of payments as Array<{ invoiceId: string; amountMinor: number }>) {
-        paidByInvoice.set(pay.invoiceId, (paidByInvoice.get(pay.invoiceId) ?? 0) + pay.amountMinor);
-      }
+      const paidByInvoice = ids.length
+        ? await netPaidByInvoice(tx, { invoiceId: { in: ids } })
+        : new Map<string, number>();
       return invoices
         .map((inv: { id: string; studentId: string; reference: string; totalMinor: number; dueDate: Date; currency: string }) => ({
           ...inv,
