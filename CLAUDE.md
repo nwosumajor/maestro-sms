@@ -2050,6 +2050,41 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### The role most likely to be over-exposed was the one never tested
+`EMAIL` / `emailFor` (`scripts/permission-matrix.mjs`). Straight after fixing the
+two probes that passed without a session, running the THIRD one — the one that
+had got that right — showed `skip junior_admin — no session (missing account, or
+the 10/min login limiter)`. It skipped on a quiet stack with the limiter clear,
+so it was never the limiter.
+Seven multi-word roles were mapped to their demo address by hand
+(`head_teacher` -> `headteacher`) and `junior_admin`, added later, was not among
+them. The probe reached for `junior_admin@demo.school`; the seed creates
+`junioradmin@demo.school`. **So the newest and most deliberately-restricted role
+in the product — the junior-admin tier that exists precisely because it must NOT
+hold `rbac.manage`, `fee.approve` or `workflow.review` — had never once been
+checked for over-exposure**, and the skip line blamed the limiter, so there was
+nothing to investigate.
+```
+before   probed 3440 role/route pairs (1 role(s) skipped)   PASS
+after    probed 3655 role/route pairs (0 role(s) skipped)   PASS
+```
+215 more pairs, exactly one full route set. **The result is a clean negative —
+junior_admin is not over-exposed — but it is now PROVEN rather than
+unexamined**, which is the whole point of running it.
+// THE ADDRESS IS DERIVED, not listed: strip the underscore, with the two that
+genuinely differ (`school_admin` -> admin, `hr_clerk` -> hr) named. A list typed
+by hand rots the moment a role is added — the same rot this file records for the
+role COUNT in prose and for the "128 tables" sweep denominator. A rule does not.
+// A RETRY IS WHAT SEPARATES THE TWO CAUSES. "No session" covered a TRANSIENT
+limiter (re-run and it is fine) and a PERMANENT missing account (nobody ever
+notices). One retry tells them apart, so only the permanent one survives to the
+summary — and it now reads `INCOMPLETE ... were never signed in and so were not
+tested`, exit 3, instead of `PASS` with the skip on the line above. The route
+smoke already worded its own headline that way; this is the third asymmetry
+across these four scripts in one session.
+// Mutation-validated by pointing a role at an address that does not exist: the
+run names the address it tried and exits 3.
+
 ### The isolation probe passed while nobody was signed in
 `classify` (`scripts/isolation-probe.mjs`), `abortIfUnauthenticated`
 (`scripts/family-scope-probe.mjs`). Found by RUNNING the four probes to check

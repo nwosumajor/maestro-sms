@@ -157,8 +157,18 @@ function client() {
   };
 }
 
-const EMAIL = { school_admin: "admin", hr_clerk: "hr", hr_manager: "hrmanager", head_teacher: "headteacher",
-  head_admin: "headadmin", head_warden: "headwarden", head_driver: "headdriver" };
+// The seed's demo logins drop the underscore (`head_teacher` -> `headteacher`),
+// so the address is DERIVED and only the two that genuinely differ are listed.
+//
+// It used to be seven hand-written entries, and `junior_admin` — added later —
+// was not among them. So the probe reached for `junior_admin@demo.school`,
+// which does not exist, and reported `skip junior_admin`. The newest and most
+// deliberately-restricted role in the product (no rbac.manage, no fee.approve,
+// no workflow.review) had NEVER been covered by the permission matrix, and the
+// skip blamed the login limiter, so there was nothing to investigate. A list
+// typed by hand rots the moment a role is added; a rule does not.
+const EMAIL = { school_admin: "admin", hr_clerk: "hr" };
+const emailFor = (role) => `${EMAIL[role] ?? role.replace(/_/g, "")}@demo.school`;
 
 const main = async () => {
   const consts = permissionConstants();
@@ -170,12 +180,23 @@ const main = async () => {
   const c = client();
   const over = [];
   let probed = 0, skipped = 0;
+  const uncovered = [];
   for (const [role, grants] of ROLES) {
-    await c.login(`${EMAIL[role] ?? role}@demo.school`);
-    // Prove the session took. A rate-limited or missing account answers 401 to
-    // everything, which would otherwise read as "refused" for every route.
-    if ((await c.get("notifications")).status === 401) {
-      console.log(`  skip ${role} — no session (missing account, or the 10/min login limiter)`);
+    // A RETRY IS WHAT SEPARATES THE TWO CAUSES. "No session" was reported as
+    // one thing covering a TRANSIENT limiter (re-run and it is fine) and a
+    // PERMANENT missing account (nobody will ever notice). Retrying once tells
+    // them apart, and only the permanent one should survive to the summary.
+    let ok = false;
+    for (const attempt of [0, 1]) {
+      if (attempt) await new Promise((res) => setTimeout(res, 7000));
+      await c.login(emailFor(role));
+      // Prove the session took. A rate-limited or missing account answers 401
+      // to everything, which would otherwise read as "refused" for every route.
+      if ((await c.get("notifications")).status !== 401) { ok = true; break; }
+    }
+    if (!ok) {
+      console.log(`  SKIP ${role} — no session as ${emailFor(role)} after a retry, so this role is UNCOVERED`);
+      uncovered.push(role);
       skipped += 1;
       continue;
     }
@@ -193,6 +214,18 @@ const main = async () => {
   }
 
   console.log(`\nprobed ${probed} role/route pairs (${skipped} role(s) skipped)`);
+  if (over.length === 0 && uncovered.length > 0) {
+    // A SKIPPED ROLE IS NOT A PASSED ONE, and the headline has to say so — the
+    // route smoke already words its own that way. A bare PASS with the skip on
+    // the line above is how `junior_admin` went uncovered without anyone
+    // noticing: the probe's whole value is that its output is believed.
+    console.log(
+      `INCOMPLETE — nothing over-exposed in what WAS probed, but ${uncovered.length} role(s) ` +
+      `were never signed in and so were not tested: ${uncovered.join(", ")}.\n` +
+      "  A retry already ruled out the login limiter, so the account is missing or unusable.",
+    );
+    process.exit(3);
+  }
   if (over.length === 0) {
     console.log("PASS — no role was served rows from an endpoint whose permission it lacks");
     process.exit(0);

@@ -922,6 +922,12 @@ problem. Two things to know before you do:
   (`PROBE ABORTED ... no session, so nothing was tested`) at sign-in and again
   if the session dies mid-run. If you see that, wait for the limiter and re-run;
   do not read the earlier lines as a partial pass.
+- The permission matrix RETRIES a role once before giving up, which separates
+  the limiter (transient) from an account that does not exist (permanent). A
+  role it still cannot sign in as is reported as `INCOMPLETE ... were never
+  signed in and so were not tested`, exit 3 — not `PASS`. That is how
+  `junior_admin` went uncovered: its demo address was missing from a hand-kept
+  list, the probe skipped it, and the skip blamed the limiter.
 
 **Rehearse the restore drill quarterly.** A backup you have never restored is not
 a backup — and an incident is the worst possible moment to discover that.
