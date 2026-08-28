@@ -2053,6 +2053,53 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### An invite link that was a session
+`verifyToken` (`auth/jwt.ts`). Found by asking what ELSE this platform signs
+with `AUTH_SECRET`, after checking that the step-up token is properly bound to
+user, school and type. There are four purpose-scoped kinds, and `verifyToken`
+accepted `sub` for `userId` and `schoolId` for `school_id` and checked nothing
+else — which is the shape of all of them:
+```
+invite          { sub, school_id, purpose: "invite"     }   7 days,  in a URL
+password reset  { sub, school_id, purpose: "pwreset"    }  30 min,   in a URL
+step-up         { sub, schoolId,  typ: "stepup"         }   5 min,   a header
+document upload { sub, school_id, purpose: "doc-upload" }   7 days,  in a URL
+```
+Measured live with an INVITE token as `Authorization: Bearer`:
+```
+garbage token        -> 401
+wrong-secret token   -> 401
+INVITE token         -> 403     denied on PERMISSIONS, i.e. it AUTHENTICATED
+GET /auth/refresh    -> 200     roles ["teacher"], 56 permissions
+```
+**A link emailed to somebody, valid for seven days, was a credential for that
+person's full authority.** A forwarded message, browser history, a shared
+device, a proxy log — and it kept working AFTER the invite was used, because
+single-use is enforced at the accept endpoint (`passwordChangedAt IS NULL`),
+which this path never touches. The 30-minute reset link is the same shape.
+// **THE CLAIM WAS WRITTEN DOWN AND WAS HALF TRUE.** `invite.ts` opens: "A token
+is scoped by `purpose: 'invite'` so a session JWT can never be replayed here
+(**and vice versa** — the API pins algorithms + checks the purpose)." The first
+half IS enforced — `verifyInviteToken` requires the purpose. The vice versa was
+enforced by nothing. Same shape as the attendance-rate comments that asserted an
+agreement which had never held.
+// **IT REFUSES THE MARKER, NOT A LIST OF VALUES.** A list of known purposes to
+reject is one the next token kind gets added without, and this check has to hold
+for tokens nobody has written yet. Session bearers carry NEITHER claim —
+`apps/web/lib/apiToken.ts` mints `userId/school_id/roles(/imp)` and the
+operator's impersonation token the same — so "carries a marker at all" is the
+rule, and it needs no maintenance.
+// THE REFUSAL IS THE GENERIC ONE, and a test pins that the two messages are
+byte-identical: a caller must not learn their token was VALID but of the wrong
+kind, which is the 404-not-403 reasoning applied to authentication.
+// EVERY PURPOSE-SCOPED TOKEN STILL WORKS FOR ITS OWN PURPOSE — each has its own
+verifier (`verifyInviteToken`, `verifyPasswordResetToken`, `verifyStepUp`,
+`verifyDocumentUploadToken`), none of which this touches. Verified live after:
+session bearer 200, step-up mint issues, a step-up-gated route 403 without the
+header and 201 with it.
+Mutation-validated three ways: remove the check, check only `purpose` (missing
+the step-up marker), and make the refusal distinguishable from a forgery.
+
 ### A ledger that was quietly ten thousand rows long
 `journalCsv` (`fees/fee-ops.service.ts`). The third artifact asked the same
 question, and the answer was a `take: 10_000` with nothing said about it. The

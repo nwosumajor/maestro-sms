@@ -3,8 +3,18 @@
 // =============================================================================
 // Signed HS256 with the same AUTH_SECRET the session tokens use (one secret, one
 // trust root). A token is scoped by `purpose: "invite"` so a session JWT can
-// never be replayed here (and vice versa — the API pins algorithms + checks the
-// purpose). Single-use is enforced at ACCEPT time, not here: an invite is only
+// never be replayed here.
+//
+// // GOTCHA: this comment used to add "and vice versa — the API pins algorithms
+// + checks the purpose", and the vice versa was NOT true. `verifyToken` accepted
+// `sub` for `userId` and checked no marker, so an invite token — seven days, in
+// a URL, in somebody's inbox — authenticated as a SESSION: live, it returned
+// 403 rather than 401 on a permission-gated route, and `GET /auth/refresh`
+// handed back the target's full roles and 56 permissions. `verifyToken` now
+// refuses any token carrying a `purpose` or `typ` claim at all, so the property
+// this line asserts is enforced in both directions rather than in one.
+//
+// Single-use is enforced at ACCEPT time, not here: an invite is only
 // honoured while the account has never set a password (passwordChangedAt IS
 // NULL), so a used link is dead even inside its 7-day window.
 
