@@ -2053,6 +2053,57 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### The bundle said COMPLETE again, and a pupil is also a USER
+`collectStudentBundle` + `every-student-table-is-accounted-for.spec.ts`. Found by
+continuing the reconciliation: for one real pupil, counting the rows every table
+actually holds about them and comparing that against the artifact.
+Everything matched EXACTLY — attendance 193 across ten monthly partitions,
+grades 27, notifications 55, enrolments 1, profile 1 — except one line:
+```
+thread_participant.userId = 3      in no section, and in no exclusion
+```
+The pupil is in three message threads and the bundle said `complete: true`.
+// **THE SAME DEFECT, ONE LEVEL FURTHER UP, AND THE FILE SAYS SO ABOUT ITSELF.**
+The previous fix's comment reads: this list "used to name one exclusion while
+the bundle silently read 8 of the 33 tables keyed on a pupil ... it had simply
+been left one level up, at the level of whole categories rather than of fields."
+It was left one level up AGAIN. Both the bundle and its gate ask for models with
+a `studentId` column — the right question for most of the schema and blind to
+the rest, because a pupil's conversations, library loans, movement scans and
+delivery preferences are keyed on `userId`, `borrowerId` or `memberId`.
+```
+before   20 sections,  9 excluded categories
+after    23 sections, 14 excluded categories   messages: 3, matching the table
+```
+// MESSAGES ARE INCLUDED, on the reasoning that added remarks and trait ratings:
+the family already reads every one of these threads in the app, so withholding
+them protected nothing and made the bundle wrong. Other participants' words stay
+in — excluding them yields half a conversation, which is less use and no more
+private, since the family has already seen it.
+// FOUR NEW EXCLUSIONS ARE DECISIONS WITH REASONS, not omissions.
+`disciplineRecords` is the sharpest: a complaint naming the pupil is
+confidential to staff while it is handled and releasing it here would identify
+the reporter — the control this file already records under "a pupil told the
+classmate in front of them is not in this school" — so the reason names the
+controller as the route instead. `movementRecords`, `gamesAndCompetitions`,
+`accountRecords` and `alumniRecord` likewise.
+// AND ONE REASON NAMED HALF ITS OWN CATEGORY: `boardingAndTransport` listed
+only hostel records, so bus assignments and daily boarding scans were inside a
+category whose text did not mention them. The same silent gap, in a sentence.
+// THE GATE NOW HAS THREE BUCKETS and `STAFF_ONLY` is a real answer, not an
+escape hatch — a payslip or a leave request cannot belong to a pupil, and saying
+so is what stops the list becoming a dumping ground. 21 staff-only models named.
+// GOTCHA: `subjectId` is a FALSE FRIEND. In `IssuedCertificate` and
+`DocumentSubmission` it is the person; in `CbtQuestionBank`, `TimetableEntry`,
+`LmsContent`, `SubjectSyllabus` and `ClassSubjectTeacher` it is the school
+SUBJECT. Treating it as a person key drags five timetable models into a privacy
+manifest they have no business in, so it is deliberately not a key here.
+// GOTCHA, for the sixth time in this repo: the existing fixture had no
+`threadParticipant`/`message`/`bookLoan`, so four tests failed with "Cannot read
+properties of undefined" — a stub describing something the database cannot
+produce. Mutation-validated both ways: an unclassified person-keyed model, and a
+bucket named in the gate that the artifact never declares.
+
 ### The rule was written down 290 lines above, and the sweep did not follow it
 `lateFeeSweep` (`fees/fee-ops.service.ts`). Found by continuing the database
 reconciliation that produced the entry below: an invoice whose HEADER total

@@ -52,6 +52,15 @@ function makeTx(notificationCount: number) {
       studentCreditEntry: { findMany: jest.fn().mockResolvedValue([]) },
       studentVirtualAccount: { findMany: jest.fn().mockResolvedValue([]) },
       integrityConsent: { findMany: jest.fn().mockResolvedValue([]) },
+      // A PUPIL IS ALSO A USER. The bundle reads three more of their records —
+      // their own conversations, library loans and delivery preferences — which
+      // are keyed on `userId`/`borrowerId` and so were invisible both to the
+      // bundle and to the gate that guards it. A real TenantTx always has these.
+      threadParticipant: { findMany: jest.fn().mockResolvedValue([]) },
+      messageThread: { findMany: jest.fn().mockResolvedValue([]) },
+      message: { findMany: jest.fn().mockResolvedValue([]) },
+      bookLoan: { findMany: jest.fn().mockResolvedValue([]) },
+      notificationPreference: { findMany: jest.fn().mockResolvedValue([]) },
       studentIntegrityExemption: { findMany: jest.fn().mockResolvedValue([]) },
     } as unknown as TenantTx,
     findMany,

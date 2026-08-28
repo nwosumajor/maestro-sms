@@ -116,6 +116,9 @@ export class PrivacyService {
       virtualAccounts,
       consents,
       exemptions,
+      messages,
+      libraryLoans,
+      notificationPreferences,
     ] = await Promise.all([
       tx.enrollment.findMany({ where: { studentId } }),
       tx.attendanceRecord.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
@@ -170,6 +173,58 @@ export class PrivacyService {
       // a family is most likely to want proof of.
       tx.integrityConsent.findMany({ where: { studentId } }),
       tx.studentIntegrityExemption.findMany({ where: { studentId } }),
+      // A PUPIL IS ALSO A USER, and the manifest had been built only over the
+      // tables keyed on `studentId`.
+      //
+      // The block below this one says the previous version "named one exclusion
+      // while the bundle silently read 8 of the 33 tables keyed on a pupil ...
+      // it had simply been left one level up". The same thing was true one level
+      // up AGAIN: a pupil's own conversations, library loans and delivery
+      // preferences are keyed on `userId`, so neither the bundle nor the gate
+      // that guards it could see them. Found by counting the rows a real pupil
+      // actually has, table by table, and reconciling against the artifact:
+      // every section matched exactly except `thread_participant = 3`, which
+      // appeared in no section and in no exclusion.
+      //
+      // MESSAGES ARE INCLUDED on the same reasoning that added remarks and
+      // trait ratings: the family already reads every one of these threads in
+      // the app, so withholding them protected nothing and made the bundle
+      // wrong. Other participants' words are part of a conversation the family
+      // has already seen; excluding them would produce half a conversation,
+      // which is less use and no more private.
+      tx.threadParticipant
+        .findMany({ where: { userId: studentId }, select: { threadId: true } })
+        .then(async (parts: Array<{ threadId: string }>) => {
+          const ids = parts.map((x) => x.threadId);
+          if (ids.length === 0) return [];
+          const [threads, messages] = await Promise.all([
+            tx.messageThread.findMany({
+              where: { id: { in: ids } },
+              select: { id: true, subject: true, createdAt: true },
+            }),
+            tx.message.findMany({
+              where: { threadId: { in: ids } },
+              select: { id: true, threadId: true, senderId: true, body: true, createdAt: true },
+              orderBy: { createdAt: "asc" },
+            }),
+          ]);
+          const byThread = new Map<string, typeof messages>();
+          for (const m of messages) (byThread.get(m.threadId) ?? byThread.set(m.threadId, []).get(m.threadId)!).push(m);
+          return (threads as Array<{ id: string; subject: string | null; createdAt: Date }>).map((t) => ({
+            ...t,
+            messages: byThread.get(t.id) ?? [],
+          }));
+        }),
+      // What the pupil borrowed, and what it cost them. The family already sees
+      // any fine on an invoice in this same bundle.
+      tx.bookLoan.findMany({
+        where: { borrowerId: studentId },
+        select: { id: true, bookId: true, issuedAt: true, dueAt: true, returnedAt: true, fineMinor: true },
+        orderBy: { issuedAt: "desc" },
+      }),
+      // Their own delivery choices — small, plainly theirs, and the record of a
+      // preference they set themselves.
+      tx.notificationPreference.findMany({ where: { userId: studentId } }),
     ]);
 
     // A limit that was REACHED means there may be more; a limit that was not
@@ -200,6 +255,9 @@ export class PrivacyService {
       virtualAccounts,
       consents,
       exemptions,
+      messages,
+      libraryLoans,
+      notificationPreferences,
       // What this bundle does and does NOT contain, stated IN the artifact. A
       // recipient cannot otherwise tell whether "medical": "(not included)"
       // means the pupil has no record or that the exporter could not read one.
@@ -232,6 +290,9 @@ export class PrivacyService {
           "virtualAccounts",
           "consents",
           "exemptions",
+          "messages",
+          "libraryLoans",
+          "notificationPreferences",
         ],
         // And what is NOT, with the reason. Integrity telemetry is about this
         // pupil and is deliberately not served to families here: the platform's
@@ -264,7 +325,7 @@ export class PrivacyService {
           {
             section: "boardingAndTransport",
             reason:
-              "Hostel allocation, hostel attendance and exeat records are held by the boarding house. Ask the school's data controller for them.",
+              "Hostel allocation, hostel attendance and exeat records are held by the boarding house, and bus route assignments and daily boarding scans by the transport office. The category was named boardingAndTransport and its reason listed only the boarding half, which is the same silent gap this manifest exists to close. Ask the school's data controller for either.",
           },
           {
             section: "examLogistics",
@@ -290,6 +351,31 @@ export class PrivacyService {
             section: "erasureRequests",
             reason:
               "Requests made under this same right are governance records of the request itself, not data about the pupil. The school's data controller holds them.",
+          },
+          {
+            section: "disciplineRecords",
+            reason:
+              "A disciplinary complaint naming this pupil is confidential to school staff while it is handled, and releasing it here would identify whoever reported it. This is a deliberate control, not an oversight — ask the school's data controller, who can release it with the reporter redacted.",
+          },
+          {
+            section: "movementRecords",
+            reason:
+              "ID-card scans at the gate, library and exam hall are an operational movement log kept by the school. Ask the school's data controller for a pupil's own scan history.",
+          },
+          {
+            section: "gamesAndCompetitions",
+            reason:
+              "Scores, standings and match histories from the classroom games are held per fixture and are visible to the pupil in the games area while a competition is running.",
+          },
+          {
+            section: "accountRecords",
+            reason:
+              "The roles the account holds, the terms it has accepted and any certificates or ID cards issued to the pupil are records of the account and of school-issued documents rather than findings about the pupil. Ask the school's data controller for copies.",
+          },
+          {
+            section: "alumniRecord",
+            reason:
+              "An alumni record is created after a pupil leaves and is maintained by the alumni office. Ask the school's data controller for it.",
           },
           {
             section: "crossSchoolCompetition",

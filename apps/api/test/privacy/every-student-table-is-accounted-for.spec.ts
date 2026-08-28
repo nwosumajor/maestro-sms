@@ -91,6 +91,94 @@ const ACCOUNTED: Record<string, string> = {
   UltimateConsent: "crossSchoolCompetition",
 };
 
+/**
+ * A PUPIL IS ALSO A USER, and this gate could not see that.
+ *
+ * It derives models with a `studentId` column, which is the right question for
+ * most of the schema and blind to the rest: a pupil's own conversations,
+ * library loans, movement scans and delivery preferences are keyed on `userId`,
+ * `borrowerId` or `memberId`. Found by counting the rows one real pupil
+ * actually has, table by table, and reconciling against the artifact — every
+ * section matched exactly except `thread_participant = 3`, which appeared in no
+ * section and in no exclusion while the bundle said `complete: true`.
+ *
+ * So the person-keyed models are classified too. Three buckets, and STAFF_ONLY
+ * is a real answer rather than an escape hatch: a payslip or a leave request
+ * cannot belong to a pupil, and saying so is what stops the list becoming a
+ * dumping ground.
+ */
+const STAFF_ONLY = "(staff-only: a pupil can hold no row here)";
+
+const PERSON_KEYED: Record<string, string> = {
+  // --- exported, as a named section -----------------------------------------
+  Notification: "notifications",
+  ThreadParticipant: "messages",
+  BookLoan: "libraryLoans",
+  NotificationPreference: "notificationPreferences",
+  // --- excluded, with a stated reason ---------------------------------------
+  DisciplineComplaint: "disciplineRecords",
+  ScanEvent: "movementRecords",
+  TransportAssignment: "boardingAndTransport",
+  TransportBoarding: "boardingAndTransport",
+  Alumnus: "alumniRecord",
+  UserRole: "accountRecords",
+  LegalAcceptance: "accountRecords",
+  IssuedCertificate: "accountRecords",
+  DocumentSubmission: "accountRecords",
+  GamePlayer: "gamesAndCompetitions",
+  GameResult: "gamesAndCompetitions",
+  Standing: "gamesAndCompetitions",
+  TypingRacer: "gamesAndCompetitions",
+  HangmanPlayer: "gamesAndCompetitions",
+  LiveQuizParticipant: "gamesAndCompetitions",
+  LiveQuizAnswer: "gamesAndCompetitions",
+  UltimateEntryLink: "crossSchoolCompetition",
+  // Anonymous BY DESIGN — a response cannot be attributed back without undoing
+  // the promise made to the pupil when they answered.
+  PollVote: "gamesAndCompetitions",
+  FormResponse: "gamesAndCompetitions",
+  // --- staff-only -----------------------------------------------------------
+  Appraisal: STAFF_ONLY,
+  BiometricEnrollment: STAFF_ONLY,
+  DisciplinaryCase: STAFF_ONLY,
+  DutyAssignment: STAFF_ONLY,
+  Employee: STAFF_ONLY,
+  EmploymentChangeRequest: STAFF_ONLY,
+  LeaveBalance: STAFF_ONLY,
+  LeaveRequest: STAFF_ONLY,
+  LoanRepayment: STAFF_ONLY,
+  PayComponent: STAFF_ONLY,
+  Payslip: STAFF_ONLY,
+  PlatformDelegation: STAFF_ONLY,
+  PlatformFeedback: STAFF_ONLY,
+  PrivilegeGrant: STAFF_ONLY,
+  SchoolGroupDirector: STAFF_ONLY,
+  StaffAttendance: STAFF_ONLY,
+  StaffChecklist: STAFF_ONLY,
+  StaffDocument: STAFF_ONLY,
+  StaffExit: STAFF_ONLY,
+  StaffLoan: STAFF_ONLY,
+  TrainingRecord: STAFF_ONLY,
+};
+
+/** Models keyed on a PERSON but not on `studentId`. */
+function personKeyedModels(): string[] {
+  const { readdirSync } = require("node:fs") as typeof import("node:fs");
+  // `subjectId` is deliberately NOT in this list: in the academic models it is
+  // the school SUBJECT, not a person, and treating it as one put five
+  // timetable/syllabus models into a privacy manifest they have no business in.
+  const KEYS = ["userId", "recipientId", "borrowerId", "memberId", "respondentId", "passengerId", "againstId", "voterId", "participantId"];
+  const out: string[] = [];
+  for (const f of readdirSync(SCHEMA_DIR).filter((n) => n.endsWith(".prisma"))) {
+    const src = readFileSync(join(SCHEMA_DIR, f), "utf8");
+    for (const m of src.matchAll(/model (\w+) \{([\s\S]*?)\n\}/g)) {
+      if (/^\s*studentId\s+String/m.test(m[2])) continue;
+      if (KEYS.some((k) => new RegExp(`^\\s*${k}\\s+String`, "m").test(m[2]))) out.push(m[1]);
+    }
+  }
+  return [...new Set(out)].sort();
+}
+
 const sections = () => {
   const block = /sections: \[([\s\S]*?)\]/.exec(SRC);
   return block ? [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
@@ -107,6 +195,23 @@ describe("every table keyed on a pupil", () => {
   it("is either exported in a named section or excluded with a reason", () => {
     const unaccounted = models.filter((m) => !(m in ACCOUNTED));
     expect(unaccounted).toEqual([]);
+  });
+
+  it("accounts for the person-keyed models too — a pupil is also a user", () => {
+    const unaccounted = personKeyedModels().filter((m) => !(m in PERSON_KEYED));
+    expect(unaccounted).toEqual([]);
+  });
+
+  it("found a believable number of person-keyed models", () => {
+    expect(personKeyedModels().length).toBeGreaterThan(20);
+  });
+
+  it("every person-keyed bucket is declared in the artifact, or is staff-only", () => {
+    const declared = new Set([...sections(), ...exclusions()]);
+    const missing = Object.entries(PERSON_KEYED)
+      .filter(([, bucket]) => bucket !== STAFF_ONLY && !declared.has(bucket))
+      .map(([model, bucket]) => `${model} -> ${bucket}`);
+    expect(missing).toEqual([]);
   });
 
   it("names a bucket that the manifest actually declares", () => {
