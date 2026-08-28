@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { readApiError } from "@/lib/api-error";
+import { downloadReportCard } from "@/lib/report-card-download";
 
 export function ReportCardButton({ studentId }: { studentId: string }) {
   const [busy, setBusy] = React.useState(false);
@@ -10,17 +10,9 @@ export function ReportCardButton({ studentId }: { studentId: string }) {
 
   const generate = async () => {
     setBusy(true); setMsg(null);
-    const res = await fetch(`/api/sms/reportcards/${studentId}/generate`, { method: "POST" });
+    const r = await downloadReportCard(studentId);
     setBusy(false);
-    if (!res.ok) { setMsg(await readApiError(res)); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `report-card-${studentId}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setMsg("Report card generated.");
+    setMsg(r.ok ? `Saved ${r.filename}` : r.error);
   };
 
   return (

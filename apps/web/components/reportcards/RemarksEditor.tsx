@@ -4,6 +4,7 @@ import * as React from "react";
 import type { AcademicSessionDto, ReportCardRemarkDto, Serialized } from "@sms/types";
 import { sendSms } from "@/components/game/play-ui";
 import { readApiError } from "@/lib/api-error";
+import { downloadReportCard } from "@/lib/report-card-download";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -65,20 +66,9 @@ export function RemarksEditor({
   const generate = async () => {
     setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/sms/reportcards/${studentId}/generate?termId=${termId}`, { method: "POST" });
+    const r = await downloadReportCard(studentId, termId);
     setBusy(false);
-    if (!res.ok) {
-      setMsg(await readApiError(res));
-      return;
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `report-card-${studentId}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setMsg("Report card generated.");
+    setMsg(r.ok ? `Saved ${r.filename}` : r.error);
   };
 
   if (terms.length === 0) {

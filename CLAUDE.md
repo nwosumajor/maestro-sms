@@ -2024,6 +2024,43 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A front door for printing a class's report cards
+`/reportcards` (`ReportCardConsole`, nav "Report cards"). Asked for, and it is a
+FRONT DOOR rather than new capability: the API could always print any term, and
+the only way to reach that was to find the pupil, open their page, scroll to a
+panel headed "Remarks" and change a selector there. Nobody looks under Remarks
+to print a report card, and nothing could do a whole class.
+Pick a class and a term, get the pupils, print one or all. Live: `VOL JSS3 B ·
+Term 1, 30 rows, 30 printable`, and one Print gives
+`report-card-volume-pupil-110-term-1.pdf`.
+// **THE ROSTER COMES FROM THE BROADSHEET, NOT THE CLASS ROLL**, and that is the
+whole reason it is accurate for a past term: the broadsheet lists whoever has
+results for that class and term — including a pupil who has since moved class or
+left, after the fix two entries up. Asking the live roll would silently omit
+exactly the pupils whose records get chased.
+// PRINTS SEQUENTIALLY. Each card renders a PDF and writes a Document Vault copy
+that notifies the guardians, so thirty at once would be thirty renders and
+thirty notification fan-outs on one click. It reports what did NOT print, not
+just the count that did, and NAMES the pupils it is skipping for having no
+published marks rather than quietly shortening the list.
+// A FAILED READ IS NOT AN EMPTY CLASS, on both the page's fetch and the
+console's: "no pupils to print" would send a head of year away believing there
+is nothing to do.
+// STAFF ONLY — a family is redirected to /gradebook, where they read their own
+card. Verified live across five roles: principal, school_admin and teacher get
+the console; parent and student land on the gradebook.
+// **AND THE NAME WAS BEING THROWN AWAY ANYWAY.** A blob URL carries no headers,
+so whatever `a.download` says wins outright — and BOTH existing call sites
+hard-coded `report-card-${studentId}.pdf`, saving every card under a UUID and
+discarding the `Content-Disposition` the fix one entry up had just put the term
+into. `lib/report-card-download.ts` is now the one definition and all three
+sites use it.
+// GOTCHA my own test found: `filename=""` misses the quoted pattern (which
+needs at least one character) and then matched the BARE one, returning two
+literal quote marks as the filename. It strips quotes on both branches and falls
+back to null, so an unparseable header degrades to the caller's default rather
+than to a broken name.
+
 ### Every term's report card was filed under the same name
 Asked whether a principal can print a PAST term's report card, and how to make
 that accurate. Most of the answer is YES ALREADY, and the parts worth recording

@@ -37,6 +37,7 @@ import {
   ClipboardListIcon,
   ScanLineIcon,
   GraduationCapIcon,
+  FileTextIcon,
   FileBarChartIcon,
   WalletIcon,
   ScrollTextIcon,
@@ -98,6 +99,7 @@ type NavKey =
   | "scholarships"
   | "assessments"
   | "gradebook"
+  | "reportcards"
   | "workflows"
   | "tasks"
   | "polls"
@@ -212,6 +214,11 @@ const NAV: {
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
   { key: "cbt", label: "CBT exams", icon: BookOpenIcon, href: "/cbt", anyPerm: ["cbt.manage", "cbt.take", "cbt.review"], module: MODULES.CBT },
   { key: "gradebook", label: "Grades", icon: GraduationCapIcon, href: "/gradebook", perm: "grade.read", module: MODULES.GRADEBOOK },
+  // Printing a class's cards for a term. Same permission and module as Grades —
+  // the console is a front door onto an API that already existed, not a new
+  // authority. Students and parents hold `grade.read` for their OWN card and the
+  // page redirects them to /gradebook, which is where a family reads one.
+  { key: "reportcards", label: "Report cards", icon: FileTextIcon, href: "/reportcards", perm: "grade.read", module: MODULES.GRADEBOOK },
   // Approvals is now the UNIFIED inbox: the workflow engine's own requests PLUS
   // pending decisions aggregated from other modules (fees, HR, payroll,
   // security, admissions, privacy). So it is visible to anyone who can approve
@@ -319,6 +326,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   dashboard: "overview", analytics: "overview", reports: "overview", announcements: "overview",
   notifications: "overview", messages: "overview", calendar: "overview", meetings: "overview", exams: "overview", scan: "overview",
   classes: "teaching", learning: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
+  reportcards: "teaching",
   certificates: "teaching", documents: "teaching", library: "teaching",
   students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",
   fees: "operations", billing: "operations", group: "operations", cbt: "teaching", hostel: "operations", transport: "operations",
