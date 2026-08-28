@@ -1450,7 +1450,27 @@ export class TermResultService {
       ]);
       const subjects = subjectRows.sort((a, b) => a.name.localeCompare(b.name));
       const orderedSubjectIds = subjects.map((s) => s.id);
-      const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
+      // WHO WAS IN THIS CLASS **THAT TERM**, not who is in it now.
+      //
+      // Rows were the ACTIVE roster alone, so the moment a pupil moved class,
+      // withdrew or was promoted out, they vanished from every PAST term's
+      // broadsheet — while their `subject_result` rows for that class and term
+      // sat in the table. Measured live: a pupil with NINE subject results for
+      // Term 1 took the sheet from 30 rows to 29.
+      //
+      // AND IT MOVED EVERY OTHER CHILD. Position is a competition rank computed
+      // over these rows, so dropping a pupil who placed third silently promotes
+      // everyone below them — a class position is printed on a report card.
+      //
+      // The UNION is the answer: a pupil with results for this class and term
+      // was in it then, and the ACTIVE roster is still needed so pupils not yet
+      // marked appear as blank rows in the CURRENT term.
+      const studentIds = [
+        ...new Set([
+          ...enrollments.map((e) => e.studentId),
+          ...results.map((r: { studentId: string }) => r.studentId),
+        ]),
+      ];
       const [students, profiles] = await Promise.all([
         tx.user.findMany({ where: { id: { in: studentIds } }, select: { id: true, name: true } }),
         tx.studentProfile.findMany({

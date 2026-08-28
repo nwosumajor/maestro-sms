@@ -2024,6 +2024,41 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A broadsheet that dropped whoever had left, and moved everyone else's rank
+`getClassBroadsheet(classId, termId)` built its ROWS from the ACTIVE roster and
+its CELLS from `subject_result` for that term. So the moment a pupil moved
+class, withdrew or was promoted out, they vanished from every PAST term's
+broadsheet while their marks sat in the table under that same class and term.
+Measured live on a real class, one field changed between the two reads:
+```
+enrolment ACTIVE     GET /term-results/broadsheet  Term 1  ->  30 rows
+enrolment PROMOTED   same call                             ->  29 rows
+                     (that pupil has NINE subject results for that term)
+```
+**AND IT MOVED EVERY OTHER CHILD.** `position` is a competition rank computed
+over these rows, so dropping a pupil who placed third silently promotes everyone
+below them — and a class position is printed on a report card. The missing row
+is visible; the shifted ranks are not.
+// THE UNION IS THE ANSWER: a pupil holding a `subject_result` for this class and
+term WAS in it then, and the ACTIVE roster stays because a pupil not yet marked
+must still appear as a blank row in the CURRENT term. Both halves are
+load-bearing and both are mutation-validated.
+// SECOND INSTANCE IN TWO FIXES of "asks who is here NOW to answer a question
+about THEN", after the register that could not be corrected once the pupil
+changed class. The report card was already right and shows the pattern to copy:
+it ranks on the class recorded on each RESULT ROW, with current enrolment only
+as a fallback when the pupil has no marks — its comment says "ranking on current
+enrolment instead put an SS3 pupil's Term 1 mark against JSS1".
+// GOTCHA in my own test, caught by mutation for the second time this session:
+every ACTIVE pupil in the fixture also had marks, so deleting the roster half of
+the union changed nothing and the suite stayed green. It needed a pupil who is
+ACTIVE with NO results — the blank row the current term exists for.
+// SWEEP RESULT, so the rest is not re-read: 69 enrolment lookups filter
+ACTIVE, and almost all are right — they ask who is in a class NOW for a
+present-tense act (the scan desk, meetings, games, messaging, documents,
+grading permission). The ones at risk are those answering about a FIXED period,
+and of those the report card was already correct and the broadsheet was not.
+
 ### A register that could not be corrected once the pupil changed class
 `assertAllEnrolled` accepted only ACTIVE enrolments, and its comment gives the
 right reason for the wrong scope: "a pupil who has left must not appear on
