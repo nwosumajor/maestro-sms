@@ -1651,7 +1651,10 @@ ALREADY O(page) rather than O(lifetime) — invoices 0.10 ms at 45,000 rows,
 notifications 0.12 ms at 500,000, the register history 1.85 ms, the audit log
 0.59 ms. Deleting the institutional record to save milliseconds would trade a
 legal obligation for a page load, and the app role deliberately cannot: it holds
-DELETE on 76 of 229 tables.
+DELETE on 76 of the 207 BASE tables — and the denominator is stated on that
+basis deliberately, because a partition-inclusive count moves every month as the
+audit and attendance partitions are provisioned. It read "229" and measured 227
+the next time anybody looked.
 **WHAT WAS ACTUALLY WRONG was the one table nobody had a plan for.**
 `attendance_record` was 201 MB — the largest in the product, roughly 2.85 M rows
 per 1,000-pupil school over fifteen years, one row per pupil per school day —
@@ -2062,6 +2065,35 @@ that quietly would be worse than saying so.
 // The refactor is not dead code: `renderPdf` routes through `renderPack`, both
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
+
+### The append-only claim, checked at the grant
+Every table this file calls append-only was measured against the actual
+privileges of the app role, which is the strongest place the property could
+live:
+```
+audit_log, integrity_signal, disciplinary_entry, student_credit_entry,
+message_credit_entry, scan_event, xapi_statement, gateway_event,
+school_referral_conversion              ->  INSERT, SELECT   (no UPDATE, no DELETE)
+invoice, payment, payment_dispute,
+platform_subscription_payment,
+salary_change_request                   ->  + UPDATE, still no DELETE
+```
+The second group needs UPDATE and the claims about them are narrower and hold —
+"no hard-delete of financial records", and "each row IS the append-only history"
+for a salary change, whose flow is maker-checker rather than immutability.
+// FIVE TABLES THE APP ROLE CANNOT EVEN READ, all deliberate and all documented:
+`_prisma_migrations`, the deny-all `agent_commission`, and the three
+`school_group` tables the operator manages and `/group` reads privileged.
+// ALREADY GATED, so nothing was added: `rls.e2e-spec` asserts INSERT-allowed /
+UPDATE-denied behaviourally per table AND cross-references every code write
+against the grants.
+// AND THE GROUP CONSOLE'S AUTHORIZATION HOLDS BY CONSTRUCTION — the other
+cross-tenant surface, never driven because `school_group` has no rows.
+`schoolDetail` requires the campus to be a member of a group the CALLER directs
+and 404s otherwise, so a non-director learns nothing about groups existing.
+// WHAT DID ROT is the denominator: "76 of 229 tables" measured 227, and it
+moves every month as partitions are provisioned. Restated on the BASE-table
+basis (76 of 207), which changes only when a model is added.
 
 ### Two more claims checked: game secrets, and medical ciphertext
 Continuing the "assert a property, then ask what makes it true" pass.
@@ -3667,9 +3699,12 @@ inside a cap hides the paging from the reader — and the page now says "Showing
 the 50 most recent of 602" rather than presenting a page as everything.
 // **HOW IT WAS FOUND, AND WHY IT WAS MISSED.** The sweep that fixed the
 chargeback banner and the admissions queue scoped itself to "the 128 tables the
-app role cannot DELETE from". That count is now **153** — and 76 of **229**
-tables, not 204. Both numbers were typed into prose as current fact and both had
-rotted, exactly as this file warns ("a count typed into prose rots the moment a
+app role cannot DELETE from". That count moved again — DELETE on 76 of the 207
+BASE tables, so 131 without it. The denominator is stated on the BASE-table
+basis on purpose: a partition-inclusive count changes every month as the audit
+and attendance partitions are provisioned, which is why "229" measured 227 the
+next time anybody looked. Both numbers were typed into prose as current fact and
+both had rotted, exactly as this file warns ("a count typed into prose rots the moment a
 role is added"). The rot is not cosmetic: the stale denominator is the
 COMPLETENESS CLAIM of a sweep, and `xapi_statement` is one of the ~25 tables that
 appeared after it. Correcting a number in a sentence would have missed the
