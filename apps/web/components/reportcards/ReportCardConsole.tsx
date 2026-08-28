@@ -96,11 +96,18 @@ export function ReportCardConsole({
       else failures.push(r.studentName);
     }
     setBusy(null);
-    // Report what did NOT happen, not just the count that did.
+    // WHAT THIS CAN AND CANNOT OBSERVE.
+    //
+    // `done` counts cards the SERVER produced. Whether the browser actually
+    // saved each one is not observable from here: a blob download is fire and
+    // forget, and browsers throttle or prompt on repeated programmatic
+    // downloads. So this says "generated", never "printed" — claiming a count
+    // the page cannot see is the silent-partial-success shape this codebase
+    // keeps finding, and it would be worse for coming from the fix for it.
     setMsg(
       failures.length === 0
-        ? `Printed ${done} report card${done === 1 ? "" : "s"}.`
-        : `Printed ${done}; ${failures.length} failed: ${failures.slice(0, 3).join(", ")}${failures.length > 3 ? "…" : ""}`,
+        ? `Generated ${done} report card${done === 1 ? "" : "s"}. Your browser may ask permission to save several files.`
+        : `Generated ${done}; ${failures.length} failed: ${failures.slice(0, 3).join(", ")}${failures.length > 3 ? "…" : ""}`,
     );
   };
 
@@ -144,7 +151,7 @@ export function ReportCardConsole({
             </select>
           </div>
           <Button onClick={printAll} disabled={busy !== null || printable.length === 0}>
-            {busy === "all" ? "Printing…" : `Print all (${printable.length})`}
+            {busy === "all" ? `Generating… (${printable.length})` : `Print all (${printable.length})`}
           </Button>
         </div>
 

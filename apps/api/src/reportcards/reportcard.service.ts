@@ -38,6 +38,57 @@ import { createPdfDocument } from "../common/pdf-document";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
+/** Everything one report card prints. */
+type ReportCardData = {
+      studentName: string;
+      schoolName: string;
+      admissionNumber: string | null;
+      className: string | null;
+      termName: string | null;
+      subjects: TermSubjectRowDto[];
+      termAverage: number | null;
+      termGrade: string | null;
+      position: number | null;
+      classSize: number | null;
+      sessionAverage: number | null;
+      sessionTermsCounted: number;
+      sessionTermsTotal: number;
+      att: Record<string, number>;
+      /** Each remark with the name of whoever signed it — see the render block. */
+      remarks: {
+        classTeacher: { text: string; byName: string | null } | null;
+        head: { text: string; byName: string | null; label: string } | null;
+      };
+      /** Named on the card the way the printed format names them. */
+      guardianNames: string[];
+      gender: string | null;
+      /** The term frame the printed format carries. */
+      termBegins: Date | null;
+      termEnds: Date | null;
+      nextTermBegins: Date | null;
+      /** Days the register was actually taken — the denominator for attendance. */
+      daysOpened: number;
+      /** Behavioural ratings, printed beside the marks and never mixed in. */
+      traitRatings: Array<{ traitKey: string; score: number }>;
+      totalTermScore: number;
+      /** Every term of the session, in order — the annual columns' headings. */
+      annualTermNames: string[];
+      /** subjectId → that subject's total in each of those terms (null = no marks). */
+      annualBySubject: Record<string, Array<number | null>>;
+      /** subjectId → the pupil's place in that subject across the whole year. */
+      annualPosition: Record<string, { position: number; of: number }>;
+      /** The recorded promotion decision, or null when nobody has taken one. */
+      promotionLine: string | null;
+      /** The school's own grade scale — what the key at the foot of the card states. */
+      bands: readonly GradeBand[];
+      /** Every term's marks added together — the printed format's cumulative score. */
+      cumulativeScore: number;
+};
+
+/** The pdfkit document `createPdfDocument` hands back, whose text is folded
+ *  for WinAnsi — see `common/pdf-document.ts`. */
+type PdfDocument = ReturnType<typeof createPdfDocument>;
+
 @Injectable()
 export class ReportCardService {
   private readonly logger = new Logger("ReportCard");
@@ -535,60 +586,19 @@ export class ReportCardService {
     return { buffer, filename };
   }
 
-  private renderPdf(
-    d: {
-      studentName: string;
-      schoolName: string;
-      admissionNumber: string | null;
-      className: string | null;
-      termName: string | null;
-      subjects: TermSubjectRowDto[];
-      termAverage: number | null;
-      termGrade: string | null;
-      position: number | null;
-      classSize: number | null;
-      sessionAverage: number | null;
-      sessionTermsCounted: number;
-      sessionTermsTotal: number;
-      att: Record<string, number>;
-      /** Each remark with the name of whoever signed it — see the render block. */
-      remarks: {
-        classTeacher: { text: string; byName: string | null } | null;
-        head: { text: string; byName: string | null; label: string } | null;
-      };
-      /** Named on the card the way the printed format names them. */
-      guardianNames: string[];
-      gender: string | null;
-      /** The term frame the printed format carries. */
-      termBegins: Date | null;
-      termEnds: Date | null;
-      nextTermBegins: Date | null;
-      /** Days the register was actually taken — the denominator for attendance. */
-      daysOpened: number;
-      /** Behavioural ratings, printed beside the marks and never mixed in. */
-      traitRatings: Array<{ traitKey: string; score: number }>;
-      totalTermScore: number;
-      /** Every term of the session, in order — the annual columns' headings. */
-      annualTermNames: string[];
-      /** subjectId → that subject's total in each of those terms (null = no marks). */
-      annualBySubject: Record<string, Array<number | null>>;
-      /** subjectId → the pupil's place in that subject across the whole year. */
-      annualPosition: Record<string, { position: number; of: number }>;
-      /** The recorded promotion decision, or null when nobody has taken one. */
-      promotionLine: string | null;
-      /** The school's own grade scale — what the key at the foot of the card states. */
-      bands: readonly GradeBand[];
-      /** Every term's marks added together — the printed format's cumulative score. */
-      cumulativeScore: number;
-    },
-    logo?: Buffer | null,
-  ): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const doc = createPdfDocument({ margin: 50, size: "A4" });
-      const chunks: Buffer[] = [];
-      doc.on("data", (c: Buffer) => chunks.push(c));
-      doc.on("end", () => resolve(Buffer.concat(chunks)));
-      doc.on("error", reject);
+  /**
+   * Draw ONE card onto an open document.
+   *
+   * Split out so a whole class prints as a SINGLE multi-page PDF. The
+   * console's "Print all" fired one blob download per pupil, and a browser
+   * throttles or blocks repeated programmatic downloads — so "Printed 30" was
+   * a claim the page could not observe, which is the silent-partial-success
+   * shape this codebase keeps finding. One file cannot half-arrive.
+   *
+   * It draws and returns; opening, paging and ending the document belong to the
+   * caller, which is what lets the pack put a page break between pupils.
+   */
+  private drawCard(doc: PdfDocument, d: ReportCardData, logo?: Buffer | null): void {
       const startX = 50;
       const fmt = (n: number | null): string => (n === null || n === undefined ? "—" : String(n));
 
@@ -966,8 +976,31 @@ export class ReportCardService {
 
       doc.font("Helvetica").fontSize(8).fillColor("#999").moveDown(1)
         .text("Term weighting: Exam 60 · Midterm 20 · Assignment 10 · Class note 10 = 100.", startX);
+  }
+
+  /**
+   * One PDF holding a card per pupil, in the order given.
+   *
+   * `renderPdf` is this with a single card, so the one-pupil path and the class
+   * path can never render differently.
+   */
+  private renderPack(cards: ReportCardData[], logo?: Buffer | null): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = createPdfDocument({ margin: 50, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+      cards.forEach((card, i) => {
+        if (i > 0) doc.addPage();
+        this.drawCard(doc, card, logo);
+      });
       doc.end();
     });
+  }
+
+  private renderPdf(d: ReportCardData, logo?: Buffer | null): Promise<Buffer> {
+    return this.renderPack([d], logo);
   }
 
   private async assertCanAccess(tx: TenantTx, p: Principal, studentId: string) {

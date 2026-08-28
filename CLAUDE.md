@@ -2024,6 +2024,32 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Reviewing my own new screen: a count the page could not see
+The first thing reviewed after building the report-card console was the console
+itself, and "Print all" claimed something it cannot observe. It fires ONE BLOB
+DOWNLOAD PER PUPIL, and a browser throttles or prompts on repeated programmatic
+downloads — so `Printed 30` was a count of what the SERVER produced, not of what
+reached the disk. A blob download is fire and forget; there is no callback.
+That is the silent-partial-success shape this file keeps recording, and it would
+have been worse for arriving in the fix FOR it. The batch now says **generated**,
+never printed, and names the browser prompt so the operator knows what to expect.
+// **THE REAL ANSWER IS ONE FILE, and the enabling half is done.** `renderPdf`
+was a single 380-line method that opened a document, drew one card and ended it.
+It is now `drawCard(doc, d, logo)` plus `renderPack(cards, logo)`, with
+`renderPdf` being the pack of ONE — so the single-pupil path and any future class
+path cannot render differently. A class pack is then `addPage()` between pupils,
+and one file cannot half-arrive.
+// WHAT IS NOT DONE, and why it stopped here rather than being rushed: the pack
+endpoint needs `generate`'s ~420 lines of data-building split into a
+`buildCardData` as well, and a decision this is not mine to take — whether
+printing a class should ALSO file 30 Document Vault copies and notify 30
+families, as printing each pupil individually does today, or whether a pack is an
+office artifact and issuing to families stays the per-pupil act. Shipping half of
+that quietly would be worse than saying so.
+// The refactor is not dead code: `renderPdf` routes through `renderPack`, both
+are exercised by the existing PDF suites, and the card was re-generated live
+after it — same filename, same content.
+
 ### A front door for printing a class's report cards
 `/reportcards` (`ReportCardConsole`, nav "Report cards"). Asked for, and it is a
 FRONT DOOR rather than new capability: the API could always print any term, and

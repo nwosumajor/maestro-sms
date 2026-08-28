@@ -44,6 +44,16 @@ describe("a front door for printing report cards", () => {
     expect(CONSOLE_TSX).toMatch(/failed:/);
   });
 
+  it("claims only what it can observe", () => {
+    // `done` counts cards the SERVER produced. Whether the browser saved each
+    // one is not observable from here — a blob download is fire and forget —
+    // so the batch says GENERATED, never "printed".
+    const batch = CONSOLE_TSX.slice(CONSOLE_TSX.indexOf("const printAll"));
+    expect(batch).toMatch(/Generated \$\{done\}/);
+    expect(batch).not.toMatch(/Printed \$\{done\}/);
+    expect(batch).toMatch(/may ask permission to save several files/);
+  });
+
   it("names the pupils it is NOT printing for, rather than hiding them", () => {
     expect(CONSOLE_TSX).toMatch(/no published marks for this term/);
   });
