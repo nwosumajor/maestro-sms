@@ -2128,6 +2128,17 @@ handler. A gate that misses the commonest form is the blind gate
 `a-gate-must-not-pass-by-finding-nothing` exists to name, and an over-wide
 replacement teaches its reader to add exemptions. Left unwritten rather than
 written badly.
+// **AND THE DECLARATIVE HALF IS NOW DONE FOR THIS MODULE**, because the module
+itself proved what was intended: `exam_attendance` FKs BOTH its person columns
+to `user` and the four sibling columns beside it had none. Migration
+`20270116000000` adds them — `exam_seat.studentId`, `exam_invigilator.staffId`,
+`exam_sitting.createdById`, `exam_schedule.createdById` — ON DELETE RESTRICT,
+matching the sibling exactly. Users are never hard deleted here (an exit sets a
+status and keeps the record), so it forbids nothing the product does, and every
+one of the four was measured orphan-free first. Verified after: a real pupil
+still seats, and the exact insert that produced the phantom now fails with
+`violates foreign key constraint "exam_seat_studentId_fkey"`; all 222 migrations
+replay onto a fresh database.
 // **THE ROOT ENABLER IS MEASURED AND LATENT.** `exam_seat.studentId` has no FK
 to `user`, which is why a phantom was STORABLE — and it is not alone: **55 of
 104 person-reference columns** (`studentId`/`userId`/`staffId`/`assigneeId`/
