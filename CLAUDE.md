@@ -2087,6 +2087,34 @@ documented cross-tenant surfaces — takes a `schoolId` from a param, query or
 body; every other controller reads it off the Principal. The two SERVICE-level
 takers are the gateway webhook paths, where the tenant comes from a signed
 event's own metadata and RLS then scopes the lookup.
+**GOLDEN RULE #6 HOLDS.** A sweep of every committed file for a secret-shaped
+literal returns one hit, and it is a function call.
+**GOLDEN RULE #8 NOW HAS A GATE, and it is the highest-stakes rule here.**
+"No automated punitive action against a student ... never a verdict, score
+penalty, or record entry on its own" was stated and enforced by nothing.
+Verified by hand and it HOLDS: of the six readers of `integrity_signal`, none
+writes a grade, a subject result or a discipline record, and the only writes the
+integrity module makes outside its own tables are the NDPR retention purge — an
+obligation to FORGET, not a punishment.
+// IT EXISTS FOR THE CHANGE THAT LOOKS HELPFUL. "Flag a high-severity signal
+into the discipline module automatically", or "zero the score when a paste is
+detected" — each is one small commit, each reads as an improvement, and each is
+exactly what the rule forbids. A machine must not decide a child cheated.
+// PER METHOD, not per file. `CbtService` legitimately does both — it records
+exam-room integrity events AND it marks scripts. The rule is not that these may
+not coexist in a file; it is that the same piece of work must not read a signal
+and then move a mark or open a record.
+// GOTCHA, and I deleted a pattern rather than exempt what it caught: a seventh
+rule `/\bgrade:\s*[a-zA-Z]/` flagged `analytics.service.ts:overview`, which
+counts signals for the dashboard and builds a grade-BAND histogram — a read-only
+DTO. Second time in this session that an over-wide gate pattern was removed
+instead of exempted, for the reason this file already gives: an exemption
+granted for a false positive is a hole with a note on it.
+// GOTCHA in the mutation run: the score-zeroing mutation FIRST reported the gate
+as passing, and the gate was fine — my insertion had landed outside the method.
+Checked rather than concluding the gate was weak; placed correctly it names
+`cbt.service.ts:recordIntegrityEvents`. A mutation that does not land where you
+think proves nothing, the same way one that does not compile proves nothing.
 **GOLDEN RULE #5's READ HALF NOW HAS A GATE.**
 `every-mutation-leaves-a-trail` enforces the WRITE half across 502 routes and
 nothing enforced the read half — the half this file has already been bitten by
