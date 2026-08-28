@@ -2024,6 +2024,44 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The receivables aging reconciles, and the refund-sign class is closed
+Two investigations that found nothing, recorded because a negative nobody writes
+down is one the next person repeats.
+**THE AGING BUCKETS RECONCILE EXACTLY.** Computed independently from raw rows
+and compared with `GET /fees/reports` on the demo school:
+```
+independent   NGN current  4 invoices  10,525,000      USD  1 in d31_60
+API           NGN current  5 invoices  10,625,000
+difference    exactly one invoice, exactly 100,000
+```
+The difference is entirely `INV-MRUG86PU-C1A4` — the PAID-but-underpaid row this
+file already records as contamination from an earlier ad-hoc probe. My query
+filtered to ISSUED/PARTIALLY_PAID; the report's `billable` CTE includes PAID
+(correctly, for the invoiced and collected totals) and the `balance > 0` filter
+then admits that inconsistent row. **That is the SAFE direction**: an invoice
+labelled PAID with money genuinely missing belongs in receivables, not hidden
+behind a status. Boundaries checked too — `days <= 0`, `0 < days <= 30`,
+`30 < days <= 60`, `days > 60` are exhaustive and non-overlapping, and the
+report's `today` is the SCHOOL's day (`region.todayInTx`), not the server's.
+**THE REFUND-SIGN CLASS IS NOW CLOSED ACROSS ALL THREE SHAPES.** The gate covers
+`payment.aggregate`/`groupBy` and, since the fee-reminder fix, a
+`payment.findMany` selecting `amountMinor` without `kind`. The remaining shape is
+RAW SQL, and all four sites were read:
+  - `fees.service` PENDING_APPROVAL total — the maker-checker window, already an
+    exempt case: a refund must not create headroom under the threshold.
+  - `operator-payments` take-rate — filtered `platformFeeMinor > 0`, which a
+    refund does not carry.
+  - `group.service` x2 — `kind = 'PAYMENT'`, so refunds are EXCLUDED from a
+    figure the board renders as "collected".
+// THE GROUP ONE IS AN OBSERVATION, NOT A FIX, and deliberately left. Excluding
+refunds makes "collected" GROSS receipts rather than net, so a campus that
+refunded most of a payment still reports the whole of it. That is a judgement
+about what a revenue KPI means — gross-with-refunds-separate is a legitimate
+convention — and the `kind = 'PAYMENT'` filter reads as deliberate rather than
+overlooked, unlike the fee reminder, which was an unambiguous BALANCE OWED by a
+family. Worth the owner settling; not worth an agent redefining a director's
+metric unasked. `school_group` has no rows, so it cannot be driven either.
+
 ### The fee reminder counted a refund as a payment
 `sendFeeReminders` summed every POSTED payment row as a POSITIVE to work out
 what a family still owes. A REFUND is a POSTED payment row. Measured live on an
