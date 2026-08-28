@@ -2053,6 +2053,53 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### A ledger that was quietly ten thousand rows long
+`journalCsv` (`fees/fee-ops.service.ts`). The third artifact asked the same
+question, and the answer was a `take: 10_000` with nothing said about it. The
+journal is what an ACCOUNTANT imports into a ledger, so a file that is quietly
+capped when the period holds more is a reconciliation balanced against the wrong
+figure — and nothing in the CSV, the filename or the download says a row was
+dropped.
+**THE CAP IS REACHABLE, NOT THEORETICAL.** Measured on a decade of a
+1,000-pupil school (120,019 posted payments seeded, then removed):
+```
+a YEAR   12,063 payments   before: a silent 10,000-row CSV
+                           after:  400 "That period holds 12,063 posted payments,
+                                   more than the 10,000 a single journal export
+                                   carries. Export it in narrower ranges…"
+a MONTH     998 payments   200, 999 lines — header plus every payment
+```
+// **THE RULE IS STATED 230 LINES UP IN THE SAME FILE.** The late-fee sweep
+carries "NO SILENT CAP: a truncated sweep that looks complete is how a backlog
+hides" and warns when it hits its own limit. The finance export beside it did
+not. Sibling asymmetry with the correct one written first, again.
+// REFUSED RATHER THAN TRUNCATED. A short ledger cannot be recovered from by
+the person reading it, because nothing tells them to look; a refusal naming the
+real count and the narrower range is actionable in the moment. It reads ONE PAST
+the cap, because `take: CAP` cannot tell "exactly 10,000" from "more than
+10,000" and those are different files. The `count()` runs only on the overflow
+path, so an ordinary export pays nothing for it.
+// **AN INDEX WAS BUILT, MEASURED, AND DELIBERATELY NOT KEPT** — the third time
+this file records that conclusion. `payment` has no index on `paidAt`, so as the
+APP ROLE under RLS a one-month journal was a **Parallel Seq Scan of all 120,019
+payments plus a sort, 2,108 buffers, 19.1 ms**, to return 998 rows;
+`(schoolId, status, paidAt)` made it an Index Scan at **1,117 buffers and
+3.8 ms**, and the planner DID choose it. It is still not added: the journal is a
+periodic export rather than a hot read, `payment` is the most written financial
+table in the product and already carries eight indexes, and 19 ms at a decade of
+volume is not a problem a ninth index should be paid for every settlement. The
+numbers are here so the next person decides from them rather than re-deriving
+them — and if the export ever becomes routine, that is the index to add.
+// The half not traded away while changing the read, and pinned: a REFUND is
+still signed negative and every row still carries its invoice's currency.
+Mutation-validated two ways — restore the silent truncation, and detect the
+overflow but deliver it anyway.
+// GOTCHA in my own test: the first version sliced 3,500 characters from the
+method name and never reached the mapping it was asserting about. Bounded by the
+method now — a fixed-size window is how a gate stops covering the thing it
+names, which this file already records for a decorator run and a 200-character
+lookbehind.
+
 ### An archive of scores against identifiers that resolve to nothing
 `SchoolArchiveService` + `an-archive-says-what-it-leaves-out.spec.ts`. The pupil
 bundle's sibling, asked the same question one artifact over — and the finding is

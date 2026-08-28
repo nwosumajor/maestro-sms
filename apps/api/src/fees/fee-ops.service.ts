@@ -755,6 +755,12 @@ export class FeeOpsService {
   }
 
   /** Every POSTED payment in [from,to] as formula-guarded CSV (fee.manage). */
+  /**
+   * How many rows one journal export carries. A finance artifact is complete or
+   * it is refused; it is never quietly short.
+   */
+  private static readonly JOURNAL_ROW_CAP = 10_000;
+
   async journalCsv(p: Principal, from: string, to: string): Promise<{ csv: string; filename: string }> {
     const window = dateWindow(from, to);
     const rows = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
@@ -765,8 +771,35 @@ export class FeeOpsService {
         where: { status: "POSTED", paidAt: { gte: window.from, lte: window.to } },
         include: { invoice: { select: { reference: true, studentId: true, currency: true } } },
         orderBy: { paidAt: "asc" },
-        take: 10_000,
+        // ONE PAST THE CAP, so an overflow is DETECTED rather than delivered.
+        //
+        // This read `take: 10_000` and said nothing. The journal is imported
+        // into a ledger by an accountant, so a file that is quietly 10,000 rows
+        // long when the period holds more is a reconciliation that balances
+        // against the wrong figure — and nothing in the CSV, the filename or
+        // the download says a row was dropped.
+        //
+        // The cap is REACHABLE, not theoretical: a 1,000-pupil school on
+        // instalments raises a few payments per pupil per term, so a
+        // year-to-date export is in this range.
+        //
+        // The late-fee sweep 230 lines up in THIS FILE already states the rule
+        // it needed — "NO SILENT CAP: a truncated sweep that looks complete is
+        // how a backlog hides" — and warns when it hits its own limit.
+        take: FeeOpsService.JOURNAL_ROW_CAP + 1,
       });
+      // REFUSED, not truncated. A short ledger cannot be recovered from by the
+      // person reading it, because nothing tells them to look; a refusal naming
+      // the count and the fix is actionable in the moment. The count is read
+      // only on this path, so the ordinary export pays nothing for it.
+      if (pays.length > FeeOpsService.JOURNAL_ROW_CAP) {
+        const total = await tx.payment.count({
+          where: { status: "POSTED", paidAt: { gte: window.from, lte: window.to } },
+        });
+        throw new BadRequestException(
+          `That period holds ${total.toLocaleString()} posted payments, more than the ${FeeOpsService.JOURNAL_ROW_CAP.toLocaleString()} a single journal export carries. Export it in narrower ranges — a term or a month at a time — so the ledger you import is complete.`,
+        );
+      }
       const studentIds = [...new Set(pays.map((x: { invoice: { studentId: string } }) => x.invoice.studentId))];
       const students = studentIds.length
         ? await tx.user.findMany({ where: { id: { in: studentIds as string[] } }, select: { id: true, name: true } })
