@@ -2063,6 +2063,38 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### The exam hall, driven for the first time — and a false finding of my own
+`exam_attendance` had never held a row, so the hall register had never been
+taken. Driven end to end — create a sitting, auto-seat a class of 30, mark two
+absent, read it back, check the day board, reconcile against the table — and
+every figure agreed:
+```
+register read back   {"ABSENT":2,"PRESENT":28}
+exam_attendance      30 rows, 2 ABSENT
+exam-day board       seated 30, absent 2, unmarked 0, noInvigilator true
+```
+The board's `warning` field is for a hall CLASH or OVER-CAPACITY specifically;
+`noInvigilator` / `noSeats` / `unmarked` are separate flags, and `ExamDayBoard`
+renders all of them, sorts by severity and counts the problems. Nothing computed
+and left unrendered.
+// **I ALMOST FILED A SERIOUS DEFECT THAT DID NOT EXIST, and the shape of the
+mistake is worth more than the result.** `SittingRegister` declares
+`useState<Record<string, Mark>>({})` and saves `marks[r.studentId] ?? "PRESENT"`
+for EVERY seated row. Read together, those two lines say: reopening a taken
+register shows everyone present, and saving it overwrites every absence. I
+proved it against the API — 2 ABSENT before, 30 PRESENT after — and started
+writing the fix.
+// The component is CORRECT. `load()` seeds `marks` from each row's saved
+`status` before anything renders, with the unmarked default explained beside it.
+My probe had hand-built an all-PRESENT payload on the ASSUMPTION that `marks`
+stayed empty, so what I "reproduced" was my own model of the component, not the
+component. A probe that simulates a client instead of driving it proves a fact
+about the simulation. Third probe error of this session, after the tenant-less
+pupil lookup and the `{halls:[]}` response shape.
+// The one thing that WAS destroyed was probe data — my simulated save wiped the
+two absences on my own sitting, which was then deleted along with everything
+else the probe created.
+
 ### The Golden Rules, checked against the running database
 Same technique as the entry below — assert a property, then ask what makes it
 true — turned on this file's own non-negotiables.
