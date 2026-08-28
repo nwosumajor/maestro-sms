@@ -45,6 +45,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
+import { netPaidMinor } from "./net-paid";
 import { NotificationService } from "../notifications/notification.service";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
@@ -104,15 +105,9 @@ export class PaymentPlansService {
     return p.roles.some((r) => STAFF_WIDE.includes(r));
   }
 
-  private async paidMinor(tx: TenantTx, invoiceId: string): Promise<number> {
-    const posted = await tx.payment.findMany({
-      where: { invoiceId, status: "POSTED" },
-      select: { amountMinor: true, kind: true },
-    });
-    return posted.reduce(
-      (n: number, x: { amountMinor: number; kind: string }) => n + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor),
-      0,
-    );
+  /** Net paid — POSTED payments minus POSTED refunds. One definition, shared. */
+  private paidMinor(tx: TenantTx, invoiceId: string): Promise<number> {
+    return netPaidMinor(tx, invoiceId);
   }
 
   // ---------------------------------------------------------------------------
@@ -194,6 +189,19 @@ export class PaymentPlansService {
       if (!inv || !(await this.canSeeStudent(tx, p, inv.studentId))) throw new NotFoundException("Not found");
       const rows = await tx.invoiceInstallment.findMany({ where: { invoiceId }, orderBy: { seq: "asc" } });
       const paid = rows.length ? await this.paidMinor(tx, invoiceId) : 0;
+      // WHAT THE BILL IS NOW, not what it was when the plan was written.
+      //
+      // `setPlan` checks the tranches sum exactly to the total, once. Three live
+      // paths move an invoice afterwards — an approved DISCOUNT or WAIVER posts
+      // a negative line item, the late-fee sweep and a library fine each append
+      // a positive one — and nothing re-checked the plan.
+      //
+      // Measured live: a 100,000 invoice with a 50,000 + 50,000 plan, then an
+      // approved 40,000 discount. The invoice went to 60,000, the family paid
+      // 60,000, the invoice read PAID with a zero balance — and their plan said
+      // instalment 2 of 50,000 was DUE.
+      const total = (await tx.invoice.findFirst({ where: { id: invoiceId }, select: { totalMinor: true } }))?.totalMinor ?? 0;
+      const plannedTotalMinor = rows.reduce((n: number, r: { amountMinor: number }) => n + r.amountMinor, 0);
       // The SCHOOL's calendar day, not the server's. A tranche due today is not
       // overdue, and comparing against UTC made it so from early evening in every
       // timezone west of it — a parent in Toronto saw OVERDUE on the due date.
@@ -205,7 +213,15 @@ export class PaymentPlansService {
       const tranches: InstallmentDto[] = rows.map((r: { seq: number; dueDate: Date; amountMinor: number }) => {
         cumulative += r.amountMinor;
         let state: InstallmentDto["state"];
-        if (paid >= cumulative) state = "PAID";
+        // CAPPED BY WHAT IS ACTUALLY OWED. A tranche asks for money by a date;
+        // once the bill itself has fallen below the planned cumulative, the
+        // remainder is not owed and must not read as outstanding. In the other
+        // direction (a late fee appended after the plan) the cap does nothing —
+        // deliberately: silently growing the last tranche would invent a
+        // schedule the family never agreed to. That case is REPORTED instead,
+        // via `coversInvoice`.
+        const owedBy = Math.min(cumulative, total);
+        if (paid >= owedBy) state = "PAID";
         else if (new Date(r.dueDate).getTime() < today.getTime()) {
           state = "OVERDUE";
           firstUnpaidMarked = true; // an overdue tranche IS the first unpaid one
@@ -215,7 +231,13 @@ export class PaymentPlansService {
         } else state = "UPCOMING";
         return { seq: r.seq, dueDate: r.dueDate, amountMinor: r.amountMinor, state };
       });
-      return { invoiceId, tranches };
+      return {
+        invoiceId,
+        tranches,
+        invoiceTotalMinor: total,
+        plannedTotalMinor,
+        coversInvoice: rows.length === 0 || plannedTotalMinor === total,
+      };
     });
   }
 

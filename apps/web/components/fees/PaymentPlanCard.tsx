@@ -84,6 +84,24 @@ export function PaymentPlanCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/*
+          THE PLAN CAN STOP MATCHING THE BILL, and it has to say so rather than
+          quietly misreport. Tranches are checked to sum exactly to the invoice
+          when the plan is SET, and three live paths move the invoice afterwards:
+          an approved discount or waiver, the late-fee sweep, and a library fine.
+          The two directions fail differently, so they are worded differently —
+          one is money the school is no longer asking for, the other is money it
+          still is.
+        */}
+        {tranches.length > 0 && initial && !initial.coversInvoice && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+            This plan was written for {money(initial.plannedTotalMinor, currency)} and the invoice is now{" "}
+            {money(initial.invoiceTotalMinor, currency)}.{" "}
+            {initial.plannedTotalMinor > initial.invoiceTotalMinor
+              ? "The parts below add up to more than is owed — settle the invoice balance, and ask the office to revise the plan."
+              : "The parts below do not cover the whole invoice, so a balance will remain after the last part. Ask the office to revise the plan."}
+          </p>
+        )}
         {tranches.length > 0 && (
           <table className="w-full text-sm">
             <tbody>

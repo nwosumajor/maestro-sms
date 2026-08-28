@@ -276,6 +276,22 @@ export interface InstallmentDto {
 export interface PaymentPlanDto {
   invoiceId: string;
   tranches: InstallmentDto[];
+  /**
+   * What the bill is NOW, and what the plan was written against.
+   *
+   * A plan's tranches must sum exactly to the invoice total, and that is checked
+   * once — when the plan is set. Three live paths change an invoice afterwards:
+   * an approved DISCOUNT or WAIVER posts a negative line item, and the late-fee
+   * sweep and a library fine each append a positive one. Nothing re-checked the
+   * plan, so it silently stopped describing the bill.
+   *
+   * Both totals are reported because the two directions fail differently and a
+   * family has to be able to tell which happened.
+   */
+  invoiceTotalMinor: number;
+  plannedTotalMinor: number;
+  /** False when the plan no longer sums to the bill — ask the office to revise it. */
+  coversInvoice: boolean;
 }
 
 /** Append-only credit-ledger entry (positive = credit in, negative = applied). */

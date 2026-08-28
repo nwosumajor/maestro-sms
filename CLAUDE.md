@@ -2053,6 +2053,53 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### A payment plan that stopped matching the bill
+`getPlan` (`fees/payment-plans.service.ts`), `PaymentPlanDto.invoiceTotalMinor /
+plannedTotalMinor / coversInvoice`. Found by reconciling the demo database
+rather than by reading code: one invoice's instalments summed to 100,000 against
+line items of 80,000, and its own history showed a "Discount: sibling discount"
+line written **271 ms after the plan**.
+`setPlan` refuses tranches that do not sum EXACTLY to the invoice total, and its
+comment says why — "a plan that doesn't cover the bill is a trap". That is
+checked ONCE. **Three live paths move an invoice afterwards and none re-checked
+it**: an approved DISCOUNT or WAIVER decrements the total, and the late-fee
+sweep and a library fine each increment it (verified: both call
+`totalMinor: { increment }`).
+Driven live on a fresh invoice — 100,000, a 50,000 + 50,000 plan, an approved
+40,000 discount, then the family pays the whole remaining 60,000:
+```
+before   invoice PAID, balance 0
+         tranches [{seq:1 PAID}, {seq:2 amt:50000 state:"DUE"}]
+after    tranches [{seq:1 PAID}, {seq:2 PAID}]
+         invoiceTotal 60000  planTotal 100000  coversInvoice false
+```
+**A family that had settled their bill in full was shown an outstanding
+instalment of NGN 500.**
+// **THE TWO DIRECTIONS ARE HANDLED DIFFERENTLY, DELIBERATELY.** A tranche's
+cumulative is capped at what is actually OWED, which fixes the discount case by
+construction — money no longer owed cannot be outstanding. The late-fee case is
+REPORTED and never absorbed: silently growing the last tranche would invent a
+payment schedule the family never agreed to. So the cap is `min`, not `max`, and
+a test pins that — `max` would mark a short plan complete, which is the
+too-low-is-the-dangerous-direction rule this file already states about the fee
+reminder.
+// THE PLAN IS INFORMATIONAL AND THE INVOICE IS AUTHORITATIVE — the module's own
+design ("the plan never moves money"). So the fix is to make the plan STOP
+DISAGREEING, and to say so when it cannot: the card now names both figures and
+tells the reader which way it is wrong, because "settle the balance and ask the
+office to revise" and "a balance will remain after the last part" are different
+instructions.
+// While there: this service kept its OWN private copy of the net-paid reduce.
+It is one of the fifteen hand-written copies this file records as "checked and
+correct", and it is exactly the drift surface `netPaidMinor` exists to remove —
+so it now calls the shared one, with a REFUND case pinned.
+// GOTCHA in my own fixture: `PaymentPlansService`'s region is the FIFTH
+constructor argument (db, audit, notifications, paystack, region). Guessing it
+wired the region into the notifier and every call threw — the same six-argument
+trap this file records for the transport service.
+// Mutation-validated three ways: drop the cap (a settled bill shows DUE again),
+always claim `coversInvoice`, and cap with `max` instead of `min`.
+
 ### A staff calendar the staff could not see
 `isStaffRoles` (`@sms/types/roles.ts`), `listEvents`
 (`communication/events.service.ts`). Found by carrying the defect class from the
