@@ -14,6 +14,14 @@ import { csvCell } from "../common/csv";
 import type { PlatformAuditEntryDto, PlatformAuditPageDto } from "@sms/types";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { decodeAuditCursor, encodeAuditCursor } from "../common/audit-cursor";
+
+/**
+ * Ceiling on a cross-tenant audit CSV, and when it bites the FILE says so.
+ *
+ * 2,000 is reached by a single school — the demo tenant alone holds 26,095
+ * audit rows — so this cap is not a theoretical bound, it is the ordinary case.
+ */
+const AUDIT_EXPORT_MAX = 2_000;
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -147,8 +155,22 @@ export class PlatformAuditService {
   /** Same query, rendered as a CSV report for download. */
   async exportCsv(p: Principal, f: PlatformAuditFilter): Promise<{ csv: string; filename: string }> {
     // Export is the WHOLE filtered set (up to a hard cap), not a single page.
-    const entries = await this.query({ ...f, cursor: undefined }, Math.min(Math.max(f.limit ?? 2000, 1), 2000));
-    await this.auditMeta(p, "operator.audit.export", { count: entries.length });
+    //
+    // ONE PAST THE CAP, so a truncated export announces itself. This read
+    // exactly `2000` and said nothing — and 2,000 is reached by a single
+    // school: the demo tenant alone holds 26,095 audit rows. So an operator
+    // exporting a cross-tenant trail DURING AN INCIDENT got the most recent
+    // 2,000 entries and no indication that the rest existed, on the artifact a
+    // forensic question is answered from.
+    //
+    // The library catalogue export already does exactly this and says why —
+    // "a librarian reconciling stock will not read an HTTP header, but they
+    // will see the last line". Same reader problem, same answer.
+    const cap = Math.min(Math.max(f.limit ?? AUDIT_EXPORT_MAX, 1), AUDIT_EXPORT_MAX);
+    const fetched = await this.query({ ...f, cursor: undefined }, cap + 1);
+    const truncated = fetched.length > cap;
+    const entries = truncated ? fetched.slice(0, cap) : fetched;
+    await this.auditMeta(p, "operator.audit.export", { count: entries.length, truncated });
     const header = ["Timestamp", "School", "Actor", "Email", "Unique ID", "Roles", "Action", "Entity", "Entity ID", "Details"];
     const lines = [header.map(csvCell).join(",")];
     for (const e of entries) {
@@ -167,6 +189,15 @@ export class PlatformAuditService {
         ]
           .map(csvCell)
           .join(","),
+      );
+    }
+    // ANNOUNCED IN THE FILE, not only in the audit metadata. Whoever opens this
+    // during an incident is not reading our audit log about our audit log.
+    if (truncated) {
+      lines.push(
+        csvCell(
+          `NOTE: truncated at ${cap} entries — the filter matches more. Narrow the date range, school or action and export again.`,
+        ),
       );
     }
     const stamp = new Date().toISOString().slice(0, 10);

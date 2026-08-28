@@ -2094,6 +2094,36 @@ them — and if the export ever becomes routine, that is the index to add.
 still signed negative and every row still carries its invoice's currency.
 Mutation-validated two ways — restore the silent truncation, and detect the
 overflow but deliver it anyway.
+// **THE CLASS WAS THEN SWEPT, and two more were silently capped.** Four
+downloadable exports carry a row cap and ONE — the library catalogue — already
+did it properly, reading one past its limit and appending a note, with the
+reason beside it: *"a librarian reconciling stock will not read an HTTP header,
+but they will see the last line."*
+```
+fees/export/journal.csv       10,000  REFUSES (an accountant's ledger is complete
+                                      or it is not imported)
+operator audit/export.csv      2,000  note row  <- reached by ONE school TODAY
+operator payments/export.csv  20,000  note row
+library books/export.csv      20,000  note row  <- was already correct
+```
+**THE AUDIT ONE IS THE SHARPEST AND IS LIVE.** The demo tenant alone holds
+26,095 audit rows, so an operator exporting a cross-tenant trail DURING AN
+INCIDENT received the most recent 2,000 and nothing said the rest existed — on
+the artifact a forensic question is answered from. Live after: **2,002 lines —
+header, 2,000 entries, and the note.**
+// THE REVENUE EXPORT'S OWN COMMENT reasoned about exactly this artifact — "an
+export that is a subset of the page is the one a reconciliation actually runs
+against" — and guarded the COLUMNS while the ROW COUNT was capped in silence.
+// REFUSE vs ANNOTATE is a judgement per artifact, not a rule: a ledger is
+balanced (refuse), an audit trail and a catalogue are browsed (annotate). A
+`truncated` flag recorded only in our own audit metadata would satisfy neither —
+nobody opening the CSV reads the audit row we wrote about ourselves.
+Gate: `an-export-that-says-when-it-is-short.spec.ts` carries a PER-FILE pattern
+rather than one derived from the constant name, because the shapes genuinely
+differ (the audit export clamps a caller-supplied `limit` against its ceiling,
+so it cannot literally read `take: AUDIT_EXPORT_MAX + 1`) — and a gate loose
+enough to cover both by accident would pass against an export that stopped
+checking. Mutation-validated on both new sites.
 // GOTCHA in my own test: the first version sliced 3,500 characters from the
 method name and never reached the mapping it was asserting about. Bounded by the
 method now — a fixed-size window is how a gate stops covering the thing it

@@ -465,16 +465,25 @@ export class OperatorPaymentsService {
   /** The same filter as a CSV for the books. Audited, formula-guarded. */
   async csv(p: Principal, filters: PaymentFilters): Promise<{ csv: string; filename: string }> {
     const where = await this.where(filters);
-    const rows = await this.client().platformSubscriptionPayment.findMany({
+    // ONE PAST THE CAP, so a truncated ledger announces itself.
+    //
+    // The comment below already reasons about this artifact being "the one a
+    // reconciliation actually runs against" — and guarded the COLUMNS while the
+    // ROW COUNT was capped in silence. At the ~50 schools this platform is
+    // sized for, 20,000 is decades away; at the 5,000 it is being scaled to it
+    // is a few months of renewals, so the bound is real rather than notional.
+    const fetched = await this.client().platformSubscriptionPayment.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      take: MAX_EXPORT_ROWS,
+      take: MAX_EXPORT_ROWS + 1,
     });
+    const truncated = fetched.length > MAX_EXPORT_ROWS;
+    const rows = truncated ? fetched.slice(0, MAX_EXPORT_ROWS) : fetched;
     const [names, initiators] = await Promise.all([
       this.schoolMap([...new Set(rows.map((r: { schoolId: string }) => r.schoolId))]),
       this.initiatorMap(rows.map((r: { initiatedById?: string }) => r.initiatedById ?? "")),
     ]);
-    await this.record(p, "platform.revenue.export", { ...filters, returned: rows.length });
+    await this.record(p, "platform.revenue.export", { ...filters, returned: rows.length, truncated });
 
     // THE EXPORT CARRIES WHAT THE SCREEN CARRIES. An export that is a subset of
     // the page is the one a reconciliation actually runs against, so a column
@@ -525,6 +534,15 @@ export class OperatorPaymentsService {
       );
     }
     const stamp = `${filters.from ?? "all"}_${filters.to ?? "all"}`;
+    // IN THE FILE. An owner reconciling revenue reads the last line of the CSV,
+    // not the audit row we wrote about ourselves.
+    if (truncated) {
+      lines.push(
+        csvCell(
+          `NOTE: truncated at ${MAX_EXPORT_ROWS} payments — the filter matches more. Narrow the date range and export again.`,
+        ),
+      );
+    }
     return { csv: lines.join("\n"), filename: `platform-revenue-${stamp}.csv` };
   }
 
