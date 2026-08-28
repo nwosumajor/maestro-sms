@@ -2024,6 +2024,40 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The probe's other blind spot: resources addressed by their OWN id
+The family-scope probe derives its surface from the controllers and probes every
+route taking a `:studentId`, asking about somebody else's child. Resources
+addressed by their own id — a message THREAD, a DOCUMENT — are not reachable
+that way, and it counts them among the parameterised routes it cannot fill. So
+they are unprobed rather than proven.
+Checked by hand, as the demo parent, comparing a REAL id belonging to another
+family against a well-formed ghost:
+```
+GET  /messages/threads/:id           404 "Thread not found"     both
+POST /messages/threads/:id/reply     404 "Thread not found"     both
+GET  /documents/:id                  404 "Document not found"   both
+GET  /documents/:id/download         404 "Document not found"   both
+```
+Byte-identical in status and wording, so neither confirms what it hides — and
+the reply path is guarded as well as the read, which is the half a reader might
+assume rather than check.
+// CONTACTS TOO, since a directory is the other way a scoping bug shows: a
+parent sees 73 contacts and a pupil 72, and the ROLE TALLY of both contains no
+`student` and no `parent` — only staff, 61 of them teachers. The documented rule
+("non-staff may only message staff/teachers") holds in the data rather than only
+in the comment.
+// THE GAP IS STILL THERE. Filling an `:id` automatically needs the probe to know
+which table each route addresses, which it cannot derive from the controller —
+so this is a hand-check recorded with its date and result, not a fix. Anything
+that adds an `:id`-addressed family-visible resource is unprobed by default.
+// Also verified while sweeping the 69 ACTIVE-enrolment lookups: the remaining
+"fixed period" candidates are sound. `teachesStudent` is an AUTHORIZATION check
+where ACTIVE is right (a stale enrolment must not grant a teacher access); the
+trait ENTRY GRID lists current pupils because that is who you rate, and a
+departed pupil's ratings stay reachable per-student for their card; and the
+session report's ACTIVE lookup only labels a HEADER, with the marks read by
+`studentId + sessionId`.
+
 ### A broadsheet that dropped whoever had left, and moved everyone else's rank
 `getClassBroadsheet(classId, termId)` built its ROWS from the ACTIVE roster and
 its CELLS from `subject_result` for that term. So the moment a pupil moved
