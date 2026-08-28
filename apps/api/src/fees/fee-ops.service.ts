@@ -563,9 +563,28 @@ export class FeeOpsService {
                     source: FEE_SOURCES.LATE_FEE,
                   },
                 });
+                // INCREMENT, never assign a total computed from an earlier
+                // read — the rule `decideAdjustment` states 290 lines above and
+                // this sweep did not follow.
+                //
+                // The comment directly above already establishes that "the read
+                // above is a separate snapshot": the MARKER is re-checked inside
+                // this transaction for exactly that reason. The arithmetic was
+                // not. `inv.totalMinor` comes from a batch read of up to 500
+                // invoices taken before the loop, so for the 400th invoice it
+                // can be seconds old — and five other paths move an invoice
+                // total (an approved discount or waiver, a library fine, hostel
+                // rent, a transport fare).
+                //
+                // The lost write is not merely money: assigning `stale + fee`
+                // over an approved DISCOUNT silently REVERSES a maker-checker
+                // decision, while the `invoice_adjustment` row still reads
+                // APPROVED and the audit trail shows only a late fee. The
+                // header then disagrees with the sum of the line items, which
+                // is how this was found.
                 await tx.invoice.update({
                   where: { id: inv.id },
-                  data: { totalMinor: inv.totalMinor + school.lateFeeFlatMinor },
+                  data: { totalMinor: { increment: school.lateFeeFlatMinor } },
                 });
                 await this.audit.record(
                   {

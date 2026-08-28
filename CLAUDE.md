@@ -2053,6 +2053,53 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### The rule was written down 290 lines above, and the sweep did not follow it
+`lateFeeSweep` (`fees/fee-ops.service.ts`). Found by continuing the database
+reconciliation that produced the entry below: an invoice whose HEADER total
+disagreed with the sum of its own line items.
+`decideAdjustment` states the rule in full, in the same file:
+```
+DECREMENT, never assign a total computed from an earlier read. ... two DIFFERENT
+adjustments on the same invoice ... would both compute `inv.totalMinor - amount`
+from the same starting figure and one would be lost. The database does the
+arithmetic, so neither can be.
+```
+SIX paths mutate an existing invoice total — an approved discount or waiver, a
+library fine, hostel rent, a transport fare, and the late-fee sweep. Five used
+`{ increment }` / `{ decrement }`. The sweep assigned
+`inv.totalMinor + school.lateFeeFlatMinor`, where `inv` comes from a BATCH READ
+OF UP TO 500 INVOICES taken before the per-invoice loop — so for the 400th
+invoice that figure can be seconds old.
+// **THE SAME BLOCK ALREADY KNEW THE READ WAS STALE.** Two lines above the bug:
+"Re-check inside the writing transaction: **the read above is a separate
+snapshot**, so a fee added between the two would otherwise be added twice." The
+IDEMPOTENCY concern was handled — the marker is re-checked in the tx — and the
+ARITHMETIC concern, written down 290 lines up, was not. One side of the same
+comparison guarded, again.
+// **WHAT THE LOST WRITE COSTS IS WORSE THAN THE MONEY.** Assigning `stale + fee`
+over an approved DISCOUNT silently REVERSES a maker-checker decision: the
+`invoice_adjustment` row still reads APPROVED, the audit trail shows only a late
+fee, and the family is billed what the school formally agreed to waive. The
+header then disagrees with the sum of the line items — which is the state that
+led me here.
+// LATENT, not observed live: it needs a concurrent write inside the window and
+the demo school has no contention. The mismatched row that found it is probe
+residue from an earlier session (a library fine's line item cleaned up without
+its header increment) — recorded rather than "corrected", on the same footing as
+the PAID-but-underpaid row this file already notes, because inventing a line
+item to balance a total is worse than a known-bad demo row.
+// Live after: a fresh overdue invoice swept from 100,000 to 350,000 with the
+header and the line items agreeing exactly (100,000 tuition + 250,000 late fee).
+Gate: `a-total-the-database-computes.spec.ts` refuses any `totalMinor:` assigned
+from an expression that reads a `.totalMinor`, AND names the five mutating paths
+so an empty offender list cannot pass against code that stopped updating totals
+at all. Mutation-validated both ways.
+// THE INVARIANT IS WORTH RE-RUNNING: `invoice.totalMinor` = sum of its line
+items, `attendance_record.date` = its session's date, no payment on another
+school's invoice, no enrolment or guardian link pointing at a non-student, no
+`subject_result` for a class the pupil was never in. All clean except the two
+known dev-data rows.
+
 ### A payment plan that stopped matching the bill
 `getPlan` (`fees/payment-plans.service.ts`), `PaymentPlanDto.invoiceTotalMinor /
 plannedTotalMinor / coversInvoice`. Found by reconciling the demo database
