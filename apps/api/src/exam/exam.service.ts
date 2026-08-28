@@ -41,6 +41,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { assertStillHere } from "../common/still-here";
+import { ON_ROLL_STUDENT } from "../common/student-scope";
 import { lockPerson } from "../common/person-lock";
 import { asDuplicateConflict } from "../common/unique-violation";
 import { dateFilter, dateWindow } from "../common/status-filter";
@@ -791,6 +792,37 @@ export class ExamService {
       if (sitting.capacity > 0 && uniq.length > sitting.capacity) {
         throw new ConflictException(`Only ${sitting.capacity} seats in this hall (${uniq.length} students given)`);
       }
+      // WHO MAY SIT A PAPER.
+      //
+      // This took a list of uuids and checked only that they FITTED. Measured
+      // live: a TEACHER was seated as a candidate (201, "Demo Teacher" on the
+      // chart) and a uuid belonging to nobody took seat #1 with a blank name —
+      // a phantom occupying a place in a hall whose capacity refuses a real
+      // candidate once it is full.
+      //
+      // The sibling one method down has always been careful, and its comment
+      // states the mirror of this reason: `assignInvigilator` 404s an id it
+      // cannot resolve, refuses a pupil ("Only a staff member can invigilate")
+      // and refuses somebody who has left, because "rostering somebody who has
+      // left leaves it unattended by a different route". Seating somebody who
+      // has left puts a name on the invigilator's chart for a child who is not
+      // coming, and on the family-facing `/exams/mine` that reads these rows.
+      //
+      // ON ROLL, not merely "is a student" — the seat plan is a decision about
+      // the present, which is exactly what that predicate documents itself for.
+      // RLS scopes the read, so an id from another school is not eligible here
+      // either, and the refusal cannot tell the two apart.
+      const eligible = await tx.user.findMany({
+        where: { id: { in: uniq }, ...ON_ROLL_STUDENT },
+        select: { id: true },
+      });
+      if (eligible.length !== uniq.length) {
+        const ok = new Set(eligible.map((u: { id: string }) => u.id));
+        const bad = uniq.filter((id) => !ok.has(id));
+        throw new BadRequestException(
+          `${bad.length} of ${uniq.length} cannot be seated: a candidate must be a student of this school who is still on roll.`,
+        );
+      }
       await tx.examSeat.deleteMany({ where: { sittingId } });
       await tx.examSeat.createMany({
         data: uniq.map((studentId, i) => ({ schoolId: p.schoolId, sittingId, studentId, seatNo: i + 1 })),
@@ -1036,7 +1068,15 @@ export class ExamService {
   /** Auto-seat every student enrolled in a class into the sitting. */
   async seatClass(p: Principal, sittingId: string, classId: string): Promise<ExamSeatDto[]> {
     const studentIds = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const enr = await tx.enrollment.findMany({ where: { status: "ACTIVE", classId }, select: { studentId: true } });
+      // NARROWED HERE TOO, so this path can never trip the eligibility check in
+      // `seat` below. An ACTIVE enrolment belonging to a pupil who has left is a
+      // state the exit reactor prevents (it closes both in one transaction) —
+      // but if one ever existed, refusing to seat the WHOLE class over one stale
+      // row would be the worse answer. The roster simply does not offer them.
+      const enr = await tx.enrollment.findMany({
+        where: { status: "ACTIVE", classId, student: ON_ROLL_STUDENT },
+        select: { studentId: true },
+      });
       return enr.map((e: { studentId: string }) => e.studentId);
     });
     if (studentIds.length === 0) throw new BadRequestException("That class has no enrolled students");

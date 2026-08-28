@@ -2040,6 +2040,59 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A teacher seated for the exam, and a candidate who is nobody
+`ExamService.seat` took a list of uuids and checked only that they FITTED the
+hall. It validated nothing about the people: not that they were pupils, not that
+they were still on roll, not that they existed. Measured live, one sitting,
+three requests:
+```
+a real pupil              201   seat #1  "Volume Pupil 2"
+a TEACHER as a candidate  201   seat #1  "Demo Teacher"
+a uuid that is nobody     201   seat #1  (no name at all)
+```
+There is no FK on `exam_seat.studentId`, so the phantom is a real stored row.
+**THE SIBLING ONE METHOD DOWN HAS ALWAYS BEEN CAREFUL, AND ITS COMMENT STATES
+THE MIRROR OF THE REASON.** `assignInvigilator` 404s an id it cannot resolve,
+refuses a pupil (*"Only a staff member can invigilate"*), takes a lock, checks
+for a clash — and calls `assertStillHere` under the note *"rostering somebody
+who has left leaves it unattended by a different route"*. Somebody thought the
+whole thing through for the STAFF side of one sitting and the CANDIDATE side of
+it was never asked. Sibling asymmetry with the careful one written first, again.
+The candidate side has the mirror harm, and it is not cosmetic: the seat plan IS
+the invigilator's chart and the family-facing `/exams/mine`, and a place in a
+capacity-bounded hall is consumed — once full, `seat` refuses a REAL candidate
+with a 409.
+Live after: pupil 201, teacher **400**, ghost **400**.
+// **ON ROLL, not merely "is a student"** — `ON_ROLL_STUDENT`, whose own doc
+says to use it "anywhere the answer feeds a decision about the present". A pupil
+who has left is not sitting next week's paper. This closes the thread that
+started it: a pupil seated BEFORE their exit keeps the seat, since nothing in
+the exit reactor touches `exam_seat`, and now nothing can put them back.
+// THE WHOLE LIST IS REFUSED, never the eligible part — a partial seat is the
+silent-partial-success shape, and the exam officer who named these candidates
+would be handed a chart quietly one name short.
+// THE REFUSAL IS NOT AN EXISTENCE ORACLE: RLS scopes the lookup, so an id from
+another school is simply "not eligible", and a real teacher and a uuid that is
+nobody produce a byte-identical message. A test pins that they stay equal.
+// `seatClass` IS NARROWED TOO so it can never trip the new check. An ACTIVE
+enrolment belonging to a departed pupil is a state the exit reactor prevents
+(it closes both in one transaction, verified: 900 ACTIVE enrolments, every one
+belonging to an ACTIVE pupil) — but refusing to seat a WHOLE class over one
+stale row would be the worse answer, so the roster does not offer them.
+// WHAT THE SAME PASS FOUND SOUND, recorded so it is not re-chased. The student
+exit already closes the account, EVERY enrolment, the hostel allocation and the
+transport assignment in one transaction, with the reasoning written out; books
+still out are deliberately SHOWN to the approver and NOT closed, because marking
+them returned would record something that did not happen and close the school's
+only claim on the copy. And there is no bulk tuition run to bill a leaver —
+the only fee runs are hostel and transport, both of which bill on the ACTIVE
+rows the exit has just closed.
+// GOTCHA in my own fixture: a stub that returns every id it is asked for models
+something Postgres cannot produce and would pass against a service that had
+stopped filtering. It applies the caller's own `where` to a small table instead.
+Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
+part, un-narrow the roster — each caught by the assertion written for it.
+
 ### Reviewing my own new screen: a count the page could not see
 The first thing reviewed after building the report-card console was the console
 itself, and "Print all" claimed something it cannot observe. It fires ONE BLOB
