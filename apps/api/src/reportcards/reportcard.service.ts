@@ -493,7 +493,25 @@ export class ReportCardService {
 
     const logo = await this.branding.getLogoBytes(p.schoolId).catch(() => null);
     const buffer = await this.renderPdf(data, logo);
-    const filename = `report-card-${data.studentName.replace(/\s+/g, "-").toLowerCase()}.pdf`;
+    // THE TERM BELONGS IN THE NAME.
+    //
+    // This was `report-card-<pupil>.pdf` whatever term was asked for, and the
+    // SAME string is the Document Vault title below — so a pupil's three cards
+    // for a session were filed under one identical name, and a family opening
+    // their vault could not tell Term 1 from Term 3. A principal printing a
+    // year's cards got three downloads the browser numbered (1), (2), (3).
+    //
+    // The card itself has always named the term in its heading; only the thing
+    // you file it under did not.
+    const slug = (v: string) => v.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+    const filename = [
+      "report-card",
+      slug(data.studentName),
+      data.termName ? slug(data.termName) : null,
+    ]
+      .filter(Boolean)
+      .join("-")
+      .concat(".pdf");
 
     // Persist into the Document Vault so the student/parent have their OWN
     // retrievable copy regardless of who generated it — best-effort: a vault

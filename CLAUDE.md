@@ -2024,6 +2024,44 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Every term's report card was filed under the same name
+Asked whether a principal can print a PAST term's report card, and how to make
+that accurate. Most of the answer is YES ALREADY, and the parts worth recording
+are the ones checked rather than assumed:
+  - `POST /reportcards/:studentId/generate?termId=` has always taken a term, and
+    `RemarksEditor` on the student page flattens EVERY session's terms into a
+    picker and passes the chosen one. So the capability exists; it is just named
+    "Remarks", which is not where somebody looks to print a card.
+  - It is ACCURATE for a past term, and for a structural reason rather than
+    luck: the class on the card is the COHORT class taken from the pupil's own
+    result rows, and position, class average and low/high are computed over
+    `subject_result` for `(classId, termId, PUBLISHED)` — never over the ACTIVE
+    roster. That is the very bug found in `getClassBroadsheet` one entry up, and
+    the report card does not share it.
+  - MAKER-CHECKER sits in the right place and is not on the print. Generating is
+    `grade.read`; what is two-person gated is PUBLISHING marks, and the card
+    only renders PUBLISHED ones. Gating the print would stop a parent taking
+    their own copy while doing nothing about the figures.
+**WHAT WAS ACTUALLY WRONG was the name.** `report-card-<pupil>.pdf`, whatever
+term was asked for — and that same string is the Document Vault TITLE:
+```
+before   Term 1        report-card-volume-pupil-75.pdf
+         Second Term   report-card-volume-pupil-75.pdf
+after    Term 1        report-card-volume-pupil-75-term-1.pdf
+         Second Term   report-card-volume-pupil-75-second-term.pdf
+```
+So a pupil's three cards for a session were filed under ONE identical title. A
+family opening their vault could not tell Term 1 from Term 3, and a principal
+printing a year got three downloads the browser numbered (1), (2), (3). **The
+card itself always named the term in its heading** — only the thing you file it
+under did not.
+// It degrades to the pupil's name when no term is asked for, which the leavers
+table and the plain button both do; a trailing dash or an "undefined" in a
+filename is its own defect, and a test pins it.
+// GOTCHA in my own test, the second time this session: asserting
+`.filter(Boolean)` matched an unrelated occurrence elsewhere in the service, so
+deleting the one that mattered left it green. Scoped to the filename block.
+
 ### A boarding roll call that named nobody missing
 Found by driving a path that had never executed: `hostel_attendance` had no
 rows, so the roll call — the record of who was in a boarding house that night —
