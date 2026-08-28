@@ -2063,6 +2063,46 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### A scheme of work whose rows lost their identity
+`SyllabusService.upsert` + `SyllabusPanel`. Found by driving a path that had
+never executed: `subject_syllabus` had no rows, so no scheme of work had ever
+been written.
+The upsert DELETED every item and recreated it, carrying the TAUGHT flag forward
+by matching `(week, topic)`. The intent was right and written down — the panel's
+own header says "an edit is not a reset" — and deriving identity from CONTENTS
+cost two things, both measured live:
+```
+rename a TAUGHT week   before [{w1 TAUGHT}]  ->  after fixing a typo in its own
+                       topic: [{w1 PLANNED}] — the taught mark simply gone
+edit ANY week          a lesson filed against week 2 had `syllabusItemId` set to
+                       NULL. The FK is ON DELETE SET NULL and `updateContent`
+                       accepts no `syllabusItemId`, so a teacher CANNOT put it back
+```
+// **WEEK IS NOT A KEY EITHER**, and the schema says so: "duplicates are allowed
+because a topic can span weeks". The only stable identity is the row's id —
+which the READ already returned and the panel threw away when mapping to its
+draft. So the fix is to carry it: existing rows are UPDATED in place, new ones
+created, and only the rows the teacher actually removed are deleted. Reordering,
+merging and renumbering all still work, because identity travels WITH the row
+instead of being re-derived from what it says.
+// `status`/`taughtAt` are deliberately NOT written by a text edit: they belong
+to the one-click "mark taught" action, and an edit must not move them in either
+direction. A test pins that.
+// AN ID FROM ANOTHER PLAN IS REFUSED — otherwise one offering's save could
+adopt or delete another's row, the same check `validateSyllabusTopic` already
+makes one file over.
+// **THE EXISTING SUITE CAUGHT A REGRESSION IN MY FIX, and it was a real one.**
+Identity-by-id alone means a caller that sends NO ids has every row fall out of
+the keep set, be deleted, and be recreated PLANNED — strictly worse than the
+behaviour it replaced, and reachable from an older tab still open or anything
+driving the API directly. The `(week, topic)` carry is therefore KEPT as a
+fallback for id-less rows. Two red tests, describing the old mechanism, were
+right about the property.
+// GOTCHA, ninth instance: the harness supplied `priorTaught` rows with no `id`
+and no `status`, which every real row carries — so the new filter dropped them.
+Live after: renaming two weeks keeps TAUGHT, every id is stable, and the lesson
+is still linked to week 2.
+
 ### "Overdue" told to the person who had already finished it
 `isOverdue` (`components/task/TaskBoard.tsx`). Found by driving a path that had
 never executed — `task_assignment` had no rows, so the task board had never once

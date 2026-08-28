@@ -76,6 +76,11 @@ const syllabusSchema = z.object({
   items: z
     .array(
       z.object({
+        // The row's OWN identity, echoed back from the read. Absent for a new
+        // row. Without it the server can only match an edited plan to the old
+        // one by its CONTENTS, which is how a renamed week lost its taught mark
+        // and every lesson filed against the plan was silently unlinked.
+        id: z.string().uuid().optional(),
         week: z.number().int().min(1).max(60),
         topic: z.string().min(1).max(200),
         objectives: z.string().max(2000).nullish(),

@@ -43,7 +43,10 @@ type Syllabus = {
   progress: { taught: number; total: number; percent: number | null };
 } | null;
 
-type Draft = { week: string; topic: string; objectives: string; resources: string };
+// `id` is present for a row that already exists and absent for one the teacher
+// has just added — which is exactly what tells the server to update rather than
+// create, and what keeps a lesson's link to its topic alive across an edit.
+type Draft = { id?: string; week: string; topic: string; objectives: string; resources: string };
 
 export function SyllabusPanel({
   classId,
@@ -76,6 +79,11 @@ export function SyllabusPanel({
     setOverview(j?.overview ?? "");
     setRows(
       (j?.items ?? []).map((i) => ({
+        // The row's OWN identity, carried through the edit and echoed back on
+        // save. Dropping it made the server match an edited plan to the old one
+        // by CONTENTS, which lost a renamed week's taught mark and silently
+        // unlinked every lesson filed against the plan.
+        id: i.id,
         week: String(i.week),
         topic: i.topic,
         objectives: i.objectives ?? "",
@@ -94,6 +102,7 @@ export function SyllabusPanel({
     const items = rows
       .filter((r) => r.topic.trim())
       .map((r) => ({
+        ...(r.id ? { id: r.id } : {}),
         week: Number(r.week) || 1,
         topic: r.topic.trim(),
         objectives: r.objectives.trim() || null,

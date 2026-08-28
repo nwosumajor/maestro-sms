@@ -21,6 +21,8 @@ const ARGS = { classId: "c1", subjectId: "s1", termId: "tm1" };
 function harness(opts: {
   offerings?: Array<{ classId: string; subjectId: string }>;
   existing?: { id: string } | null;
+  /** Rows already on the plan. A REAL row always carries its `id` and `status`;
+   *  the service reads both now that a row keeps its identity across an edit. */
   priorTaught?: Array<{ week: number; topic: string; taughtAt: Date | null }>;
 } = {}) {
   const created: Array<Record<string, unknown>> = [];
@@ -47,7 +49,9 @@ function harness(opts: {
       }),
     },
     subjectSyllabusItem: {
-      findMany: jest.fn().mockResolvedValue(opts.priorTaught ?? []),
+      findMany: jest.fn().mockResolvedValue(
+        (opts.priorTaught ?? []).map((t, i) => ({ id: `prior-${i}`, status: "TAUGHT", ...t })),
+      ),
       deleteMany: jest.fn().mockResolvedValue({}),
       createMany: jest.fn(({ data }: { data: Array<Record<string, unknown>> }) => {
         created.push(...data);

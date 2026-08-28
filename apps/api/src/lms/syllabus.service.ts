@@ -34,6 +34,8 @@ const SYLLABUS_WIDE_ROLES = new Set(["school_admin", "principal", "head_teacher"
 const ITEM_STATUSES = ["PLANNED", "TAUGHT"] as const;
 
 interface SyllabusItemInput {
+  /** The row's own id, echoed back from the read. Absent for a new row. */
+  id?: string;
   week: number;
   topic: string;
   objectives?: string | null;
@@ -199,19 +201,57 @@ export class SyllabusService {
       })) as { id: string } | null;
 
       let syllabusId: string;
+      // A ROW KEEPS ITS IDENTITY ACROSS AN EDIT.
+      //
+      // This used to delete every item and recreate it, carrying the TAUGHT flag
+      // forward by matching `(week, topic)`. The intent was right — the panel's
+      // own note says "an edit is not a reset" — and deriving identity from
+      // CONTENTS cost two things, both measured live:
+      //
+      //   • renaming a taught week LOST its taught mark: fixing a typo in
+      //     "Week 1 — number" turned TAUGHT back to PLANNED;
+      //   • every lesson filed against the plan was SILENTLY UNLINKED.
+      //     `lms_content.syllabusItemId` is ON DELETE SET NULL, so editing an
+      //     UNRELATED week nulled the link on a lesson filed against week 2 —
+      //     and `updateContent` accepts no `syllabusItemId`, so a teacher cannot
+      //     put it back.
+      //
+      // Week is NOT a key either: the schema says "duplicates are allowed
+      // because a topic can span weeks". The only stable identity is the row's
+      // id, which the read already returns, so the client echoes it back.
+      // Reordering, merging and renumbering all still work — identity travels
+      // WITH the row instead of being re-derived from what it says.
+      const keepIds = new Set(input.items.map((i) => i.id).filter(Boolean) as string[]);
       const taughtBefore = new Map<string, Date | null>();
       if (existing) {
         syllabusId = existing.id;
         const prior = (await tx.subjectSyllabusItem.findMany({
-          where: { syllabusId, status: "TAUGHT" },
-          select: { week: true, topic: true, taughtAt: true },
-        })) as Array<{ week: number; topic: string; taughtAt: Date | null }>;
-        for (const t of prior) taughtBefore.set(`${t.week}:${t.topic.trim().toLowerCase()}`, t.taughtAt);
+          where: { syllabusId },
+          select: { id: true, week: true, topic: true, status: true, taughtAt: true },
+        })) as Array<{ id: string; week: number; topic: string; status: string; taughtAt: Date | null }>;
+        // THE OLD (week, topic) CARRY IS KEPT AS A FALLBACK, for a caller that
+        // sends no ids — an older tab still open, or anything driving the API
+        // directly. Without it, identity-by-id would DELETE every row such a
+        // client submits and recreate it PLANNED: strictly worse than the
+        // behaviour it replaced. Caught by the existing suite, which drives
+        // exactly that shape.
+        for (const t of prior) {
+          if (t.status === "TAUGHT") taughtBefore.set(`${t.week}:${t.topic.trim().toLowerCase()}`, t.taughtAt);
+        }
+        const mine = new Set(prior.map((r) => r.id));
+        // An id from ANOTHER plan would otherwise let one offering's edit adopt
+        // or delete another's row — the same check `validateSyllabusTopic` makes
+        // one file over, for the same reason.
+        for (const id of keepIds) {
+          if (!mine.has(id)) throw new BadRequestException("That syllabus row belongs to a different plan.");
+        }
         await tx.subjectSyllabus.update({
           where: { id: syllabusId },
           data: { overview: input.overview ?? null },
         });
-        await tx.subjectSyllabusItem.deleteMany({ where: { syllabusId } });
+        // Only the rows the teacher actually removed.
+        const dropped = prior.map((r) => r.id).filter((id) => !keepIds.has(id));
+        if (dropped.length > 0) await tx.subjectSyllabusItem.deleteMany({ where: { id: { in: dropped } } });
       } else {
         const created = await tx.subjectSyllabus.create({
           data: {
@@ -226,9 +266,28 @@ export class SyllabusService {
         syllabusId = created.id;
       }
 
-      if (input.items.length > 0) {
+      // Existing rows are UPDATED in place — the id survives, and with it the
+      // taught mark and every lesson filed against that topic. `status` and
+      // `taughtAt` are deliberately NOT written here: they are owned by the
+      // one-click "mark taught" action, and an edit of the text must not move
+      // them in either direction.
+      const fresh = input.items.filter((it) => !it.id);
+      for (const it of input.items) {
+        if (!it.id) continue;
+        await tx.subjectSyllabusItem.update({
+          where: { id: it.id },
+          data: {
+            week: it.week,
+            topic: it.topic.trim(),
+            objectives: it.objectives?.trim() || null,
+            resources: it.resources?.trim() || null,
+          },
+        });
+      }
+      if (fresh.length > 0) {
         await tx.subjectSyllabusItem.createMany({
-          data: input.items.map((it) => {
+          data: fresh.map((it) => {
+            // Only reachable for a row with no id — see the fallback above.
             const carried = taughtBefore.get(`${it.week}:${it.topic.trim().toLowerCase()}`);
             return {
               schoolId: p.schoolId,
@@ -248,7 +307,10 @@ export class SyllabusService {
         subjectId: args.subjectId,
         termId: args.termId,
         items: input.items.length,
-        carriedTaught: taughtBefore.size,
+        // What the edit actually did, rather than how many flags were carried:
+        // rows now KEEP their identity, so nothing is carried at all.
+        kept: input.items.filter((i) => i.id).length,
+        added: input.items.filter((i) => !i.id).length,
       });
       return { id: syllabusId, items: input.items.length };
     });
