@@ -1,0 +1,17 @@
+-- A withdrawn consent leaves the cross-school arena.
+--
+-- Entry into the Ultimate arena requires two-tier consent: the school enrols,
+-- and the pupil's GUARDIAN grants consent. Revoking that consent updated the
+-- consent row and did nothing to the arena, so the child's handle, school and
+-- scores stayed on a leaderboard visible to every other school in the
+-- competition, indefinitely.
+--
+-- The arena is RLS-EXEMPT and deliberately holds no per-school data, so a
+-- cross-school read CANNOT consult each tenant's consent table. The school
+-- reaches its own pupil instead, through `ultimate_entry_link` — the only
+-- userId->participantId map, and tenant-scoped.
+--
+-- A NULLABLE MARKER rather than a new status value: `status` is the GAME state
+-- (ACTIVE/FINISHED), and overloading it would destroy a finish that
+-- re-consenting could then only guess back.
+ALTER TABLE "ultimate_participant" ADD COLUMN "withdrawnAt" TIMESTAMP(3);

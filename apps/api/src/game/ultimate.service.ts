@@ -249,6 +249,33 @@ export class UltimateService {
         guardianId = input.guardianId;
       }
 
+      // A WITHDRAWAL REACHES THE ARENA.
+      //
+      // Entry needs two-tier consent, and revoking it used to update this row
+      // and nothing else — so a child whose guardian withdrew consent kept their
+      // handle, school and scores on a leaderboard visible to every other school
+      // in the competition, for ever. The integrity module already states the
+      // house rule: a withdrawal takes effect, and anything captured before it
+      // is not processed afterwards.
+      //
+      // The arena is RLS-EXEMPT and deliberately holds no per-school data, so a
+      // cross-school READ cannot consult each tenant's consent table. The school
+      // reaches its OWN pupil instead, through `ultimate_entry_link` — the only
+      // userId->participantId map, and tenant-scoped, so this can never touch
+      // another school's entry.
+      const links = (await tx.ultimateEntryLink.findMany({
+        where: { userId: input.studentId },
+        select: { participantId: true },
+      })) as Array<{ participantId: string }>;
+      if (links.length > 0) {
+        await tx.ultimateParticipant.updateMany({
+          where: { id: { in: links.map((l) => l.participantId) } },
+          // Cleared on a re-grant: a guardian who consents again should not have
+          // to re-enter, and the game state was never touched.
+          data: { withdrawnAt: input.granted ? null : new Date() },
+        });
+      }
+
       const existing = await tx.ultimateConsent.findFirst({
         where: { schoolId: p.schoolId, studentId: input.studentId },
       });
@@ -450,7 +477,11 @@ export class UltimateService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const comp = await this.requireCompetition(tx, competitionId);
       // RLS-exempt arena read — intentionally across all schools.
-      const participants = await tx.ultimateParticipant.findMany({ where: { competitionId } });
+      const participants = await tx.ultimateParticipant.findMany({
+        // A withdrawn entry is excluded from every cross-school read — that is
+        // what makes the withdrawal mean something.
+        where: { competitionId, withdrawnAt: null },
+      });
       const finished = participants.filter((pt) => pt.status === "FINISHED");
       const finishes: RaceFinish[] = finished.map((pt) => ({
         userId: pt.id, // opaque participant id, NOT a userId
@@ -517,7 +548,7 @@ export class UltimateService {
     let rank: number | null = null;
     if (me.status === "FINISHED") {
       const participants = await tx.ultimateParticipant.findMany({
-        where: { competitionId, status: "FINISHED" },
+        where: { competitionId, status: "FINISHED", withdrawnAt: null },
       });
       const ranked = computeRaceStandings(
         participants.map((pt) => ({

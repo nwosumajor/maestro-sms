@@ -84,6 +84,11 @@ model UltimateParticipant {
   elapsedMs   Int?
   finishedAt  DateTime?
   status      UltimateParticipantStatus @default(ACTIVE)
+  /// Set when the pupil's GUARDIAN CONSENT is withdrawn, and cleared if it is
+  /// granted again. Separate from `status`, which is the game state: a
+  /// withdrawal must not destroy a finish, and re-consenting must not have to
+  /// guess one back. A withdrawn entry is excluded from every cross-school read.
+  withdrawnAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

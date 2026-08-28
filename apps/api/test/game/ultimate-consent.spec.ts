@@ -43,6 +43,12 @@ function makeService(opts: { studentExists?: boolean; guardianLink?: boolean } =
   const tx = {
     user: { findFirst: jest.fn().mockResolvedValue(studentExists ? { id: "pupil-1" } : null) },
     parentChild: { findFirst: jest.fn().mockResolvedValue(guardianLink ? { id: "link-1" } : null) },
+    // A REAL TenantTx always has these. Setting consent now reaches the pupil's
+    // OWN arena entry through the school's `ultimate_entry_link` map, so that a
+    // withdrawal actually removes them from the cross-school leaderboard. This
+    // fixture has no arena entry, which is the ordinary case.
+    ultimateEntryLink: { findMany: jest.fn().mockResolvedValue([]) },
+    ultimateParticipant: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
     ultimateConsent: {
       findFirst: jest.fn().mockResolvedValue(null),
       create: consentCreate,

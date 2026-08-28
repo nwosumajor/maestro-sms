@@ -2063,6 +2063,45 @@ that quietly would be worse than saying so.
 are exercised by the existing PDF suites, and the card was re-generated live
 after it — same filename, same content.
 
+### A withdrawn consent that never left the cross-school arena
+`setConsent` + `leaderboard` (`game/ultimate.service.ts`), migration
+`20270115000000`. Found by checking a CLAIM this file makes about its ONE
+deliberate tenant-boundary crossing — that the arena carries no PII. The columns
+bear that out exactly (opaque id, handle, schoolId, server-only secret, scores).
+What did not hold was the consent behind it.
+Entry needs two tiers, and the gate is thorough — school posture or scholarship
+qualification, school enrolment, and an explicit granted guardian consent, all
+enforced. But `setConsent(granted: false)` updated the consent row and **did
+nothing to the arena**, so a child whose guardian withdrew consent kept their
+handle, their school and their scores on a leaderboard visible to every other
+school in the competition, indefinitely.
+```
+consent GRANTED         1 on the board  ["MathWhiz"]
+consent WITHDRAWN       0 on the board  []
+consent GRANTED again   1 on the board  ["MathWhiz"]   finish intact
+```
+// **THE HOUSE RULE WAS ALREADY WRITTEN, ONE MODULE OVER.** `runDetection`
+"re-checks consent so anything captured before a withdrawal is never analysed".
+The arena is the place that rule matters most and did not follow it.
+// **A CROSS-SCHOOL READ CANNOT ASK.** The arena is RLS-EXEMPT and deliberately
+holds no per-school data, so the leaderboard cannot consult each tenant's
+consent table — that IS the two-halves design. The SCHOOL reaches its own pupil
+instead, through `ultimate_entry_link`, the only userId->participantId map and
+tenant-scoped, so a revocation can never touch another school's entry.
+// **A NULLABLE MARKER, NOT A NEW STATUS VALUE.** `status` is the GAME state
+(ACTIVE/FINISHED); overloading it would destroy a finish that re-consenting
+could then only guess back — which is exactly what the third line above
+demonstrates. It also avoids `ALTER TYPE ... ADD VALUE`, which cannot run inside
+a transaction on older Postgres.
+// BOTH cross-school reads filter it, and a test asserts BOTH: one filtered and
+one not would put the child back on a board through the other door.
+// GOTCHA, tenth instance: the consent harness had no `ultimateEntryLink` or
+`ultimateParticipant`, which every real `TenantTx` has.
+// PROBE ARTEFACT, recorded rather than hidden: the demo tenant's single arena
+row is residue from an earlier session, and driving this overwrote its
+`guessCount`/`elapsedMs` (now 7 / 42000). Status, finishedAt and withdrawnAt
+were restored to what I found; those two figures cannot be.
+
 ### An alumni broadcast that reached nobody and said it had
 `AlumniService.broadcast` / `fanOutBroadcast`. Found by driving a path that had
 never executed: `alumnus` had no rows.
