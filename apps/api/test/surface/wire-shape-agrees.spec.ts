@@ -86,9 +86,18 @@ describe("the shape the web asserts and the shape the API declares", () => {
   const mismatches: string[] = [];
   let compared = 0;
 
+  /** Call sites this gate cannot speak for, and why — reported, not swallowed. */
+  const uncompared: string[] = [];
+
   for (const w of web) {
     const declared = api.get(`GET ${w.path}`);
-    if (!declared) continue; // no annotation, or a path this crude matcher missed
+    if (!declared) {
+      // No annotation on the handler, or a path this crude matcher missed. Either
+      // way the contract is UNCHECKED, and a gate that drops them silently
+      // reports a coverage figure nobody can act on.
+      uncompared.push(`${w.file}: apiGet<${w.type}>("${w.path}")`);
+      continue;
+    }
     if (`GET ${w.path}` in NOT_COMPARED) continue;
     compared += 1;
     // `Serialized<X>` and `X` agree about being a list; unwrap before asking.
@@ -113,5 +122,35 @@ describe("the shape the web asserts and the shape the API declares", () => {
     // gate's own blind spot, made visible: if it drops toward zero, the
     // extraction has broken rather than the code having become perfect.
     expect(compared).toBeGreaterThan(20);
+  });
+
+  it("has not quietly stopped comparing most of what it used to", () => {
+    // A RATCHET, because `> 20` was not a floor — it was 220 at the time of
+    // writing, so TWO HUNDRED call sites could have fallen out of the net and
+    // this gate would still have gone green. That is the softer form of the
+    // blind-gate failure: not finding nothing, but finding a fraction and
+    // saying so only in a console line nobody reads on a passing run.
+    //
+    // Lowering these deliberately is fine — routes are removed, a page stops
+    // reading an endpoint — but it should be a decision somebody takes, not a
+    // number that erodes.
+    expect(compared).toBeGreaterThanOrEqual(200);
+    expect(api.size).toBeGreaterThanOrEqual(250);
+  });
+
+  it("names what it could not compare, rather than only counting it", () => {
+    // eslint-disable-next-line no-console -- the uncovered set is the point
+    if (uncompared.length > 0) {
+      console.log(
+        `wire-shape gate: ${uncompared.length} apiGet call site(s) have NO annotated handler, so their contract is unchecked:\n  ` +
+          uncompared.slice(0, 12).join("\n  ") +
+          (uncompared.length > 12 ? `\n  …and ${uncompared.length - 12} more` : ""),
+      );
+    }
+    // Not asserted to be empty: annotating every read controller is a standing
+    // job, not a precondition for this gate to be useful. Asserted to be
+    // BOUNDED, so the unchecked set cannot grow quietly while the compared
+    // count stays flat.
+    expect(uncompared.length).toBeLessThanOrEqual(60);
   });
 });

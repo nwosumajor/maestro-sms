@@ -2040,6 +2040,39 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A floor of twenty under a gate that was covering two hundred
+`wire-shape-agrees.spec.ts`. Second instance in two rounds of the same shape —
+after the cadence gate that checked 13 of 18 jobs — and two makes it a class
+worth naming: **a gate that covers a FRACTION and says so only in a console line
+nobody reads on a passing run.**
+This one compares what the web asserts (`apiGet<T>`) against what the API
+declares (`: Promise<X>`), and it already had a "did I find anything" guard —
+`expect(compared).toBeGreaterThan(20)`. The real figure is **220 of 269 call
+sites**. So two hundred could have fallen out of the net and it would still have
+gone green: not the blind-gate failure this repo already gates against, the
+softer one where the floor sits an order of magnitude below the truth.
+Now a RATCHET (`>= 200` compared, `>= 250` annotated handlers) and, more
+usefully, the 49 uncompared call sites are NAMED rather than counted — those are
+contracts nothing checks, and a figure nobody can act on is not coverage. The
+uncompared set is asserted BOUNDED rather than empty: annotating every read
+controller is a standing job, not a precondition for the gate to be useful.
+// PROVED NECESSARY BY MUTATION: dropping half the annotated handlers is caught
+ONLY by the new assertions — the old floor passed it.
+// **THE SWEEP BEHIND IT CAME BACK CLEAN, and that is worth recording so it is
+not redone.** 81 of 361 GET routes carry no return type; the interesting ones are
+the 29 the web asserts a DTO for, and all 29 MATCH what the API actually
+returns — checked live, not read: `/students/count`, `/attendance/term-lock`,
+`/billing/credits`, `/academic/shape`, `/legal/acceptance/status`,
+`/students/:id/attendance/summary`, `/invoices/:id/pay/availability`,
+`/students/exited` and the rest. So there is no live drift; what there is, is 29
+contracts held together by nobody checking them.
+// WHY THOSE ARE THE RISKY ONES: several assert an ANONYMOUS inline shape rather
+than a shared DTO (`{ students: number }`, `{ lockBeforeDate: string | null }`,
+`{ balance: number; bundles: [...] }`), so both sides can drift freely and the
+spine's "one rename breaks producer AND consumer" does not apply. Annotating the
+API alone would not connect them — the fix for those is a DTO in `@sms/types`,
+which is a standing job rather than this round's.
+
 ### "You have no children linked" was also what a refusal looked like
 `/family` (`app/(app)/family/page.tsx`). `?? { children: [] }` on the one page
 whose whole purpose is a parent's own family — and the page renders an empty
