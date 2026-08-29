@@ -374,7 +374,15 @@ export default async function HelpPage() {
             description="Read-only visibility with one deliberate power."
             steps={[
               { title: "See without touching", body: "You can read classes, grades, workflows, fees, scholarships and documents across the school — but not modify them." },
-              { title: "The veto", body: "On any approval workflow you may exercise a veto — the one active power the board holds, and it is audit-logged like everything else." },
+              { title: "The veto", body: "Once a request has been APPROVED you may veto it — the one active power the board holds, and it is audit-logged like everything else. It is only available on an approved request; there is nothing to veto while one is still being reviewed." },
+              // Says what it DOES NOT do. A veto lands after the approval has
+              // already taken effect — the role was granted, the charges are on
+              // families' invoices, the marks are published — and it records the
+              // board's decision rather than reversing it. Proven live: a vetoed
+              // junior-admin appointment left the role on the account. A board
+              // member who believes the button undoes the act will not go and
+              // ask anyone to undo it.
+              { title: "A veto records, it does not reverse", body: "A veto reaches a request that was already approved, so whatever the approval did has already happened. Vetoing does not undo it — ask the relevant office to reverse it, and everyone who approved it is told at the same time." },
             ]}
           />
         )}

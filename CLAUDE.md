@@ -2040,6 +2040,37 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The manual promised a power the button does not have
+`/help` and `docs/ONBOARDING-MANUAL.html`. Found by checking what the product
+TELLS somebody about a control I had just changed. The board's guide said:
+*"On any approval workflow you may exercise a veto."* Two things wrong in one
+sentence.
+**It is not on any workflow.** `WORKFLOW_TRANSITIONS` allows VETO from APPROVED
+and nowhere else, so there is nothing to veto while a request is being reviewed
+— a board member hunting for the button on a pending row would not find one, and
+the sentence sends them looking.
+**And it reads as a reversal.** A veto lands after the approval has taken effect
+and every reactor is `if (state !== "APPROVED") return`, so it records the
+board's decision and undoes nothing. The NOTIFICATION says that now; the one
+document that explains the power to the person who holds it did not, and
+somebody who believes the button undid the act will not go and ask anyone to
+undo it.
+// SAYS WHAT TO DO INSTEAD. "It does not undo it" alone leaves a reader stuck,
+so the guide names the next step and the fact that everyone who approved it has
+been told — the same rule as the discipline refusal that names a teacher who can
+file for a pupil.
+// BOTH DOCUMENTS, because the manual is what a school owner reads before
+anybody signs in, and a test asserts they agree — two descriptions of one power
+drift exactly like two spellings of one rule.
+// THE PREMISE IS PINNED TOO, not just the wording: a test derives from
+`WORKFLOW_TRANSITIONS` that VETO really is reachable only from APPROVED, so if
+that ever changes the guide becomes wrong in the OTHER direction and the build
+says so.
+// GOTCHA in my own mutation run: `git checkout docs/ONBOARDING-MANUAL.html`
+restored the file to HEAD, which discarded the uncommitted fix rather than the
+mutation. Re-applied and the served copy regenerated — `build:manual` is
+required after any manual edit, and `pricing-consistency` fails if it is stale.
+
 ### A gate that checked thirteen of eighteen jobs
 `repeatable-schedules.spec.ts`. The console judges a job LATE against the
 catalogue's `everyMinutes`, so a cadence that disagrees with the cron makes it
