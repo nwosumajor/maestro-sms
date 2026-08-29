@@ -19,6 +19,7 @@
 // verifying a teacher's licence.
 // =============================================================================
 
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
@@ -100,6 +101,12 @@ export class SuppliedDocumentsService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    // @Global and 60s-cached. Needed because "has this document expired" is a
+    // question about the SCHOOL's calendar day: a certificate is valid THROUGH
+    // the day it names, and deciding that in UTC gets it wrong by a day on
+    // either side of the meridian — the class this repo has now recorded on
+    // eleven surfaces.
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -301,6 +308,7 @@ export class SuppliedDocumentsService {
       })) as SubmissionRow[];
       const names = await this.namesFor(tx, submissions.map((s) => s.verifiedById));
       const labelOf = new Map(requirements.map((r) => [r.id, r.label] as const));
+      const today = await this.region.todayInTx(tx, p.schoolId);
       return {
         subjectKind,
         subjectId,
@@ -308,11 +316,15 @@ export class SuppliedDocumentsService {
         submissions: submissions.map((s) => this.toSubmissionDto(s, labelOf, names)),
         outstanding: outstandingRequirements(
           requirements,
-          submissions.map((s) => ({ requirementId: s.requirementId, status: s.status as SubmissionStatus })),
+          // `expiresAt` rides along: a VERIFIED document whose expiry has passed
+          // is not a document the school holds.
+          submissions.map((s) => ({ requirementId: s.requirementId, status: s.status as SubmissionStatus, expiresAt: s.expiresAt })),
+          today,
         ).map((r) => this.toRequirementDto(r)),
         progress: submissionProgress(
           requirements,
-          submissions.map((s) => ({ requirementId: s.requirementId, status: s.status as SubmissionStatus })),
+          submissions.map((s) => ({ requirementId: s.requirementId, status: s.status as SubmissionStatus, expiresAt: s.expiresAt })),
+          today,
         ),
       };
     });
@@ -765,7 +777,12 @@ export class SuppliedDocumentsService {
         orderBy: { createdAt: "asc" },
       })) as SubmissionRow[];
       const labelOf = new Map(requirements.map((r) => [r.id, r.label] as const));
-      const pairs = submissions.map((s) => ({ requirementId: s.requirementId, status: s.status as SubmissionStatus }));
+      const pairs = submissions.map((s) => ({
+        requirementId: s.requirementId,
+        status: s.status as SubmissionStatus,
+        expiresAt: s.expiresAt,
+      }));
+      const today = await this.region.todayInTx(tx, subject.schoolId);
       return {
         childName: application.childName,
         requirements: requirements.map((r) => this.toRequirementDto(r)),
@@ -781,8 +798,8 @@ export class SuppliedDocumentsService {
             rejectedReason: s.rejectedReason,
             at: s.uploadedAt ?? s.createdAt,
           })),
-        outstanding: outstandingRequirements(requirements, pairs).map((r) => this.toRequirementDto(r)),
-        complete: submissionProgress(requirements, pairs).complete,
+        outstanding: outstandingRequirements(requirements, pairs, today).map((r) => this.toRequirementDto(r)),
+        complete: submissionProgress(requirements, pairs, today).complete,
       };
     });
   }

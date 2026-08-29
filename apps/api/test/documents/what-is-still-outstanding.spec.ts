@@ -19,6 +19,10 @@ import {
   type SubmissionStatus,
 } from "@sms/types";
 
+/** A fixed school day. `asAt` is required so no caller can fall back to the
+ *  server's UTC day — the bug this repo has recorded on eleven surfaces. */
+const TODAY = new Date("2026-08-29T00:00:00.000Z");
+
 const req = (id: string, opts: Partial<{ mandatory: boolean; active: boolean }> = {}) => ({
   id,
   key: id,
@@ -31,78 +35,78 @@ const sub = (requirementId: string | null, status: SubmissionStatus) => ({ requi
 
 describe("what is still outstanding", () => {
   it("counts a requirement nothing has arrived for", () => {
-    const out = outstandingRequirements([req("birth_cert"), req("photo")], [sub("photo", "UPLOADED")]);
+    const out = outstandingRequirements([req("birth_cert"), req("photo")], [sub("photo", "UPLOADED")], TODAY);
     expect(out.map((r) => r.id)).toEqual(["birth_cert"]);
   });
 
   it("treats an UPLOADED file as satisfying, before anyone has checked it", () => {
     // Deliberate: the family has done their part. Chasing them again while the
     // file sits unverified in the office is how a school loses their goodwill.
-    expect(outstandingRequirements([req("a")], [sub("a", "UPLOADED")])).toEqual([]);
+    expect(outstandingRequirements([req("a")], [sub("a", "UPLOADED")], TODAY)).toEqual([]);
   });
 
   it("does NOT let a REJECTED file satisfy anything", () => {
     // The failure this prevents: a photograph of somebody's thumb marked
     // received, and a pupil enrolled with no birth certificate on file.
-    expect(outstandingRequirements([req("a")], [sub("a", "REJECTED")]).map((r) => r.id)).toEqual(["a"]);
+    expect(outstandingRequirements([req("a")], [sub("a", "REJECTED")], TODAY).map((r) => r.id)).toEqual(["a"]);
   });
 
   it("lets a WAIVED requirement close", () => {
     // A birth certificate lost in a flood, with a sworn declaration accepted
     // instead, is an ordinary week in a school office. Without this the list
     // can never reach zero and stops being read at all.
-    expect(outstandingRequirements([req("a")], [sub("a", "WAIVED")])).toEqual([]);
+    expect(outstandingRequirements([req("a")], [sub("a", "WAIVED")], TODAY)).toEqual([]);
   });
 
   it("ignores a PENDING upload — the bytes may never arrive", () => {
     // PENDING means a presigned URL was handed out. The browser may have closed
     // mid-upload; nothing has been confirmed to exist.
-    expect(outstandingRequirements([req("a")], [sub("a", "PENDING")]).map((r) => r.id)).toEqual(["a"]);
+    expect(outstandingRequirements([req("a")], [sub("a", "PENDING")], TODAY).map((r) => r.id)).toEqual(["a"]);
   });
 
   it("drops a requirement the school has switched off", () => {
-    expect(outstandingRequirements([req("a", { active: false }), req("b")], [])).toEqual([
+    expect(outstandingRequirements([req("a", { active: false }), req("b")], [], TODAY)).toEqual([
       expect.objectContaining({ id: "b" }),
     ]);
   });
 
   it("ignores a file supplied outside the asked-for list", () => {
     // "Anything else you think we should see" is welcome, and satisfies nothing.
-    expect(outstandingRequirements([req("a")], [sub(null, "VERIFIED")]).map((r) => r.id)).toEqual(["a"]);
+    expect(outstandingRequirements([req("a")], [sub(null, "VERIFIED")], TODAY).map((r) => r.id)).toEqual(["a"]);
   });
 
   it("agrees with the statuses it publishes as satisfying", () => {
     // The constant and the behaviour must not drift apart.
     for (const status of SATISFYING_STATUSES) {
-      expect(outstandingRequirements([req("a")], [sub("a", status)])).toEqual([]);
+      expect(outstandingRequirements([req("a")], [sub("a", status)], TODAY)).toEqual([]);
     }
   });
 });
 
 describe("the summary a dashboard shows", () => {
   it("counts only MANDATORY gaps as chaseable", () => {
-    const p = submissionProgress([req("a"), req("b", { mandatory: false })], []);
+    const p = submissionProgress([req("a"), req("b", { mandatory: false })], [], TODAY);
     expect(p).toMatchObject({ required: 2, satisfied: 0, missingMandatory: 1 });
   });
 
   it("is COMPLETE while only optional items are missing", () => {
     // An optional immunisation record must not keep a pupil's file looking
     // unfinished for ever — that is how staff learn to ignore the indicator.
-    const p = submissionProgress([req("a"), req("b", { mandatory: false })], [sub("a", "VERIFIED")]);
+    const p = submissionProgress([req("a"), req("b", { mandatory: false })], [sub("a", "VERIFIED")], TODAY);
     expect(p.complete).toBe(true);
     expect(p.satisfied).toBe(1);
   });
 
   it("is not complete while a mandatory one is missing", () => {
-    expect(submissionProgress([req("a")], []).complete).toBe(false);
+    expect(submissionProgress([req("a")], [], TODAY).complete).toBe(false);
   });
 
   it("is complete for a school that asks for nothing", () => {
-    expect(submissionProgress([], []).complete).toBe(true);
+    expect(submissionProgress([], [], TODAY).complete).toBe(true);
   });
 
   it("does not count switched-off requirements as required", () => {
-    const p = submissionProgress([req("a", { active: false })], []);
+    const p = submissionProgress([req("a", { active: false })], [], TODAY);
     expect(p).toMatchObject({ required: 0, missingMandatory: 0, complete: true });
   });
 });

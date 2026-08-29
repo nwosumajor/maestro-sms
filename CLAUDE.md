@@ -2040,6 +2040,45 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A teaching licence that lapsed, still ticked off as held
+`outstandingRequirements` / `isExpired` (`@sms/types/supplied-documents.ts`).
+A document requirement can be marked `needsExpiry`, and a verifier records the
+date the document runs out — `expiresAt`, a `@db.Date` on the submission.
+**Nothing ever read it.** `outstandingRequirements` decided on `status` alone, so
+a VERIFIED document whose expiry passed went on satisfying its requirement for
+ever, and the checklist a registrar reads said the school held a valid one.
+**NOT A THEORETICAL FLAG: the shipped defaults use it.**
+`teaching_licence` and `identity_document` are both seeded `needsExpiry: true`,
+so a school onboarding staff records a licence expiry as a matter of course, and
+a lapsed teaching licence counted as on file.
+Live on a real pupil, one row, two readings:
+```
+expiry 2027-06-01 (in date)   outstanding 5 of 6   — satisfies
+expiry 2024-06-01 (lapsed)    outstanding 6 of 6   — no longer does
+```
+Before, both read 5.
+// SAME SHAPE AS THE ERASED STATUS one layer over in this module — a document
+the school no longer HAS, counted as held — and the same rule the STAFF document
+sweep already applies: valid THROUGH the day it names, so `expiresAt < today`
+and never `<=`, against the SCHOOL's day rather than the server's UTC one. That
+is why the service now takes `SchoolRegionService` (@Global, 60s-cached).
+// `asAt` IS REQUIRED, not defaulted to `new Date()`. A default would have been
+the UTC-day bug this file records on eleven surfaces, and the required parameter
+is what found all eleven call sites — two in the service, nine across four test
+files — which is the same trick that found the Paystack currency sites.
+// A MALFORMED DATE DOES NOT EXPIRE A DOCUMENT: chasing a family for something
+the school already holds, because somebody typed the date badly, is the worse
+failure. Nor does a missing one — most requirements never expire.
+// **WHAT IS STILL MISSING, and it is a feature rather than a fix:** nothing
+SWEEPS student-document expiry. Staff documents get a nightly job with EXPIRING
+and EXPIRED stages and two notices; the student side has no equivalent, so an
+expiry now correctly stops satisfying and still nobody is told in advance. The
+checklist surfaces it the next time somebody looks.
+// GOTCHA in my own probe: I called `/documents/requirements/checklist`, which
+does not exist — the route is `/documents/checklist` — and read the empty
+response as "this school has no requirements". It has ten. A probe that gets the
+path wrong reports the absence of the path.
+
 ### The screens that make a per-stop fare usable
 Asked for, after the entry below made the silence visible. The API was already
 complete; four things on the web side were not, and the FIRST is the money one.

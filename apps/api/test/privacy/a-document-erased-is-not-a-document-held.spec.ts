@@ -22,6 +22,10 @@ import {
   submissionProgress,
 } from "@sms/types";
 
+/** A fixed school day: the expiry rule takes one, and a required parameter is
+ *  what stops a caller quietly using the server's UTC day. */
+const TODAY = new Date("2026-08-29T00:00:00.000Z");
+
 const requirement = {
   id: "req-1",
   key: "birth_certificate",
@@ -42,24 +46,24 @@ describe("a document erased is not a document held", () => {
 
     const held = outstandingRequirements([requirement], [
       { requirementId: "req-1", status: "UPLOADED" as const },
-    ]);
+    ], TODAY);
     expect(held).toEqual([]);
 
     const erased = outstandingRequirements([requirement], [
       { requirementId: "req-1", status: "ERASED" as const },
-    ]);
+    ], TODAY);
     expect(erased.map((r) => r.key)).toEqual(["birth_certificate"]);
   });
 
   it("stops the paperwork reading COMPLETE for a file that is gone", () => {
     const before = submissionProgress([requirement], [
       { requirementId: "req-1", status: "UPLOADED" as const },
-    ]);
+    ], TODAY);
     expect(before).toMatchObject({ complete: true, missingMandatory: 0 });
 
     const after = submissionProgress([requirement], [
       { requirementId: "req-1", status: "ERASED" as const },
-    ]);
+    ], TODAY);
     expect(after).toMatchObject({ complete: false, missingMandatory: 1 });
   });
 });

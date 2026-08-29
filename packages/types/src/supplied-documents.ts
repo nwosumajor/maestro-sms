@@ -214,13 +214,41 @@ export function defaultRequirements(scope: RequirementScope): readonly Requireme
  * A REJECTED submission does NOT satisfy: telling a family "received" for a
  * photograph of somebody's thumb is how a file passes review empty.
  */
+/**
+ * A document that has EXPIRED no longer satisfies anything.
+ *
+ * A requirement can be marked `needsExpiry`, and a verifier records the date it
+ * runs out. Nothing looked at it: `status` alone decided, so an immunisation
+ * record that lapsed two years ago went on ticking its requirement off for ever,
+ * and the checklist a registrar reads said the school held a valid one.
+ *
+ * Same shape as the ERASED status one layer over in this module — a document the
+ * school no longer has counted as held — and the same rule the STAFF document
+ * sweep already applies to a certificate: valid THROUGH the day it names, so the
+ * comparison is `expiresAt < today` and never `<=`, against the SCHOOL's day
+ * rather than the server's UTC one.
+ *
+ * `asAt` is REQUIRED. A default of `new Date()` would be the UTC-day bug this
+ * repo has now recorded on eleven surfaces, and a required parameter is a search
+ * for every caller.
+ */
+export function isExpired(
+  submission: { expiresAt?: Date | string | null },
+  asAt: Date,
+): boolean {
+  if (!submission.expiresAt) return false;
+  const on = new Date(submission.expiresAt);
+  if (Number.isNaN(on.getTime())) return false;
+  return on.getTime() < asAt.getTime();
+}
+
 export function outstandingRequirements<
   R extends { id: string; key: string; label: string; mandatory: boolean; active: boolean },
-  S extends { requirementId: string | null; status: SubmissionStatus },
->(requirements: readonly R[], submissions: readonly S[]): R[] {
+  S extends { requirementId: string | null; status: SubmissionStatus; expiresAt?: Date | string | null },
+>(requirements: readonly R[], submissions: readonly S[], asAt: Date): R[] {
   const satisfied = new Set(
     submissions
-      .filter((s) => s.requirementId && SATISFYING_STATUSES.includes(s.status))
+      .filter((s) => s.requirementId && SATISFYING_STATUSES.includes(s.status) && !isExpired(s, asAt))
       .map((s) => s.requirementId as string),
   );
   return requirements.filter((r) => r.active && !satisfied.has(r.id));
@@ -230,13 +258,14 @@ export function outstandingRequirements<
  *  should ever be chased; the rest is context. */
 export function submissionProgress<
   R extends { id: string; key: string; label: string; mandatory: boolean; active: boolean },
-  S extends { requirementId: string | null; status: SubmissionStatus },
+  S extends { requirementId: string | null; status: SubmissionStatus; expiresAt?: Date | string | null },
 >(
   requirements: readonly R[],
   submissions: readonly S[],
+  asAt: Date,
 ): { required: number; satisfied: number; missingMandatory: number; complete: boolean } {
   const active = requirements.filter((r) => r.active);
-  const outstanding = outstandingRequirements(requirements, submissions);
+  const outstanding = outstandingRequirements(requirements, submissions, asAt);
   const missingMandatory = outstanding.filter((r) => r.mandatory).length;
   return {
     required: active.length,

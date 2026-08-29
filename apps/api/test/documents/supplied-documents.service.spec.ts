@@ -141,7 +141,10 @@ function build(opts: { submissions?: Row[]; requirements?: Row[]; bytes?: Buffer
     },
   };
 
-  const svc = new SuppliedDocumentsService(db as never, audit as never, storage as never);
+  const svc = new SuppliedDocumentsService(db as never, audit as never, storage as never,
+    // The school's day, for the expiry rule. A real TenantTx always resolves
+    // one; a stub without it models something the platform cannot produce.
+    { todayInTx: async () => new Date("2026-08-29T00:00:00.000Z") } as never);
   return { svc, submissions, requirements, deleted, audits, documents, staffDocuments };
 }
 

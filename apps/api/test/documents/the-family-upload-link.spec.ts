@@ -80,7 +80,10 @@ function build(opts: { status?: string; submissions?: Row[]; bytes?: Buffer | nu
     delete: (key: string) => { deleted.push(key); return Promise.resolve(); },
   };
   const audit = { record: (e: { action: string }) => { audits.push(e.action); return Promise.resolve(); } };
-  const svc = new SuppliedDocumentsService(db as never, audit as never, storage as never);
+  const svc = new SuppliedDocumentsService(db as never, audit as never, storage as never,
+    // The school's day, for the expiry rule. A real TenantTx always resolves
+    // one; a stub without it models something the platform cannot produce.
+    { todayInTx: async () => new Date("2026-08-29T00:00:00.000Z") } as never);
   return { svc, submissions, deleted, audits, subject: { applicationId: APP, schoolId: SCHOOL } };
 }
 
