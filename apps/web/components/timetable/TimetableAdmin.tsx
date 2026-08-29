@@ -109,7 +109,10 @@ export function TimetableAdmin({
       }),
     });
     if (res.ok) { setEntry((s) => ({ ...s, subjectId: "" })); setMsg("Lesson added."); router.refresh(); }
-    else if (res.status === 409) setMsg("Conflict: that class, teacher, or room is already booked in this slot.");
+    // The API sends the REASON, and there are now four of them — the three
+    // double-bookings and a teacher who has declared the period unavailable.
+    // A fixed sentence listing three would have been wrong for the fourth.
+    else if (res.status === 409) setMsg(await readApiError(res));
     else setMsg(await readApiError(res));
   };
 

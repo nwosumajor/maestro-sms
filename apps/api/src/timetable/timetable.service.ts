@@ -1407,6 +1407,13 @@ export class TimetableService {
   ) {
     const slot = { dayOfWeek: e.dayOfWeek, periodId: e.periodId };
     const not = excludeId ? { id: { not: excludeId } } : {};
+    // The row being edited, so an unchanged slot is not treated as a new placement.
+    const existing = excludeId
+      ? ((await tx.timetableEntry.findFirst({
+          where: { id: excludeId },
+          select: { dayOfWeek: true, periodId: true, teacherId: true },
+        })) as { dayOfWeek: string; periodId: string; teacherId: string } | null)
+      : null;
 
     const classClash = await tx.timetableEntry.findFirst({
       where: { ...slot, classId: e.classId, ...not },
@@ -1416,6 +1423,44 @@ export class TimetableService {
       throw new ConflictException(
         "This class already has a lesson in that slot",
       );
+
+    // THE TEACHER SAID THEY CANNOT TEACH THEN, and only the generator listened.
+    //
+    // `teacher_unavailability` is a HARD constraint in `generateTimetable` —
+    // verified live: a teacher marked unavailable all Monday got 0 Monday
+    // lessons where the same run without the constraint gave them 1. The
+    // teaching-load card deducts it too ("so a part-timer is not shown as
+    // under-used"). Placing a lesson BY HAND was the one path that never asked,
+    // so the auto-generated grid honoured a declaration and one drag past it
+    // did not, silently.
+    //
+    // Refused rather than warned, for the same reason the three clashes below
+    // are: this module's own answer to "the slot will not work" is a 409 with
+    // the reason. A school that genuinely needs the slot clears it from the
+    // teacher's availability, which keeps ONE record of when they can teach
+    // instead of a grid that quietly contradicts it.
+    //
+    // `changingSlot` keeps it off rows that already exist in that slot: an entry
+    // placed before the teacher declared themselves unavailable must still be
+    // editable — moving its ROOM must not be blocked by where it already is.
+    // Freezing legacy rows is the trap the exam-hall capacity guard avoided.
+    const changingSlot =
+      !existing ||
+      existing.dayOfWeek !== e.dayOfWeek ||
+      existing.periodId !== e.periodId ||
+      existing.teacherId !== e.teacherId;
+    if (changingSlot) {
+      const declined = await tx.teacherUnavailability.findFirst({
+        where: { teacherId: e.teacherId, dayOfWeek: e.dayOfWeek, periodId: e.periodId },
+        select: { id: true },
+      });
+      if (declined) {
+        throw new ConflictException(
+          "That teacher has marked this period as unavailable. Place it elsewhere, " +
+            "or clear the slot on their availability first.",
+        );
+      }
+    }
 
     const teacherClash = await tx.timetableEntry.findFirst({
       where: { ...slot, teacherId: e.teacherId, ...not },

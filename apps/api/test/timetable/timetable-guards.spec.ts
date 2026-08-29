@@ -101,7 +101,11 @@ function harness(opts: {
       create: jest.fn(() => maybeReject()),
     },
     classSubjectTeacher: { count: jest.fn().mockResolvedValue(opts.offeringsPreferringRoom ?? 0) },
-    teacherUnavailability: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    teacherUnavailability: {
+      // Placing or MOVING a lesson now asks whether the teacher declared that
+      // period unavailable — the generator always treated it as a hard
+      // constraint and the by-hand path never asked. A real tx has this method.
+      findFirst: jest.fn(async () => null), deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
     subject: { findFirst: jest.fn().mockResolvedValue({ id: "sub1", name: "History" }) },
     class: { findFirst: jest.fn().mockResolvedValue({ id: "c1" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "t1" }) },

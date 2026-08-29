@@ -43,6 +43,10 @@ function makeService(f: Fakes) {
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
     classTeacher: { findFirst: jest.fn().mockResolvedValue(f.classTeacher ?? null), findMany: jest.fn().mockResolvedValue([]) },
     teacherUnavailability: {
+      // Placing or MOVING a lesson now asks whether the teacher declared that
+      // period unavailable — the generator always treated it as a hard
+      // constraint and the by-hand path never asked. A real tx has this method.
+      findFirst: jest.fn(async () => null),
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },

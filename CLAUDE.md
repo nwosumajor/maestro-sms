@@ -2040,6 +2040,41 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The teacher said they cannot teach then, and only the generator listened
+`assertNoConflict` (`timetable.service.ts`). Found by driving
+`teacher_unavailability`, which had never held a row.
+**The solver honours it, and that half is now proven rather than assumed.** A
+teacher marked unavailable for all ten Monday periods got **0** Monday lessons;
+the same generation with the constraint cleared gave them **1**. The control
+matters — without it the pass would have been vacuous, since a teacher who never
+gets Monday lessons anyway proves nothing. The teaching-load card deducts it too
+("so a part-timer is not shown as under-used").
+**The by-hand path never asked.** `assertNoConflict` — the guard on creating AND
+editing an entry — checked three double-bookings (class, teacher, room) and
+nothing else. So the auto-generated grid respected a teacher's declaration and
+one drag past it did not, silently, and the 409 the UI printed named only
+"class, teacher, or room" because those were the only three reasons.
+Live after: place while available **201**, place into a declined slot **409**
+naming the reason, existing entry still editable **200**.
+// REFUSED, NOT WARNED, and the reason is consistency: this module's own answer
+to "that slot will not work" is a 409 with the cause. A school that genuinely
+needs the period clears it from the teacher's availability — which keeps ONE
+record of when they can teach, instead of a grid quietly contradicting one.
+// **IT MUST NOT FREEZE LEGACY ROWS**, which is the trap the exam-hall capacity
+guard already avoided: an entry placed BEFORE the teacher declared themselves
+unavailable has to stay editable, or changing its room is blocked by where it
+already is. `changingSlot` compares the stored (day, period, teacher) with the
+target, so an in-place edit passes and a MOVE into a declined slot — or swapping
+in a teacher who declined it — is refused. All four cases are tested and
+mutation-validated.
+// The web's 409 message listed the three reasons as a fixed sentence, which
+would have been wrong for the fourth. It reads the API's own reason now.
+// GOTCHA, eleventh instance: two fixtures had `teacherUnavailability` with only
+`deleteMany`/`createMany` — the MODEL was there and the METHOD was not, so the
+failure read `findFirst is not a function` rather than the usual undefined
+model. And my first repair was a regex that patched four unrelated files and
+none of the two that mattered; reverted, then targeted.
+
 ### The gate that polices gates could not see five of them
 `a-gate-must-not-pass-by-finding-nothing.spec.ts`. Third instance of one class in
 one round, and the third is in the file written to prevent the first two.
