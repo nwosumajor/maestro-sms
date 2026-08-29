@@ -2040,6 +2040,45 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A fifth probe: no request, ordinary or hostile, is a 500
+`apps/web/scripts/no-request-is-a-500.mjs`, `probe:no-500`. A 5xx is the one
+status that is unambiguously OURS. It tells the caller nothing they can act on —
+the fix for `?page=abc` is "1", and the message says "Internal server error" —
+and it SPENDS AN ALERT, because a 5xx is what pages somebody: a mistyped
+bookmark becomes indistinguishable from the database being down.
+This repo has been bitten by that class TWICE, both found by accident:
+`?page=abc` reaching Prisma as `skip: NaN` on seven paged lists, and a raw
+`FOR UPDATE` casting a malformed id before `MalformedIdFilter` could see it, so
+the bursar's record-payment desk answered 500 where every other route answered
+404. Both are fixed and gated at the unit level; neither gate can see a route
+added later that reaches the database another way.
+**THE SWEEP FIRST, AND IT IS CLEAN — 4,463 live probes, zero 5xx.** 916 (role,
+route) pairs over four roles; 2,977 hostile query strings (`page=abc`, `page=0`,
+`page=1e999`, `limit=999999`, `from=2026-13-45`, `status=NOT_A_STATUS`, a
+500-character `q`); 570 malformed ids including a path traversal and an SQL
+fragment. That is a wide, expensive-to-re-derive negative and it validates
+`narrowStatus`, `pageNumber`, `dateWindow` and `MalformedIdFilter` together, on
+the running stack rather than in a fixture.
+// MADE REPEATABLE rather than left as an audit, because the value is in running
+it after the NEXT route is added. Same shape as the other four probes: routes
+DERIVED from the controllers (a hand-kept route table is what this repo has
+watched rot in four places), the nearest `@Controller` above a route, and a
+refusal to run at all if the walk finds too few — a probe that reads no
+controllers passes everything.
+// IT PROVES THE SESSION TOOK before sweeping. A rate-limited or missing account
+answers 401 to everything, and 401 is NOT 5xx, so the sweep would run green
+having tested nothing — the exact false negative the isolation and family probes
+both shipped with.
+// 400, 403 and 404 ARE NOT FINDINGS. A 400 naming the allowed values is the
+CORRECT answer to `status=NOT_A_STATUS` and is what several of this repo's own
+fixes produce. Only 5xx counts, or the probe would report the fixes as faults.
+// VALIDATED BY MAKING IT FIRE, not by reading it: a deliberate `throw` in
+`GET /students/count` is reported for all four roles by name and exits 1;
+restored, it is clean again. The extraction guard was fired too, by running it
+from the wrong directory.
+// Listed in the incident runbook beside the other four, and the served copy
+regenerated — `build:runbooks` is required after editing it.
+
 ### The question paper was proved to reach the right people, never to be safe
 `paper-pdf.spec.ts`. Same gap as the receipt below, with exam answers at stake.
 Five tests cover WHO may print — editor, reviewer, outsider, and a reviewer

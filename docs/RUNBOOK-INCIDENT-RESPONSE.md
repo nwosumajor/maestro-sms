@@ -894,6 +894,7 @@ The controls already in place, so you know what you are relying on:
 | Cross-tenant isolation probe | `pnpm --filter @sms/web isolation:probe` | A school reaching another school's records BY ID through the real front door |
 | Family-scope probe | `pnpm --filter @sms/web probe:family` | One parent or pupil reaching another family's child |
 | Permission matrix | `pnpm --filter @sms/web probe:permissions` | A role served rows from an endpoint whose permission it lacks |
+| No request is a 500 | `pnpm --filter @sms/web probe:no-500` | A route that answers 5xx to an ordinary request, a hostile query string, or a malformed id |
 | Restore drill | `infrastructure/scripts/restore-drill.sh` | Backups that don't actually restore |
 | Fail-closed demo seeding | `packages/db/prisma/seed.ts` | Demo credentials reaching production |
 | 12 CloudWatch alarms → SNS | `alarms.tf` | Infrastructure symptoms |

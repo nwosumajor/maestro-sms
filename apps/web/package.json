@@ -15,7 +15,8 @@
     "isolation:probe": "node scripts/isolation-probe.mjs",
     "probe:family": "node scripts/family-scope-probe.mjs",
     "probe:permissions": "node scripts/permission-matrix.mjs",
-    "seed:modules": "node scripts/seed-modules.mjs"
+    "seed:modules": "node scripts/seed-modules.mjs",
+    "probe:no-500": "node scripts/no-request-is-a-500.mjs"
   },
   "dependencies": {
     "@sms/tokens": "workspace:*",
