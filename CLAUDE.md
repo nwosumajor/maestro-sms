@@ -2040,6 +2040,51 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The access review counted elevations the API already refused
+`recertification` (`security/security.service.ts`). A privilege grant
+auto-expires by TIME; `status` only leaves ACTIVE when somebody explicitly
+revokes it, there is **no EXPIRED status at all**, and nothing sweeps elapsed
+rows. So a grant that ran out weeks ago still reads `status: "ACTIVE"` for ever
+— and the report filtered on status ALONE, returning the result as
+`activeElevations`, which `/admin/recertification` renders as a headline count
+labelled **"Active elevations"** and describes as "live elevations".
+So the one artifact a school reviews to answer "who can do what" named powers
+the guard had already stopped honouring — and unbounded: every elevation ever
+granted and never explicitly revoked, for the life of the school.
+**THE GUARD WAS ALWAYS RIGHT.** `activeGrantPermissions` — "the ONE definition
+of what a grant gives you", called by the guard AND by login/refresh — has
+always required `status: "ACTIVE"` **and** `expiresAt: { gt: now }`. The report
+asks the same two questions now, and a test asserts the PAIR agrees rather than
+that each looks reasonable alone.
+Live, one grant, two readings:
+```
+lapsed four weeks ago, never revoked   Active elevations: 0   (was 1)
+same grant, expiry two days out        Active elevations: 1   certificate.issue
+```
+// OVER-REPORTING IS THE SAFE DIRECTION AND STILL WRONG: a review list that is
+mostly dead entries is one people stop reading, and a genuinely live grant hides
+among them. The same argument this file makes about repeating an alert on the
+one day it matters.
+// NOT FIXED BY ADDING AN `EXPIRED` STATUS OR A SWEEP — the guard needs neither,
+and a nineteenth timed job to maintain a field two reads can derive is the more
+elaborate answer to the smaller problem. A test asserts no EXPIRED status has
+appeared, so whoever adds one meets this reasoning first.
+// **A TEST I BROKE EARLIER IN THIS SESSION AND ONLY FOUND NOW**, recorded
+because the lesson is about me rather than the code: `contended-seats-are-
+claimed-not-counted` sliced **900 characters** from `async seat(` looking for
+the `deleteMany` that makes the capacity check correct. The candidate-eligibility
+check I added to that method pushed the delete past the window, so a CORRECT
+method failed. I ran `test/exam` after that change and this test lives in
+`test/security`. Re-anchored to the METHOD — the fixed-size-window failure mode
+this file already records for a decorator run, a 200-character lookbehind and a
+3,500-character slice — and given an extra assertion it should always have had:
+the delete comes AFTER the refusal, so a bad list cannot clear a hall's seating
+plan on its way to being rejected.
+// GOTCHA, twice in one session: `git checkout apps/api/...` run from INSIDE
+`apps/api` fails with "did not match any file(s) known to git" and leaves the
+mutation in place. Check `git status` after undoing a mutation, not just the
+test result.
+
 ### Two more promises the help page could not keep
 Same technique, widened: 155 guide entries, read for CHECKABLE claims and each
 checked against the code. Most hold — the classmate-only discipline rule, the

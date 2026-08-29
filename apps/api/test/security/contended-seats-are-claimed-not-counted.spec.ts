@@ -66,10 +66,20 @@ describe("places that can run out", () => {
     // Its capacity check compares only the incoming students, which is correct
     // ONLY because the previous plan is deleted first. If that delete ever goes,
     // the check silently becomes wrong and a hall over-seats.
+    // BOUNDED BY THE METHOD, not by a character count. This sliced 900
+    // characters from `async seat(`, and adding the candidate-eligibility check
+    // (a real pupil, still on roll) pushed the delete past the end of the
+    // window — so a correct method failed an assertion about a property it
+    // still has. The fixed-size-window failure mode this repo records for a
+    // decorator run, a 200-character lookbehind and a 3,500-character slice.
     const src = read("exam/exam.service.ts");
-    const seat = src.slice(src.indexOf("async seat("), src.indexOf("async seat(") + 900);
+    const from = src.indexOf("async seat(");
+    const seat = src.slice(from, src.indexOf("\n  async ", from + 1));
     expect(seat).toMatch(/deleteMany\(\{ where: \{ sittingId \} \}\)/);
     expect(seat.indexOf("deleteMany")).toBeLessThan(seat.indexOf("createMany"));
+    // And the delete still comes AFTER the eligibility refusal, so a bad list
+    // cannot clear a hall's seating plan on its way to being rejected.
+    expect(seat.indexOf("cannot be seated")).toBeLessThan(seat.indexOf("deleteMany"));
   });
 });
 

@@ -292,8 +292,23 @@ export class SecurityService {
       const userRoles = await tx.userRole.findMany({
         include: { user: { select: { id: true, name: true, email: true } }, role: { select: { name: true } } },
       });
+      // ACTIVE **AND NOT ELAPSED** — the same two conditions the guard uses.
+      //
+      // A grant auto-expires by TIME; `status` only leaves ACTIVE when somebody
+      // explicitly revokes it, and nothing sweeps elapsed rows (there is no
+      // EXPIRED status at all). So filtering on status alone reported every
+      // elevation ever granted and never revoked as LIVE, for ever — on the one
+      // artifact a school reviews to answer "who can do what", under a headline
+      // that reads "Active elevations".
+      //
+      // The guard has always been right: `activeGrantPermissions` requires
+      // `status: "ACTIVE"` AND `expiresAt: { gt: now }`, so the REPORT was
+      // naming powers the API would already refuse. Over-reporting is the safe
+      // direction and still the wrong one — an access review whose list is
+      // mostly dead entries is one people stop reading, and a genuinely live
+      // grant hides among them.
       const activeElevations = await tx.privilegeGrant.findMany({
-        where: { status: "ACTIVE" },
+        where: { status: "ACTIVE", expiresAt: { gt: new Date() } },
         orderBy: { createdAt: "desc" },
       });
 
