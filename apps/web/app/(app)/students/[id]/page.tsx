@@ -43,6 +43,8 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 export default async function StudentProfilePage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   // Same gate as the section index — a detail page is reachable by URL
   // whether or not the list that links to it was.
   if (!hasPermission(user.permissions, "student.profile.read")) redirect("/dashboard");
@@ -92,7 +94,7 @@ export default async function StudentProfilePage({ params }: { params: { id: str
             </CardHeader>
             <CardContent>
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <Field label="Date of birth" value={shortDate(profile.dateOfBirth)} />
+                <Field label="Date of birth" value={shortDate(profile.dateOfBirth, region)} />
                 <Field label="Gender" value={profile.gender} />
                 <Field label="Phone" value={profile.phone} />
                 <Field label="Email" value={profile.email} />

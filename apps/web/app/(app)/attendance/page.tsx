@@ -9,7 +9,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { shortDate, titleCase } from "@/lib/format";
+import { regionOf, shortDate, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
 import { RegisterBoard } from "@/components/attendance/RegisterBoard";
 import { ClassAttendanceBoard } from "@/components/attendance/ClassAttendanceBoard";
@@ -50,6 +50,8 @@ export default async function AttendancePage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   // Gate matches this section's AppShell nav entry ("attendance.read"), so the page
   // cannot be reached by URL by someone the nav hides it from.
   if (!hasPermission(user.permissions, "attendance.read")) redirect("/dashboard");
@@ -133,7 +135,7 @@ export default async function AttendancePage({
                   {summary.excused > 0 ? ` · ${summary.excused} excused` : ""}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {summary.from && summary.to ? `this term (${shortDate(summary.from)} – ${shortDate(summary.to)})` : "all recorded days"}
+                  {summary.from && summary.to ? `this term (${shortDate(summary.from, region)} – ${shortDate(summary.to, region)})` : "all recorded days"}
                   {" · "}
                   {summary.total} day{summary.total === 1 ? "" : "s"} recorded
                 </span>
@@ -158,7 +160,7 @@ export default async function AttendancePage({
                   <tbody>
                     {records.map((r) => (
                       <tr key={r.id} className="border-b border-border last:border-0">
-                        <td className="px-4 py-2.5 text-muted-foreground">{shortDate(r.session.date)}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{shortDate(r.session.date, region)}</td>
                         <td className="px-4 py-2.5">
                           <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{titleCase(r.status)}</Badge>
                         </td>

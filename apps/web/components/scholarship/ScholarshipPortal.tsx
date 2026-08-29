@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { money, shortDate } from "@/lib/format";
+import { money } from "@/lib/format";
 import { useFormat } from "@/components/shell/RegionProvider";
 
 type Portal = Serialized<ScholarshipPortalDto>;
@@ -68,6 +68,8 @@ const FORM_FIELDS: Array<{ key: keyof ScholarshipRequestForm; label: string; req
 ];
 
 export function ScholarshipPortal({ portal, roles }: { portal: Portal; roles: string[] }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const isStudent = roles.includes("student");
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -397,6 +399,8 @@ function ApplicationRow({
   busy: string | null;
   run: (key: string, fn: () => Promise<{ ok: boolean; error: string | null }>, okText: string) => Promise<void>;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const consented = !!app.consentAt;
   const legacyDraft = app.status === "DRAFT" && app.applicantRole !== "student";
   return (

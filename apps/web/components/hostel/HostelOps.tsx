@@ -1,6 +1,7 @@
 "use client";
 
 import type { HostelDto, HostelExeatDto, HostelIncidentDto, HostelAttendanceDto, HostelAllocationDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
 import { useRegion } from "@/components/shell/RegionProvider";
@@ -11,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
-import { shortDate } from "@/lib/format";
 
 type Hostel = Serialized<HostelDto>;
 type Alloc = Serialized<HostelAllocationDto>;
@@ -233,6 +233,8 @@ function ExeatPanel({ students, onMsg }: { students: { id: string; name: string 
 }
 
 function IncidentPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: string) => void }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [list, setList] = React.useState<Serialized<HostelIncidentDto>[]>([]);
   const [hostelId, setHostelId] = React.useState(hostels[0]?.id ?? "");
   const [category, setCategory] = React.useState("MAINTENANCE");

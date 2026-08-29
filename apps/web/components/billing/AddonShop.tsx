@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { postWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
 import { postSms } from "@/components/game/play-ui";
-import { shortDate } from "@/lib/format";
+
 import { useFormat } from "@/components/shell/RegionProvider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +28,7 @@ const BLURB = new Map(MODULE_CATALOG.map((c) => [c.key as string, (c as { descri
 
 export function AddonShop({ offers, canBuy }: { offers: Serialized<AddonOfferDto>[]; canBuy: boolean }) {
   const router = useRouter();
-  const { money } = useFormat();
+  const { money, shortDate } = useFormat();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);
 

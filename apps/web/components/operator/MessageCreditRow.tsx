@@ -5,12 +5,13 @@
 // only) a comp/debit form. Mirrors SubscriptionManager's expand-on-demand shape.
 
 import type { MessageCreditBalanceDto, MessageCreditLedgerEntryDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { dateTime } from "@/lib/format";
+
 import { readApiError } from "@/lib/api-error";
 import { sendWithStepUp } from "@/lib/stepup";
 
@@ -20,6 +21,8 @@ type Entry = Serialized<MessageCreditLedgerEntryDto>;
 const REASON_LABEL: Record<string, string> = { PURCHASE: "Purchase", SEND: "Sent", ADJUST: "Operator comp/debit" };
 
 export function MessageCreditRow({ row, canAdjust }: { row: Row; canAdjust: boolean }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);

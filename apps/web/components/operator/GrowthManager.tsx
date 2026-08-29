@@ -6,6 +6,7 @@
 // transfer to the agent) — "Mark paid" records that it happened.
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { sendWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatMoney } from "@sms/types";
-import { shortDate } from "@/lib/format";
+
 
 interface Promo {
   id: string;
@@ -65,6 +66,8 @@ export function GrowthManager({
   agents: AgentRow[];
   commissions: CommissionRow[];
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [promoForm, setPromoForm] = React.useState({ code: "", percentOff: "10", maxUses: "" });

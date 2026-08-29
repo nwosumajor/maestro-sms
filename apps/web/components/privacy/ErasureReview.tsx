@@ -1,12 +1,13 @@
 "use client";
 
 import type { ErasureRequestDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { dateTime, titleCase } from "@/lib/format";
+import { titleCase } from "@/lib/format";
 
 export type ErasureRequest = Serialized<ErasureRequestDto>;
 
@@ -17,6 +18,8 @@ const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline
 };
 
 export function ErasureReview({ requests }: { requests: ErasureRequest[] }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);

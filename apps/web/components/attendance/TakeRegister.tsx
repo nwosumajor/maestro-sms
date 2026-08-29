@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { readApiError } from "@/lib/api-error";
-import { shortDate } from "@/lib/format";
+
 import { useFormat } from "@/components/shell/RegionProvider";
 
 const STATUSES = ["PRESENT", "ABSENT", "LATE", "EXCUSED"] as const;
@@ -64,7 +64,7 @@ export function TakeRegister({
   const [classId, setClassId] = React.useState(
     (initialClassId && classes.some((c) => c.id === initialClassId) ? initialClassId : classes[0]?.id) ?? "",
   );
-  const { region } = useFormat();
+  const { region, shortDate } = useFormat();
   // ONE value for "today", so the default, the max and the Today button cannot
   // disagree with each other or with the server.
   const schoolToday = React.useMemo(() => todayIn(region.timezone), [region.timezone]);

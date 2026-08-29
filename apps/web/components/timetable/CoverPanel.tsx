@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { CoverLessonDto, Serialized } from "@sms/types";
 import { sendSms, postSms } from "@/components/game/play-ui";
 import { personLabel } from "@/lib/people";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortDate } from "@/lib/format";
+
 
 type Cover = Serialized<CoverLessonDto>;
 
@@ -14,6 +15,8 @@ type Cover = Serialized<CoverLessonDto>;
 // window, and lets a timetable manager assign a reliever (double-book-checked
 // server-side). Defaults to the coming two weeks.
 export function CoverPanel({ teachers }: { teachers: { id: string; name: string; roles?: string[] }[] }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const today = new Date();
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   const [from, setFrom] = React.useState(iso(today));

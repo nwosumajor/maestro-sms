@@ -1,11 +1,12 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { DocumentRowDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { shortDate, titleCase } from "@/lib/format";
+import { titleCase } from "@/lib/format";
 import { DocumentActions } from "@/components/documents/DocumentActions";
 import { StudentPicker } from "@/components/people/StudentPicker";
 
@@ -36,6 +37,8 @@ export function DocumentBrowser({
   initialCursor: string | null;
   canWrite: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [rows, setRows] = React.useState<Row[]>(initial);
   const [cursor, setCursor] = React.useState<string | null>(initialCursor);
   const [type, setType] = React.useState<string>("");

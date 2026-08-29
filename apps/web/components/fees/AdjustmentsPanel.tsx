@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { InvoiceAdjustmentDto, Serialized } from "@sms/types";
 import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { minorFrom, money, shortDate } from "@/lib/format";
+import { minorFrom, money } from "@/lib/format";
 
 type Adjustment = Serialized<InvoiceAdjustmentDto>;
 
@@ -32,6 +33,8 @@ export function AdjustmentsPanel({
   canApprove: boolean;
   selfId: string;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const [kind, setKind] = React.useState<"DISCOUNT" | "WAIVER">("DISCOUNT");
   const [amount, setAmount] = React.useState("");

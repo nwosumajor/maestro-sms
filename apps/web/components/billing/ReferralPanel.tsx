@@ -6,15 +6,18 @@
 // referred school's first paid subscription lands — this panel is read/share UI.
 
 import type { ReferralInfoDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { interpretApiError } from "@/lib/api-error";
-import { shortDate } from "@/lib/format";
+
 
 type Info = Serialized<ReferralInfoDto>;
 
 export function ReferralPanel({ initial, canManage }: { initial: Info; canManage: boolean }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [info, setInfo] = React.useState<Info>(initial);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);

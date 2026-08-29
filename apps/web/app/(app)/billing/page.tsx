@@ -7,7 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { money, shortDate, titleCase } from "@/lib/format";
+import { money, regionOf, shortDate, titleCase } from "@/lib/format";
 import { BillingCheckout } from "@/components/billing/BillingCheckout";
 import { PaymentVerifyBanner } from "@/components/billing/PaymentVerifyBanner";
 import { CreditVerifyBanner } from "@/components/billing/CreditVerifyBanner";
@@ -53,6 +53,8 @@ export default async function BillingPage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   // Gate BEFORE fetching. This page had no gate at all: all three reads
   // require billing.read, which 14 of 18 roles lack, so every one of them
   // loaded a billing page that fired three authenticated round-trips and
@@ -113,7 +115,7 @@ export default async function BillingPage({
                   {data.activeStudents} active student{data.activeStudents === 1 ? "" : "s"}
                   {" · "}
                   {data.subscription.currentPeriodEnd
-                    ? `Renews ${shortDate(data.subscription.currentPeriodEnd)}`
+                    ? `Renews ${shortDate(data.subscription.currentPeriodEnd, region)}`
                     : "No active paid period"}
                   {data.subscription.priceMinor != null &&
                     ` · Last charged ${money(data.subscription.priceMinor, data.subscription.currency ?? "NGN")}`}
@@ -215,7 +217,7 @@ export default async function BillingPage({
                       <tbody>
                         {data.payments.map((pmt) => (
                           <tr key={pmt.id} className="border-b last:border-0">
-                            <td className="py-2 pr-4">{shortDate(pmt.createdAt)}</td>
+                            <td className="py-2 pr-4">{shortDate(pmt.createdAt, region)}</td>
                             <td className="py-2 pr-4">{pmt.plan}</td>
                             <td className="py-2 pr-4">{titleCase(pmt.billingCycle)}</td>
                             <td className="py-2 pr-4 tabular-nums">{pmt.seats}</td>
@@ -228,7 +230,7 @@ export default async function BillingPage({
                                 {PAYMENT_STATE[pmt.status]?.label ?? titleCase(pmt.status)}
                               </Badge>
                             </td>
-                            <td className="py-2 pr-4">{pmt.periodEnd ? shortDate(pmt.periodEnd) : "—"}</td>
+                            <td className="py-2 pr-4">{pmt.periodEnd ? shortDate(pmt.periodEnd, region) : "—"}</td>
                             <td className="py-2 pr-4">
                               {/* Only a PAID row has a receipt — there is no such
                                   thing as a receipt for money never received. */}

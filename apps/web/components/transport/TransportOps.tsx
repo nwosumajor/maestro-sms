@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
-import { shortDate } from "@/lib/format";
 
 type Route = Serialized<TransportRouteDto>;
 type Vehicle = Serialized<VehicleDto>;
@@ -210,7 +209,7 @@ function TripsPanel({ routes, onMsg }: { routes: Route[]; onMsg: (s: string) => 
 }
 
 function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s: string) => void }) {
-  const { money, minorFrom } = useFormat();
+  const { minorFrom, money, shortDate } = useFormat();
   const [list, setList] = React.useState<Serialized<VehicleMaintenanceDto>[]>([]);
   const [vehicleId, setVehicleId] = React.useState(vehicles[0]?.id ?? "");
   const [type, setType] = React.useState("SERVICE");

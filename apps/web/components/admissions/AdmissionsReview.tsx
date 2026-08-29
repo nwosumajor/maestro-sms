@@ -1,13 +1,14 @@
 "use client";
 
 import type { AdmissionApplicationDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { dateTime, titleCase } from "@/lib/format";
+import { titleCase } from "@/lib/format";
 import { readApiError } from "@/lib/api-error";
 import { EnrolAccepted } from "./EnrolAccepted";
 
@@ -90,6 +91,8 @@ function AdmissionRow({
   classes: { id: string; name: string }[];
   canEnrol: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const [open, setOpen] = React.useState(false);
   const [examDate, setExamDate] = React.useState(a.examDate ? a.examDate.slice(0, 10) : "");
   const [examNote, setExamNote] = React.useState(a.examNote ?? "");

@@ -8,7 +8,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { shortDate } from "@/lib/format";
+import { regionOf, shortDate } from "@/lib/format";
 import { SubmissionFileLink } from "@/components/assessment/SubmissionFileLink";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -17,6 +17,8 @@ export const dynamic = "force-dynamic";
 export default async function AssessmentSubmissionsPage({ params }: { params: { assessmentId: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   if (!hasPermission(user.permissions, "integrity.report.read")) redirect("/dashboard");
   const { assessmentId } = params;
   const [submissions, list] = await Promise.all([
@@ -56,7 +58,7 @@ export default async function AssessmentSubmissionsPage({ params }: { params: { 
                     <tr key={s.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-2.5 font-medium">{s.studentName ?? "—"}</td>
                       <td className="px-4 py-2.5 text-muted-foreground">{s.status.replace(/_/g, " ").toLowerCase()}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{s.submittedAt ? shortDate(s.submittedAt) : "—"}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{s.submittedAt ? shortDate(s.submittedAt, region) : "—"}</td>
                       <td className="px-4 py-2.5">
                         {s.signalCount > 0 ? <Badge variant="destructive">{s.signalCount}</Badge> : <span className="text-muted-foreground">0</span>}
                       </td>

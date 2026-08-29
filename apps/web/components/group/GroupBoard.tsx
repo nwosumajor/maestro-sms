@@ -10,12 +10,13 @@
 // =============================================================================
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import Link from "next/link";
 import type { GroupFlag, GroupOverviewDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money, shortDate } from "@/lib/format";
+import { money } from "@/lib/format";
 
 type Data = Serialized<GroupOverviewDto>;
 
@@ -35,6 +36,8 @@ const PERIODS = [
 ] as const;
 
 export function GroupBoard({ data }: { data: Data }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const currencies = Object.keys(data.totals.byCurrency).sort();
   const qs = (over: Record<string, string>) =>
     new URLSearchParams({ groupId: data.groupId, period: data.period.key, ...over }).toString();

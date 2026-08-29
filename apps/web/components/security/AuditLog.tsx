@@ -1,10 +1,11 @@
 "use client";
 
 import type { AuditLogRowDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { dateTime } from "@/lib/format";
+
 import { readApiError } from "@/lib/api-error";
 
 type Row = Serialized<AuditLogRowDto>;
@@ -22,6 +23,8 @@ export function AuditLog({
   nextCursor: string | null;
   query: string;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const [rows, setRows] = React.useState<Row[]>(initial);
   const [cursor, setCursor] = React.useState<string | null>(nextCursor);
   const [busy, setBusy] = React.useState(false);

@@ -16,7 +16,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { dateTime } from "@/lib/format";
+import { dateTime, regionOf } from "@/lib/format";
 import { BreachRegister } from "@/components/privacy/BreachRegister";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -25,6 +25,8 @@ export const dynamic = "force-dynamic";
 export default async function CompliancePage() {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   if (!hasPermission(user.permissions, "privacy.compliance.manage")) redirect("/admin");
 
   const [posture, breaches] = await Promise.all([

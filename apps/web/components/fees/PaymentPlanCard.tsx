@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { PaymentPlanDto, Serialized } from "@sms/types";
 import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { minorFrom, money, shortDate } from "@/lib/format";
+import { minorFrom, money } from "@/lib/format";
 
 type Plan = Serialized<PaymentPlanDto>;
 
@@ -33,6 +34,8 @@ export function PaymentPlanCard({
   initial: Plan | null;
   canManage: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const [editing, setEditing] = React.useState(false);
   const [rows, setRows] = React.useState<Array<{ dueDate: string; amount: string }>>([

@@ -10,6 +10,7 @@
 // panel never sees one for an open sitting.
 
 import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { readApiError } from "@/lib/api-error";
 import { CbtMarkingConsole } from "@/components/cbt/CbtMarkingConsole";
 import { CbtBankEditor } from "@/components/cbt/CbtBankEditor";
-import { dateTime } from "@/lib/format";
+
 
 type Bank = Serialized<CbtBankDto>;
 type Exam = Serialized<CbtExamDto>;
@@ -102,6 +103,8 @@ export function CbtStaffPanel({
    *  a button that always 404s is a worse experience than no button. */
   canManage?: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   // Levels the caller can actually target, derived from their own classes — so a
   // teacher tags questions with the levels they teach, not a free-typed number.
   const levelOptions = React.useMemo(() => {

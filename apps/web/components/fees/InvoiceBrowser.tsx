@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { readApiError } from "@/lib/api-error";
 import Link from "next/link";
 import type { InvoiceListItemDto, InvoiceSummaryDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { money, shortDate, titleCase } from "@/lib/format";
+import { money, titleCase } from "@/lib/format";
 
 type Row = Serialized<InvoiceListItemDto>;
 type Summary = Serialized<InvoiceSummaryDto>;
@@ -51,6 +52,8 @@ export function InvoiceBrowser({
   summary: Summary | null;
   canManage: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [rows, setRows] = React.useState<Row[]>(initial);
   const [cursor, setCursor] = React.useState<string | null>(initialCursor);
   const [filter, setFilter] = React.useState("all");

@@ -13,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { money, shortDate, dateTime, titleCase } from "@/lib/format";
+import { dateTime, money, regionOf, shortDate, titleCase } from "@/lib/format";
 import { RecordPaymentForm } from "@/components/fees/RecordPaymentForm";
 import { InvoiceActions } from "@/components/fees/InvoiceActions";
 import { PayOnlineButton } from "@/components/fees/PayOnlineButton";
@@ -32,6 +32,8 @@ type InvoiceDetail = Serialized<InvoiceDetailDto>;
 export default async function InvoiceDetailPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   // Same gate as the fees list. Without it, the 12 roles that hold no fee.read
   // reached this page, asked the API for an invoice, were refused, and got a
   // "not found" — which says the invoice does not exist rather than that this
@@ -99,7 +101,7 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-mono text-xl font-semibold tracking-tight">{inv.reference}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Due {shortDate(inv.dueDate)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Due {shortDate(inv.dueDate, region)}</p>
           </div>
           <div className="flex items-center gap-2">
             {inv.overdue && <Badge variant="destructive">Overdue</Badge>}
@@ -149,7 +151,7 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
                     <tr key={p.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-2.5">{money(p.amountMinor, inv.currency)}</td>
                       <td className="px-4 py-2.5 text-muted-foreground">{titleCase(p.method)}</td>
-                      <td className="px-4 py-2.5 text-right text-muted-foreground">{dateTime(p.paidAt)}</td>
+                      <td className="px-4 py-2.5 text-right text-muted-foreground">{dateTime(p.paidAt, region)}</td>
                       <td className="px-4 py-2.5 text-right">
                         {p.status === "POSTED" && (
                           <a

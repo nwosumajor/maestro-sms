@@ -14,11 +14,12 @@
 // =============================================================================
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { IntegrityExemptionDto, Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { sendSms } from "@/components/game/play-ui";
-import { shortDate } from "@/lib/format";
+
 
 type Row = Serialized<IntegrityExemptionDto>;
 
@@ -33,6 +34,8 @@ export function ExemptionPanel({
   initial: Row[] | null;
   canWrite: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [rows, setRows] = React.useState<Row[] | null>(initial);
   const [reason, setReason] = React.useState("");
   const [busy, setBusy] = React.useState(false);

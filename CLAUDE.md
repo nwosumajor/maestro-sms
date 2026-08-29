@@ -2040,6 +2040,57 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The money followed the school and the clock did not
+`shortDate` / `dateTime` / `longDate` (`apps/web/lib/format.ts`) take an optional
+region and fall back to `PLATFORM_REGION` — `en-NG` / `Africa/Lagos`. Right for
+the public site and for the operator console, wrong on every screen a school
+reads about itself. Measured: **91 of 102 date renders took the platform
+default; ELEVEN were region-aware.**
+**THE DISPUTES PAGE SAYS IT IN ONE LINE.** `money(d.amountMinor, d.currency)` —
+the money sweep landed on that exact file — with four bare `shortDate` calls
+around it. The region plumbing was built and the MONEY half was swept and gated;
+the DATE half was left, so `shortDate`'s `region` parameter had **zero callers
+in the entire web tier**.
+// NOT ABOUT DAY-TYPED COLUMNS. `isCalendarDate` already forces a `@db.Date` to
+render in UTC, and a test now pins that this sweep did not break it — converting
+one into a zone west of UTC is what would date every Toronto register a day
+early. What was wrong is TRUE INSTANTS: a meeting time, when a notice arrived,
+a chargeback's evidence deadline.
+// LIVE BUT NARROW TODAY, and that is the honest standing: one school runs on
+`Africa/Accra` (UTC+0 against the platform's UTC+1), so only the 23:00–00:00
+window differs. It becomes material the moment a school west of UTC or far east
+signs up, which a 12-country catalogue invites — measured, an instant at 14:00Z
+reads 28 August in Lagos and 29 August in Auckland.
+// **THE OPERATOR CONSOLE DELIBERATELY KEEPS THE PLATFORM CLOCK**, and the gate
+names all seven surfaces with a reason. An owner scanning a revenue ledger
+across every tenant, or a director comparing campuses, needs ONE clock — a
+column where each row is in a different timezone cannot be read down. Same
+judgement the scholarship portal already makes about money, where the award is
+the PLATFORM's and the pupil's fees are the school's.
+// THE TELL IS THE IMPORT, NOT THE CALL — the trap
+`money-is-not-divided-by-a-hundred` already records. `useFormat()` hands back
+formatters already bound to the school, so a bare `shortDate(x)` in a component
+that destructured it is CORRECT; what silently means "the platform's clock" is a
+bare call in a file that imported the function straight from `@/lib/format`.
+// GOTCHA, committed BY ME while fixing exactly this class: I checked for
+module-scope helpers in the client half — 49 calls, all inside a component — and
+never asked the same of the server half. `dashboard/page.tsx` has a top-level
+`ago(iso)`, which a hook cannot reach and a page-level `const region` is not in
+scope for; it takes the region as a parameter now. The typecheck caught it,
+which is why a sweep of this size is done against `tsc` rather than by reading.
+// GOTCHA: three client files carry TWO separate `@/lib/format` import lines, so
+a `re.search` for the first one skipped them entirely and they stayed on the
+platform clock. The re-measurement after the sweep is what found them — a sweep
+that does not re-measure reports the files it happened to match.
+// Verified by RENDERING, not only by compiling: a misplaced hook is invisible
+to `tsc`, so the frontend container was rebuilt and the route smoke run — 108
+routes for every role, all ok.
+Gate: `school-dates-use-the-schools-region.test.ts`, mutation-validated both
+ways (one bare call restored; an exemption naming a file that no longer exists),
+and it asserts the region argument is LOAD-BEARING — without that half it would
+pass against a formatter that accepted a region and ignored it, leaving every
+call site looking fixed.
+
 ### A fifth probe: no request, ordinary or hostile, is a 500
 `apps/web/scripts/no-request-is-a-500.mjs`, `probe:no-500`. A 5xx is the one
 status that is unambiguously OURS. It tells the caller nothing they can act on —

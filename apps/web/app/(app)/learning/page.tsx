@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/shell/PageHeader";
-import { shortDate } from "@/lib/format";
+import { regionOf, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +35,8 @@ const TYPE_LABEL: Record<string, string> = {
 export default async function LearningPage() {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   // Gate matches this section's AppShell nav entry ("lms.quiz.attempt"), so the page
   // cannot be reached by URL by someone the nav hides it from.
   if (!hasPermission(user.permissions, "lms.quiz.attempt")) redirect("/dashboard");
@@ -101,7 +103,7 @@ export default async function LearningPage() {
                             <span className="font-medium">{i.title}</span>
                             <Badge variant="outline">{TYPE_LABEL[i.type] ?? i.type}</Badge>
                           </span>
-                          <span className="text-xs text-muted-foreground">{shortDate(i.createdAt)}</span>
+                          <span className="text-xs text-muted-foreground">{shortDate(i.createdAt, region)}</span>
                         </Link>
                       </li>
                     ))}
@@ -129,7 +131,7 @@ export default async function LearningPage() {
                           <span>{i.title}</span>
                           <span className="text-xs">· {i.className}</span>
                         </span>
-                        <span className="text-xs text-muted-foreground">{shortDate(i.createdAt)}</span>
+                        <span className="text-xs text-muted-foreground">{shortDate(i.createdAt, region)}</span>
                       </Link>
                     </li>
                   ))}

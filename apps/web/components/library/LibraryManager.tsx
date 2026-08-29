@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortDate } from "@/lib/format";
+
 import { useFormat } from "@/components/shell/RegionProvider";
 
 type Book = Serialized<LibraryBookDto>;
@@ -28,7 +28,7 @@ export function LibraryManager({
   // defaults to `PLATFORM_REGION.currency`, so these read in naira for a school
   // that bills in anything else — the region rides the session and
   // `useFormat()` is how a client island gets at it.
-  const { money } = useFormat();
+  const { money, shortDate } = useFormat();
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);

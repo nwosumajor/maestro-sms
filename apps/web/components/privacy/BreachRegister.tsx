@@ -10,6 +10,7 @@
 // =============================================================================
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { BreachIncidentDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dateTime } from "@/lib/format";
+
 import { readApiError } from "@/lib/api-error";
 
 type Breach = Serialized<BreachIncidentDto>;
@@ -30,6 +31,8 @@ const localNow = () => {
 };
 
 export function BreachRegister({ initial }: { initial: Breach[] }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);

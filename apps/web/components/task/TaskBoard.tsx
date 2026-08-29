@@ -5,6 +5,7 @@
 // and either side posts follow-up comments.
 
 import type { TaskDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { usePaged, type Paged } from "@/lib/paged";
 import { LoadMore } from "@/components/shell/LoadMore";
 import * as React from "react";
@@ -16,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortDate } from "@/lib/format";
+
 import { personLabel } from "@/lib/people";
 
 type Task = Serialized<TaskDto>;
@@ -65,6 +66,8 @@ export function TaskBoard({
 }: {
   page: Paged<Task>; staff: Person[]; students: Person[]; canAssign: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const { items: tasks, hasMore, loading, loadMore } = usePaged<Task>(page, "tasks");
   const [msg, setMsg] = React.useState<string | null>(null);

@@ -13,6 +13,7 @@
 // =============================================================================
 
 import { useEffect, useState } from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { PlatformDelegationDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { sendWithStepUp } from "@/lib/stepup";
 import { interpretApiError } from "@/lib/api-error";
-import { shortDate } from "@/lib/format";
+
 
 type Delegation = Serialized<PlatformDelegationDto>;
 type Lendable = { permissions: string[]; maxDays: number; defaultDays: number };
@@ -41,6 +42,8 @@ const DUTY_LABEL: Record<string, string> = {
 };
 
 export function PlatformDelegations({ staff }: { staff: { id: string; name: string; email: string }[] }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [rows, setRows] = useState<Delegation[] | null>(null);
   const [lendable, setLendable] = useState<Lendable | null>(null);
   const [userId, setUserId] = useState("");

@@ -1,4 +1,5 @@
 import type { ScholarshipApplicationDto, ScholarshipPortalDto, Serialized } from "@sms/types";
+import { regionOf } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -15,6 +16,8 @@ type Portal = Serialized<ScholarshipPortalDto>;
 export default async function ScholarshipsPage() {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   const canApply = hasPermission(user.permissions, "scholarship.apply");
   // The portal carries the pending-decision queue, so whoever decides the final
   // stage needs it too — and a school covering for an absent principal gives a
@@ -63,7 +66,7 @@ export default async function ScholarshipsPage() {
               </p>
             </div>
             {schoolApplications ? (
-              <SchoolApplications applications={schoolApplications} />
+              <SchoolApplications applications={schoolApplications} region={region} />
             ) : (
               <Alert variant="info">
                 <AlertTitle>Couldn&apos;t load your school&apos;s applications</AlertTitle>

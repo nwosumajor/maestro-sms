@@ -8,7 +8,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { dateTime } from "@/lib/format";
+import { dateTime, regionOf } from "@/lib/format";
 import { Composer } from "@/components/messaging/Composer";
 import { ReplyBox } from "@/components/messaging/ReplyBox";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -24,6 +24,8 @@ type Contact = Serialized<UserSummaryDto>;
 export default async function MessagesPage({ searchParams }: { searchParams: { thread?: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   // Gate matches this section's AppShell nav entry ("message.read"), so the page
   // cannot be reached by URL by someone the nav hides it from.
   if (!hasPermission(user.permissions, "message.read")) redirect("/dashboard");
@@ -77,7 +79,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: { t
                     {selected.messages.map((m) => (
                       <div key={m.id} className={cn("rounded-md px-3 py-2 text-sm", m.senderId === user.id ? "bg-primary/10 ml-8" : "bg-muted mr-8")}>
                         <p>{m.body}</p>
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">{dateTime(m.createdAt)}</p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">{dateTime(m.createdAt, region)}</p>
                       </div>
                     ))}
                   </div>

@@ -34,7 +34,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { money, shortDate } from "@/lib/format";
+import { money, regionOf, shortDate, type DisplayRegion } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { PlatformAnalytics } from "@/components/operator/PlatformAnalytics";
 import { GamesAnalytics } from "@/components/operator/GamesAnalytics";
@@ -72,14 +72,14 @@ function greeting(): string {
 }
 
 /** Compact relative time for the activity feed ("4h ago"). */
-function ago(iso: string): string {
+function ago(iso: string, region: DisplayRegion): string {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.max(1, Math.floor(ms / 60_000));
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
-  return d < 7 ? `${d}d ago` : shortDate(iso);
+  return d < 7 ? `${d}d ago` : shortDate(iso, region);
 }
 
 // Notification-type severity dot — matches the inbox's own colour language.
@@ -148,6 +148,8 @@ function Action({ icon: Icon, label, href, hint }: { icon: LucideIcon; label: st
 export default async function DashboardPage() {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   const can = (p: Parameters<typeof hasPermission>[1]) => hasPermission(user.permissions, p);
   const mod = (m: string) => !user.modules || user.modules.includes(m);
   const firstName = (user.name ?? "there").split(" ")[0];
@@ -397,7 +399,7 @@ export default async function DashboardPage() {
                         <span className={`block truncate text-sm ${n.readAt ? "text-muted-foreground" : "font-medium"}`}>{n.title}</span>
                         <span className="block truncate text-xs text-muted-foreground">{n.body}</span>
                       </span>
-                      <span className="tnum shrink-0 pt-0.5 text-xs text-muted-foreground/70">{ago(n.createdAt)}</span>
+                      <span className="tnum shrink-0 pt-0.5 text-xs text-muted-foreground/70">{ago(n.createdAt, region)}</span>
                     </li>
                   ))}
                 </ul>
@@ -433,7 +435,7 @@ export default async function DashboardPage() {
                         <span className="min-w-0">
                           <span className="block truncate text-sm font-medium">{e.title}</span>
                           <span className="block text-xs capitalize text-muted-foreground">
-                            {e.audience.toLowerCase()} · {shortDate(e.startsAt)}
+                            {e.audience.toLowerCase()} · {shortDate(e.startsAt, region)}
                           </span>
                         </span>
                       </li>

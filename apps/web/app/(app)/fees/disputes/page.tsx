@@ -8,7 +8,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DisputeRespondForm } from "@/components/fees/DisputeRespondForm";
-import { money, shortDate } from "@/lib/format";
+import { money, regionOf, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +36,8 @@ export default async function DisputesPage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   // fee.manage, not fee.read: the list is school-wide finance-internal data.
   if (!hasPermission(user.permissions, "fee.manage")) redirect("/dashboard");
   const qs = new URLSearchParams();
@@ -182,9 +184,9 @@ export default async function DisputesPage({
                       <StatusChip status={d.status} />
                     </div>
                     <CardDescription>
-                      Opened {shortDate(d.createdAt)}
+                      Opened {shortDate(d.createdAt, region)}
                       {d.category ? <> · {d.category}</> : null}
-                      {d.dueAt ? <> · evidence deadline {shortDate(d.dueAt)}</> : null}
+                      {d.dueAt ? <> · evidence deadline {shortDate(d.dueAt, region)}</> : null}
                       {d.invoiceId ? (
                         <>
                           {" "}
@@ -199,13 +201,13 @@ export default async function DisputesPage({
                   <CardContent className="space-y-2 text-sm">
                     {d.responseNote && (
                       <p>
-                        <span className="text-muted-foreground">Response recorded ({shortDate(d.respondedAt)}):</span>{" "}
+                        <span className="text-muted-foreground">Response recorded ({shortDate(d.respondedAt, region)}):</span>{" "}
                         {d.responseNote}
                       </p>
                     )}
                     {d.resolution && (
                       <p className="text-muted-foreground">
-                        Resolution: {d.resolution} ({shortDate(d.resolvedAt)})
+                        Resolution: {d.resolution} ({shortDate(d.resolvedAt, region)})
                       </p>
                     )}
                     {d.status === "OPEN" && <DisputeRespondForm disputeId={d.id} />}

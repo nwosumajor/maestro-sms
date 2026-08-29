@@ -13,6 +13,7 @@
 // =============================================================================
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { MeetingRequestDto, MeetingRequestPageDto, Serialized } from "@sms/types";
 import { MEETING_REQUEST_TOPICS, MEETING_REQUEST_TOPIC_LABELS } from "@sms/types";
@@ -23,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { StudentPicker } from "@/components/people/StudentPicker";
 import { readApiError } from "@/lib/api-error";
-import { dateTime } from "@/lib/format";
+
 
 type Row = Serialized<MeetingRequestDto>;
 type Page = Serialized<MeetingRequestPageDto>;
@@ -202,6 +203,8 @@ function RequestRow({
   busy: boolean;
   send: (path: string, body?: unknown, method?: "POST" | "DELETE") => Promise<boolean>;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const [when, setWhen] = React.useState({ date: "", start: "15:00", end: "15:30" });
   const [note, setNote] = React.useState("");
   const [openForm, setOpenForm] = React.useState(false);

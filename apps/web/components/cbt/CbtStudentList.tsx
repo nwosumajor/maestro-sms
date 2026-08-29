@@ -4,17 +4,20 @@
 // straight into the exam room route.
 
 import type { CbtExamDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
-import { dateTime } from "@/lib/format";
+
 
 type Exam = Serialized<CbtExamDto>;
 
 export function CbtStudentList({ exams }: { exams: Exam[] }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);

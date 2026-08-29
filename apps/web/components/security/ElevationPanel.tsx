@@ -1,6 +1,7 @@
 "use client";
 
 import type { PrivilegeGrantDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { dateTime, titleCase } from "@/lib/format";
+import { titleCase } from "@/lib/format";
 import { readApiError } from "@/lib/api-error";
 
 export type Grant = Serialized<PrivilegeGrantDto>;
@@ -29,6 +30,8 @@ export function ElevationPanel({
   userId: string;
   canApprove: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const router = useRouter();
   const [permission, setPermission] = React.useState("");
   const [reason, setReason] = React.useState("");

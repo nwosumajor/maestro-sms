@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { MeetingSlotDto, MeetingBookingDto, Serialized } from "@sms/types";
 import { MEETING_PROVIDERS, MEETING_PROVIDER_LABELS } from "@sms/types";
@@ -11,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { PeoplePicker, type Person } from "./PeoplePicker";
 import { StudentPicker } from "@/components/people/StudentPicker";
 import { Label } from "@/components/ui/label";
-import { dateTime } from "@/lib/format";
+
 
 type Slot = Serialized<MeetingSlotDto>;
 type Booking = Serialized<MeetingBookingDto>;
@@ -42,6 +43,8 @@ export function MeetingsClient({
    *  only, which is what every slot was before this existed. */
   audiences?: AudienceChoice[];
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);

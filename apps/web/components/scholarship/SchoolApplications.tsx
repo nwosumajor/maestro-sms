@@ -1,5 +1,5 @@
 import type { ScholarshipApplicationDto, Serialized } from "@sms/types";
-import { money, dateTime } from "@/lib/format";
+import { money, dateTime, type DisplayRegion } from "@/lib/format";
 
 // =============================================================================
 // SchoolApplications — leadership's oversight table
@@ -28,7 +28,7 @@ const STAGE: Record<string, { label: string; tone: string }> = {
   REJECTED: { label: "Not successful", tone: "bg-destructive/10 text-destructive" },
 };
 
-export function SchoolApplications({ applications }: { applications: App[] }) {
+export function SchoolApplications({ applications, region }: { applications: App[]; region: DisplayRegion }) {
   if (applications.length === 0) {
     return (
       <div className="rounded-lg border border-border bg-card p-6 text-center">
@@ -88,7 +88,7 @@ export function SchoolApplications({ applications }: { applications: App[] }) {
                   <td className="px-3 py-2 text-right tabular-nums">
                     {a.awardMinor != null ? money(a.awardMinor) : "—"}
                   </td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{dateTime(a.createdAt)}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{dateTime(a.createdAt, region)}</td>
                 </tr>
               );
             })}

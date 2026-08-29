@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, Serialized } from "@sms/types";
 import { findHallClash, describeClash } from "@sms/types";
@@ -9,7 +10,7 @@ import { personLabel } from "@/lib/people";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortDate } from "@/lib/format";
+
 
 type Sitting = Serialized<ExamSittingDto>;
 type Schedule = Serialized<ExamScheduleDto>;
@@ -43,6 +44,8 @@ export function ExamPlanner({
   attachableExams: { id: string; title: string }[];
   canRelease: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);

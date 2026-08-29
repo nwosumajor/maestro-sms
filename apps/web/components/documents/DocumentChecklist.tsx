@@ -13,12 +13,13 @@
 // =============================================================================
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { SubmissionChecklistDto, Serialized } from "@sms/types";
 import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortDate } from "@/lib/format";
+
 import { uploadDocument } from "@/lib/upload-document";
 
 type Checklist = Serialized<SubmissionChecklistDto>;
@@ -57,6 +58,8 @@ export function DocumentChecklist({
    *  refused — a button that always 403s is worse than no button. */
   canDecide: boolean;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);

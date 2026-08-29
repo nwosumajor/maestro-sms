@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
 import type { ExamScheduleDto, ExamSittingDto, MyExamDto, Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortDate } from "@/lib/format";
+
 import { ExamPlanner } from "./ExamPlanner";
 import { ExamDayBoard } from "./ExamDayBoard";
 
@@ -49,6 +50,8 @@ export function ExamsClient({
   schedules: Schedule[];
   attachableExams: { id: string; title: string }[];
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   // Default to EXAM DAY when something is actually on today — on exam morning that
   // is the screen you want, and on any other day planning is.
   const { timezone } = useRegion();

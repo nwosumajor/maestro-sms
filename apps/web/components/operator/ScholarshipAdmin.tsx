@@ -6,6 +6,7 @@
 // loads its own data via the BFF.
 
 import type { ScholarshipProgramDto, ScholarshipApplicationDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { sendWithStepUp } from "@/lib/stepup";
 import { sendSms } from "@/components/game/play-ui";
@@ -15,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money, shortDate } from "@/lib/format";
+import { money } from "@/lib/format";
 import { CURRENCIES, toMinor } from "@sms/types";
 
 type Program = Serialized<ScholarshipProgramDto>;
@@ -397,6 +398,8 @@ function ProgramRow({
   onCollect: () => void;
   onStatus: (status: string) => void;
 }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { shortDate } = useFormat();
   const [mode, setMode] = React.useState(pr.examMode ?? "");
   const [at, setAt] = React.useState("");
   const [venue, setVenue] = React.useState(pr.examVenue ?? "");

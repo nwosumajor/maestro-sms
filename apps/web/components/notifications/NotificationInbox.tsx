@@ -1,13 +1,14 @@
 "use client";
 
 import type { NotificationInboxDto, NotificationItemDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { readApiError } from "@/lib/api-error";
-import { dateTime, titleCase } from "@/lib/format";
+import { titleCase } from "@/lib/format";
 
 export type NotificationItem = Serialized<NotificationItemDto>;
 export type InboxData = Serialized<NotificationInboxDto>;
@@ -51,6 +52,8 @@ const FILTERABLE_TYPES = [
 ];
 
 export function NotificationInbox({ initial }: { initial: InboxData }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const [data, setData] = React.useState(initial);
   const [items, setItems] = React.useState(initial.items);
   const [unread, setUnread] = React.useState(initial.unread);

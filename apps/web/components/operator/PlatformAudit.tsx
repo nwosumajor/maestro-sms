@@ -5,12 +5,13 @@
 // and school for investigation. Export the current view as a CSV report.
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { PlatformAuditEntryDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { dateTime } from "@/lib/format";
+
 
 type Entry = Serialized<PlatformAuditEntryDto>;
 type Tenant = { id: string; name: string };
@@ -23,6 +24,8 @@ const PAGE = 50;
 type Page = { entries: Entry[]; nextCursor: string | null };
 
 export function PlatformAudit({ tenants, initial, initialCursor }: { tenants: Tenant[]; initial: Entry[]; initialCursor: string | null }) {
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const { dateTime } = useFormat();
   const [f, setF] = React.useState(EMPTY);
   const [rows, setRows] = React.useState<Entry[]>(initial);
   const [cursor, setCursor] = React.useState<string | null>(initialCursor);
