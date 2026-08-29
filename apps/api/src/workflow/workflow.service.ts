@@ -187,7 +187,11 @@ export class WorkflowService {
         schoolId: p.schoolId,
         requestId: req.id,
         initiatorId: p.userId,
-        approverId: null,
+        // NAMES ITS ACTOR. This column feeds ONLY `trail[].actorName` — it is
+        // read in exactly one place and the maker-checker EVIDENCE comes from
+        // the separate `approvals` JSON — so leaving it null on the rows the
+        // initiator writes bought nothing and cost the trail a name.
+        approverId: p.userId,
         oldState: null,
         newState: "DRAFT",
         comments: "created",
@@ -304,6 +308,21 @@ export class WorkflowService {
   async review(p: Principal, id: string, action: WorkflowAction, comments?: string) {
     if (action !== "APPROVE" && action !== "REJECT" && action !== "REQUEST_REVISION") {
       throw new BadRequestException("Invalid review action");
+    }
+    // A REVISION REQUEST IS AN INSTRUCTION, so it has to say something.
+    //
+    // The other decisions are complete without a comment: an approval speaks for
+    // itself and a rejection ends the matter. Sending something BACK does not —
+    // it asks the initiator to change something, and only the reviewer knows
+    // what. Without a reason the notice reads "your request was sent back for
+    // changes" and the person who must act next has to go and ask.
+    //
+    // Same rule, and the same sentence, as declining a parent's meeting request:
+    // "Say why, so the parent knows what to do next."
+    if (action === "REQUEST_REVISION" && !comments?.trim()) {
+      throw new BadRequestException(
+        "Say what needs to change, so the person who raised this knows what to do next.",
+      );
     }
     return this.transition(p, id, action, comments, { mustNotBeInitiator: true });
   }
@@ -724,7 +743,14 @@ export class WorkflowService {
         schoolId: p.schoolId,
         requestId: id,
         initiatorId: req.initiatorId,
-        approverId: action === "SUBMIT" ? null : p.userId,
+        // SUBMIT names its actor too. It used to be nulled, unexplained, and it
+        // matters now that a resubmission can carry the initiator's REPLY to a
+        // revision instruction: the reviewer's words were attributed and the
+        // answer to them was not, in a trail that is meant to read as one
+        // conversation. Only `mustBeInitiator` may submit, so this is always the
+        // person named on the request — which is exactly why recording it is
+        // safe, and why the trail reading "?" was a loss with no compensation.
+        approverId: p.userId,
         oldState: req.state,
         newState: nextState,
         // The reviewer's words AND what the system knows — never one instead of

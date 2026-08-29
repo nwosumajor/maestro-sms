@@ -2040,6 +2040,56 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The note that made a revision request worth sending
+Asked for: a place for the approver to say WHAT must change, and a place for the
+initiator to answer with what they did. Both halves already existed on the
+server and neither was reachable.
+`POST :id/review`, `:id/submit` and `:id/veto` have ALWAYS accepted `comments`;
+`transition` has always written them into the immutable `workflow_audit_log`;
+and `WorkflowChain` has always RENDERED them on the request. Every button in
+`WorkflowInbox` posted an empty body — `{ action: "REQUEST_REVISION" }`, `{}`,
+`{}`. Third instance of this exact shape in the repo, after the meetings page
+ignoring its own `?open=1` filter and provisioning never sending `country`, and
+it silently disarmed the fix directly below this one: the revision notice was
+built to carry the reviewer's reason, and nothing could ever supply one.
+// **REQUIRED ON A REVISION, AND NOWHERE ELSE.** An approval speaks for itself
+and a rejection ends the matter; sending something BACK asks the initiator to
+change something and only the reviewer knows what. Same rule and nearly the same
+sentence as declining a parent's meeting request — *"Say why, so the parent knows
+what to do next."* Demanding a note on every decision is how people learn to
+type "ok" into a box. Live: an empty revision request is **400 "Say what needs
+to change, so the person who raised this knows what to do next."**
+// ONE BOX, BOTH DIRECTIONS: the reviewer types the instruction, the initiator
+answers with what they changed when they resubmit, and both land in the trail
+already on the card — so the conversation stays attached to the request instead
+of living in two inboxes. Keyed per request, because two open rows must not
+share a draft.
+// **THE TRAIL NAMES ITS ACTOR NOW.** `approverId` was nulled on SUBMIT, and on
+the CREATE row, with no reason given — so the trail read `?` for everything the
+initiator did. That was tolerable while those rows were wordless and became a
+real gap the moment a resubmission could carry the REPLY: the reviewer's words
+were attributed and the answer to them was not, in a record meant to read as one
+conversation. Safe to record, and checked before changing: that column is read
+in exactly ONE place and feeds only `trail[].actorName` — the maker-checker
+EVIDENCE comes from the separate `approvals` JSON.
+Live, the whole loop on one request:
+```
+null -> DRAFT               Demo Teacher: created
+DRAFT -> PENDING_REVIEW     Demo Teacher: (no note)
+-> REVISION_REQUESTED       Demo Head Teacher: Add the dates and the cost, and
+                            say who covers your lessons.
+-> PENDING_REVIEW           Demo Teacher: Dates 3-5 Nov, cost NGN 40,000.
+                            Mr Bello covers Tue and Wed.
+```
+// VALIDATION BEFORE AUTHORIZATION, deliberately, and an existing test caught the
+ordering: a bystander reviewer now meets "say what needs to change" before the
+routing refusal. That is safe for the reason this file already records about the
+meeting decline — the check is INPUT-ONLY and never consults the row, so it
+cannot become an existence oracle. The test supplies an instruction now, so it
+goes on testing ROUTING rather than my validation.
+Mutation-validated three ways: drop the requirement, accept whitespace as an
+instruction, and require a note on every decision.
+
 ### The board vetoed an appointment and the person kept the role
 `WorkflowService.veto` / `announce` (`workflow/workflow.service.ts`),
 `WorkflowInbox`. `WORKFLOW_TRANSITIONS` allows `VETO` only from **APPROVED** —

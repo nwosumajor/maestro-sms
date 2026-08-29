@@ -355,7 +355,12 @@ describe("WorkflowService initiator-routed chains (named approvers)", () => {
   it("a bystander reviewer cannot REQUEST_REVISION on a routed stage either", async () => {
     const { service } = makeRoutedService(routed(), []);
     await expect(
-      service.review(p(["workflow.review"], "bystander"), "w1", "REQUEST_REVISION"),
+      // The instruction is supplied so this still tests ROUTING. A revision
+      // request now requires one, and that check is INPUT-ONLY — it never reads
+      // the row — so it runs first and would otherwise answer here instead. That
+      // ordering is the same one the meeting decline uses, and is safe for the
+      // same reason: a validation that cannot see the record cannot disclose it.
+      service.review(p(["workflow.review"], "bystander"), "w1", "REQUEST_REVISION", "add dates"),
     ).rejects.toThrow(/routed to Head One/i);
   });
 

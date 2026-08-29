@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -89,6 +90,18 @@ export function WorkflowInbox({
   // the role on the account. The board member pressing this is the person who
   // most needs to know it records a decision rather than reversing one.
   const [notice, setNotice] = React.useState<string | null>(null);
+  // THE NOTE THAT TRAVELS WITH A DECISION.
+  //
+  // `POST :id/review`, `:id/submit` and `:id/veto` have ALWAYS accepted
+  // `comments`, the engine has always written them into the immutable trail, and
+  // `WorkflowChain` has always rendered them — and every button here posted an
+  // empty body. So the one field that makes a revision request actionable was
+  // reachable by nothing, which is the same shape as the meeting page ignoring
+  // its own `?open=1` filter and provisioning never sending `country`.
+  //
+  // Keyed per request: two rows open at once must not share a draft.
+  const [note, setNote] = React.useState<Record<string, string>>({});
+  const noteOf = (id: string) => (note[id] ?? "").trim();
   // Only the types this user may initiate (PO needs finance, disciplinary needs
   // rbac.manage, content-publish is system-only).
   const initiatableTypes = WORKFLOW_TYPES.filter((t) => canInitiateWorkflowType(t, permissions));
@@ -161,7 +174,7 @@ export function WorkflowInbox({
 
   // Which transitions are legal from this state, given the actor's permissions
   // and separation of duties. The API re-checks all of this.
-  function actionsFor(w: WorkflowDto): { action: string; label: string; variant?: "default" | "destructive" | "outline"; run: () => void }[] {
+  function actionsFor(w: WorkflowDto): { action: string; label: string; variant?: "default" | "destructive" | "outline"; disabled?: boolean; run: () => void }[] {
     const legal = WORKFLOW_TRANSITIONS[w.state as WorkflowState] ?? {};
     const isInitiator = w.initiatorId === userId;
     const out: ReturnType<typeof actionsFor> = [];
@@ -170,7 +183,11 @@ export function WorkflowInbox({
       out.push({
         action: "SUBMIT",
         label: "Submit for review",
-        run: () => call(`workflows/${w.id}/submit`, {}, `${w.id}:submit`),
+        // The initiator's side of the loop: what they changed, in answer to the
+        // instruction they were sent. Optional on a FIRST submission, where
+        // there is nothing to answer.
+        run: () =>
+          call(`workflows/${w.id}/submit`, { comments: noteOf(w.id) || undefined }, `${w.id}:submit`),
       });
     }
     // `awaitingMe` is the SERVER's answer to "can this person decide this now",
@@ -185,20 +202,39 @@ export function WorkflowInbox({
       out.push({
         action: "APPROVE",
         label: "Approve",
-        run: () => call(`workflows/${w.id}/review`, { action: "APPROVE" }, `${w.id}:approve`),
+        run: () =>
+          call(
+            `workflows/${w.id}/review`,
+            { action: "APPROVE", comments: noteOf(w.id) || undefined },
+            `${w.id}:approve`,
+          ),
       });
       out.push({
         action: "REQUEST_REVISION",
         label: "Request revision",
         variant: "outline",
+        // REQUIRED here and nowhere else: an approval speaks for itself and a
+        // rejection ends the matter, but sending something back asks somebody to
+        // change something and only the reviewer knows what. The API refuses an
+        // empty one too, so this is a courtesy rather than the control.
+        disabled: !noteOf(w.id),
         run: () =>
-          call(`workflows/${w.id}/review`, { action: "REQUEST_REVISION" }, `${w.id}:revise`),
+          call(
+            `workflows/${w.id}/review`,
+            { action: "REQUEST_REVISION", comments: noteOf(w.id) },
+            `${w.id}:revise`,
+          ),
       });
       out.push({
         action: "REJECT",
         label: "Reject",
         variant: "destructive",
-        run: () => call(`workflows/${w.id}/review`, { action: "REJECT" }, `${w.id}:reject`),
+        run: () =>
+          call(
+            `workflows/${w.id}/review`,
+            { action: "REJECT", comments: noteOf(w.id) || undefined },
+            `${w.id}:reject`,
+          ),
       });
     }
     if ("VETO" in legal && canVeto && w.state === "APPROVED") {
@@ -209,7 +245,7 @@ export function WorkflowInbox({
         run: () =>
           call(
             `workflows/${w.id}/veto`,
-            {},
+            { comments: noteOf(w.id) || undefined },
             `${w.id}:veto`,
             "Veto recorded. It does NOT undo what the approval already did — reverse that in the module it belongs to. Everyone who approved it has been told.",
           ),
@@ -448,14 +484,44 @@ export function WorkflowInbox({
                   </div>
                 </CardHeader>
                 {actions.length > 0 && (
-                  <CardContent>
+                  <CardContent className="space-y-2">
+                    {/* THE NOTE TRAVELS WITH WHATEVER BUTTON IS PRESSED, and it
+                        is the same box on both sides of the loop: a reviewer
+                        types the instruction, and the person who raised it
+                        answers with what they changed when they resubmit. Both
+                        land in the immutable trail above, so the conversation
+                        stays attached to the request rather than living in two
+                        inboxes. */}
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`note-${w.id}`}>
+                        {w.awaitingMe
+                          ? "Note for the person who raised this"
+                          : "Note (what you changed, or anything the reviewer should know)"}
+                      </Label>
+                      <Textarea
+                        id={`note-${w.id}`}
+                        rows={2}
+                        value={note[w.id] ?? ""}
+                        onChange={(e) => setNote((m) => ({ ...m, [w.id]: e.target.value }))}
+                        placeholder={
+                          w.awaitingMe
+                            ? "Required to send back for changes — say what needs to change."
+                            : "Optional."
+                        }
+                      />
+                    </div>
                     <div className="flex flex-wrap gap-2">
                       {actions.map((a) => (
                         <Button
                           key={a.action}
                           size="sm"
                           variant={a.variant ?? "default"}
-                          disabled={busy?.startsWith(w.id)}
+                          disabled={busy?.startsWith(w.id) || a.disabled}
+                          title={
+                            a.disabled && a.action === "REQUEST_REVISION"
+                              ? "Say what needs to change first"
+                              : undefined
+                          }
                           onClick={a.run}
                         >
                           {a.label}
