@@ -223,12 +223,30 @@ export class TransportService {
   }
 
   /** Rename a route (typo/duplicate fix; assignments and stops follow the id). */
-  async updateRoute(p: Principal, id: string, input: { name: string }): Promise<TransportRouteDto> {
+  async updateRoute(
+    p: Principal,
+    id: string,
+    input: { name?: string; fareMode?: "FLAT" | "STOP"; flatFareMinor?: number },
+  ): Promise<TransportRouteDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const r = await tx.transportRoute.findFirst({ where: { id } });
       if (!r) throw new NotFoundException("Route not found");
-      await tx.transportRoute.update({ where: { id }, data: { name: input.name } });
-      await this.log(tx, p, "transport.route.update", id, { from: r.name, to: input.name });
+      // Only what was actually sent: an edit of the name must not reset a fare,
+      // and an edit of the fare must not rename the route.
+      await tx.transportRoute.update({
+        where: { id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.fareMode !== undefined ? { fareMode: input.fareMode } : {}),
+          ...(input.flatFareMinor !== undefined ? { flatFareMinor: input.flatFareMinor } : {}),
+        },
+      });
+      await this.log(tx, p, "transport.route.update", id, {
+        from: r.name,
+        to: input.name ?? r.name,
+        fareMode: input.fareMode,
+        flatFareMinor: input.flatFareMinor,
+      });
       return this.routeDto(tx, id);
     });
   }

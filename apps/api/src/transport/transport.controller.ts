@@ -21,7 +21,14 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { TransportService } from "./transport.service";
 
 const customFields = z.record(z.string()).optional();
-const routeRenameSchema = z.object({ name: z.string().min(1).max(120) });
+// A route's FARE is editable, not only its name. It could be set at creation and
+// never corrected, so a school that picked the wrong mode had to retire the route
+// and re-assign every rider — losing the assignments the fares hang off.
+const routeRenameSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  fareMode: z.enum(["FLAT", "STOP"]).optional(),
+  flatFareMinor: z.number().int().min(0).optional(),
+});
 const vehicleSchema = z.object({
   driverId: z.string().uuid().nullish(),
   name: z.string().min(1).max(160),
@@ -149,7 +156,7 @@ export class TransportController {
     return this.transport.deleteVehicle(p, id);
   }
 
-  /** Rename a route (assignments, stops and fees follow the route id). */
+  /** Edit a route's name or fare (assignments, stops and fees follow the route id). */
   @Put("routes/:id")
   @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)
   updateRoute(

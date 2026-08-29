@@ -2040,6 +2040,43 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The screens that make a per-stop fare usable
+Asked for, after the entry below made the silence visible. The API was already
+complete; four things on the web side were not, and the FIRST is the money one.
+1. **The assignment form sent no `stopId`.** On a per-stop route the fare lives
+   on the rider's stop, so every rider assigned through the product priced at
+   zero. There is now a stop picker, shown only when the chosen route charges by
+   stop, and **required** there — optional would be the same defect with a picker
+   beside it. A per-stop route with no stops yet says so instead of offering an
+   empty dropdown.
+2. **Both fare boxes asked for raw minor units, labelled "(kobo)"** — the route's
+   flat fare and, through a `prompt()`, each stop's. A bursar typing 300 meant
+   three hundred naira and got three, and in a school billing anything else the
+   label named a unit that does not exist there. Both take MAJOR units through
+   `minorFrom` now and are labelled with the school's own currency. This is the
+   writing half of the currency rule, at two sites the original fourteen missed.
+3. **A stop was created by three chained `prompt()` dialogs**, which cannot be
+   labelled for a screen reader, cannot validate, and lost whatever was typed on
+   a mis-click. A real form, with the accessible-name gate covering it.
+4. **A route's fare could be set once and never corrected** (`updateRoute` took a
+   name only), so a school that chose the wrong mode had to retire the route and
+   re-assign every rider — losing the assignments the fares hang off. The PUT
+   now takes `fareMode`/`flatFareMinor`, applying only what was sent so a rename
+   cannot reset a fare.
+Plus a warning on the route card naming riders who would not be billed, on the
+screen where it can be put right.
+Live, end to end: per-stop route -> two stops -> assign with a stop
+(`stopName=Ikeja Gate, fareMinor=120000`) -> fee run
+`{passengersBilled:1, totalBilledMinor:120000, unpriced:0}` -> that route
+switched to a flat fare. The same route billed nobody, silently, before.
+// GOTCHA, and the gate caught its author twice. My assertion that the fares are
+no longer in kobo read the RAW file and failed on the comment explaining the fix
+— the trap this file already records for `money-is-not-divided-by-a-hundred`. And
+`will not assign without a stop` matched `needsStop && !aStop` ANYWHERE, which
+the button's own `title` also contains, so removing the guard left it green:
+matched-by-accident, found only by mutation, now anchored on the `disabled`
+expression.
+
 ### A fee run that billed nobody, for a bus carrying five children
 `fareFor` / `postFeeRun` / `previewFeeRun` (`transport.service.ts`). The second
 finding from the same sweep as the entry below — `stopId` is one of the 24
