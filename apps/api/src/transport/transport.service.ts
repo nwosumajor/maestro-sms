@@ -863,6 +863,7 @@ export class TransportService {
       })) as Array<{ routeId: string; stopId: string | null; passengerType: string }>;
       let count = 0;
       let total = 0;
+      let unpriced = 0;
       for (const a of assignments) {
         // The SAME three rules `postFeeRun` applies, and using its own
         // `fareFor` rather than a second reading of where a fare lives.
@@ -875,14 +876,31 @@ export class TransportService {
         // with the run it is previewing.
         if (a.passengerType !== "STUDENT") continue; // only students are invoiced
         const fare = await this.fareFor(tx, a.routeId, a.stopId);
-        if (fare <= 0) continue;
+        if (fare <= 0) {
+          // COUNTED, NOT SWALLOWED. A rider whose fare resolves to zero is
+          // skipped by the run, and the approver could not tell that from a
+          // route with nobody on it. Two ways it happens and both are worth
+          // seeing before approving: a FLAT route left at a zero fare, and a
+          // per-stop route where the rider has no stop — which is every rider
+          // assigned through the web, because the assignment screen has no stop
+          // picker at all.
+          unpriced += 1;
+          continue;
+        }
         count += 1;
         total += fare;
       }
-      if (count === 0) return "No fare-paying passengers in scope — this run would bill nobody.";
+      const unpricedNote =
+        unpriced === 0
+          ? ""
+          : ` ${unpriced} rider${unpriced === 1 ? " is" : "s are"} NOT billed because no fare applies to them` +
+            ` — a zero flat fare, or a per-stop route with no stop set.`;
+      if (count === 0) {
+        return `No fare-paying passengers in scope — this run would bill nobody.${unpricedNote}`;
+      }
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
       const currency = school?.currency ?? "NGN";
-      return `Bills ${count} passenger${count === 1 ? "" : "s"}, ${formatMoney(total, currency)} in total (as at today).`;
+      return `Bills ${count} passenger${count === 1 ? "" : "s"}, ${formatMoney(total, currency)} in total (as at today).${unpricedNote}`;
     });
   }
 
@@ -922,10 +940,17 @@ export class TransportService {
       let skippedAlreadyBilled = 0;
       let totalBilledMinor = 0;
       let passengersBilled = 0;
+      // Riders the run passes over because no fare could be resolved. Reported
+      // rather than dropped: "0 billed" for a route carrying thirty children
+      // reads as an empty route, which is the one thing it is not.
+      let unpriced = 0;
       for (const a of assignments as Array<{ routeId: string; stopId: string | null; passengerId: string; passengerType: string }>) {
         if (a.passengerType !== "STUDENT") continue; // only students are invoiced
         const fare = await this.fareFor(tx, a.routeId, a.stopId);
-        if (fare <= 0) continue;
+        if (fare <= 0) {
+          unpriced += 1;
+          continue;
+        }
         if (billed.has(a.passengerId)) {
           skippedAlreadyBilled++;
           continue;
@@ -955,10 +980,10 @@ export class TransportService {
         passengersBilled++;
       }
       await this.audit.record(
-        { actorId, action: "transport.fees.schedule", entity: "transport", entityId: input.routeId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, passengersBilled, skippedAlreadyBilled } },
+        { actorId, action: "transport.fees.schedule", entity: "transport", entityId: input.routeId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, passengersBilled, skippedAlreadyBilled, unpriced } },
         tx,
       );
-      return { invoicesCreated, totalBilledMinor, passengersBilled };
+      return { invoicesCreated, totalBilledMinor, passengersBilled, unpriced };
     }
   }
 

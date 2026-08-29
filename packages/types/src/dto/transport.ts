@@ -73,6 +73,16 @@ export interface TransportFeeRunDto {
   invoicesCreated: number;
   totalBilledMinor: number;
   passengersBilled: number;
+  /**
+   * Riders the run passed over because no fare could be resolved for them.
+   *
+   * Two ways it happens: a FLAT route left at a zero fare, and a per-stop route
+   * where the rider has no stop — which is EVERY rider assigned through the web,
+   * because the assignment screen has no stop picker. Reported rather than
+   * dropped: "0 billed" for a route carrying thirty children reads as an empty
+   * route, which is the one thing it is not.
+   */
+  unpriced: number;
 }
 
 /** Fleet analytics for the transport module (driver-scoped or school-wide). */

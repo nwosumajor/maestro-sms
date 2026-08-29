@@ -2040,6 +2040,42 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A fee run that billed nobody, for a bus carrying five children
+`fareFor` / `postFeeRun` / `previewFeeRun` (`transport.service.ts`). The second
+finding from the same sweep as the entry below — `stopId` is one of the 24
+optional body fields the web never sends, and this one costs money.
+A route has a `fareMode`. On **STOP** the fare lives on the rider's stop, and
+`fareFor` returns **0** when they have none. Both the run and the approver's
+preview then did `if (fare <= 0) continue` — no count, no mention. So the preview
+read *"No fare-paying passengers in scope — this run would bill nobody"*, which
+is the same sentence an EMPTY route produces.
+**IT IS NOT A HYPOTHETICAL SHAPE, because the web cannot set a stop.** The API is
+complete — `POST /transport/routes/:id/stops`, reorder, and a check that a
+`stopId` belongs to its route — and `grep stopId apps/web` returns NOTHING: no
+stop picker on the assignment screen, no fare-mode control, no stops screen at
+all. So every rider assigned through the product carries `stopId: null`, and on a
+per-stop route every one of them prices at zero.
+Measured on the demo tenant: 6 routes all FLAT, **0 stops, 30 assignments, 0 with
+a stop**. Live, flipping one route with five riders to STOP:
+```
+before   {"invoicesCreated":0,"totalBilledMinor":0,"passengersBilled":0}
+after    {... ,"passengersBilled":0,"unpriced":5}
+approver "…would bill nobody. 5 riders are NOT billed because no fare applies
+          to them — a zero flat fare, or a per-stop route with no stop set."
+```
+// BOTH CAUSES ARE NAMED because a zero FLAT fare is a legitimate free route, and
+a reader needs to know which of the two they are looking at before approving.
+// THE COUNT IS AN ADDITION, not a replacement: the outcome sentence was already
+right, and silence appears on ordinary runs — a note that fires every time is one
+people stop reading, which a test pins.
+// **BUILDING THE MISSING SCREENS IS A FEATURE AND IS DELIBERATELY NOT DONE.**
+What is fixed is the silence. LATENT — no school here is on per-stop fares — and
+it would have gone wrong quietly the first time one was, which is the worst
+moment, because the evidence is an invoice nobody raised.
+// GOTCHA in my own test: the preview method is `previewFeeRun`, not the
+`feeRunSummary` I guessed from the DTO field name, and six tests failed at once
+on a name rather than a property.
+
 ### A field the API accepted, the sweep required, and no screen could fill in
 Found by sweeping the class the entry below is an instance of: 240 optional body
 fields across the controllers, cross-referenced against every identifier that
