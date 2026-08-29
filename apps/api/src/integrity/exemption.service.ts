@@ -45,7 +45,12 @@ import {
 } from "./integrity.foundation";
 
 /** Sees and manages accommodations for every pupil in the school. */
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
+// junior_admin holds integrity.exemption.READ and not .write, and this set
+// decides ROW SCOPE only — the write routes are gated by the permission it does
+// not have. Kept identical to IntegrityReportService, which the comment above
+// promises ("matching IntegrityReportService's SCHOOL_WIDE_ROLES exactly"); a
+// promise of that kind is exactly what drifts when only one side is edited.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin"]);
 
 /** The stored row, as this service reads it. */
 type ExemptionRow = {

@@ -2040,6 +2040,55 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A grant that answered "not found" to every row
+`SCHOOL_WIDE_ROLES` in `integrity-report.service.ts` and `exemption.service.ts`.
+Found by driving the Assessment Integrity module for the first time —
+`integrity_signal`, `submission_draft`, `submission_telemetry` and
+`student_integrity_exemption` were ALL empty, so the module this file documents
+first and at greatest length had never held a row.
+`integrity.report.read` is seeded to board, junior_admin, principal,
+school_admin and teacher. The report service's wide set was
+{school_admin, principal}, and junior_admin teaches nothing — so every
+submission answered "Submission not found". Measured live, one junior_admin:
+```
+GET /assessments                 200   30 assessments
+GET .../integrity-report         404   "Submission not found"
+GET /integrity/exemptions        200   []            (scoped to nothing)
+```
+**THE ARGUMENT WAS WRITTEN DOWN TWICE AND APPLIED TO ONE OF THREE SERVICES.**
+The report service's set was widened for PRINCIPAL with the dead-grant reasoning
+verbatim — *"otherwise the grant is dead"* — and `AssessmentListService`'s was
+widened for junior_admin **citing this very permission**: *"junior_admin holds
+assessment.read and integrity.report.read on the same footing"*. So the fix's own
+comment names the grant it did not act on, and the result is the reverse of the
+sentence that fix used: the module let them FIND an assessment they could not
+judge. Live after: junior_admin 200 with the signals; pupil 403, parent 403,
+teacher 200, all unchanged.
+// **BOARD IS DELIBERATELY LEFT REFUSED, and a test pins it.** It holds the same
+permission and is in no wide set anywhere in this module, and unlike
+junior_admin it is not roster-wide elsewhere. A governance tier reading one
+named child's paste and focus telemetry is a policy question, not a drifted set
+— Golden Rule #7 until somebody decides it. That is a live dead grant left
+standing on purpose, and it is recorded here rather than quietly widened.
+// THE EXEMPTION SERVICE MOVED WITH IT because its own comment promises to match
+the report service "exactly", and a promise of that kind is precisely what
+drifts when one side is edited. Its set gates ROW SCOPE only — the write routes
+are gated by `integrity.exemption.write`, which junior_admin does not hold.
+// WHAT THE SAME PASS VERIFIED, first time live, and it all HELD: a client
+signal batch persists PASTE and FOCUS_LOSS with the paste LENGTH and never the
+content; withdrawing consent DROPS the next batch while the endpoint still
+answers 202 (the pupil is not told their exam is broken); the report read writes
+an `integrity.report.read` audit row (Golden Rule #5); and `integrity.signal
+.create` is held by student alone.
+// GOTCHA in my own probe, twice: the signal schema is a discriminated union on
+`kind`, not `type`, so my first batch was a 400 — and the demo school has three
+"current" terms across different tenants, so an unscoped `limit 1` picked
+another school's and every role got 404, including the control. A probe that
+cannot tell a refusal from a broken request reports the wrong one.
+Mutation-validated four ways, in BOTH directions: revert the report set, drift
+the exemption set alone, over-widen to board, and drop the teacher relationship
+check.
+
 ### The admissions funnel, driven end to end — and it is sound
 `admission_application` had no rows, so the public intake -> three-stage review
 -> convert chain had never once been driven. Recorded as a clean negative

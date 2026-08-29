@@ -40,7 +40,24 @@ const SEVERITY_ORDER: IntegritySignalSeverity[] = [
 // integrity.exemption.write, so it sees integrity reports school-wide like
 // school_admin — otherwise the grant is dead (it reviews only assessments it
 // personally created, which is ~none). teacher stays relationship-scoped.
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
+//
+// junior_admin, for the SAME reason, and the argument was already written down
+// twice without being acted on here. It holds integrity.report.read; it is not
+// a teacher of anything, so every submission 404s — measured live, the role
+// listed 30 assessments and got "Submission not found" on the report for one of
+// them. `AssessmentListService`'s own comment cites this grant as the reason to
+// list assessments for them ("junior_admin holds assessment.read AND
+// integrity.report.read on the same footing"), and the fix that added principal
+// HERE gave the dead-grant reason verbatim. One of three services was updated.
+// It is the reverse of the sentence that fix used: the module now lets them
+// FIND an assessment they cannot judge.
+//
+// board is deliberately NOT added. It holds integrity.report.read and is in no
+// wide set anywhere in this module, and unlike junior_admin it is not
+// roster-wide elsewhere — a governance tier reading one named child's paste and
+// focus telemetry is a policy question, not a drifted set, so the restrictive
+// option stands until somebody decides it (Golden Rule #7).
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin"]);
 
 @Injectable()
 export class IntegrityReportService {
