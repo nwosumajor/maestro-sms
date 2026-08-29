@@ -2040,6 +2040,49 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Seeing a record and destroying it were the same question
+`deleteDocument` (`documents.service.ts`). It HARD deletes the vault row AND the
+object bytes, and its only authorisation was `assertCanAccessStudent` — a READ
+predicate whose own comments talk about never revealing another pupil's document
+and about a teacher keeping "access to their records". It returns for the PUPIL,
+for their PARENT, and for any teacher of a class they are actively in.
+**THE TWO BRANCHES WERE THE WRONG WAY ROUND, IN ONE IF/ELSE:**
+```
+if (existing.studentId) await this.assertCanAccessStudent(...)   // a child's REPORT CARD
+else if (!this.isStaffWide(p)) throw new NotFoundException(...)  // a school policy PDF
+```
+A school-level document demanded school-wide staff; a child's report card needed
+only family scope. **The stricter guard was on the less sensitive object.**
+Measured live on the demo tenant, where all 35 vault documents are report cards
+the office generated: a teacher READ one (200) and DELETED it (200) for a pupil
+they teach — row gone, and in production the bytes with it.
+Live after: read 200, delete **403**, the teacher's OWN upload still 200, the
+principal unaffected.
+// **WHAT THE VAULT IS FOR IS THE ARGUMENT.** `generate` files a copy so the
+student and guardians get "an independently retrievable copy ... no matter who
+generated it", and the NDPR erasure path deliberately RETAINS these, counts them
+and now says so at the moment of signing (`retainedVaultDocuments`). A plain
+delete walked straight past all of that reasoning.
+// NOT A BLANKET REFUSAL, because that would be the wrong fix: `generate` files a
+NEW document every time, so duplicates accumulate and somebody has to tidy them.
+The rule is that you may remove what YOU put there, and removing somebody else's
+record needs school-wide authority — which is also why the fix keys on
+`uploadedById` rather than on the document TYPE.
+// **IT ALSO STOPS BEING A SINGLE LAYER.** A family holds no `document.write`
+today, so the family half was latent — but the permission gate was the ONLY thing
+between a parent and the school's copy of their child's record, and Golden Rule
+#2 is that a control is never one layer. The teacher half was live.
+// 403, NOT 404, and a test pins it: they have just been allowed to READ this
+document, so claiming it does not exist would be a positive statement that is
+untrue — the same line this file draws for the pupil told a classmate is "not in
+this school". Somebody who cannot see it at all still gets 404.
+// GOTCHA, and it is the one this file already records as "a mutation that does
+not land where you think proves nothing": the two-line visibility check appears
+TWICE in the file, so my mutation removed the OTHER copy and the suite stayed
+green — I had asserted the string EXISTED, which is not the same as asserting
+WHERE. Bounded to the method, the assertion written for it fails immediately.
+Mutation-validated four ways once that was fixed.
+
 ### A teacher seated for the exam, and a candidate who is nobody
 `ExamService.seat` took a list of uuids and checked only that they FITTED the
 hall. It validated nothing about the people: not that they were pupils, not that

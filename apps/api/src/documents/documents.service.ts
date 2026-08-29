@@ -276,8 +276,41 @@ export class DocumentsService {
     const key = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const existing = await tx.document.findFirst({ where: { id } });
       if (!existing) throw new NotFoundException("Document not found");
+      // CAN YOU SEE IT — unchanged, and still 404 so a refusal never reveals
+      // another pupil's document.
       if (existing.studentId) await this.assertCanAccessStudent(tx, p, existing.studentId);
       else if (!this.isStaffWide(p)) throw new NotFoundException("Document not found");
+      // MAY YOU DESTROY IT — a separate question, and it used to have no answer.
+      //
+      // `assertCanAccessStudent` is a READ predicate: its own comments talk about
+      // never revealing another pupil's document and about a teacher keeping
+      // "access to their records". It admits the PUPIL, their PARENT and any
+      // teacher of a class they are in — and it was the only authorisation on a
+      // HARD delete of the row and of the bytes.
+      //
+      // The two branches above were the wrong way round: a school-level document
+      // (a policy PDF) demanded school-wide staff, while a child's REPORT CARD
+      // needed only family scope. The stricter guard was on the less sensitive
+      // object. Measured live: a teacher read (200) and deleted (200) a report
+      // card the OFFICE had generated for a pupil they teach — and the vault's
+      // whole purpose is that the family has "an independently retrievable copy
+      // ... no matter who generated it". The erasure path deliberately RETAINS
+      // these and counts them as the school's own record; a plain delete walked
+      // straight past that reasoning.
+      //
+      // Not a blanket refusal: `generate` files a NEW document every time, so
+      // duplicates accumulate and somebody has to tidy them. You may remove what
+      // you put there; removing somebody else's record needs school-wide
+      // authority. That also means a family can never delete the school's copy
+      // even if `document.write` were ever granted to them — Golden Rule #2,
+      // rather than leaving the permission gate as the only layer.
+      if (!this.isStaffWide(p) && existing.uploadedById !== p.userId) {
+        // 403, not 404: they can already SEE this document, so claiming it does
+        // not exist would be a positive statement that is untrue.
+        throw new ForbiddenException(
+          "Only school-wide staff can remove a document they did not upload. Ask the school office.",
+        );
+      }
       await tx.document.delete({ where: { id } });
       await this.log(tx, p, "document.delete", "document", id);
       return existing.storageKey as string;
