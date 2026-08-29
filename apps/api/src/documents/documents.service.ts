@@ -234,8 +234,21 @@ export class DocumentsService {
       } else {
         const ids = await this.visibleStudentIds(tx, p);
         if (ids.length === 0) return { items: [], nextCursor: null };
-        where.studentId =
-          opts?.studentId && ids.includes(opts.studentId) ? opts.studentId : { in: ids };
+        // A FILTER THIS CALLER CANNOT SATISFY IS REFUSED, not widened.
+        //
+        // Measured live: a teacher asked for a pupil they do not teach and got
+        // 200 with a report card belonging to a DIFFERENT child — the same body
+        // a uuid that is nobody returned. Every row was inside their scope, so
+        // nothing leaked; what was wrong is that a downloadable document was
+        // presented as the answer to a filter for another child.
+        //
+        // 404, matching every per-student route, rather than an empty page:
+        // "no documents" reads as a fact about that child and hides the
+        // refusal — the objection the test pinning the old behaviour raised.
+        if (opts?.studentId && !ids.includes(opts.studentId)) {
+          throw new NotFoundException("Document not found");
+        }
+        where.studentId = opts?.studentId ?? { in: ids };
       }
       // One extra row tells us whether another page exists, without a second query.
       const rows = (await tx.document.findMany({

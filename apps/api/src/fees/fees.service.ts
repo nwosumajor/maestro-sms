@@ -767,9 +767,23 @@ export class FeesService {
       } else {
         const ids = await this.visibleStudentIds(tx, p);
         if (ids.length === 0) return { items: [], nextCursor: null };
-        where.studentId = opts?.studentId && ids.includes(opts.studentId)
-          ? opts.studentId
-          : { in: ids };
+        // A FILTER THIS CALLER CANNOT SATISFY IS REFUSED, not widened.
+        //
+        // This used to DROP the requested id and answer with the caller's whole
+        // visible set, so a parent filtering for another family's child was
+        // handed their OWN children's invoices as the answer. Nothing leaked —
+        // every row was already theirs — but the list did not answer the
+        // question it was asked, and looked exactly as though it had.
+        //
+        // NOT an empty page either, and the test that pinned the old behaviour
+        // is right about why: "no invoices" hides the refusal and reads as a
+        // fact about that child. 404 is what every per-student route already
+        // answers for a pupil outside your scope, so this agrees with them and
+        // discloses nothing a random id would not.
+        if (opts?.studentId && !ids.includes(opts.studentId)) {
+          throw new NotFoundException("Invoice not found");
+        }
+        where.studentId = opts?.studentId ?? { in: ids };
         // A DRAFT IS NOT A BILL YET, so a family must not be shown one.
         //
         // There was no default status filter, so every status came back to

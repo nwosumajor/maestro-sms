@@ -63,21 +63,36 @@ const docs = (db: unknown) => {
 };
 
 describe("a parent asking for another family's child", () => {
-  it("is given their OWN children's invoices, not the ones they asked for", async () => {
+  // WHAT CHANGED, AND WHY THE OLD ASSERTION WAS DEFENDING A DEFECT.
+  //
+  // This used to assert the requested id was "discarded and replaced by the
+  // caller's own set", with a comment rejecting an empty result because it
+  // "would look like 'no invoices' and hide the refusal". The objection was
+  // right and the remedy was not: answering with the caller's OTHER children
+  // presents rows as the answer to a question about a different child. Found
+  // live on documents, where a teacher filtering for a pupil they do not teach
+  // was handed another pupil's report card — the same body a uuid that is
+  // nobody returned.
+  //
+  // 404 satisfies both halves: no wrong rows, and the refusal is explicit. It
+  // is what every per-student route already answers, so it discloses nothing a
+  // random id would not. The SECURITY property these cases exist for is
+  // unchanged and is asserted more strictly now — the query is never issued at
+  // all.
+  it("is REFUSED, and the query is never issued with the foreign id", async () => {
     const { db, seen } = capture();
-    await fees(db).listInvoices(PARENT, { studentId: SOMEONE_ELSES });
-    expect(seen).toHaveLength(1);
-    // The requested id is discarded and replaced by the caller's own set — NOT
-    // intersected to empty, which would look like "no invoices" and hide the
-    // refusal, and NOT honoured, which would be the leak.
-    expect(seen[0].studentId).toEqual({ in: [OWN_CHILD] });
+    await expect(fees(db).listInvoices(PARENT, { studentId: SOMEONE_ELSES })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(seen).toEqual([]);
   });
 
-  it("is given their OWN children's documents, on the same rule", async () => {
+  it("is refused for documents on the same rule", async () => {
     const { db, seen } = capture();
-    await docs(db).listDocuments(PARENT, { studentId: SOMEONE_ELSES });
-    expect(seen).toHaveLength(1);
-    expect(seen[0].studentId).toEqual({ in: [OWN_CHILD] });
+    await expect(docs(db).listDocuments(PARENT, { studentId: SOMEONE_ELSES })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(seen).toEqual([]);
   });
 });
 

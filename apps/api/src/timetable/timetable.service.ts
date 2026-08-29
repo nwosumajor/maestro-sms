@@ -814,10 +814,13 @@ export class TimetableService {
       } else {
         const classIds = await this.visibleClassIds(tx, p);
         if (classIds.length === 0) return [];
-        where.classId =
-          opts?.classId && classIds.includes(opts.classId)
-            ? opts.classId
-            : { in: classIds };
+        // A class this caller cannot see is REFUSED, never swapped for their
+        // other classes — a timetable answering with the wrong class is a
+        // lesson in the wrong room. 404 matches the per-class routes.
+        if (opts?.classId && !classIds.includes(opts.classId)) {
+          throw new NotFoundException("Class not found");
+        }
+        where.classId = opts?.classId ?? { in: classIds };
       }
       return tx.timetableEntry.findMany({
         where,
@@ -924,10 +927,10 @@ export class TimetableService {
       } else {
         const classIds = await this.visibleClassIds(tx, p);
         if (classIds.length === 0) return [];
-        where.classId =
-          opts.classId && classIds.includes(opts.classId)
-            ? opts.classId
-            : { in: classIds };
+        if (opts.classId && !classIds.includes(opts.classId)) {
+          throw new NotFoundException("Class not found");
+        }
+        where.classId = opts.classId ?? { in: classIds };
       }
 
       const rows = (await tx.timetableEntry.findMany({

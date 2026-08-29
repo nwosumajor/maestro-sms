@@ -2040,6 +2040,51 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A filter the caller could not satisfy, answered with somebody else
+Found by probing the gap in the probe set: the four hand-run probes cover a
+PARENT and a PUPIL, and nothing systematically checks a TEACHER against a pupil
+they do not teach — the scoping most likely to drift, since the per-module wide-
+role sets have diverged before. Driven by hand across nine student-scoped reads,
+eight were exactly right (`attendance/summary` and `reportcards/remarks` 200 for
+their own pupil and 404 for another's; medical and invoices 403 on the
+permission). The ninth was not.
+```
+GET /documents?studentId=<a pupil they teach>      200  that pupil's report card
+GET /documents?studentId=<a pupil they do NOT>     200  the SAME report card
+GET /documents?studentId=<a uuid that is nobody>   200  the SAME report card
+```
+One line, in three services:
+```ts
+where.studentId = opts.studentId && ids.includes(opts.studentId)
+  ? opts.studentId : { in: ids };
+```
+The fallback fires when the caller asks about somebody OUTSIDE their scope, and
+it silently DROPS the filter. **Nothing leaks** — every row returned was already
+inside the caller's scope — but the list does not answer the question it was
+asked and looks exactly as though it had: on a page whose rows are downloadable,
+another child's report card presented as the one you filtered for. The FEES
+instance is the same shape on money (a parent filtering for another family's
+child was handed their own children's invoices) and the TIMETABLE one is a
+lesson in the wrong class.
+// **A TEST PINNED THE OLD BEHAVIOUR, AND ITS OBJECTION WAS RIGHT.**
+`a-supplied-student-id-is-never-taken-on-trust` asserted the widening and
+explained the alternative it had rejected: an empty result "would look like 'no
+invoices' and hide the refusal". True — and the remedy chosen was worse, because
+answering with the caller's OTHER children is a wrong answer rather than a
+missing one. Neither option in front of that author was good, which is why the
+answer is the THIRD: **404, exactly what every per-student route already returns
+for a pupil outside your scope.** No wrong rows, and the refusal is explicit.
+That test now asserts the stronger property — the query is never issued at all —
+rather than the symptom it used to describe.
+// The refusal discloses nothing: a pupil the caller cannot see and a uuid that
+is nobody produce byte-identical 404s, verified live.
+// SCOPE: only the relationship-scoped branch changes. A staff-wide caller may
+still filter by any pupil, and an unfiltered list still returns everything the
+caller may see — the half that must not be traded away for the fix, pinned by
+its own test.
+Mutation-validated on both money and documents. Live after: own pupil 200,
+another's 404, ghost 404, unfiltered unchanged.
+
 ### A decision that failed, on the queue where schools wait to be let in
 `OnboardingRequests.act` (`components/operator/OnboardingRequests.tsx`). Swept
 the client-side twin of the silent-success class: a mutation whose FAILURE the
