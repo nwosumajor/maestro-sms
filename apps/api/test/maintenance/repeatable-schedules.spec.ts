@@ -130,6 +130,16 @@ describe("the catalogue matches the cron the code actually uses", () => {
     ["DEFAULT_AUDIT_PARTITION_CRON", "maintenance/maintenance.constants.ts", "maintenance.auditPartition"],
     ["DEFAULT_LATE_FEE_CRON", "fees/fee-ops.service.ts", "fees.ops"],
     ["DEFAULT_RETENTION_CRON", "integrity/integrity.constants.ts", "integrity.retention"],
+    // The five this list did not reach. It covered 13 of an 18-key catalogue,
+    // which is how a hand-kept list fails: not by being wrong, but by not
+    // growing. All five agreed when they were finally checked — the point is
+    // that nothing had been checking them, in a gate whose own comment records
+    // the catalogue drifting TWICE.
+    ["DEFAULT_ATTENDANCE_ROLLUP_CRON", "attendance/attendance.constants.ts", "attendance.rollup"],
+    ["DEFAULT_SUBMISSION_RETENTION_CRON", "documents/submission-retention.constants.ts", "documents.submissionRetention"],
+    ["DEFAULT_INDEX_BLOAT_CRON", "maintenance/index-bloat.service.ts", "maintenance.indexBloat"],
+    ["DEFAULT_NOTIFICATION_RECOVERY_CRON", "notifications/notification-recovery.service.ts", "notifications.deliveryRecovery"],
+    ["DEFAULT_BREACH_DEADLINE_CRON", "privacy/privacy.constants.ts", "privacy.breachDeadline"],
   ];
 
   it.each(CRON_TO_JOB)("%s matches the catalogue's cadence", (name, file, jobKey) => {
@@ -139,11 +149,34 @@ describe("the catalogue matches the cron the code actually uses", () => {
     // Minute field "*" => every minute; hour field "*" => hourly; else daily or
     // rarer. Good enough to catch an order-of-magnitude disagreement, which is
     // the only kind that has ever gone wrong here.
-    const [min, hour] = (pattern as string).split(" ");
-    const implied = min === "*" ? 1 : hour === "*" ? 60 : 1440;
+    // WEEKLY is its own cadence. `maintenance.indexBloat` runs "10 2 * * 0" and
+    // declares 10080 minutes; reading the day-of-week field as "daily" would
+    // have made this new case fail against a correct catalogue.
+    const fields = (pattern as string).split(" ");
+    const [min, hour] = fields;
+    const dayOfWeek = fields[4];
+    const implied =
+      min === "*" ? 1 : hour === "*" ? 60 : dayOfWeek && dayOfWeek !== "*" ? 10080 : 1440;
     const declared = SCHEDULED_JOBS.find((j) => j.key === jobKey)?.everyMinutes;
     expect({ jobKey, declared }).toEqual({ jobKey, declared: implied });
   });
+
+  it("checks EVERY catalogued job, so the list cannot fall behind the catalogue", () => {
+    // The failure this list actually has is not being wrong — it is not
+    // growing. It covered 13 of 18, and the five it missed were unverified for
+    // as long as they have existed. Deriving the pairing from the source is not
+    // possible (a cron constant and its job key share no name), so the list
+    // stays a list and is made to police itself: a 19th job with no entry here
+    // fails the build rather than going quietly unchecked.
+    const mapped = new Set(CRON_TO_JOB.map(([, , key]) => key));
+    const unmapped = SCHEDULED_JOBS.map((j) => j.key).filter((k) => !mapped.has(k));
+    expect(unmapped).toEqual([]);
+  });
+
+  // The other direction — an entry naming a job the catalogue dropped — needs no
+  // test: `SCHEDULED_JOBS` is a const array, so its keys are a literal union and
+  // a stale entry here fails to COMPILE. Proved by trying to write that test and
+  // watching tsc reject it. A test that cannot fail is noise.
 
   it("the jobs catalogue agrees", () => {
     const byKey = Object.fromEntries(SCHEDULED_JOBS.map((j) => [j.key, j.everyMinutes]));

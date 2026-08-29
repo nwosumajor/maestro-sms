@@ -2040,6 +2040,39 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A gate that checked thirteen of eighteen jobs
+`repeatable-schedules.spec.ts`. The console judges a job LATE against the
+catalogue's `everyMinutes`, so a cadence that disagrees with the cron makes it
+wrong in one of two directions — its own comment records the catalogue drifting
+TWICE, once claiming a job daily that runs hourly (the row reads OK on a digest
+dead since yesterday) and once the reverse (crying late at a healthy job).
+It guards that with `CRON_TO_JOB`, a HAND-KEPT list — **13 entries against an
+18-key catalogue.** The five it never reached were unverified for as long as
+they have existed: `attendance.rollup`, `documents.submissionRetention`,
+`maintenance.indexBloat`, `notifications.deliveryRecovery`,
+`privacy.breachDeadline`.
+**All five AGREE — this is a clean negative on the data and a real gap in the
+gate.** The failure a hand-kept list has is not being wrong; it is not GROWING,
+and nothing said it had stopped.
+// SELF-POLICING NOW rather than derived, and the distinction is deliberate: a
+cron constant and its job key share no name (`DEFAULT_INDEX_BLOAT_CRON` ->
+`maintenance.indexBloat`), so there is nothing to derive the pairing FROM. The
+list stays a list and the gate asserts it covers every catalogue key, so a 19th
+job with no entry fails the build instead of going quietly unchecked.
+// WEEKLY IS ITS OWN CADENCE. The cron reader was `min === "*" ? 1 : hour ===
+"*" ? 60 : 1440`, which calls `10 2 * * 0` daily — so adding `indexBloat`
+(10080 minutes, correctly) would have failed against a CORRECT catalogue. The
+day-of-week field is read now, and a mutation restoring the old reader is caught.
+// A TEST I WROTE AND DELETED: the other direction — an entry naming a job the
+catalogue dropped — needs none. `SCHEDULED_JOBS` is a const array, so its keys
+are a literal union and a stale entry fails to COMPILE; tsc rejected the test as
+I wrote it. A test that cannot fail is noise.
+// CHECKED AND CLEAN in the same pass, so it is not re-run: the 18 catalogue keys
+and the 18 `jobRuns.record(...)` keys are the same set, exactly.
+Mutation-validated three ways: add a 19th catalogued job with no mapping,
+mis-declare the weekly sweep as daily, and restore the old daily-reading cron
+parser.
+
 ### A teaching licence that lapsed, still ticked off as held
 `outstandingRequirements` / `isExpired` (`@sms/types/supplied-documents.ts`).
 A document requirement can be marked `needsExpiry`, and a verifier records the
