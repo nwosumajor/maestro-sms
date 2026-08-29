@@ -10,6 +10,8 @@
 // =============================================================================
 
 import type { LmsAwardDto, Serialized } from "@sms/types";
+import { shortDate, type DisplayRegion } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { LMS_BADGES, badgeMeta } from "@sms/types";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -34,11 +36,14 @@ async function req(method: string, path: string, body?: unknown) {
   return { ok: false as const, error };
 }
 
-function when(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+// Region threaded in: a module-scope helper cannot call a hook.
+function when(iso: string, region: DisplayRegion): string {
+  return shortDate(iso, region);
 }
 
 export function Awards({ classId, canManage }: { classId: string; canManage: boolean }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { region } = useFormat();
   const [awards, setAwards] = React.useState<Award[]>([]);
   const [roster, setRoster] = React.useState<Student[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
@@ -90,7 +95,7 @@ export function Awards({ classId, canManage }: { classId: string; canManage: boo
                     <div className="font-medium">{m.label}</div>
                     <div className="text-xs text-muted-foreground">
                       {canManage && <>{a.studentName} · </>}
-                      {a.note ? a.note : m.description} · {when(a.createdAt)}
+                      {a.note ? a.note : m.description} · {when(a.createdAt, region)}
                     </div>
                   </div>
                   {canManage && (

@@ -123,4 +123,33 @@ describe("a school's dates use the school's region", () => {
     expect(shortDate(day, { timezone: "America/Toronto" })).toContain("28");
     expect(shortDate(day, { timezone: "Pacific/Auckland" })).toContain("28");
   });
+
+  it("formats no date or time from the browser's own clock", () => {
+    // THE SECOND HALF OF THIS CLASS, and the half the first sweep missed. That
+    // pass keyed on callers of `shortDate`/`dateTime` and could not see a
+    // component formatting a date ITSELF: seventeen called
+    // `toLocaleDateString(undefined, …)` and four `toLocaleTimeString()`, which
+    // take the BROWSER's zone and locale.
+    //
+    // Worse than the ones it did find, for two reasons. They bypass
+    // `isCalendarDate`, so a `@db.Date` such as a leaver's last working day
+    // renders a DAY EARLY in any browser west of UTC. And a client component
+    // fed by server props renders once on the server (UTC in a container) and
+    // again in the browser — a hydration mismatch, which this repo's own note
+    // says "a user sees as a blank page".
+    //
+    // `toLocaleString` is deliberately NOT matched: numbers use it for
+    // thousands separators, and a rule that flagged those would be the
+    // over-wide gate this repo treats as the same failure as a blind one.
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (file.endsWith(path.join("lib", "format.ts"))) continue;
+      const src = strip(fs.readFileSync(file, "utf8"));
+      for (const m of src.matchAll(/\btoLocale(?:Date|Time)String\(/g)) {
+        const line = src.slice(0, m.index).split("\n").length;
+        offenders.push(`${path.relative(WEB, file)}:${line} — formats from the browser's clock, not the school's`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });

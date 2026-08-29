@@ -14,6 +14,7 @@
 // to the question they actually had.
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,8 @@ type Result = {
 };
 
 export function PaymentVerifyBanner({ reference }: { reference: string }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const [state, setState] = React.useState<"checking" | "settled" | "pending" | "error">("checking");
   const [sub, setSub] = React.useState<Result["subscription"] | null>(null);
@@ -64,7 +67,7 @@ export function PaymentVerifyBanner({ reference }: { reference: string }) {
   }, [reference, router]);
 
   const until = sub?.currentPeriodEnd
-    ? new Date(sub.currentPeriodEnd).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
+    ? shortDate(sub.currentPeriodEnd)
     : null;
 
   if (state === "checking") {

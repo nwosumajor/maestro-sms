@@ -10,6 +10,8 @@
 // =============================================================================
 
 import type { EmployeeDto, EmploymentChangeDto, Serialized } from "@sms/types";
+import { shortDate, type DisplayRegion } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -35,7 +37,9 @@ async function req(method: string, path: string, body?: unknown) {
   return { ok: false as const, error };
 }
 
-const dateStr = (v: string | Date | null) => (v ? new Date(v).toLocaleDateString(undefined, { dateStyle: "medium" }) : null);
+// The region is threaded in: a module-scope helper cannot call a hook, and a
+// bare formatter here would silently take the browser's clock.
+const dateStr = (v: string | Date | null, region: DisplayRegion) => (v ? shortDate(v, region) : null);
 
 export function EmploymentLifecycle({
   userId,
@@ -48,6 +52,8 @@ export function EmploymentLifecycle({
   initial: Change[];
   canApprove: boolean;
 }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { region } = useFormat();
   const router = useRouter();
   const [changes, setChanges] = React.useState<Change[]>(initial);
   const [type, setType] = React.useState("PROMOTION");
@@ -104,11 +110,11 @@ export function EmploymentLifecycle({
               {employee.confirmationStatus === "CONFIRMED" ? "confirmed" : "on probation"}
             </Badge>
             {employee.confirmationStatus === "PROBATION" && employee.probationEndsAt && (
-              <span className="text-muted-foreground">probation ends {dateStr(employee.probationEndsAt)}</span>
+              <span className="text-muted-foreground">probation ends {dateStr(employee.probationEndsAt, region)}</span>
             )}
             {employee.gradeLevel && <Badge variant="outline">{employee.gradeLevel}</Badge>}
             {employee.endDate ? (
-              <span className="text-muted-foreground">contract ends {dateStr(employee.endDate)}</span>
+              <span className="text-muted-foreground">contract ends {dateStr(employee.endDate, region)}</span>
             ) : (
               <span className="text-muted-foreground">open-ended</span>
             )}
@@ -161,11 +167,11 @@ export function EmploymentLifecycle({
                 </Badge>
                 <span className="font-medium">{c.type.toLowerCase()}</span>
                 <span className="text-muted-foreground">
-                  {[c.newJobTitle, c.newGradeLevel, c.newEndDate ? `until ${dateStr(c.newEndDate)}` : null]
+                  {[c.newJobTitle, c.newGradeLevel, c.newEndDate ? `until ${dateStr(c.newEndDate, region)}` : null]
                     .filter(Boolean)
                     .join(" · ") || "—"}
                 </span>
-                <span className="ml-auto text-xs text-muted-foreground">{dateStr(c.createdAt)}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{dateStr(c.createdAt, region)}</span>
                 {canApprove && c.status === "PENDING" && (
                   <span className="inline-flex gap-1">
                     <Button size="sm" className="h-7" onClick={() => decide(c.id, true)}>

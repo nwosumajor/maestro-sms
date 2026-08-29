@@ -19,6 +19,8 @@
 // =============================================================================
 
 import type { Serialized, AcademicSessionDto } from "@sms/types";
+import { shortDate, type DisplayRegion } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { Badge } from "@/components/ui/badge";
 
 type Session = Serialized<AcademicSessionDto>;
@@ -29,14 +31,16 @@ const day = (d: unknown): number | null => {
   const t = new Date(`${String(d).slice(0, 10)}T00:00:00Z`).getTime();
   return Number.isFinite(t) ? t : null;
 };
-const fmt = (ms: number) =>
-  new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+// Region threaded in: a module-scope helper cannot call a hook.
+const fmt = (ms: number, region: DisplayRegion) => shortDate(new Date(ms), region);
 
 /** A rotating palette so adjacent terms are distinguishable without meaning
  *  anything — colour here is for telling bars apart, never for status. */
 const BAR = ["bg-primary/70", "bg-primary/50", "bg-primary/85", "bg-primary/35"];
 
 export function CalendarTimeline({ sessions }: { sessions: Session[] }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { region } = useFormat();
   const today = Date.now();
 
   // Only sessions with at least one dated term can be drawn.
@@ -73,7 +77,7 @@ export function CalendarTimeline({ sessions }: { sessions: Session[] }) {
               {s.isCurrent && <Badge variant="secondary">current</Badge>}
               {terms.length > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  {fmt(from)} – {fmt(to)}
+                  {fmt(from, region)} – {fmt(to, region)}
                 </span>
               )}
             </div>
@@ -90,7 +94,7 @@ export function CalendarTimeline({ sessions }: { sessions: Session[] }) {
                         t.isCurrent ? "ring-2 ring-inset ring-foreground/40" : ""
                       }`}
                       style={{ left: `${left}%`, width: `${width}%` }}
-                      title={`${t.name}: ${fmt(t.s)} – ${fmt(t.e)}`}
+                      title={`${t.name}: ${fmt(t.s, region)} – ${fmt(t.e, region)}`}
                     >
                       <span className="truncate px-1 text-[11px] font-medium text-primary-foreground">{t.name}</span>
                     </div>

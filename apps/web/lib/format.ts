@@ -106,6 +106,51 @@ export function dateTime(value: string | Date | null | undefined, region: Partia
   }
 }
 
+/**
+ * ISO datetime -> the time of day AT THE SCHOOL.
+ *
+ * The four places that showed a bare time called `toLocaleTimeString()` with no
+ * timeZone, which takes the BROWSER's zone and locale. Two of them —
+ * `MyAttendance` and `AttendanceAdmin` — receive their rows as props from the
+ * server, so they render during SSR in the container's UTC and again in the
+ * browser's zone: a hydration mismatch of the exact kind this file's header
+ * warns about, on staff CLOCK-IN times, which feed lateness and pay.
+ *
+ * A time with no date is only ever an instant, so there is no `isCalendarDate`
+ * case here: a `@db.Date` has no meaningful time of day to show.
+ */
+export function timeOfDay(value: string | Date | null | undefined, region: Partial<DisplayRegion> = {}): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  try {
+    return d.toLocaleTimeString(region.locale || PLATFORM_REGION.locale, {
+      timeZone: region.timezone || PLATFORM_REGION.timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return d.toISOString().slice(11, 16);
+  }
+}
+
+/** A date with its weekday, in the school's zone — for a roster, where "Tue" is
+ *  the point. Same `isCalendarDate` rule as `shortDate`: a `@db.Date` is a DAY
+ *  and must not be shifted into a zone. */
+export function weekdayDate(value: string | Date | null | undefined, region: Partial<DisplayRegion> = {}): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const timeZone = isCalendarDate(d) ? "UTC" : region.timezone || PLATFORM_REGION.timezone;
+  try {
+    return d.toLocaleDateString(region.locale || PLATFORM_REGION.locale, {
+      timeZone, weekday: "short", day: "numeric", month: "short",
+    });
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
+}
+
 /** Formatters bound to one school's region — what a page or component uses once
  *  it knows where the school is. */
 /**
@@ -165,6 +210,8 @@ export function formattersFor(region: DisplayRegion) {
     majorFrom: (minor: number, currency?: string) => majorFrom(minor, currency || region.currency),
     shortDate: (v: string | Date | null | undefined) => shortDate(v, region),
     dateTime: (v: string | Date | null | undefined) => dateTime(v, region),
+    timeOfDay: (v: string | Date | null | undefined) => timeOfDay(v, region),
+    weekdayDate: (v: string | Date | null | undefined) => weekdayDate(v, region),
     /** Today, as the school reckons it — see `todayIn`. */
     today: () => todayIn(region.timezone),
   };

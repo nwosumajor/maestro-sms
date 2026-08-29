@@ -124,6 +124,8 @@ function BoardingPanel({ routes, assignments, onMsg }: { routes: Route[]; assign
 }
 
 function GpsPanel({ vehicles, canManage, onMsg }: { vehicles: Vehicle[]; canManage: boolean; onMsg: (s: string) => void }) {
+  // Times follow the SCHOOL's clock, not the browser's.
+  const { timeOfDay } = useFormat();
   const [locs, setLocs] = React.useState<Serialized<VehicleLocationDto>[]>([]);
   const [vehicleId, setVehicleId] = React.useState(vehicles[0]?.id ?? "");
   const [lat, setLat] = React.useState("");
@@ -154,7 +156,7 @@ function GpsPanel({ vehicles, canManage, onMsg }: { vehicles: Vehicle[]; canMana
               <a href={`https://www.google.com/maps?q=${l.lat},${l.lng}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-primary underline">
                 {l.lat.toFixed(4)}, {l.lng.toFixed(4)}
               </a>
-              <span className="text-xs text-muted-foreground">{new Date(l.recordedAt).toLocaleTimeString()}</span>
+              <span className="text-xs text-muted-foreground">{timeOfDay(l.recordedAt)}</span>
             </div>
           ))}
         </div>

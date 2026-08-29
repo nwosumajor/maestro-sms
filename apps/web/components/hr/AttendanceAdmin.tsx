@@ -10,6 +10,7 @@
 // =============================================================================
 
 import type { AttendanceRegisterDto, AttendanceSummaryDto, KioskConfigDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
@@ -53,6 +54,8 @@ export function AttendanceAdmin({
   initialSummary: Summary | null;
   canWrite: boolean;
 }) {
+  // Times follow the SCHOOL's clock, not the browser's.
+  const { timeOfDay } = useFormat();
   const { timezone } = useRegion();
   const today = todayIn(timezone);
   const [date, setDate] = React.useState(today);
@@ -106,7 +109,7 @@ export function AttendanceAdmin({
                       <span className="text-xs text-muted-foreground">
                         {r.mark.source === "SELF_KIOSK" ? "kiosk" : r.mark.source.toLowerCase()}
                         {r.mark.clockInAt &&
-                          ` · ${new Date(r.mark.clockInAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`}
+                          ` · ${timeOfDay(r.mark.clockInAt)}`}
                       </span>
                       {r.mark.flagged && <Badge variant="destructive">⚑ review</Badge>}
                     </>

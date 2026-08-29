@@ -8,6 +8,7 @@
 // =============================================================================
 
 import type { DutyAssignmentDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,8 @@ function iso(d: Date): string {
 }
 
 export function DutyRoster({ staff, canWrite }: { staff: StaffOption[]; canWrite: boolean }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { weekdayDate } = useFormat();
   const today = new Date();
   const weekAhead = new Date(today.getTime() + 13 * 24 * 3600 * 1000);
   const [duties, setDuties] = React.useState<Duty[] | null>(null);
@@ -145,7 +148,7 @@ export function DutyRoster({ staff, canWrite }: { staff: StaffOption[]; canWrite
             {duties.map((d) => (
               <li key={d.id} className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm">
                 <span className="w-24 text-muted-foreground">
-                  {new Date(d.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}
+                  {weekdayDate(d.date)}
                 </span>
                 <span className="font-medium">{d.userName ?? "Staff"}</span>
                 <span>{d.title}</span>
@@ -175,6 +178,8 @@ export function DutyRoster({ staff, canWrite }: { staff: StaffOption[]; canWrite
 
 /** Staff self-service: my upcoming duties (rendered on /leave). */
 export function MyDuties({ initial }: { initial: Duty[] }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { weekdayDate } = useFormat();
   if (initial.length === 0) return null; // nothing rostered — keep /leave uncluttered
   return (
     <Card>
@@ -187,7 +192,7 @@ export function MyDuties({ initial }: { initial: Duty[] }) {
           {initial.map((d) => (
             <li key={d.id} className="flex items-center gap-2">
               <span className="w-28 text-muted-foreground">
-                {new Date(d.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}
+                {weekdayDate(d.date)}
               </span>
               <span className="font-medium">{d.title}</span>
               <span className="text-xs text-muted-foreground">

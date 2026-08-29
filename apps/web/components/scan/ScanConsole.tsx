@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { Serialized, MemberScanDto, ScanRecordResultDto } from "@sms/types";
 import { SCAN_PURPOSES, SCAN_PURPOSE_LABELS } from "@sms/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +37,8 @@ type LogEntry = {
 // stated where the operator is actually looking — next to the card, not in a
 // dropdown they set once and forgot.
 export function ScanConsole() {
+  // Times follow the SCHOOL's clock, not the browser's.
+  const { timeOfDay } = useFormat();
   const [mode, setMode] = React.useState<"identify" | "record">("identify");
   const [purpose, setPurpose] = React.useState<string>("CHECK_IN");
   const [code, setCode] = React.useState("");
@@ -53,7 +56,7 @@ export function ScanConsole() {
   const push = (ok: boolean, who: string, what: string) =>
     setLog((prev) =>
       [
-        { id: (seq.current += 1), at: new Date().toLocaleTimeString(), ok, who, what },
+        { id: (seq.current += 1), at: timeOfDay(new Date()), ok, who, what },
         ...prev,
       ].slice(0, 8),
     );

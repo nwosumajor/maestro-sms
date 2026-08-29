@@ -5,6 +5,7 @@
 
 import * as React from "react";
 
+import { useFormat } from "@/components/shell/RegionProvider";
 // /certificates/history/:subjectId existed with no screen, so a clerk could
 // issue a duplicate certificate to the same pupil with nothing to warn them.
 type Issued = { id: string; type: string; title: string | null; serial: string; issuedAt: string };
@@ -19,6 +20,8 @@ import { personLabel } from "@/lib/people";
 type Person = { id: string; name: string; roles?: string[] };
 
 export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; students?: Person[] }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const [type, setType] = React.useState("ID_CARD");
   // Categorised person picker: choose Student or Staff, then a name from ONLY
   // that list (defaults to students — the overwhelmingly common case).
@@ -124,7 +127,7 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
             <ul className="space-y-0.5">
               {history.slice(0, 6).map((h) => (
                 <li key={h.id} className="text-xs text-muted-foreground">
-                  {h.title || h.type} · {h.serial} · {new Date(h.issuedAt).toLocaleDateString()}
+                  {h.title || h.type} · {h.serial} · {shortDate(h.issuedAt)}
                 </li>
               ))}
             </ul>

@@ -19,6 +19,7 @@
 // =============================================================================
 
 import { useState } from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { Serialized, MisplacedPlatformRoleDto } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +28,8 @@ import { sendWithStepUp } from "@/lib/stepup";
 import { interpretApiError } from "@/lib/api-error";
 
 export function PlatformRoleAudit({ initial }: { initial: Serialized<MisplacedPlatformRoleDto>[] }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const [rows, setRows] = useState(initial);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -78,7 +81,7 @@ export function PlatformRoleAudit({ initial }: { initial: Serialized<MisplacedPl
                 <Badge variant="outline">{r.status.toLowerCase()}</Badge>
               </div>
               <span className="text-xs text-muted-foreground">
-                {r.email} · {r.schoolName} · granted {new Date(r.grantedAt).toLocaleDateString()}
+                {r.email} · {r.schoolName} · granted {shortDate(r.grantedAt)}
               </span>
             </div>
             <div className="flex flex-wrap gap-1.5">

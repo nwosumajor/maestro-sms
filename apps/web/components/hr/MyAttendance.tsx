@@ -9,6 +9,7 @@
 // =============================================================================
 
 import type { Serialized, StaffAttendanceDto } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
@@ -26,6 +27,8 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = 
 };
 
 export function MyAttendance({ initial }: { initial: Mark[] }) {
+  // Times follow the SCHOOL's clock, not the browser's.
+  const { shortDate, timeOfDay } = useFormat();
   const [history, setHistory] = React.useState<Mark[]>(initial);
   const [code, setCode] = React.useState("");
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -92,12 +95,12 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
             {history.slice(0, 10).map((m) => (
               <li key={m.id} className="flex items-center gap-2">
                 <span className="w-28 text-muted-foreground">
-                  {new Date(m.date).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                  {shortDate(m.date)}
                 </span>
                 <Badge variant={STATUS_VARIANT[m.status] ?? "secondary"}>{m.status.toLowerCase()}</Badge>
                 {m.clockInAt && (
                   <span className="text-xs text-muted-foreground">
-                    {new Date(m.clockInAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                    {timeOfDay(m.clockInAt)}
                   </span>
                 )}
               </li>

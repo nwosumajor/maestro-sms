@@ -10,6 +10,7 @@ import {
   type Serialized,
 } from "@sms/types";
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
@@ -48,6 +49,8 @@ export function BillingCheckout({
    *  block a purchase that might have worked. */
   currencyAvailability?: Array<{ currency: string; available: boolean; reason: string | null }>;
 }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const plans = React.useMemo(() => Array.from(new Set(quotes.map((q) => q.plan))), [quotes]);
   const cycles = React.useMemo(() => Array.from(new Set(quotes.map((q) => q.billingCycle))), [quotes]);
   const [plan, setPlan] = React.useState(plans[0] ?? "STANDARD");
@@ -256,7 +259,7 @@ export function BillingCheckout({
         {selected && (
           <p className="mt-3 text-sm">
             Buys <span className="font-medium">{months} billed month{months === 1 ? "" : "s"}</span> — access runs
-            until <span className="font-medium">{runsUntil.toLocaleDateString()}</span>
+            until <span className="font-medium">{shortDate(runsUntil)}</span>
             {currentPeriodEnd ? " (added to your current period)" : ""}.
             <span className="block text-xs text-muted-foreground">
               An academic year is 3 terms — 9 billed months. Holiday months are not charged.

@@ -2040,6 +2040,39 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The half of the clock sweep that keyed on the wrong thing
+`timeOfDay` / `weekdayDate` (`lib/format.ts`), and a second assertion on
+`school-dates-use-the-schools-region`. The previous sweep asked "who calls
+`shortDate` without a region" and fixed 91 sites. It could not see a component
+that formats a date ITSELF, and there were **seventeen `toLocaleDateString` and
+four `toLocaleTimeString` calls** doing exactly that — taking the BROWSER's zone
+and locale. A sweep that keys on one shape reports the absence of that shape.
+**THESE ARE WORSE THAN THE ONES IT FOUND, for two reasons.**
+They bypass `isCalendarDate`, so a `@db.Date` — a leaver's LAST WORKING DAY, a
+probation end, a duty date — renders a DAY EARLY in any browser west of UTC:
+precisely the failure that rule exists to prevent, reached through a door it
+does not cover. And a client component fed by SERVER PROPS renders once on the
+server (UTC in a container) and again in the browser, which is a hydration
+mismatch — this repo's own note on the region says a user sees that "as a blank
+page". `MyAttendance` and `AttendanceAdmin` are both of that shape, on staff
+CLOCK-IN times, which feed lateness and pay.
+// `toLocaleString` IS DELIBERATELY NOT MATCHED. Numbers use it for thousands
+separators — 20-odd legitimate calls — and a rule that flagged those would be
+the over-wide gate this file already treats as the same failure as a blind one,
+because it teaches the next reader to add an exemption.
+// TWO NEW FORMATTERS RATHER THAN ONE. `timeOfDay` has no `isCalendarDate` case
+by design (a `@db.Date` has no time of day to show), and `weekdayDate` exists
+because a duty roster wants "Tue" and folding it into `shortDate` would have
+quietly dropped what that screen is for — losing information to satisfy a sweep
+is the wrong trade.
+// GOTCHA, and the same one as last round: three MODULE-SCOPE helpers
+(`dateStr`, `when`, `fmt`) cannot call a hook, so they take the region as a
+parameter and their callers bind `const { region } = useFormat()`. The compiler
+found all three; nothing else would have.
+Mutation-validated: restoring one raw `toLocaleDateString` names the file and
+line. Verified by RENDERING — frontend rebuilt, route smoke green across 108
+routes for every role.
+
 ### The cohosts were checked three ways and the host not at all
 `assertMayHost` (`meeting/meeting.service.ts`). `openSlot` takes `teacherId`
 from any staff-wide caller — `input.teacherId && staffWide ? input.teacherId :

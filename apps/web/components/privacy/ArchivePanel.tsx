@@ -19,6 +19,7 @@
 // =============================================================================
 
 import { useState } from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import type { Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,8 @@ function currentSessionLabel(): string {
 }
 
 export function ArchivePanel({ initial }: { initial: Serialized<Archive>[] }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const [archives, setArchives] = useState<Serialized<Archive>[]>(initial);
   const [label, setLabel] = useState(currentSessionLabel());
   const [busy, setBusy] = useState<string | null>(null);
@@ -167,7 +170,7 @@ export function ArchivePanel({ initial }: { initial: Serialized<Archive>[] }) {
                   {a.containsHrPii && <Badge variant="outline">includes staff pay</Badge>}
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {rows.toLocaleString()} records · taken {new Date(a.createdAt).toLocaleDateString()} ·{" "}
+                  {rows.toLocaleString()} records · taken {shortDate(a.createdAt)} ·{" "}
                   <span title={a.checksum}>sha256:{a.checksum.slice(0, 12)}…</span>
                 </span>
               </div>

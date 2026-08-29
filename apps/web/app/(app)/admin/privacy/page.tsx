@@ -1,4 +1,5 @@
 import { MODULES } from "@sms/types";
+import { regionOf, shortDate } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -14,6 +15,8 @@ export const dynamic = "force-dynamic";
 export default async function AdminPrivacyPage() {
   const session = await auth();
   const user = session!.user;
+  // Dates follow the SCHOOL's timezone, not the platform's.
+  const region = regionOf(user);
   if (!hasPermission(user.permissions, "privacy.erasure.review")) redirect("/dashboard");
   // NULL IS NOT EMPTY, and on this page that distinction is the whole point.
   // apiGet returns null when it could not ask (403, or a 404 because the
@@ -82,7 +85,7 @@ export default async function AdminPrivacyPage() {
               {runs.slice(0, 12).map((r) => (
                 <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm">
                   <span>
-                    {new Date(r.createdAt).toLocaleDateString()}
+                    {shortDate(r.createdAt, region)}
                     <span className="ml-1 text-xs text-muted-foreground">
                       {r.trigger.toLowerCase()} · kept {r.retentionDays} days
                     </span>

@@ -1,6 +1,7 @@
 "use client";
 
 import type { AnnouncementDto, Serialized } from "@sms/types";
+import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,8 @@ export function AnnouncementsBoard({
   announcements: Announcement[];
   canManage: boolean;
 }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const [f, setF] = React.useState({ title: "", body: "", audience: "ALL" });
   const [busy, setBusy] = React.useState(false);
@@ -95,7 +98,7 @@ export function AnnouncementsBoard({
               <div>
                 <CardTitle className="text-base">{a.title}</CardTitle>
                 <CardDescription>
-                  {a.authorName} · {new Date(a.createdAt).toLocaleDateString()}{" "}
+                  {a.authorName} · {shortDate(a.createdAt)}{" "}
                   <Badge variant="outline" className="ml-1 text-[10px]">{a.audience.toLowerCase()}</Badge>
                 </CardDescription>
               </div>

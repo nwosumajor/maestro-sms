@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import { MODULE_CATALOG, type OnboardingRequestDto, type Serialized } from "@sms/types";
 import { postSms } from "@/components/game/play-ui";
@@ -33,6 +34,8 @@ function daysWaiting(createdAt: string): number {
 }
 
 export function OnboardingRequests({ requests }: { requests: Req[] }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
 
@@ -96,7 +99,7 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
                     })()}
                   </>
                 ) : (
-                  <>Received {new Date(r.createdAt).toLocaleDateString()}</>
+                  <>Received {shortDate(r.createdAt)}</>
                 )}
               </p>
               {(r.city || r.state || r.studentCount != null || r.staffCount != null) && (

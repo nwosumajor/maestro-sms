@@ -51,7 +51,7 @@ export function ExitPanel({
 }) {
   const router = useRouter();
   // Formats in the SCHOOL's currency and its own minor-unit scale.
-  const { money } = useFormat();
+  const { money, shortDate } = useFormat();
   const mine = initial.filter((e) => e.userId === userId);
   const [exits, setExits] = React.useState<Exit[]>(mine);
   const [type, setType] = React.useState("RESIGNATION");
@@ -135,7 +135,7 @@ export function ExitPanel({
               </Badge>
               <span className="font-medium">{e.type.toLowerCase()}</span>
               <span className="text-muted-foreground">
-                last day {new Date(e.lastWorkingDay).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                last day {shortDate(e.lastWorkingDay)}
               </span>
               {canApprove && e.status === "PENDING" && (
                 <span className="ml-auto inline-flex gap-1">

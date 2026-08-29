@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { useRouter } from "next/navigation";
 import type { MyFeedbackDto, FeedbackKind, Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
@@ -130,6 +131,8 @@ export function FeedbackClient({ mine }: { mine: Mine[] }) {
 }
 
 function MyFeedbackItem({ f }: { f: Mine }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const [open, setOpen] = React.useState(false);
   return (
     <li className="rounded-md border p-3">
@@ -137,7 +140,7 @@ function MyFeedbackItem({ f }: { f: Mine }) {
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{f.subject}</p>
           <p className="text-xs text-muted-foreground">
-            {f.kind === "SUGGESTION" ? "Suggestion" : "Complaint"} · {new Date(f.createdAt).toLocaleDateString()}
+            {f.kind === "SUGGESTION" ? "Suggestion" : "Complaint"} · {shortDate(f.createdAt)}
           </p>
         </div>
         <Badge variant={STATUS_VARIANT[f.status] ?? "outline"}>{f.status}</Badge>

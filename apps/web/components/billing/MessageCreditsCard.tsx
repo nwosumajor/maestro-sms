@@ -5,6 +5,7 @@
 // always free. Purchases go through the hosted checkout (step-up server-side).
 
 import * as React from "react";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { sendWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,8 @@ export function MessageCreditsCard({
   bundles: Bundle[];
   canManage: boolean;
 }) {
+  // Dates follow the SCHOOL's calendar, not the browser's.
+  const { shortDate } = useFormat();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [showLedger, setShowLedger] = React.useState(false);
   const [ledger, setLedger] = React.useState<LedgerRow[] | null>(null);
@@ -163,7 +166,7 @@ export function MessageCreditsCard({
                   <tbody>
                     {ledger.map((e) => (
                       <tr key={e.id} className="border-b last:border-0">
-                        <td className="py-2 pr-4 whitespace-nowrap">{new Date(e.createdAt).toLocaleDateString()}</td>
+                        <td className="py-2 pr-4 whitespace-nowrap">{shortDate(e.createdAt)}</td>
                         <td className="py-2 pr-4">{REASON[e.reason] ?? e.reason}</td>
                         <td className="py-2 pr-4">{e.channel ?? "—"}</td>
                         <td className={"py-2 pr-4 text-right tabular-nums " + (e.deltaCredits >= 0 ? "text-brand2" : "")}>
