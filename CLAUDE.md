@@ -2040,6 +2040,42 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The admissions funnel, driven end to end — and it is sound
+`admission_application` had no rows, so the public intake -> three-stage review
+-> convert chain had never once been driven. Recorded as a clean negative
+because every hypothesis I brought to it was refuted by the measurement, and the
+next person should start from that rather than re-running it.
+```
+public apply (no session)          201, application NEW
+apply to ANOTHER school's slug     that tenant's row; our principal 404s it
+REJECT then convert                400 "Only an accepted application can be enrolled"
+principal tries both stages        409 naming the deadlock it would create
+school_admin -> hr_manager -> principal   REVIEWING, REVIEWING, ACCEPTED
+convert                            201, pupil + guardian + credentials
+convert AGAIN                      201 {"alreadyConverted":true}, same studentId
+two children with the SAME NAME    two pupils, ...name@ and ...name2@
+```
+// **THE DEAD-END GUARD IS ALREADY THERE AND IS THE GOOD PART.** `resolveChain`
+drops a stage nobody in the school can decide, records the resolved chain on the
+row so the screen shows the route an application will really take, and keeps the
+FULL chain if NOTHING can be staffed — "an application that cannot be reviewed
+must stay unreviewed, never sail through by default". So a school with no HR
+manager is not stalled, which was the failure I went looking for.
+// The duplicate-name case is the one a school of 900 actually hits, and
+`allocateLoginEmail(..., { autoSuffix: true })` handles it, with the RLS caveat
+and "P2002 is the final guarantee" written down beside it.
+// **A DESIGN DECISION I AM NOT TAKING, flagged rather than changed:**
+`ADMISSION_REVIEW_CHAIN` is School admin -> **HR manager** -> Principal, and its
+own comment says it "Mirrors STAFF_REQUEST_CHAIN". That chain is right for a
+STAFF request; whether the HR manager should gate admitting a CHILD is a
+question about how a school runs, not a correctness bug — and `resolveChain`
+already means a school without one is unaffected. Worth the owner confirming.
+// GOTCHA in my own probe: I took "the first non-platform school" for the slug
+and applied to a DIFFERENT tenant, then read the resulting 404s as a defect for
+a minute. They were correct isolation. Scope a probe's own fixture query to the
+tenant under test — the same trap this file already records for the guardian
+import.
+
 ### Seeing a record and destroying it were the same question
 `deleteDocument` (`documents.service.ts`). It HARD deletes the vault row AND the
 object bytes, and its only authorisation was `assertCanAccessStudent` — a READ
@@ -2076,6 +2112,20 @@ between a parent and the school's copy of their child's record, and Golden Rule
 document, so claiming it does not exist would be a positive statement that is
 untrue — the same line this file draws for the pupil told a classmate is "not in
 this school". Somebody who cannot see it at all still gets 404.
+// **THE CLASS WAS SWEPT: three mutating methods in the whole API are authorised
+by a read-scope predicate, and the other two are gated.** `SisService`'s
+`updateContact` and `removeContact` — a pupil's EMERGENCY CONTACTS, who the
+school rings when a child is hurt — use the same family-scope helper, which
+likewise admits the pupil, their parent and a teacher of their class. They are
+LATENT where documents was live: `student.contact.write` is held only by
+junior_admin, principal and school_admin, all of whom `isSchoolWide` returns
+early for, so the family branches are unreachable from those routes. Recorded
+rather than changed, and worth re-checking the moment that permission is granted
+to a teacher or a guardian-facing role.
+// While there: admissions' `approverCount` and `common/approvers.ts`'s
+`holdersOf` are two independent spellings of "an approver is somebody who is
+still here", and BOTH filter `status: ACTIVE`. Correct twice, which is how a
+pair drifts — but a correct duplicate is not a licence to refactor unasked.
 // GOTCHA, and it is the one this file already records as "a mutation that does
 not land where you think proves nothing": the two-line visibility check appears
 TWICE in the file, so my mutation removed the OTHER copy and the suite stayed
