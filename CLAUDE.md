@@ -2040,6 +2040,33 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### "You have no children linked" was also what a refusal looked like
+`/family` (`app/(app)/family/page.tsx`). `?? { children: [] }` on the one page
+whose whole purpose is a parent's own family — and the page renders an empty
+list as a settled, ACTIONABLE statement in an INFO alert: *"Your account isn't
+linked to any students yet — ask the school office to link you."* So a refusal
+sent a parent to ring the school about a link that already exists.
+**THE TWO CASES ARE DISTINGUISHABLE AND WERE COLLAPSED.** A parent with no links
+gets **200 and `{ children: [] }`** — the service returns that explicitly and
+never 404s — so `null` is never "no children". It is the API declining to
+answer, most realistically a **403**, which is reachable because this page gates
+on the SESSION's permissions while the API gates on the DB's and the two can
+disagree (the divergence is already recorded here).
+// **I HAD THE CAUSE WRONG FIRST AND CHECKED IT.** My initial comment said "a
+network blip, a 5xx, an expired session". `apiGet` deliberately THROWS on an
+unreachable API, on 5xx and on 429 — with its own comment saying why: "rendering
+an empty page here would assert that the school has no data, which is a
+different and much worse claim". None of those reaches this branch. Both
+premises are now pinned by tests, so the message cannot drift from the reason.
+// SCOPE, deliberately: 17 pages use `?? []` on an `apiGet`, and the others were
+read rather than swept. "No announcements yet" and "No alumni yet" are claims a
+reader simply reloads past; this one instructs a WRONG ACTION, and that is where
+the line sits. Fixing all seventeen would put a caveat on every empty list,
+which is how a warning stops being read.
+// THE GENUINE EMPTY CASE IS KEPT, and a test pins it: a parent really can have
+no links yet, and that message is right for them. Over-correcting would replace
+one false statement with another.
+
 ### The access review counted elevations the API already refused
 `recertification` (`security/security.service.ts`). A privilege grant
 auto-expires by TIME; `status` only leaves ACTIVE when somebody explicitly

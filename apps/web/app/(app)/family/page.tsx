@@ -30,7 +30,25 @@ export default async function FamilyPage() {
   // tell a family what they owe.
   const region = regionOf(user);
   const fees = (minor: number) => money(minor, region.currency, region.locale);
-  const overview = (await apiGet<Overview>("/family/overview")) ?? { children: [] };
+  // NULL IS NOT EMPTY, and here the two were the SAME rendering.
+  //
+  // A parent with no linked children gets 200 and `{ children: [] }` — the
+  // service returns that explicitly and never 404s. So `null` from `apiGet` is
+  // always something else: the API DECLINED to answer. Realistically a 403,
+  // which is reachable because this page gates on the SESSION's permissions
+  // while the API gates on the DB's, and those can disagree — the divergence is
+  // documented, and a parent whose row says otherwise lands here.
+  //
+  // (Not a network blip: `apiGet` deliberately THROWS on an unreachable API, a
+  // 5xx and a 429, precisely so none of them renders as "no data". Checked
+  // rather than assumed — the first version of this comment said blip.)
+  //
+  // `?? { children: [] }` turned that refusal into the page's settled,
+  // actionable statement: "Your account isn't linked to any students yet — ask
+  // the school office to link you", in an INFO alert, so it reads as fact. It
+  // sends a parent to ring the school about a link that already exists, on the
+  // one page whose whole purpose is their own family.
+  const overview = await apiGet<Overview>("/family/overview");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="family" permissions={user.permissions}>
@@ -42,7 +60,16 @@ export default async function FamilyPage() {
             <Link className="text-primary hover:underline" href="/attendance">Attendance</Link> and{" "}
             <Link className="text-primary hover:underline" href="/fees">Fees</Link> pages.</>} />
 
-        {overview.children.length === 0 ? (
+        {overview === null ? (
+          <Alert variant="destructive">
+            <AlertTitle>Your children could not be loaded</AlertTitle>
+            <AlertDescription>
+              The school&apos;s system would not answer, so this is NOT a statement that you have no
+              children linked. Reload the page; if it keeps happening, tell the school office that
+              your account cannot read your family record.
+            </AlertDescription>
+          </Alert>
+        ) : overview.children.length === 0 ? (
           <Alert variant="info">
             <AlertTitle>No linked children</AlertTitle>
             <AlertDescription>
