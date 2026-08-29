@@ -779,7 +779,7 @@ export class WorkflowService {
     // the transition is already real, and a notification commits in its own
     // transaction, so sending it from inside would announce a state a later
     // failure rolled back.
-    await this.announce(p, out);
+    await this.announce(p, out, action);
     return { id: out.id, state: out.state, currentStage: out.currentStage };
   }
 
@@ -802,8 +802,46 @@ export class WorkflowService {
   private async announce(
     p: Principal,
     out: { id: string; state: string; currentStage: number; initiatorId: string; title: string; stages: WorkflowStage[] },
+    action: WorkflowAction,
   ): Promise<void> {
     try {
+      // A VETO IS NOT A REJECTION, and saying "rejected" was the whole problem.
+      //
+      // A veto is only reachable FROM APPROVED (`WORKFLOW_TRANSITIONS`), so by
+      // the time it lands the approval's reactor has already run in-tx: the role
+      // was granted, the charges are on families' invoices, the register was
+      // amended, the marks were published. Every reactor then opens with
+      // `if (state !== "APPROVED") return`, and several are additionally guarded
+      // on the pre-approval state (`status: "PENDING_APPROVAL"`, leave that is
+      // still PENDING) — so the REJECTED fan-out a veto produces is a no-op by
+      // construction, in every module.
+      //
+      // Proven live on the sharpest case: a school_admin appointed a
+      // junior_admin, the principal approved it (role granted), the board
+      // vetoed it — request REJECTED, and the pupil-facing effect of that
+      // appointment, the ROLE, was still on the account afterwards.
+      //
+      // Making the veto UNDO things is a decision per module with money in it
+      // (reversing an invoice is not the same act as removing a role) and is
+      // not taken here. What is fixed is the silence: the board's own screen and
+      // the people who can act are told, in one sentence that is true for every
+      // type and therefore cannot rot into a stale per-type list.
+      if (action === "VETO") {
+        const approvers = await this.approversFor(p, out.stages, out.currentStage, "");
+        const to = [...new Set([out.initiatorId, ...approvers])].filter((id) => id !== p.userId);
+        if (to.length > 0) {
+          await this.notifications.enqueueMany(this.ctx(p), to, {
+            type: "WORKFLOW_UPDATE",
+            title: "A decision was overturned by the board",
+            body:
+              `${out.title} — the board has vetoed this AFTER it was approved. ` +
+              `The approval has already taken effect and a veto does not undo it: ` +
+              `reverse it in the module it belongs to.`,
+            data: { requestId: out.id },
+          });
+        }
+        return;
+      }
       if (out.state === "PENDING_REVIEW") {
         const to = await this.approversFor(p, out.stages, out.currentStage, out.initiatorId);
         if (to.length === 0) return;

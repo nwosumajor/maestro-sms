@@ -2040,6 +2040,53 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The board vetoed an appointment and the person kept the role
+`WorkflowService.veto` / `announce` (`workflow/workflow.service.ts`),
+`WorkflowInbox`. `WORKFLOW_TRANSITIONS` allows `VETO` only from **APPROVED** —
+so by the time a veto lands, the approval's reactor has already run IN-TX. Every
+reactor then opens `if (state !== "APPROVED") return`, and several are guarded on
+the PRE-approval state as well (`status: "PENDING_APPROVAL"`, leave still
+PENDING), so the REJECTED fan-out a veto produces is a **no-op by construction,
+in every module**.
+Driven live on the sharpest case there is, a privilege grant:
+```
+librarian's roles BEFORE   librarian
+school_admin appoints      ADMIN_APPOINTMENT raised (maker-checker)
+principal approves         role GRANTED
+board VETOES               request state REJECTED
+librarian's roles AFTER    junior_admin, librarian
+```
+The board overturned the appointment, the record says REJECTED, and the person
+still holds the role. The same is true of every other type: FEE_SCHEDULE charges
+sit on families' invoices, an ATTENDANCE_AMENDMENT stays applied, published marks
+stay published, an exited pupil stays exited.
+// **THE FIX IS THE SILENCE, NOT THE REVERSAL, and that is a deliberate line.**
+Making a veto UNDO things is a decision per module with money in it — reversing
+an invoice is not the same act as removing a role, and some of it is genuinely
+irreversible — so it is not taken here. What WAS wrong and is now fixed: the
+only notice sent was to the INITIATOR, reading *"Your request was rejected"* —
+the identical sentence an ordinary review rejection uses, when the two mean
+opposite things about whether anything happened.
+// **THE APPROVERS ARE TOLD, NOT JUST THE INITIATOR**, because the initiator
+often cannot undo it: a school administrator who requested an appointment need
+not hold `rbac.manage`, and a teacher cannot reverse an invoice. Live after, the
+notice reached head admin, head teacher, HR manager and principal — the holders
+of the stage permission — as well as the person who raised it.
+// ONE SENTENCE FOR EVERY TYPE, on purpose: a per-type map of "what the approval
+already did" is exactly the hand-kept list this file keeps watching rot, and it
+would go stale the first time a workflow type is added. The board's own screen
+says the same thing at the moment they press it, since they are the person who
+most needs to know the button records a decision rather than reversing one.
+// GOTCHA, third time this session: the demo database holds workflow requests
+belonging to ANOTHER tenant, so my first veto probe 404'd correctly and I nearly
+read it as a broken route. Scope a probe's own fixture query to the tenant under
+test.
+// GOTCHA: `workflow_request` cannot be deleted while `workflow_audit_log`
+references it — the trail is immutable by FK, which is the design working.
+Mutation-validated four ways: remove the VETO branch, notify only the initiator,
+reword it back to a plain rejection, and apply the veto wording to every terminal
+state (which would mislabel an ordinary REJECT, where nothing happened).
+
 ### A grant that answered "not found" to every row
 `SCHOOL_WIDE_ROLES` in `integrity-report.service.ts` and `exemption.service.ts`.
 Found by driving the Assessment Integrity module for the first time —

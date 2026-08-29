@@ -81,6 +81,14 @@ export function WorkflowInbox({
   const [details, setDetails] = React.useState("");
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  // A VETO NEEDS A WORD BACK. It is the only action here whose effect is not
+  // what the button implies: it is reachable only from APPROVED, so the
+  // approval has already run — the role was granted, the charges are on
+  // invoices, the marks are published — and the engine's REJECTED fan-out is a
+  // no-op in every module. Proven live: a vetoed junior-admin appointment left
+  // the role on the account. The board member pressing this is the person who
+  // most needs to know it records a decision rather than reversing one.
+  const [notice, setNotice] = React.useState<string | null>(null);
   // Only the types this user may initiate (PO needs finance, disciplinary needs
   // rbac.manage, content-publish is system-only).
   const initiatableTypes = WORKFLOW_TYPES.filter((t) => canInitiateWorkflowType(t, permissions));
@@ -102,9 +110,10 @@ export function WorkflowInbox({
   const pickedRoute = route.filter(Boolean);
 
   // All mutating calls go through the same-origin BFF, which injects the Bearer.
-  const call = async (path: string, body: unknown, key: string) => {
+  const call = async (path: string, body: unknown, key: string, okNotice?: string) => {
     setBusy(key);
     setError(null);
+    setNotice(null);
     const res = await fetch(`/api/sms/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -121,6 +130,7 @@ export function WorkflowInbox({
       );
       return;
     }
+    if (okNotice) setNotice(okNotice);
     router.refresh();
   };
 
@@ -196,7 +206,13 @@ export function WorkflowInbox({
         action: "VETO",
         label: "Veto",
         variant: "destructive",
-        run: () => call(`workflows/${w.id}/veto`, {}, `${w.id}:veto`),
+        run: () =>
+          call(
+            `workflows/${w.id}/veto`,
+            {},
+            `${w.id}:veto`,
+            "Veto recorded. It does NOT undo what the approval already did — reverse that in the module it belongs to. Everyone who approved it has been told.",
+          ),
       });
     }
     return out;
@@ -300,6 +316,7 @@ export function WorkflowInbox({
       )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
+      {notice && <p className="text-sm font-medium text-foreground">{notice}</p>}
 
       {/* FINDING one request, months later. The register is the school's
           maker-checker record, and reading it used to mean scrolling the 500
