@@ -2040,6 +2040,43 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The gate for a translation nobody sends, and a guard driven for the first time
+`every-translation-has-a-producer.spec.ts`. The entry below found five catalogue
+entries with no producer; this is the rule that stops a sixth. The existing test
+asserts every entry carries every LANGUAGE — the shape of an entry — and says
+nothing about whether it is ever SENT, which is how text written ahead of the
+code sat dead long enough for the missing parent notification underneath it to
+go unnoticed.
+// NOT "every entry must be used". Two are legitimately unwired because their
+producer cannot supply the params the text needs, and deleting a translation to
+satisfy a gate would lose real work. They are NAMED with the reason, so the gap
+is a decision rather than a silence — and the gate refuses a name that is no
+longer a catalogue key, and refuses one that IS being sent, because a note
+saying "nobody sends this" becomes a lie about the product the day somebody
+wires it. Mutation-validated both ways.
+**AND A CLEAN NEGATIVE, driven for the first time.** `school_holiday` had never
+held a row, so the HOLIDAY arm of `registerClosedReason` — the rule that a
+register is not taken on a declared closure — had never executed against real
+data. Live, one class, one date:
+```
+holiday declared   400 "This date is a school holiday (PROBE Founders Day) —
+                        no register is taken. Remove the holiday if this is a
+                        school day."
+holiday removed    201, register taken
+```
+The guard is sound and the refusal names both the holiday and the way out.
+// GOTCHA, twice in one probe, and both are traps this file already records.
+My first attempt posted `records: []` and got a 400 I read as the register
+guard — it was the boundary schema saying the array must not be empty, so I was
+reading the wrong refusal. And my cleanup verification asked
+`where "isCurrent" = true limit 1` with NO school filter and reported another
+tenant's term start, which looked like a failed restore. Scope a probe's own
+queries to the tenant under test, and read the BODY before believing a status.
+// The demo fixture cannot take a register at all as it stands — it sits before
+its current term, so every past date is term-locked and every future one is
+refused. Driving this needed the term start moved back and restored afterwards,
+the same technique the attendance-correction probe records.
+
 ### Five translations with no producer, and the parent who was never told
 `notification-messages.ts` holds a per-user message catalogue whose header
 states the priority plainly: a francophone parent "rarely opens the web app.
