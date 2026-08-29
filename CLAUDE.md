@@ -2077,6 +2077,34 @@ already did" is exactly the hand-kept list this file keeps watching rot, and it
 would go stale the first time a workflow type is added. The board's own screen
 says the same thing at the moment they press it, since they are the person who
 most needs to know the button records a decision rather than reversing one.
+// **AND THE STATE NEXT TO IT WAS ANNOUNCED BY NOTHING.** `WORKFLOW_TRANSITIONS`
+produces exactly four states — PENDING_REVIEW, APPROVED, REJECTED and
+**REVISION_REQUESTED** — and `announce`, which runs only from `transition`,
+handled PENDING_REVIEW, APPROVED, REJECTED and **DRAFT**. No transition produces
+DRAFT, so that arm was unreachable; and a reviewer pressing "Request revision"
+told the initiator nothing. Measured live: head teacher sends a staff request
+back, state REVISION_REQUESTED, the teacher's notification count **14 -> 14**.
+It matters more than a missed notice usually would, because ONLY the initiator
+may resubmit (`mustBeInitiator`) — so nobody else could move it on, which is
+precisely the failure the rest of that block was written to fix.
+// **A TEST PINNED THE DEAD BRANCH**, which is why the gap stayed invisible:
+`it.each` carried `["DRAFT", "Your request was sent back for changes"]`, so the
+suite looked as though the sent-back case was covered while the state a reviewer
+can actually create was covered by nothing. The self-guard case beside it also
+used DRAFT and therefore passed vacuously. Same shape as the promotion-line test
+that defended keying on the current class.
+// THE REVIEWER'S REASON NOW RIDES THE NOTICE, because "your request was sent
+back" tells somebody to go and find out why and the reviewer has already typed
+the answer. Only on a revision: an approval or rejection carries the reviewer's
+own reasoning into the immutable trail, and only a revision is an INSTRUCTION to
+the initiator. Live after: **"Your request was sent back for changes — PROBE
+revision notice — please add dates"**.
+// GOTCHA, and this file already names it: my first mutation for this — swapping
+REVISION_REQUESTED back to DRAFT in the outer condition alone — did not COMPILE,
+because the narrowed union then made the inner `=== "REVISION_REQUESTED"` test
+impossible, and jest reported "Test suite failed to run". A mutation that does
+not compile proves nothing. Re-run as the EXACT shipped block, it fails four
+tests.
 // GOTCHA, third time this session: the demo database holds workflow requests
 belonging to ANOTHER tenant, so my first veto probe 404'd correctly and I nearly
 read it as a broken route. Scope a probe's own fixture query to the tenant under

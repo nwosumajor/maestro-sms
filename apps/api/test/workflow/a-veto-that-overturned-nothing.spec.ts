@@ -42,7 +42,9 @@ function make(holders: string[] = ["head-1", "head-2"]) {
     logger: { warn: jest.fn() },
   });
   const announce = (
-    s as unknown as { announce: (p: Principal, o: unknown, a: string) => Promise<void> }
+    s as unknown as {
+      announce: (p: Principal, o: unknown, a: string, c?: string) => Promise<void>;
+    }
   ).announce.bind(s);
   return { announce, enqueueMany };
 }
@@ -102,5 +104,59 @@ describe("a veto that overturned nothing", () => {
     const { announce, enqueueMany } = make();
     await announce(BOARD, { ...approved, state: "PENDING_REVIEW" }, "APPROVE");
     expect(enqueueMany.mock.calls[0][2].title).toBe("A request is waiting for your approval");
+  });
+});
+
+/**
+ * The state the engine produces, and the state the notice was written for.
+ *
+ * `WORKFLOW_TRANSITIONS` can produce exactly four states — PENDING_REVIEW,
+ * APPROVED, REJECTED and REVISION_REQUESTED — and `announce` runs only from
+ * `transition`. It handled DRAFT, which no transition produces, and not
+ * REVISION_REQUESTED, which is the one a reviewer creates by pressing "Request
+ * revision".
+ *
+ * Measured live: a head teacher sent a staff request back, the state became
+ * REVISION_REQUESTED, and the initiator's notification count did not move
+ * (14 -> 14). Only the initiator can resubmit, so nobody else could move it on.
+ */
+describe("a request sent back for changes", () => {
+  const sentBack = {
+    id: "wf-2",
+    title: "Training request",
+    initiatorId: "teacher-1",
+    stages: STAGES,
+    currentStage: 0,
+    state: "REVISION_REQUESTED",
+  };
+
+  it("tells the person who raised it", async () => {
+    const { announce, enqueueMany } = make();
+    await announce(BOARD, sentBack, "REQUEST_REVISION", "please add the dates");
+    expect(enqueueMany).toHaveBeenCalled();
+    expect(enqueueMany.mock.calls[0][1]).toEqual(["teacher-1"]);
+    expect(enqueueMany.mock.calls[0][2].title).toBe("Your request was sent back for changes");
+  });
+
+  it("carries the reviewer's reason, which is the actionable part", async () => {
+    // "Your request was sent back" sends somebody to find out why; the reviewer
+    // has already typed the answer.
+    const { announce, enqueueMany } = make();
+    await announce(BOARD, sentBack, "REQUEST_REVISION", "please add the dates");
+    expect(enqueueMany.mock.calls[0][2].body).toMatch(/please add the dates/);
+  });
+
+  it("still reads properly when the reviewer left no comment", async () => {
+    const { announce, enqueueMany } = make();
+    await announce(BOARD, sentBack, "REQUEST_REVISION", "   ");
+    expect(enqueueMany.mock.calls[0][2].body).toBe("Training request");
+  });
+
+  it("does not attach a reason to an approval or a rejection", async () => {
+    // The comment box is the reviewer's own reasoning and is recorded in the
+    // immutable trail; only a revision request is an instruction to the initiator.
+    const { announce, enqueueMany } = make();
+    await announce(BOARD, { ...sentBack, state: "REJECTED" }, "REJECT", "not this term");
+    expect(enqueueMany.mock.calls[0][2].body).toBe("Training request");
   });
 });

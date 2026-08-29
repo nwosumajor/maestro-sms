@@ -113,7 +113,13 @@ describe("a request that has been decided", () => {
   it.each([
     ["APPROVED", "Your request was approved"],
     ["REJECTED", "Your request was rejected"],
-    ["DRAFT", "Your request was sent back for changes"],
+    // REVISION_REQUESTED, not DRAFT. This row used to say DRAFT — a state
+    // `WORKFLOW_TRANSITIONS` cannot produce — so it pinned an unreachable branch
+    // and made the suite look as though "sent back for changes" was covered,
+    // while the state a reviewer actually creates was announced by nothing.
+    // Measured live: a head teacher sent a staff request back and the
+    // initiator's notification count did not move.
+    ["REVISION_REQUESTED", "Your request was sent back for changes"],
   ])("tells the person who raised it: %s", async (state, title) => {
     const { announce, enqueueMany } = make({});
     await announce(P, { ...base, state });
@@ -126,7 +132,9 @@ describe("a request that has been decided", () => {
     // revising it yourself needs no announcement back to yourself.
     const self: Principal = { ...P, userId: INITIATOR };
     const { announce, enqueueMany } = make({});
-    await announce(self, { ...base, state: "DRAFT" });
+    // Also REVISION_REQUESTED: with DRAFT this passed vacuously, since the
+    // branch it fell through was never entered for any reason.
+    await announce(self, { ...base, state: "REVISION_REQUESTED" });
     expect(enqueueMany).not.toHaveBeenCalled();
   });
 });

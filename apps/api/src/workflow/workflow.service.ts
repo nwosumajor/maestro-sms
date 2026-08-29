@@ -779,7 +779,7 @@ export class WorkflowService {
     // the transition is already real, and a notification commits in its own
     // transaction, so sending it from inside would announce a state a later
     // failure rolled back.
-    await this.announce(p, out, action);
+    await this.announce(p, out, action, comments);
     return { id: out.id, state: out.state, currentStage: out.currentStage };
   }
 
@@ -803,6 +803,7 @@ export class WorkflowService {
     p: Principal,
     out: { id: string; state: string; currentStage: number; initiatorId: string; title: string; stages: WorkflowStage[] },
     action: WorkflowAction,
+    comments?: string,
   ): Promise<void> {
     try {
       // A VETO IS NOT A REJECTION, and saying "rejected" was the whole problem.
@@ -855,14 +856,34 @@ export class WorkflowService {
       }
       // The other direction, which was equally silent: the person who raised it
       // learns what happened to it.
-      if (out.state === "APPROVED" || out.state === "REJECTED" || out.state === "DRAFT") {
+      // REVISION_REQUESTED, not DRAFT.
+      //
+      // `WORKFLOW_TRANSITIONS` can produce exactly four states — PENDING_REVIEW,
+      // APPROVED, REJECTED and REVISION_REQUESTED — and `announce` is only ever
+      // called from `transition`. So the DRAFT arm that used to be here was
+      // UNREACHABLE, and the one state it was plainly meant to cover was handled
+      // by nothing: a reviewer pressed "Request revision" and the person who
+      // raised it was never told. Measured live — head teacher sent a staff
+      // request back, state REVISION_REQUESTED, and the initiator's notification
+      // count did not move (14 -> 14).
+      //
+      // It matters more than a missed notice usually would, because ONLY the
+      // initiator can resubmit (`mustBeInitiator`). Nobody else can move it on,
+      // so an unannounced revision request stops the chain until they happen to
+      // open the page — which is the exact failure the rest of this block was
+      // written to fix, left in the one state it did not name.
+      if (out.state === "APPROVED" || out.state === "REJECTED" || out.state === "REVISION_REQUESTED") {
         if (out.initiatorId === p.userId) return; // they just did it themselves
         const said =
           out.state === "APPROVED" ? "approved" : out.state === "REJECTED" ? "rejected" : "sent back for changes";
+        // THE REVIEWER'S REASON IS THE ACTIONABLE PART of a revision request:
+        // "your request was sent back" tells somebody to go and find out why,
+        // and the reviewer has already typed the answer.
+        const why = out.state === "REVISION_REQUESTED" && comments?.trim() ? ` — ${comments.trim()}` : "";
         await this.notifications.enqueueMany(this.ctx(p), [out.initiatorId], {
           type: "WORKFLOW_UPDATE",
           title: `Your request was ${said}`,
-          body: out.title,
+          body: `${out.title}${why}`,
           data: { requestId: out.id },
         });
       }
