@@ -2049,12 +2049,19 @@ A route has a `fareMode`. On **STOP** the fare lives on the rider's stop, and
 preview then did `if (fare <= 0) continue` — no count, no mention. So the preview
 read *"No fare-paying passengers in scope — this run would bill nobody"*, which
 is the same sentence an EMPTY route produces.
-**IT IS NOT A HYPOTHETICAL SHAPE, because the web cannot set a stop.** The API is
-complete — `POST /transport/routes/:id/stops`, reorder, and a check that a
-`stopId` belongs to its route — and `grep stopId apps/web` returns NOTHING: no
-stop picker on the assignment screen, no fare-mode control, no stops screen at
-all. So every rider assigned through the product carries `stopId: null`, and on a
+**IT IS NOT A HYPOTHETICAL SHAPE, because the ASSIGNMENT FORM cannot set a
+stop.** `postSms("transport/assignments", { routeId, passengerId, passengerType
+})` — no `stopId`, and the change-route control beside it sends none either. So
+every rider assigned through the product carries `stopId: null`, and on a
 per-stop route every one of them prices at zero.
+// **CORRECTION, and the reason it is written here rather than quietly amended:**
+this entry first said "the web cannot set a stop … no fare-mode control, no
+stops screen at all", on the strength of `grep stopId apps/web` returning
+nothing. That grep was for the wrong token — `TransportManager` binds `r.stops`
+and `s.id`, never the string `stopId` — and the screens for route fare MODE,
+stop creation and stop REORDER have always existed. The gap was the assignment
+form alone. A probe that searches for a name the code does not use reports the
+absence of the name, not the absence of the feature.
 Measured on the demo tenant: 6 routes all FLAT, **0 stops, 30 assignments, 0 with
 a stop**. Live, flipping one route with five riders to STOP:
 ```
