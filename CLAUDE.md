@@ -2040,6 +2040,41 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A field the API accepted, the sweep required, and no screen could fill in
+Found by sweeping the class the entry below is an instance of: 240 optional body
+fields across the controllers, cross-referenced against every identifier that
+appears anywhere in `apps/web`. **24 are never mentioned by the web at all.**
+Most are legitimately API-only — a gate terminal's `speedKph` and `headingDeg`,
+the server-side `targetSecret`. One was not.
+**`effectiveDate` on a salary change.** The API has always accepted it, stored
+it and returned it in `SalaryChangeDto`; `applyDueSalaryChanges` — a migration,
+a nightly cross-tenant sweep and its tests — selects
+`effectiveDate: { not: null }`. And `SalaryChanges.tsx` never sent one. So every
+raise raised through the product was IMMEDIATE, the deferral feature was
+unreachable, and the sweep could never find a row to act on.
+// **THE FIX'S OWN COMMENT CLAIMED OTHERWISE.** It read that `effectiveDate` was
+"accepted, stored, returned in the DTO and shown on the screen — and consulted by
+NOTHING". The last clause was the defect being fixed; "shown on the screen" was
+never true — the file did not mention the field. Corrected in place, which is the
+same shape as the attendance-rate comments that asserted an agreement that had
+never held, and `invite.ts`'s "and vice versa".
+// **THE APPROVER COULD SEE NEITHER THE DATE NOR WHETHER IT HAD TAKEN EFFECT.**
+`appliedAt` now reaches the DTO: NULL on an APPROVED row is the state a future
+date creates — decided, and the money has not moved — and without it a screen
+cannot tell that from a raise already in somebody's pay. The row says
+`1 Dec 2026 · not yet in force`.
+Live, the whole path from the product for the first time: request effective
+2026-12-01 -> approve -> `status APPROVED, appliedAt null`, and the employee's
+stored `salaryEnc` **byte-identical before and after**.
+// While there: the form's label read `New salary (₦)` whatever the school bills
+in. The FIGURES were already school-aware (`money` from `useFormat()`), so the
+`school-money-uses-the-schools-region` gate had nothing to catch — a hard-coded
+symbol in a LABEL is the same defect one layer out from where that gate looks.
+// The sweep is worth re-running when a controller grows an optional field, and
+the 23 others are recorded as checked: device telemetry, server-only secrets,
+and fields with a server default the UI is right to leave alone
+(`linkGuardian` defaults to true).
+
 ### The note that made a revision request worth sending
 Asked for: a place for the approver to say WHAT must change, and a place for the
 initiator to answer with what they did. Both halves already existed on the

@@ -231,6 +231,16 @@ export interface SalaryChangeDto {
   newSalaryMinor: number | null;
   reason: string | null;
   effectiveDate: Date | null;
+  /**
+   * When the new figure actually reached the employee.
+   *
+   * NULL on an APPROVED row means the decision is made and the money has NOT
+   * moved — the state a future `effectiveDate` creates, and the one the nightly
+   * sweep closes on the day. Without it a screen cannot tell "approved, in
+   * force" from "approved, waiting", which are different facts about somebody's
+   * pay.
+   */
+  appliedAt: Date | null;
   status: string;
   requestedById: string;
   decidedById: string | null;

@@ -108,8 +108,12 @@ export class SalaryService {
       const status = approve ? "APPROVED" : "REJECTED";
       // A RAISE TAKES EFFECT WHEN IT SAYS IT DOES.
       //
-      // `effectiveDate` was accepted, stored, returned in the DTO and shown on
-      // the screen — and consulted by NOTHING. Approval applied the new salary
+      // `effectiveDate` was accepted, stored, returned in the DTO and consulted
+      // by NOTHING. (This comment used to claim it was "shown on the screen"
+      // too. It was not: `SalaryChanges.tsx` did not mention the field, could
+      // not SET one, and so every raise raised through the product was
+      // immediate and the sweep below could never see one. The form and the row
+      // carry it now.) Approval applied the new salary
       // immediately and unconditionally, so a raise requested "effective 1
       // October" and approved on 27 August moved the salary on 27 August and the
       // next payroll run paid it. Proven live on exactly those dates.
@@ -160,7 +164,7 @@ export class SalaryService {
   }
 
   private decorate(
-    r: { id: string; employeeId: string; oldSalaryEnc: string | null; newSalaryEnc: string | null; reason: string | null; effectiveDate: Date | null; status: string; requestedById: string; decidedById: string | null; decidedAt: Date | null; createdAt: Date },
+    r: { id: string; employeeId: string; oldSalaryEnc: string | null; newSalaryEnc: string | null; reason: string | null; effectiveDate: Date | null; status: string; requestedById: string; decidedById: string | null; decidedAt: Date | null; appliedAt?: Date | null; createdAt: Date },
     schoolId: string,
     employeeName: string | null,
   ): SalaryChangeDto {
@@ -173,6 +177,7 @@ export class SalaryService {
       newSalaryMinor: dec(r.newSalaryEnc),
       reason: r.reason,
       effectiveDate: r.effectiveDate,
+      appliedAt: r.appliedAt ?? null,
       status: r.status,
       requestedById: r.requestedById,
       decidedById: r.decidedById,

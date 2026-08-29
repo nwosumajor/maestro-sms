@@ -36,11 +36,20 @@ export function SalaryChanges({
 }) {
   // The SCHOOL's currency, both directions. A salary is the one figure where
   // a hundredfold error is least likely to be questioned before it is paid.
-  const { money, minorFrom } = useFormat();
+  const { money, minorFrom, shortDate, region, today } = useFormat();
   const router = useRouter();
   const [employeeId, setEmployeeId] = React.useState(employees[0]?.id ?? "");
   const [salaryMajor, setSalaryMajor] = React.useState("");
   const [reason, setReason] = React.useState("");
+  // WHEN THE RAISE STARTS.
+  //
+  // `effectiveDate` has always been accepted by the API, stored, and returned in
+  // the DTO — and this form could not set one, so every raise raised through the
+  // product was immediate and the nightly sweep that exists to put a FUTURE one
+  // into force (`applyDueSalaryChanges`, which selects `effectiveDate: { not:
+  // null }`) could never find a row. A migration, a sweep and its tests, all for
+  // a field no screen could fill in.
+  const [effectiveDate, setEffectiveDate] = React.useState("");
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -52,9 +61,18 @@ export function SalaryChanges({
     const res = await postWithStepUp(`hr/salary/employees/${employeeId}/changes`, {
       newSalaryMinor: minorFrom(salaryMajor),
       reason: reason || null,
+      effectiveDate: effectiveDate || null,
     });
     setBusy(null);
-    if (res.ok) { setSalaryMajor(""); setReason(""); setMsg("Requested — needs a different HR approver."); router.refresh(); }
+    if (res.ok) {
+      setSalaryMajor(""); setReason(""); setEffectiveDate("");
+      setMsg(
+        effectiveDate
+          ? `Requested — needs a different HR approver, and takes effect on ${effectiveDate}.`
+          : "Requested — needs a different HR approver, and takes effect as soon as it is approved.",
+      );
+      router.refresh();
+    }
     else setMsg(await readApiError(res));
   };
 
@@ -79,7 +97,18 @@ export function SalaryChanges({
                 {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.user?.name ?? emp.jobTitle}</option>)}
               </select>
             </div>
-            <div className="space-y-1.5"><Label htmlFor="sc-salary">New salary (₦)</Label><Input id="sc-salary" inputMode="decimal" value={salaryMajor} onChange={(e) => setSalaryMajor(e.target.value)} className="w-32" /></div>
+            <div className="space-y-1.5"><Label htmlFor="sc-salary">New salary ({region.currency})</Label><Input id="sc-salary" inputMode="decimal" value={salaryMajor} onChange={(e) => setSalaryMajor(e.target.value)} className="w-32" /></div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sc-effective">Takes effect</Label>
+              <Input
+                id="sc-effective"
+                type="date"
+                min={today()}
+                value={effectiveDate}
+                onChange={(e) => setEffectiveDate(e.target.value)}
+                className="w-40"
+              />
+            </div>
             <div className="space-y-1.5 flex-1 min-w-40"><Label htmlFor="sc-reason">Reason</Label><Input id="sc-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional" /></div>
             <Button type="submit" disabled={busy === "request"}>Request change</Button>
           </form>
@@ -91,13 +120,26 @@ export function SalaryChanges({
         ) : (
           <table className="w-full text-sm">
             <thead className="border-b border-border text-left text-muted-foreground">
-              <tr><th className="px-2 py-2 font-medium">Employee</th><th className="px-2 py-2 font-medium">From → To</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2 font-medium" /></tr>
+              <tr><th className="px-2 py-2 font-medium">Employee</th><th className="px-2 py-2 font-medium">From → To</th><th className="px-2 py-2 font-medium">Takes effect</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2 font-medium" /></tr>
             </thead>
             <tbody>
               {changes.map((c) => (
                 <tr key={c.id} className="border-b border-border last:border-0">
                   <td className="px-2 py-2">{c.employeeName ?? "—"}</td>
                   <td className="px-2 py-2 text-muted-foreground">{c.oldSalaryMinor != null ? money(c.oldSalaryMinor) : "—"} → {c.newSalaryMinor != null ? money(c.newSalaryMinor) : "—"}</td>
+                  {/* THE APPROVER DECIDES A DATE AS WELL AS A FIGURE, and could
+                      see neither. "Approved" alone cannot distinguish a raise
+                      already in the employee's pay from one that starts in
+                      October — which is exactly the state a future date creates
+                      and the nightly sweep closes. */}
+                  <td className="px-2 py-2 text-muted-foreground">
+                    {c.effectiveDate ? shortDate(c.effectiveDate) : "on approval"}
+                    {c.status === "APPROVED" && (
+                      <span className="ml-1 text-xs">
+                        {c.appliedAt ? "· in force" : "· not yet in force"}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-2 py-2"><Badge variant={VARIANT[c.status] ?? "secondary"}>{c.status}</Badge></td>
                   <td className="px-2 py-2">
                     {canApprove && c.status === "PENDING" && c.requestedById !== userId && (
