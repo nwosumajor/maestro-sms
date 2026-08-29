@@ -100,7 +100,15 @@ export default async function HelpPage() {
             { title: "Navigation", body: "The left menu shows only what your role can use. Your school's enabled modules decide which sections exist — if something's missing, your school's plan doesn't include it yet." },
             { title: "Notifications", body: "The Notifications page is your in-app inbox — payment receipts, absences, approvals, scholarship updates and announcements land there (and by email where configured)." },
             { title: "Your account", body: "On the Account page: change your password, enrol two-factor authentication (recommended for all staff), and add your phone number so the school can reach you by SMS or WhatsApp where enabled. Forgot your password? Use the link on the sign-in page — a one-time reset link is emailed to you." },
-            { title: "Security", body: "Sensitive actions ask you to re-confirm your password (step-up). Staff passwords expire every 30 days; three failed sign-ins lock the account until an administrator reactivates it. Never share your login." },
+            // WHO CAN ACTUALLY UNLOCK IT. This said "until an administrator
+            // reactivates it", and no administrator in a school can: the only
+            // unlock route in the product is
+            // `POST /operator/tenants/:schoolId/users/:userId/unlock`, gated on
+            // `platform.user.credentials`, which only super_admin holds. There
+            // is no school-side unlock anywhere. So a locked-out teacher asked
+            // their own office, which had no button to press, and the sentence
+            // was what sent them there.
+            { title: "Security", body: "Sensitive actions ask you to re-confirm your password (step-up). Staff passwords expire every 30 days; three failed sign-ins lock the account permanently. Your school's own administrators cannot undo that — only the platform operator can, so ask your school to contact support. Never share your login." },
             { title: "Messages & calendar", body: "Messages is two-way: write to staff and read replies in one thread. Calendar shows school events for your audience." },
           ]}
         />
@@ -137,7 +145,15 @@ export default async function HelpPage() {
               { title: "Bus & boarding-house alerts", body: "If your child rides the school bus, you're alerted the moment they board for pickup. For boarders, you're notified when an exeat (a pass to leave the boarding house) is approved, with the expected return time. These arrive in Notifications." },
               { title: "Book a meeting with a teacher", body: "Meetings shows the appointment slots teachers have opened. Pick one, choose which child it's about, and book — the teacher is notified straight away. You can cancel from the same page (so can they, and you'll be told)." },
               { title: "Your child's exam hall and seat", body: "Exams shows each child's upcoming exams with hall, time and seat number." },
-              { title: "Choose how we contact you", body: "Account → Notification preferences: switch email, SMS or WhatsApp on or off, and mute categories you don't need (announcements, fee reminders, grade publications…). Your in-app inbox always keeps everything, and payment and security notices are always sent." },
+              // A CHANNEL SWITCH APPLIES TO EVERYTHING, including the notices
+              // this used to say were "always sent". `allowedChannels` lets an
+              // ESSENTIAL type ignore a category MUTE and then filters by the
+              // channel toggles all the same — so a guardian who turns email off
+              // gets no fee reminders by email. Said immediately after the
+              // sentence about switching channels, "always sent" read as "these
+              // reach you whatever you switch off", which is the one thing it
+              // does not mean.
+              { title: "Choose how we contact you", body: "Account → Notification preferences: switch email, SMS or WhatsApp on or off, and mute categories you don't need (announcements, fee reminders, grade publications…). Fee and security notices ignore category mutes — but switching a CHANNEL off silences everything on it, those included. Your in-app inbox always keeps every notice whatever you switch off." },
               { title: "Cross-school games consent", body: "If the school invites your child to a cross-school games event, it requires your explicit consent first — only a pseudonymous handle (never their name) is visible to other schools." },
               { title: "Message the school", body: "Messages: write to your child's teachers or the school office; replies appear in the same thread and in Notifications." },
               { title: "Applying for another child?", body: "The public Browse Schools directory lets you apply to any onboarded school online; you're notified when the school reviews it." },

@@ -2040,6 +2040,36 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Two more promises the help page could not keep
+Same technique, widened: 155 guide entries, read for CHECKABLE claims and each
+checked against the code. Most hold — the classmate-only discipline rule, the
+oldest-unpaid-invoice transfer, the rejected double-booking, the best-three
+scholarship. Two did not, and both are about what a reader should DO next.
+**"three failed sign-ins lock the account until an administrator reactivates
+it."** No administrator in a school can. The ONLY unlock in the product is
+`POST /operator/tenants/:schoolId/users/:userId/unlock`, gated on
+`platform.user.credentials`, which **super_admin alone** holds — there is no
+school-side route at all. So a locked-out teacher went to their own office,
+which had no button to press, and this sentence is what sent them there. It now
+says the lock is permanent, that the school's administrators cannot undo it, and
+who to ask.
+**"payment and security notices are always sent"** — one sentence after "switch
+email, SMS or WhatsApp on or off". `allowedChannels` lets an ESSENTIAL type
+ignore a category MUTE and then filters by the channel toggles ANYWAY, so a
+guardian who switches email off receives no fee reminders by email. Read in
+place, the sentence meant the opposite of what the code does, on the notices a
+family most needs. It now separates the two: mutes are ignored, a channel switch
+is not, and the in-app inbox keeps everything either way.
+// **BOTH ARE PINNED AGAINST THE CODE, not against a remembered rule.** The
+lockout test asserts from the shared route extractor that the operator unlock is
+still the only one, and the notification tests drive `allowedChannels` itself —
+so if either behaviour changes under the guide, the build fails instead of the
+sentence going quietly wrong again. That is the difference between correcting
+prose and gating it.
+// GOTCHA: `allowedChannels(pref, type, requested)` takes the PREFERENCE first;
+I wrote the type first from the name and the compiler caught it — `Tests: 0
+total`, which is not a pass.
+
 ### The manual promised a power the button does not have
 `/help` and `docs/ONBOARDING-MANUAL.html`. Found by checking what the product
 TELLS somebody about a control I had just changed. The board's guide said:
