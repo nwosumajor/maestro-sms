@@ -57,6 +57,19 @@ function specs(dir: string, out: string[] = []): string[] {
 
 const FILES = ROOTS.flatMap((r) => specs(r));
 
+/**
+ * A gate WALKS if it reads the tree itself, or asks something that does.
+ *
+ * The detector was `readdirSync(` alone, and the rule above it says "every test
+ * that walks the source tree". Five gates walk through the shared extractors
+ * instead — `apiRoutes`, `sourceFiles`, `walkSources`, `walkControllers` — and
+ * were therefore invisible to their own rule. All five happen to carry a
+ * magnitude assertion already, so nothing was unguarded; a SIXTH written that
+ * way would have passed silently, which is the exact failure this file exists to
+ * forbid, one level up.
+ */
+const WALKS = /readdirSync\s*\(|\b(apiRoutes|sourceFiles|walkSources|walkControllers)\s*\(/;
+
 describe("every test that walks the source tree", () => {
   it("found the tests at all — this file is not exempt from its own rule", () => {
     expect(FILES.length).toBeGreaterThan(200);
@@ -69,7 +82,7 @@ describe("every test that walks the source tree", () => {
       const rel = file.split("/test/")[1] ?? file.split("__tests__/")[1] ?? file;
       if (NOT_A_WALK[rel]) continue;
       // A gate: it walks a directory AND asserts an empty offender list.
-      const walks = /readdirSync\s*\(/.test(src);
+      const walks = WALKS.test(src);
       const assertsEmpty = /expect\(\s*\w+\s*\)\.toEqual\(\[\]\)/.test(src);
       if (!walks || !assertsEmpty) continue;
       // The guard: SOME assertion that a count is above a floor.
@@ -84,7 +97,7 @@ describe("every test that walks the source tree", () => {
     // a gate at all: precisely the blindness it exists to forbid, in itself.
     const gates = FILES.filter((f) => {
       const src = readFileSync(f, "utf8");
-      return /readdirSync\s*\(/.test(src) && /expect\(\s*\w+\s*\)\.toEqual\(\[\]\)/.test(src);
+      return WALKS.test(src) && /expect\(\s*\w+\s*\)\.toEqual\(\[\]\)/.test(src);
     });
     expect(gates.length).toBeGreaterThan(20);
   });

@@ -2040,6 +2040,36 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The gate that polices gates could not see five of them
+`a-gate-must-not-pass-by-finding-nothing.spec.ts`. Third instance of one class in
+one round, and the third is in the file written to prevent the first two.
+Its rule is stated as **"every test that walks the source tree"** and its
+detector was `readdirSync(` alone. Five gates do not call it — they walk through
+the SHARED extractors this repo built precisely so nothing hand-rolls a walk
+(`apiRoutes`, `sourceFiles`, `walkSources`, `walkControllers`):
+```
+fees/a-balance-a-sum-cannot-express        surface/a-filter-nobody-validated
+surface/a-download-name-survives-its-header surface/no-two-routes-answer-the-same-url
+workflow/what-the-approver-is-shown
+```
+**All five already carry a magnitude assertion, so nothing was unguarded** — the
+gap was in the RULE, not the code. A sixth written that way would have passed
+silently, which is the exact failure this file exists to forbid, one level up.
+And the pull toward it is real: using the shared extractor is the RIGHT thing to
+do, so the gates that follow the repo's own advice were the ones that escaped.
+Proved both ways rather than asserted: a throwaway gate that walks via
+`apiRoutes()`, asserts an empty list and never says how much it scanned is
+**named** by the widened detector and passes clean under the old one.
+// THE "real subjects" GUARD MOVED WITH IT. That test exists so the check above
+cannot pass the day the regex stops recognising a gate at all; leaving it on the
+narrow pattern would have left the widened rule with a stale sentinel.
+// WHAT THE SAME PASS DECIDED NOT TO CHANGE: 245 magnitude assertions across the
+suite, most of the form "the walk found more than 100 files" against ~440. Those
+are SANITY checks whose failure mode is zero, and tightening them to the current
+count would turn every added file into a broken build. The two worth ratcheting
+were the ones counting what a gate CHECKED rather than what it read — the
+cadence list and `wire-shape`, both done.
+
 ### A floor of twenty under a gate that was covering two hundred
 `wire-shape-agrees.spec.ts`. Second instance in two rounds of the same shape —
 after the cadence gate that checked 13 of 18 jobs — and two makes it a class
