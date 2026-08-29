@@ -17,6 +17,7 @@
 // until marking finished.
 // =============================================================================
 
+import { inflateSync } from "node:zlib";
 import { NotFoundException } from "@nestjs/common";
 import { CbtService } from "../../src/cbt/cbt.service";
 
@@ -91,6 +92,72 @@ describe("printable question paper", () => {
     const { svc } = makeService({ canTouch: true });
     const out = await svc.examPaperPdf(EDITOR, EXAM, true);
     expect(out.filename).toContain("answer-key");
+  });
+
+  /**
+   * The text a printed paper actually carries.
+   *
+   * Every test above proves WHO may print, and none can see WHAT is on the
+   * page. If `examPaperPdf(..., false)` ever started rendering the answer
+   * markers, every holder of `cbt.review` would receive the answers to an exam
+   * they are about to approve — and all five access tests would still pass.
+   *
+   * The marker is a leading `*` on the correct option, so the paper is right
+   * only if the questions are present and the marker is not. Read out of the
+   * PDF because that is where the leak would be: pdfkit deflates its content
+   * streams, so the bytes are inflated and the hex runs glued back together.
+   */
+  function textOf(pdf: Buffer): string {
+    const out: string[] = [];
+    let i = 0;
+    for (;;) {
+      const st = pdf.indexOf("\nstream", i);
+      if (st === -1) break;
+      let from = st + 7;
+      while (pdf[from] === 0x0d || pdf[from] === 0x0a) from += 1;
+      const e = pdf.indexOf("endstream", from);
+      if (e === -1) break;
+      i = e + 9;
+      let raw: string;
+      try {
+        raw = inflateSync(pdf.subarray(from, e)).toString("latin1");
+      } catch {
+        continue;
+      }
+      for (const chunk of raw.split(/\bTm\b/)) {
+        const line = [...chunk.matchAll(/<([0-9A-Fa-f]+)>/g)]
+          .map((m) => Buffer.from(m[1], "hex").toString("latin1"))
+          .join("");
+        if (line.trim()) out.push(line.trim());
+      }
+    }
+    return out.join("\n");
+  }
+
+  it("the question paper carries the questions and NOT the answers", async () => {
+    const { svc } = makeService();
+    const text = textOf((await svc.examPaperPdf(EDITOR, EXAM, false)).buffer);
+    expect(text).toContain("2 + 2 = ?");
+    // The option LETTER AND ITS TEXT together. `toContain("4")` was the first
+    // version and matched a date, a mark count, anything — the
+    // matched-by-accident shape this repo gates against, and mutation proved
+    // it: drawing the letter with the option text removed left it green.
+    expect(text).toMatch(/B\.\s+4\b/);
+    expect(text).toMatch(/A\.\s+3\b/);
+    // The marker, not the letter: "B." is on the paper legitimately.
+    expect(text).not.toMatch(/^\*/m);
+    expect(text).not.toContain("ANSWER KEY");
+  });
+
+  it("the answer key marks the right option, and says it is not for candidates", async () => {
+    // The other half. Without it, a paper that rendered NOTHING would pass the
+    // test above — the leak-proof paper and the empty one look identical to a
+    // "does not contain" assertion.
+    const { svc } = makeService({ canTouch: true });
+    const text = textOf((await svc.examPaperPdf(EDITOR, EXAM, true)).buffer);
+    expect(text).toMatch(/^\*/m);
+    expect(text).toMatch(/ANSWER KEY/);
+    expect(text).toContain("2 + 2 = ?");
   });
 
   it("someone with neither permission gets nothing", async () => {

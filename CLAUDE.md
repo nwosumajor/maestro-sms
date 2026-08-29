@@ -2040,6 +2040,38 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The question paper was proved to reach the right people, never to be safe
+`paper-pdf.spec.ts`. Same gap as the receipt below, with exam answers at stake.
+Five tests cover WHO may print — editor, reviewer, outsider, and a reviewer
+refused the key — and none could see WHAT is on the page. If
+`examPaperPdf(..., false)` ever began rendering the markers, every holder of
+`cbt.review` would receive the answers to an exam they are about to approve, and
+all five would still pass.
+**DRIVEN LIVE FIRST, and the design holds exactly as its comments claim.** On a
+demo-school exam: a pupil gets 404 on the paper and 403 on the key (no
+permission at all), a teacher who did not write it gets 404 on BOTH — the
+service's scope check, 404-not-403 so it never confirms the exam exists — and
+the principal gets 200 on both. The route for the paper is deliberately UNGATED
+because two audiences reach it and `@RequirePermission` takes one; the service
+really does enforce it.
+And the content is right: the paper prints `A. 3 / B. 4 / C. 5` with no markers,
+the key prints `*B. 4` under **"ANSWER KEY — NOT FOR CANDIDATES"**.
+Now pinned both ways, because "does not contain the answers" is also true of a
+BLANK page — the paper must carry the questions AND lack the marker, and the key
+must carry the marker AND say it is not for candidates.
+// GOTCHA, and mutation caught it against me: my first assertion was
+`toContain("4")` — a single character, which matches a date or a mark count, so
+drawing the option LETTER with the text removed left the test green. That is
+exactly the shape `assertions-that-match-by-accident` exists for, written by
+somebody who knew about it. It asserts `/B\.\s+4\b/` now: the letter and its
+option together.
+// Mutation-validated three ways: render the markers on the plain paper (the
+leak), draw the letters without the options (the blank paper), and rename the
+key's header. Each caught by the assertion written for it.
+// GOTCHA, third compile-only mutation of the session: a `continue` I inserted
+outside a loop gave `Tests: 0 total`, which is not a pass. Re-run as an
+expression change, it fails properly.
+
 ### The receipt was proved to be a PDF, never to be the right one
 `fee-ops.e2e-spec`. The existing test asserts the bytes start `%PDF-`, that the
 filename matches `RCP-…`, and that an outsider gets 404. It cannot see a wrong
