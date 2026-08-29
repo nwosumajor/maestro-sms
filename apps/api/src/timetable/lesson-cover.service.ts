@@ -171,6 +171,37 @@ export class LessonCoverService {
       if (input.coveringTeacherId === entry.teacherId) {
         throw new BadRequestException("The absent teacher cannot cover their own lesson");
       }
+      // A RELIEVER WHO DECLARED THIS PERIOD UNAVAILABLE IS NOT A RELIEVER.
+      //
+      // `teacher_unavailability` is a hard constraint in the timetable generator
+      // and, since the fix beside this one, in placing a lesson by hand. Cover
+      // was the third path handing somebody a period, and it asked the other
+      // three questions — still employed, not self-cover, no clash — and not
+      // this one.
+      //
+      // It is the sharper case of the three: cover is assigned at short notice,
+      // the reliever is NOTIFIED and expected to turn up, and the whole feature
+      // exists so a class is not left unattended. Rostering the one person who
+      // has told the school they cannot be there produces exactly the empty room
+      // the clash checks above exist to prevent.
+      //
+      // Refused with the same way out as the timetable: if the school needs them
+      // that period, clear it from their availability, so there is ONE record of
+      // when a teacher can teach rather than a roster quietly contradicting one.
+      const declined = await tx.teacherUnavailability.findFirst({
+        where: {
+          teacherId: input.coveringTeacherId,
+          dayOfWeek: entry.dayOfWeek,
+          periodId: entry.periodId,
+        },
+        select: { id: true },
+      });
+      if (declined) {
+        throw new ConflictException(
+          `${reliever.name} has marked this period as unavailable. Pick another reliever, ` +
+            `or clear the slot on their availability first.`,
+        );
+      }
       // Double-booking: the reliever's OWN lesson at this period on this weekday,
       // OR another cover already assigned to them at this period/date.
       //

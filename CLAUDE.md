@@ -2067,6 +2067,21 @@ already is. `changingSlot` compares the stored (day, period, teacher) with the
 target, so an in-place edit passes and a MOVE into a declined slot — or swapping
 in a teacher who declined it — is refused. All four cases are tested and
 mutation-validated.
+// **AND THE THIRD PATH HAD IT TOO, found by asking the same question one method
+over.** `assignCover` hands somebody a period as surely as the timetable does,
+and it asked the other three questions — still employed, not self-cover, no
+clash — and never this one. It is the SHARPEST of the three: cover is assigned
+at short notice, the reliever is NOTIFIED and expected to turn up, and the
+feature exists so a class is not left unattended. Rostering the one person who
+told the school they cannot be there produces exactly the empty room the clash
+checks prevent. Live: **409 "Volume Teacher 1 has marked this period as
+unavailable"**, then 201 once the declaration is cleared.
+// GOTCHA in my own fixture, and mutation caught it: `teacherUnavailability
+.findFirst` answered from a FLAG rather than applying the caller's `where`, so
+dropping `periodId` from the query left all nine assertions green. It filters a
+one-row table now — the same repair this file records for the exam-seating stub.
+Second compile-only mutation of the session too (`if (true)` left `declined`
+unused): `Tests: 0 total` is not a pass.
 // The web's 409 message listed the three reasons as a fixed sentence, which
 would have been wrong for the fourth. It reads the API's own reason now.
 // GOTCHA, eleventh instance: two fixtures had `teacherUnavailability` with only
