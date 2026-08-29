@@ -52,7 +52,7 @@ import {
   type PlatformPaymentDto,
   type SubscriptionDto,
   PAYMENT_CHANNELS,
-  pickCardRail, formatMoneyPdf } from "@sms/types";
+  pickCardRail, formatMoneyPdf, resolveRegion, schoolDateString } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -63,6 +63,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { NotificationService } from "../notifications/notification.service";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { StripeService, type StripeEvent } from "../payments/stripe.service";
@@ -106,6 +107,9 @@ export class BillingService {
     private readonly addonPricing: AddonPricingService,
     private readonly referrals: ReferralService,
     private readonly growth: GrowthService,
+    // The school's clock: a renewal date and a receipt date are DAYS at the
+    // school, and were being rendered in the server process's zone.
+    private readonly region: SchoolRegionService,
     // LAST and @Optional deliberately. DI always provides it in the running
     // app; being optional keeps every existing unit wiring compiling, and
     // absent it FAILS OPEN — a missing switchboard must never be the reason a
@@ -162,7 +166,12 @@ export class BillingService {
         where: { id: paymentId, status: "PAID" },
       });
       if (!pay) throw new NotFoundException("Payment not found");
-      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+      // `timezone` for the date on the receipt: a receipt is a financial record and
+      // its date is the SCHOOL's day, not the server's.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { name: true, country: true, timezone: true },
+      });
       await this.audit.record(
         {
           actorId: p.userId,
@@ -173,7 +182,7 @@ export class BillingService {
         },
         tx,
       );
-      return { pay, schoolName: school?.name ?? "" };
+      return { pay, schoolName: school?.name ?? "", timezone: resolveRegion(school ?? {}).timezone };
     });
 
     const { pay } = data;
@@ -198,7 +207,7 @@ export class BillingService {
       doc.moveDown();
       doc.fontSize(10);
       doc.text(`Receipt no: ${receiptNo}`);
-      doc.text(`Date: ${issuedAt.toISOString().slice(0, 10)}`);
+      doc.text(`Date: ${schoolDateString(data.timezone, issuedAt)}`);
       doc.text(`School: ${data.schoolName}`);
       doc.moveDown();
       doc.text(`Plan: ${pay.plan}`);
@@ -206,7 +215,7 @@ export class BillingService {
       doc.text(`Seats billed: ${pay.seats}`);
       if (pay.periodStart && pay.periodEnd) {
         doc.text(
-          `Period: ${pay.periodStart.toISOString().slice(0, 10)} to ${pay.periodEnd.toISOString().slice(0, 10)}`,
+          `Period: ${schoolDateString(data.timezone, pay.periodStart)} to ${schoolDateString(data.timezone, pay.periodEnd)}`,
         );
       }
       doc.moveDown();
@@ -1427,7 +1436,7 @@ export class BillingService {
           recipientId: ok.recipientId,
           type: "BILLING",
           title: "Subscription active",
-          body: `Your ${ok.plan} plan is active until ${ok.periodEnd.toDateString()}.${bonus} This message is your payment receipt.`,
+          body: `Your ${ok.plan} plan is active until ${schoolDateString((await this.region.forSchool(schoolId)).timezone, ok.periodEnd)}.${bonus} This message is your payment receipt.`,
           channels: ["EMAIL"],
         },
       );
@@ -1446,7 +1455,7 @@ export class BillingService {
             body:
               `${ok.referral.referredSchoolName} subscribed using your referral code — ` +
               `your school earned ${ok.referral.rewardMonths} months of free platform usage. ` +
-              `Your subscription now runs until ${ok.referral.referrerPeriodEnd.toDateString()}.`,
+              `Your subscription now runs until ${schoolDateString((await this.region.forSchool(ok.referral.referrerSchoolId)).timezone, ok.referral.referrerPeriodEnd)}.`,
             channels: ["EMAIL"],
           },
         );

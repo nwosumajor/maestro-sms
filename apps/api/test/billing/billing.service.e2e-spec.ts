@@ -13,6 +13,7 @@
 // privileged dunning). Skips otherwise so it never false-passes.
 // =============================================================================
 
+import { SchoolRegionService } from "../../src/foundation/school-region.service";
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { PrismaClient, prisma } from "@sms/db";
@@ -112,6 +113,10 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       new AddonPricingService(tenant, new AuditLogService() as never, { client: privileged } as never),
       new ReferralService(tenant, new AuditLogService() as never),
       new GrowthService(tenant, new AuditLogService() as never, { client: privileged } as never),
+      // The school's clock. A REAL instance over the same tenant handle, so the
+      // dates these notices carry are resolved the way production resolves
+      // them rather than from a stub that cannot disagree.
+      new SchoolRegionService(tenant),
     );
   });
 

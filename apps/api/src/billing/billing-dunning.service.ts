@@ -29,6 +29,8 @@ import {
   type BillingCycle,
   type Currency,
   type Plan,
+  resolveRegion,
+  schoolDateString,
 } from "@sms/types";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { NotificationService } from "../notifications/notification.service";
@@ -154,6 +156,22 @@ export class BillingDunningService {
     // must be reported once. `failed` is what the operator's jobs console reads
     // to decide its "Partial" badge, so it has to mean "schools this run could
     // not fully process" — the accrual half was invisible to it entirely.
+    // A RENEWAL DATE IS A DAY AT THE SCHOOL, not on the server.
+    //
+    // These notices used `toDateString()`, which renders in the SERVER process's
+    // zone (UTC in a container) — so a school east of UTC could be told its plan
+    // renews the day BEFORE it does, and one west of it a day after. Resolved
+    // once per school for the whole run rather than per notice.
+    const PLATFORM_TZ = resolveRegion({}).timezone;
+    const tzOf = new Map<string, string>();
+    for (const row of await client.school.findMany({
+      where: { id: { in: [...new Set(subs.map((x) => x.schoolId))] } },
+      select: { id: true, country: true, timezone: true },
+    })) {
+      tzOf.set(row.id, resolveRegion(row).timezone);
+    }
+    const renewalDay = (schoolId: string, at: Date) => schoolDateString(tzOf.get(schoolId) ?? PLATFORM_TZ, at);
+
     const failedSchools = new Set<string>(arrearsFailedSchools);
     for (const s of subs) {
       if (!s.currentPeriodEnd) continue;
@@ -194,7 +212,7 @@ export class BillingDunningService {
           client,
           s.schoolId,
           "Subscription renewal due soon",
-          `Your ${s.plan} plan renews on ${s.currentPeriodEnd.toDateString()}. Renew to keep your modules enabled.`,
+          `Your ${s.plan} plan renews on ${renewalDay(s.schoolId, s.currentPeriodEnd)}. Renew to keep your modules enabled.`,
         );
       }
       } catch (err) {

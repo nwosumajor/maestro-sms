@@ -55,7 +55,7 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { FeesService } from "./fees.service";
-import { currencyDecimals, formatMoney, resolveRegion, schoolToday, toMajor } from "@sms/types";
+import { currencyDecimals, formatMoney, resolveRegion, schoolDateString, schoolToday, toMajor } from "@sms/types";
 import { BrandingService } from "../branding/branding.service";
 import { dateWindow } from "../common/status-filter";
 import { createPdfDocument } from "../common/pdf-document";
@@ -692,7 +692,14 @@ export class FeeOpsService {
         !!(await tx.parentChild.findFirst({ where: { parentId: p.userId, studentId }, select: { id: true } }));
       if (!isStaff && !isFamily) throw new NotFoundException("Payment not found"); // 404-not-403
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { name: true } });
-      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+      // `timezone` for the same reason the late-fee sweep selects it: the date
+      // on a receipt is the SCHOOL's day. resolveRegion, not the raw column —
+      // a null means the platform's home, which is how the region model behaves
+      // everywhere else.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { name: true, country: true, timezone: true },
+      });
       const paid = await this.paidMinor(tx, pay.invoiceId);
       await this.audit.record(
         { actorId: p.userId, action: "fee.receipt.download", entity: "payment", entityId: paymentId, schoolId: p.schoolId },
@@ -702,6 +709,7 @@ export class FeeOpsService {
         pay,
         studentName: student?.name ?? "Student",
         schoolName: school?.name ?? "",
+        timezone: resolveRegion(school ?? {}).timezone,
         balanceMinor: pay.invoice.totalMinor - paid,
       };
     });
@@ -710,6 +718,11 @@ export class FeeOpsService {
     // a network call, and a receipt must not hold a DB transaction open for it.
     const logo = (await this.branding?.getLogoBytes(p.schoolId).catch(() => null)) ?? null;
 
+    // THE NUMBER IS DELIBERATELY LEFT ON UTC. It is an issued IDENTIFIER, not a
+    // claim about the calendar: re-deriving it from the school's day would give
+    // a reprint a different number from the one the payer already holds, and a
+    // receipt number that moves is worse than one whose digits sit a day from
+    // the date beside it. The DATE line is what a person reads and reconciles.
     const receiptNo = `RCP-${data.pay.createdAt.toISOString().slice(0, 10).replace(/-/g, "")}-${paymentId.slice(0, 8).toUpperCase()}`;
     // formatMoney, never minor/100: a zero-decimal currency (the CFA franc and
     // ten others in the catalogue) prints at a HUNDREDTH of its value under a
@@ -738,7 +751,13 @@ export class FeeOpsService {
       doc.moveDown();
       doc.fontSize(10);
       doc.text(`Receipt no: ${receiptNo}`);
-      doc.text(`Date: ${data.pay.paidAt.toISOString().slice(0, 10)}`);
+      // THE SCHOOL'S DAY, not the server's. `paidAt` is an INSTANT (the column
+      // is DateTime, unlike the `@db.Date` due dates elsewhere in this file), so
+      // slicing its UTC form dates a payment taken at 22:00 in Toronto to the
+      // NEXT day — on the document a family keeps and a bursar reconciles
+      // against the bank. Third defect on this one artifact, after the naive
+      // minor/100 and the naira sign pdfkit cannot draw.
+      doc.text(`Date: ${schoolDateString(data.timezone, data.pay.paidAt)}`);
       doc.text(`Student: ${data.studentName}`);
       doc.text(`Invoice: ${data.pay.invoice.reference}`);
       doc.moveDown();

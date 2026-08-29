@@ -380,4 +380,30 @@ d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", 
       expect(noneSummary).toMatchObject({ outstandingMinor: 0, collectedMinor: 0, overdueCount: 0 });
     });
   });
+
+  /**
+   * THE DATE ON A RECEIPT IS THE SCHOOL'S DAY.
+   *
+   * Third defect on this one artifact, after the naive minor/100 and the naira
+   * sign pdfkit cannot draw. `paidAt` is an INSTANT (a DateTime column, unlike
+   * the `@db.Date` due dates in the same service), so slicing its UTC form
+   * dates a payment taken at 22:00 in Toronto to the NEXT day — on the document
+   * a family keeps and a bursar reconciles against the bank.
+   *
+   * The receipt NUMBER deliberately stays on UTC: it is an issued identifier,
+   * and re-deriving it would give a reprint a different number from the one the
+   * payer already holds.
+   */
+  it("receipt PDF: dated by the school's day, not the server's", async () => {
+    // 01:30Z is still the previous day in Toronto.
+    await admin.query(`UPDATE school SET timezone = 'America/Toronto' WHERE id = $1`, [SA]);
+    await admin.query(`UPDATE payment SET "paidAt" = $2 WHERE id = $1`, [paymentId, "2026-09-01T01:30:00.000Z"]);
+    try {
+      const text = receiptText((await svc.receiptPdf(guardian(), paymentId)).buffer);
+      expect(text).toMatch(/Date:\s*2026-08-31/);
+      expect(text).not.toMatch(/Date:\s*2026-09-01/);
+    } finally {
+      await admin.query(`UPDATE school SET timezone = NULL WHERE id = $1`, [SA]);
+    }
+  });
 });

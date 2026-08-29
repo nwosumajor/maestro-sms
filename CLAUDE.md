@@ -2040,6 +2040,56 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The date on a receipt, and the sweep that found the rest of them
+Fixing the chargeback deadline made a claim in this file testable: that the
+remaining `toISOString().slice(0, 10)` uses "label a document; they do not key a
+record". Swept properly — every human-facing date rendering in the API, 50 of
+them — and the claim had rotted. **Most are `@db.Date` columns, where UTC
+slicing is CORRECT and converting would be the bug** (a due date, a term start,
+a last working day, an exam date). What the sweep separates out is the true
+INSTANTS, and there were five, in a cluster: money documents and billing
+notices.
+```
+fee receipt PDF        Date: <paidAt>                 UTC
+subscription receipt   Date: <issuedAt>, Period: …    UTC
+renewal reminder       "renews on <currentPeriodEnd>" toDateString() — SERVER-LOCAL
+subscription active    "active until <periodEnd>"     toDateString()
+referral reward        "runs until <referrerPeriodEnd>" toDateString()
+```
+**THE FEE RECEIPT IS THE THIRD DEFECT ON ONE ARTIFACT**, and the comment block
+directly above the broken line records the other two — the naive `minor / 100`
+that printed a CFA-franc receipt at a hundredth of its value, and the naira sign
+pdfkit cannot draw. `paidAt` is a `DateTime`, unlike the `@db.Date` due dates in
+the same service, so a payment taken at 22:00 in Toronto was dated to the NEXT
+day on the document a family keeps and a bursar reconciles against the bank.
+// **THE RECEIPT NUMBER IS DELIBERATELY LEFT ON UTC**, and that is the
+interesting half. `RCP-YYYYMMDD-xxxx` is an ISSUED IDENTIFIER: re-deriving it
+from the school's day would give a REPRINT a different number from the one the
+payer already holds. A receipt number whose digits sit a day from the date
+beside it is odd; one that MOVES is a reconciliation failure. So the DATE line —
+what a person actually reads — follows the school, and the token does not.
+// `toDateString()` was the worse of the two shapes and is easy to miss in a
+grep for `toISOString`: it renders in the SERVER PROCESS's zone (UTC in a
+container) AND in a fixed English format. Three school-facing billing notices
+used it.
+// The dunning sweep resolves the timezone ONCE PER SCHOOL for the whole run
+rather than per notice — it is a fleet sweep, and the HR reminder sweep already
+learned that lesson.
+// GOTCHA, and TypeScript caught it rather than a test: adding the region to
+`BillingService`'s constructor placed a REQUIRED parameter after the `@Optional`
+one, which is a syntax error, not a subtle bug. The optional `channels` is last
+for a reason recorded beside it, and anything new goes BEFORE it.
+// **A CYCLE IS THE RISK A UNIT TEST CANNOT SEE** — this file already records
+1,402 tests staying green while the module graph would not boot. `DisputesService`
+and `BillingService` both gained a foundation import, so the API was REBUILT and
+watched to start: "Nest application successfully started", and
+`/public/plan-pricing` answered 200.
+// COVERAGE, stated exactly: the receipt is proven by a real-Postgres e2e that
+decodes the actual PDF bytes and is mutation-validated (restoring the UTC slice
+fails it by name); it is NOT driven over HTTP, because the demo tenant holds no
+posted payment and manufacturing one to prove an unchanged transport layer is
+not worth writing financial rows for.
+
 ### A chargeback deadline, a day late, on the notice that says "lost by default"
 `DisputesService` (`fees/disputes.service.ts`). The sibling of the entry below,
 found by arriving from it: once the disputes SCREEN rendered the evidence
