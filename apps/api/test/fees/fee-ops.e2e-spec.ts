@@ -13,6 +13,7 @@
 // =============================================================================
 
 import { Pool } from "pg";
+import { inflateSync } from "node:zlib";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { FeeOpsService } from "../../src/fees/fee-ops.service";
@@ -201,11 +202,83 @@ d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", 
     expect((still.rows[0] as { totalMinor: number }).totalMinor).toBe(45_000);
   });
 
+  /**
+   * The text a payer actually sees.
+   *
+   * pdfkit FLATE-compresses its content streams and writes text as HEX runs, so
+   * the bytes have to be inflated and the runs glued back together. Same
+   * technique as `reportcard-pdf.spec.ts`, and the CP1252 mapping matters: an em
+   * dash is 0x97 there, which latin1 treats as a control character — read
+   * without the mapping it silently disappears and reads as a double space. It
+   * cost me one false finding before I checked the byte.
+   */
+  function receiptText(pdf: Buffer): string {
+    const out: string[] = [];
+    let i = 0;
+    for (;;) {
+      const st = pdf.indexOf("\nstream", i);
+      if (st === -1) break;
+      let from = st + 7;
+      while (pdf[from] === 0x0d || pdf[from] === 0x0a) from += 1;
+      const e = pdf.indexOf("endstream", from);
+      if (e === -1) break;
+      i = e + 9;
+      let raw: string;
+      try {
+        raw = inflateSync(pdf.subarray(from, e)).toString("latin1");
+      } catch {
+        continue;
+      }
+      for (const chunk of raw.split(/\bTm\b/)) {
+        const line = [...chunk.matchAll(/<([0-9A-Fa-f]+)>/g)]
+          .map((m) => Buffer.from(m[1], "hex").toString("latin1"))
+          .join("");
+        if (line.trim()) out.push(line.trim());
+      }
+    }
+    return out.join("\n");
+  }
+
   it("receipt PDF: guardian downloads it; an unrelated parent gets 404", async () => {
     const { buffer, filename } = await svc.receiptPdf(guardian(), paymentId);
     expect(buffer.subarray(0, 5).toString()).toBe("%PDF-");
     expect(filename).toMatch(/^RCP-\d{8}-[0-9A-F]{8}\.pdf$/);
     await expect(svc.receiptPdf(outsider(), paymentId)).rejects.toMatchObject({ status: 404 });
+  });
+
+  /**
+   * WHAT THE RECEIPT SAYS, not merely that it is a PDF.
+   *
+   * The test above proves the bytes start `%PDF-` and that an outsider gets 404.
+   * It cannot see a wrong FIGURE, and this artifact has carried two money bugs
+   * already: a `minor / 100` under a hard-coded `en-NG` that printed a
+   * CFA-franc receipt at a hundredth of its value, and a naira symbol pdfkit
+   * could not draw, which came out as a broken bar. Both were visible only to
+   * whoever opened the file — the one document every payer reads.
+   */
+  it("receipt PDF: the figure on it is the payment that was recorded", async () => {
+    const { buffer } = await svc.receiptPdf(guardian(), paymentId);
+    const text = receiptText(buffer);
+    expect(text).toContain("OFFICIAL RECEIPT");
+    // The fixture posts 25000 minor units in the school's currency.
+    expect(text).toMatch(/Amount received:\s*NGN\s*250\.00/);
+  });
+
+  it("receipt PDF: money is named by its ISO code, never a symbol pdfkit cannot draw", () => {
+    // The guard is on the BYTES: pdfkit's built-in fonts are WinAnsi, and a
+    // naira sign there emits 0xA6 — the BROKEN BAR — so a receipt read
+    // `¦250.00`. Asserting the rendered text alone would not catch a symbol
+    // that survives as the wrong glyph.
+    // On the DECODED text, not the raw file: a PDF's content streams are
+    // deflate-compressed, so 0xA6 turns up in them by chance and asserting on
+    // the buffer fails against a perfectly good receipt. My first version did
+    // exactly that and this test caught it.
+    return svc.receiptPdf(guardian(), paymentId).then(({ buffer }) => {
+      const text = receiptText(buffer);
+      expect(text).not.toContain("\xa6"); // the broken bar a naira sign becomes
+      expect(text).not.toMatch(/[₦₵]/);
+      expect(text).toContain("NGN");
+    });
   });
 
   it("journal CSV: posted payments in range, formula-guarded", async () => {

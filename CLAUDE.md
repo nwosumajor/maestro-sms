@@ -2040,6 +2040,47 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The receipt was proved to be a PDF, never to be the right one
+`fee-ops.e2e-spec`. The existing test asserts the bytes start `%PDF-`, that the
+filename matches `RCP-…`, and that an outsider gets 404. It cannot see a wrong
+FIGURE — and this artifact has already carried two money bugs: a `minor / 100`
+under a hard-coded `en-NG` that printed a CFA-franc receipt at a HUNDREDTH of
+its value, and a naira sign pdfkit cannot draw, which came out as the broken bar
+`¦250.00`. Both were visible only to whoever opened the file, which is every
+payer.
+**RECONCILED FIRST, AND IT IS CORRECT.** Two real payments read out of the
+running system: `amountMinor 2000000` NGN prints **"Amount received: NGN
+20,000.00"**, `50000` USD prints **"USD 500.00"**, both by the ISO code rather
+than a symbol, both correctly "Invoice fully settled."
+Now pinned: the figure must equal the payment row, and the decoded text must
+carry no `₦`/`₵` and no 0xA6. Mutation-validated against the ACTUAL historic
+bug — restoring `(amountMinor / 100).toLocaleString("en-NG", …)` fails both new
+tests, and neither of the three that existed before.
+// **THREE CLEAN NEGATIVES from the same pass, recorded so they are not
+re-chased.** (1) The OVERPAYMENT double-entry survives a real race: one USD
+invoice of 10,000 carries four concurrent settlements of 10,000 and one REFUND
+of 30,000, so net paid equals the total exactly and the invoice reads PAID with
+five credit rows — the design working under the 4-way race that produced it.
+(2) A genuinely EMPTY tenant (2 users, 0 classes, 0 periods) answers 24 main
+reads with no 5xx; the 404s are module gating and the 400s were my probe
+omitting required params. The route smoke only ever runs against the demo
+school, so that shape had never been exercised. (3) `assessCalendar` returns
+`[]` for that school CORRECTLY — it handles zero sessions with a critical
+finding, and this school's calendar is genuinely fine.
+// GOTCHA, and it cost a false finding: reading a pdfkit receipt with a latin1
+extractor drops the em dash — CP1252 has it at 0x97, which latin1 treats as a
+control character, so "receipt — valid without signature" read as a DOUBLE
+SPACE and looked like a folded character. Checked the byte: 0x97 is present and
+the receipt is right. The repo's own `reportcard-pdf` extractor maps those back
+and mine did not.
+// GOTCHA in my own assertion: `buffer.includes(0xa6)` on a PDF is meaningless
+— content streams are deflate-compressed, so that byte occurs by chance and the
+check fails against a perfectly good receipt. It belongs on the DECODED text.
+The test caught it.
+// GOTCHA: `npx jest test/fees/fee-ops.e2e-spec.ts` reported "12 skipped" and I
+nearly read it as a pass. DB-gated suites need `pnpm --filter @sms/api test:db`
+— the trap this file already names, met while validating a fix for it.
+
 ### The teacher said they cannot teach then, and only the generator listened
 `assertNoConflict` (`timetable.service.ts`). Found by driving
 `teacher_unavailability`, which had never held a row.
