@@ -564,7 +564,7 @@ describe("book() — the capacity claim itself", () => {
 // Two things must follow, or being added is an invitation that never arrives:
 // they have to SEE the meeting, and they have to get the join link.
 
-function cohostHarness(staffIds: string[], seeingIds?: string[]) {
+function cohostHarness(staffIds: string[], seeingIds?: string[], goneIds: string[] = []) {
   // The harness HONOURS the where. createSlot asks userRole two different
   // questions — "are these staff" and "can these open the meetings page" — and a
   // mock answering both with the same list is how a deleted check keeps passing.
@@ -574,7 +574,22 @@ function cohostHarness(staffIds: string[], seeingIds?: string[]) {
   const tx = {
     class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
-    user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "P" }), findMany: jest.fn().mockResolvedValue([]) },
+    // HONOURS THE WHERE, for the same reason the userRole stub does. This used
+    // to answer [] to everything, which models a `user_role` row for a user that
+    // does not exist — something the database cannot produce — and it went
+    // unnoticed while nothing asked. `goneIds` are real people who have LEFT.
+    user: {
+      findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "P" }),
+      findMany: jest.fn((args: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            name: id,
+            status: goneIds.includes(id) ? "EXITED" : "ACTIVE",
+          })),
+        ),
+      ),
+    },
     userRole: {
       findMany: jest.fn((args: { where?: { role?: Record<string, unknown> } }) => {
         const asksPermission = !!args?.where?.role?.permissions;
@@ -607,7 +622,7 @@ function cohostHarness(staffIds: string[], seeingIds?: string[]) {
     enqueue: jest.fn().mockResolvedValue({}),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { svc: new MeetingService(db as never, audit as never, notifications as never), cohosts, notified };
+  return { svc: new MeetingService(db as never, audit as never, notifications as never), cohosts, notified, tx };
 }
 
 const CO = { startsAt: "2027-07-01T09:00:00Z", endsAt: "2027-07-01T10:00:00Z" };
@@ -749,5 +764,62 @@ describe("a co-host is a host for the things that matter", () => {
   it("lists the colleagues on the slot, so a parent knows who will be there", async () => {
     const out = await listHarness(["sl1"]).mySlots(colleague);
     expect((out[0].cohosts ?? []).map((c) => c.name)).toContain("Colleague");
+  });
+});
+
+/**
+ * THE HOST IS CHECKED LIKE A COHOST.
+ *
+ * `teacherId` is accepted from any staff-wide caller and was validated in NO
+ * way: measured live against the running stack, a principal opened a bookable
+ * slot hosted by a PARENT (201) and one hosted by a uuid that is nobody (201,
+ * rendering with `teacherName: null`). The cohost path three lines below had
+ * asked the same questions carefully all along — sibling asymmetry inside one
+ * method, with the careful half written first.
+ */
+describe("who may be named as the host of a meeting", () => {
+  it("refuses a parent as the host — they would get the organiser's view and the join link", async () => {
+    const { svc } = cohostHarness(["t2"]); // "a-parent" is in no staff pool
+    await expect(svc.createSlot(principal, { ...CO, teacherId: "a-parent" }))
+      .rejects.toThrow(/not staff at this school/);
+  });
+
+  it("refuses a host who is nobody at all", async () => {
+    // There is no FK on meeting_slot.teacherId, so the phantom was a real
+    // stored row that rendered with no name and could still be booked.
+    const { svc } = cohostHarness(["t2"]);
+    await expect(svc.createSlot(principal, { ...CO, teacherId: "00000000-0000-4000-8000-000000000000" }))
+      .rejects.toThrow(/not staff at this school/);
+  });
+
+  it("refuses a host who has LEFT the school", async () => {
+    // A meeting is future work. Naming a leaver sends an invitation into an
+    // inbox its owner can no longer open, and tells the organiser they will be
+    // there — the failure `assertStillHere` exists for, on a module that was
+    // never added to its list.
+    const { svc } = cohostHarness(["gone"], ["gone"], ["gone"]);
+    await expect(svc.createSlot(principal, { ...CO, teacherId: "gone" }))
+      .rejects.toThrow(/has left the school and cannot host a meeting/);
+  });
+
+  it("refuses a COHOST who has left, in the same words", async () => {
+    const { svc, cohosts } = cohostHarness(["t2", "gone"], ["t2", "gone"], ["gone"]);
+    await expect(svc.createSlot(principal, { ...CO, cohostIds: ["t2", "gone"] }))
+      .rejects.toThrow(/has left the school and cannot co-host a meeting/);
+    expect(cohosts).toHaveLength(0);
+  });
+
+  it("still opens a slot for the caller THEMSELVES with no extra lookup", async () => {
+    // The check must not make the ordinary act — a teacher offering their own
+    // availability — depend on a role lookup that could refuse them.
+    const { svc, tx } = cohostHarness([]);
+    await svc.createSlot(principal, { ...CO });
+    expect((tx.user.findMany as jest.Mock)).not.toHaveBeenCalled();
+  });
+
+  it("refuses a host who cannot open the meetings page", async () => {
+    const { svc } = cohostHarness(["t2"], []); // staff, but holds no meeting.host
+    await expect(svc.createSlot(principal, { ...CO, teacherId: "t2" }))
+      .rejects.toThrow(/cannot open the meetings page/);
   });
 });

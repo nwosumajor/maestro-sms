@@ -2040,6 +2040,55 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The cohosts were checked three ways and the host not at all
+`assertMayHost` (`meeting/meeting.service.ts`). `openSlot` takes `teacherId`
+from any staff-wide caller — `input.teacherId && staffWide ? input.teacherId :
+p.userId` — so a principal may open a slot on somebody else's behalf. That id
+was validated in NO way: not that they are staff, not that they still work here,
+not that they exist. Three lines below, the COHOST path asks all three.
+Measured live on the running stack, one principal, two requests:
+```
+host = a PARENT                     201
+host = a uuid that is NOBODY        201, teacherName: null, still bookable
+after:  400 / 400, a real teacher still 201
+```
+**THE COHOST CHECK'S OWN COMMENT DESCRIBES THE HARM IT WAS NOT APPLIED TO** — a
+parent must not be a host because it "would hand them the join link before the
+window and the organiser's view of the slot". Making them the HOST does exactly
+that, and additionally makes them the person a family books a meeting WITH.
+Sibling asymmetry inside a single method, with the careful half written first.
+// THERE IS NO FK ON `meeting_slot.teacherId`, so the phantom is a real stored
+row — the same enabler measured for `exam_seat.studentId`, where 55 of 104
+person-reference columns carry no foreign key.
+// **AND MEETINGS WERE NEVER ON THE `assertStillHere` LIST.** That entry names
+seven surfaces that hand out FUTURE work; a meeting is future work, and naming a
+leaver sends an invitation into an inbox its owner can no longer open while
+telling the organiser they will be there. Both the host AND the cohosts are
+checked now — the cohost path had the other two questions and not this one.
+// ONE RULE, NOT TWO SPELLINGS. The host and the cohosts stand in the same
+relation to the family, so the three checks moved into one helper that both
+call. A pair of checks that ought to agree is how this diverged.
+// THE CALLER'S OWN SLOT IS DELIBERATELY UNCHECKED and a test pins it: a teacher
+offering their own availability is signed in, still here, and holds the
+permission that reached the route, so making the ordinary act depend on a role
+lookup that could refuse them would be the fix causing the outage.
+// GOTCHA in the fixture, the twelfth instance: the harness's `user.findMany`
+returned `[]` to everything, which models a `user_role` row for a user that does
+not exist. It went unnoticed while nothing asked. Its sibling stub carries the
+comment "The harness HONOURS the where … a mock answering both with the same
+list is how a deleted check keeps passing" — written for `userRole`, not applied
+to `user` beside it.
+Mutation-validated twice: drop the host check (4 tests fail), drop the departed
+check (2 fail).
+
+// CORRECTION to the entry below: I recorded that the receipt date could not be
+driven over HTTP because "the demo tenant holds no posted payment". It holds
+NINETEEN — my query used `slug='demo-school'` and the slug is `demo`, so an
+empty result was my own bad probe reported as a fact about the data. Driven
+properly, on a real payment at 16:18 UTC: a school on `Pacific/Auckland` prints
+**Date: 2026-08-26** and an unset school **2026-08-25**. The same wrong slug had
+also made me believe that tenant had no message threads and no LMS content.
+
 ### The date on a receipt, and the sweep that found the rest of them
 Fixing the chargeback deadline made a claim in this file testable: that the
 remaining `toISOString().slice(0, 10)` uses "label a document; they do not key a

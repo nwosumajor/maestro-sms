@@ -13,6 +13,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { STILL_HERE } from "../common/still-here";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
 import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl,
   SUBJECT_STAGES,
@@ -367,6 +368,10 @@ export class MeetingService {
     }
     const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const { className, studentName } = await this.assertAudienceExists(tx, p, audience, staffWide);
+      // A DELEGATED host is checked exactly as a cohost is. Opening a slot for
+      // YOURSELF needs none of it: you are signed in, still here, and hold the
+      // permission that reached this route.
+      if (teacherId !== p.userId) await this.assertMayHost(tx, [teacherId], "host");
       const row = await tx.meetingSlot.create({
         data: {
           schoolId: p.schoolId,
@@ -423,36 +428,7 @@ export class MeetingService {
       const wantedCohosts = [...new Set(input.cohostIds ?? [])].filter((id) => id && id !== teacherId);
       if (wantedCohosts.length > 0) {
         if (wantedCohosts.length > 20) throw new BadRequestException("A meeting can have at most 20 additional staff.");
-        const staff = (await tx.userRole.findMany({
-          where: { userId: { in: wantedCohosts }, role: { name: { notIn: [...NON_STAFF_ROLE_NAMES] } } },
-          select: { userId: true },
-          distinct: ["userId"],
-        })) as Array<{ userId: string }>;
-        const ok = new Set(staff.map((x) => x.userId));
-        const notStaff = wantedCohosts.filter((id) => !ok.has(id));
-        if (notStaff.length > 0) {
-          throw new BadRequestException(`${notStaff.length} of those are not staff at this school.`);
-        }
-        // AND they must be able to SEE a meeting. Being staff is not enough:
-        // the meetings list is gated on `meeting.host`, so a colleague without
-        // it would be told they are attending and then get a 403 — an
-        // invitation that never arrives, and invisible to whoever sent it.
-        // Refusing here makes that impossible rather than merely unlikely.
-        const canSee = (await tx.userRole.findMany({
-          where: {
-            userId: { in: wantedCohosts },
-            role: { permissions: { some: { permission: { key: MEETING_PERMISSIONS.MEETING_HOST } } } },
-          },
-          select: { userId: true },
-          distinct: ["userId"],
-        })) as Array<{ userId: string }>;
-        const seeing = new Set(canSee.map((x) => x.userId));
-        const blind = wantedCohosts.filter((id) => !seeing.has(id));
-        if (blind.length > 0) {
-          throw new BadRequestException(
-            `${blind.length} of those cannot open the meetings page, so they would never see this. Their role needs meeting access first.`,
-          );
-        }
+        await this.assertMayHost(tx, wantedCohosts, "co-host");
         await tx.meetingCohost.createMany({
           data: wantedCohosts.map((tid) => ({ schoolId: p.schoolId, slotId: row.id, teacherId: tid })),
           skipDuplicates: true,
@@ -791,6 +767,77 @@ export class MeetingService {
    * to release a slot at all. It must never reach `openSlots`, where one parent
    * would learn which other families had booked.
    */
+  /**
+   * WHO MAY BE PUT IN FRONT OF A FAMILY AS A HOST.
+   *
+   * The cohost path asked three careful questions — is this a staff member of
+   * this school, can they actually open the meetings page, and are there fewer
+   * than twenty — while the HOST, the person a parent books a meeting WITH, was
+   * validated in no way at all. `teacherId` is taken from any staff-wide caller,
+   * so a principal could open a bookable slot hosted by a PARENT (the exact harm
+   * the cohost comment describes: it hands them the join link before the window
+   * and the organiser's view of the slot) or by a uuid that is nobody, which
+   * renders with no name and can still be booked. Measured live: both 201.
+   *
+   * ONE rule for both rather than two spellings of it — the host and the cohosts
+   * stand in the same relation to the family, and a pair of checks that ought to
+   * agree is how this diverged in the first place.
+   */
+  private async assertMayHost(tx: TenantTx, ids: string[], noun: string): Promise<void> {
+    if (ids.length === 0) return;
+    // STILL EMPLOYED. A meeting is FUTURE work: naming somebody who has left
+    // sends an invitation into an inbox its owner can no longer open and tells
+    // the organiser they are attending — the rule `assertStillHere` already
+    // applies to a cover reliever and an invigilator. Meetings were never on
+    // that list. Batched rather than per-id: a slot may carry twenty cohosts.
+    const people = (await tx.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, status: true },
+    })) as Array<{ id: string; name: string; status: string }>;
+    const byId = new Map(people.map((u) => [u.id, u]));
+    // RLS confines the lookup to the tenant, so a foreign id is simply absent
+    // and this can never confirm that another school's user exists.
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+      throw new BadRequestException(`${missing.length} of those are not staff at this school.`);
+    }
+    const gone = ids.filter((id) => byId.get(id)!.status !== STILL_HERE.status);
+    if (gone.length > 0) {
+      throw new BadRequestException(
+        `${gone.map((id) => byId.get(id)!.name).join(", ")} has left the school and cannot ${noun} a meeting.`,
+      );
+    }
+    const staff = (await tx.userRole.findMany({
+      where: { userId: { in: ids }, role: { name: { notIn: [...NON_STAFF_ROLE_NAMES] } } },
+      select: { userId: true },
+      distinct: ["userId"],
+    })) as Array<{ userId: string }>;
+    const ok = new Set(staff.map((x) => x.userId));
+    const notStaff = ids.filter((id) => !ok.has(id));
+    if (notStaff.length > 0) {
+      throw new BadRequestException(`${notStaff.length} of those are not staff at this school.`);
+    }
+    // AND they must be able to SEE a meeting. Being staff is not enough: the
+    // meetings list is gated on `meeting.host`, so somebody without it would be
+    // named on the slot and then get a 403 — an invitation that never arrives,
+    // and invisible to whoever sent it.
+    const canSee = (await tx.userRole.findMany({
+      where: {
+        userId: { in: ids },
+        role: { permissions: { some: { permission: { key: MEETING_PERMISSIONS.MEETING_HOST } } } },
+      },
+      select: { userId: true },
+      distinct: ["userId"],
+    })) as Array<{ userId: string }>;
+    const seeing = new Set(canSee.map((x) => x.userId));
+    const blind = ids.filter((id) => !seeing.has(id));
+    if (blind.length > 0) {
+      throw new BadRequestException(
+        `${blind.length} of those cannot open the meetings page, so they would never see this. Their role needs meeting access first.`,
+      );
+    }
+  }
+
   private async bookingsForHost(
     tx: TenantTx,
     slotIds: string[],
