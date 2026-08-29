@@ -38,12 +38,23 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
   const { shortDate } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [msg, setMsg] = React.useState<string | null>(null);
 
   const act = async (id: string, status: "REVIEWING" | "APPROVED" | "REJECTED") => {
     setBusy(id + status);
+    setMsg(null);
     const res = await postSms(`operator/onboarding-requests/${id}/status`, { status });
     setBusy(null);
+    // A FAILURE HAS TO SAY SO. This was `if (res.ok) router.refresh()` and
+    // nothing else, in a component with no message state at all — so a refused
+    // or failed decision stopped the spinner, changed nothing, and said
+    // nothing. The operator reads that as "it worked and the row is stale",
+    // and the row in question is a school waiting to be let in.
     if (res.ok) router.refresh();
+    // `postSms` already carries the server message plus a plain-language
+    // reading of the status — the shared interpretation every other mutation
+    // in this app shows.
+    else setMsg(res.error ?? "That could not be saved. Try again.");
   };
 
   // Approve & provision: jump straight into the "Onboard a school" form above,
@@ -72,6 +83,11 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
+        {msg && (
+          <p role="alert" className="text-sm font-medium text-destructive">
+            {msg}
+          </p>
+        )}
         {requests.length === 0 && <p className="text-sm text-muted-foreground">No requests.</p>}
         {requests.map((r) => (
           <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">

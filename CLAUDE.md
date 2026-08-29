@@ -2040,6 +2040,40 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A decision that failed, on the queue where schools wait to be let in
+`OnboardingRequests.act` (`components/operator/OnboardingRequests.tsx`). Swept
+the client-side twin of the silent-success class: a mutation whose FAILURE the
+user never learns about. **74 result-assigning mutations across the web, and
+exactly one had no failure path.**
+```
+const res = await postSms(`operator/onboarding-requests/${id}/status`, { status });
+setBusy(null);
+if (res.ok) router.refresh();      // and nothing else
+```
+The component had no message state, no error import and no alert — no way to
+report a failure AT ALL. So a refused or failed decision stopped the spinner,
+changed nothing and said nothing, which an operator reads as "it worked and the
+row is stale". The row in question is a prospective school waiting to be let in,
+on the funnel this file already records as the platform's only unanswered REVENUE.
+// `postSms` ALREADY CARRIES THE ANSWER. It returns `{ok, status, data, error}`
+where `error` is the server message plus a plain-language reading of the status
+— the shared interpretation every other mutation in the app shows. The fix is to
+display what was already in hand, which is the same shape as the lead-age fix on
+this very component: the data was there and the defect was in the drawing.
+// GOTCHA in my own fix: I reached for `readApiError(res)`, which takes a raw
+`Response`. `sendWithStepUp` returns one and `postSms` does not — two senders
+with different return types, and the compiler caught it.
+// **A GATE WAS PROTOTYPED TWICE AND SHIPPED NEITHER TIME**, which is the honest
+outcome rather than a weak one. "An `if (res.ok)` with no `else`" flags 4 sites
+of which 3 are correct (a ternary, and two `if (ok) { … return; }` fallthroughs);
+"the result is referenced twice" flags 15, all correct, because it cannot see
+`readApiError(res)`. This repo's own rule is that an over-wide gate is the same
+failure as a blind one — it teaches the next reader to add an exemption — so the
+sweep is recorded here and the rule is not enforced in code. Same conclusion the
+`body.studentIds` gate reached.
+// The sweep is worth re-running when a new mutation idiom appears; what it
+proves today is that 73 of 74 already tell the user, in one of four shapes.
+
 ### The gate for a translation nobody sends, and a guard driven for the first time
 `every-translation-has-a-producer.spec.ts`. The entry below found five catalogue
 entries with no producer; this is the rule that stops a sixth. The existing test
