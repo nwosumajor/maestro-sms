@@ -15,19 +15,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { STILL_HERE } from "../common/still-here";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
-import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl,
-  SUBJECT_STAGES,
-  meetingAudienceProblem,
-  type MeetingAudience,
-  describeAudience,
-  type MeetingAudienceKind,
-  isAppointment,
-  NON_STAFF_ROLE_NAMES,
-  MEETING_PERMISSIONS,
-  parseStreamRef,
-  streamAudienceRef,
-  CLASS_STREAM_LABELS,
-} from "@sms/types";
+import { CLASS_STREAM_LABELS, MEETING_PERMISSIONS, MEETING_PROVIDERS, NON_STAFF_ROLE_NAMES, SUBJECT_STAGES, describeAudience, isAppointment, isMeetingJoinOpen, meetingAudienceProblem, meetingJoinOpensAt, normalizeMeetingUrl, parseStreamRef, resolveRegion, schoolDateString, streamAudienceRef, type MeetingAudience, type MeetingAudienceKind } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -66,6 +54,22 @@ function streamLabel(stage: string | null, level: number | null, stream: string 
   const year = level == null ? "" : `${prefix === "SS" || prefix === "JSS" ? "" : " "}${level}`;
   const name = stream ? ` ${CLASS_STREAM_LABELS[stream as keyof typeof CLASS_STREAM_LABELS] ?? stream}` : "";
   return `${prefix}${year}${name}`.trim();
+}
+
+/**
+ * When a meeting is, AT THE SCHOOL.
+ *
+ * One definition, because the booking notice and the cancellation notice are
+ * two readings of the same instant and a pair that ought to agree is how these
+ * things drift. Both used `toISOString()` — the server's UTC — on the message
+ * that tells a family when to turn up.
+ */
+function meetingWhen(timezone: string, at: Date): string {
+  return `${schoolDateString(timezone, at)} ${at.toLocaleTimeString("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
 @Injectable()
@@ -686,20 +690,56 @@ export class MeetingService {
         tx,
       );
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { name: true } });
-      return { row, teacherId: slot.teacherId, startsAt: slot.startsAt, studentName: student?.name ?? "" };
+      const host = await tx.user.findFirst({ where: { id: slot.teacherId }, select: { name: true } });
+      // The meeting happens AT THE SCHOOL, so the time in the notice is the
+      // school's clock. It was `toISOString()` — the server's UTC — which tells
+      // a parent in Lagos to come an hour early and one in Toronto four hours
+      // late, on the one message that says when to turn up.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { country: true, timezone: true },
+      });
+      return {
+        row,
+        teacherId: slot.teacherId,
+        startsAt: slot.startsAt,
+        studentName: student?.name ?? "",
+        hostName: host?.name ?? "the teacher",
+        timezone: resolveRegion(school ?? {}).timezone,
+      };
     });
 
+    const when = meetingWhen(outcome.timezone, outcome.startsAt);
     try {
       await this.notifications.enqueue(this.ctx(p), {
         recipientId: outcome.teacherId,
         type: "GENERIC",
         title: "Parent meeting booked",
-        body: `A parent booked a meeting about ${outcome.studentName} for ${outcome.startsAt.toISOString().slice(0, 16).replace("T", " ")}.`,
+        body: `A parent booked a meeting about ${outcome.studentName} for ${when}.`,
         data: { slotId, bookingId: outcome.row.id },
         channels: ["EMAIL"],
       });
     } catch {
       /* non-fatal */
+    }
+    // AND THE PARENT WHO BOOKED IT. Only the teacher was told, while this
+    // module's own description says both parties are notified on book and
+    // cancel — the cancel path does exactly that one method below. A parent
+    // holds no record of a time they typed into a form, and the translated
+    // message for this had been sitting in the catalogue with no producer.
+    try {
+      await this.notifications.enqueue(this.ctx(p), {
+        recipientId: p.userId,
+        type: "GENERIC",
+        key: "meeting.booked",
+        params: { host: outcome.hostName, student: outcome.studentName, date: when },
+        title: "Meeting confirmed",
+        body: `Your meeting with ${outcome.hostName} about ${outcome.studentName} is confirmed for ${when}.`,
+        data: { slotId, bookingId: outcome.row.id },
+        channels: ["EMAIL"],
+      });
+    } catch {
+      /* non-fatal — the booking is already committed */
     }
     return this.toBookingDto(outcome.row, outcome.startsAt, outcome.studentName);
   }
@@ -721,14 +761,37 @@ export class MeetingService {
       );
       // Notify the OTHER party.
       const notifyId = p.userId === b.parentId ? b.slot.teacherId : b.parentId;
-      return { notifyId, startsAt: b.slot.startsAt };
+      const host = await tx.user.findFirst({ where: { id: b.slot.teacherId }, select: { name: true } });
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { country: true, timezone: true },
+      });
+      return {
+        notifyId,
+        startsAt: b.slot.startsAt,
+        toParent: notifyId === b.parentId,
+        hostName: host?.name ?? "the teacher",
+        timezone: resolveRegion(school ?? {}).timezone,
+      };
     });
     try {
+      const when = meetingWhen(outcome.timezone, outcome.startsAt);
       await this.notifications.enqueue(this.ctx(p), {
         recipientId: outcome.notifyId,
         type: "GENERIC",
+        // THE KEY ONLY WHEN THE PARENT IS THE ONE BEING TOLD. The catalogue
+        // entry reads "The meeting with {host} … has been cancelled", which is
+        // written for a family; sending it to the host names them to
+        // themselves. The teacher keeps the plain sentence until an entry
+        // exists that is worded for them — a translation that reads oddly is
+        // not an improvement on English.
+        ...(outcome.toParent
+          ? { key: "meeting.cancelled", params: { host: outcome.hostName, date: when } }
+          : {}),
         title: "Parent meeting cancelled",
-        body: `A meeting scheduled for ${outcome.startsAt.toISOString().slice(0, 16).replace("T", " ")} was cancelled.`,
+        body: outcome.toParent
+          ? `The meeting with ${outcome.hostName} on ${when} has been cancelled.`
+          : `A meeting scheduled for ${when} was cancelled.`,
         data: { bookingId },
         channels: ["EMAIL"],
       });

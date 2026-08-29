@@ -49,6 +49,12 @@ function makeService() {
     slot: { teacherId: "teach-1", startsAt: new Date("2026-09-01T09:00:00.000Z") },
   };
   const tx = {
+    // Every real TenantTx has this: the notice carries the meeting time in the
+    // SCHOOL's clock, so the producer resolves the school's region.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
+    // The cancellation names the HOST, so the producer resolves their name —
+    // every real TenantTx can answer this.
+    user: { findFirst: jest.fn(async () => ({ name: "Demo Teacher" })) },
     meetingBooking: {
       findFirst: jest.fn(async () => booking),
       update: jest.fn(async () => ({})),

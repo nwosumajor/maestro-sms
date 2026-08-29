@@ -2040,6 +2040,66 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Five translations with no producer, and the parent who was never told
+`notification-messages.ts` holds a per-user message catalogue whose header
+states the priority plainly: a francophone parent "rarely opens the web app.
+They get an SMS saying their child was absent, and they get a report card and a
+fee receipt." A test enforces that every entry carries every language. **Nothing
+checked that an entry is ever SENT, and five of the nine had no producer at
+all** — `document.shared`, `exam.scheduled`, `meeting.booked`,
+`meeting.cancelled`, `reportcard.available`. The text was written ahead of the
+code and never wired, so the report card — one of the three artifacts the file
+itself names — went out in English.
+**AND WIRING `meeting.booked` FOUND THE REAL DEFECT UNDER IT.** The entry reads
+"Votre rendez-vous avec {host} … est confirmé", which is addressed to a PARENT —
+and `book()` notified only the TEACHER. The parent who booked was told nothing,
+while this module's own description says both parties are notified on book and
+cancel, and `cancelBooking` one method below does exactly that. Sibling
+asymmetry with the correct half written second, and the translation for the
+missing message sitting unused three files away.
+**A THIRD DEFECT IN THE SAME TWO LINES:** both notices rendered the time with
+`toISOString()` — the SERVER's UTC — on the one message that says when to turn
+up. Live, a 09:30Z slot at a Lagos school: it said **09:30** and now says
+**10:30**. Thirteenth surface in that class, and the first that is a TIME rather
+than a day.
+Live, one booking, two recipients, after:
+```
+teacher@demo.school  Parent meeting booked  "…about Demo Student for 2026-10-05 10:30."
+parent@demo.school   Meeting confirmed      "…is confirmed for 2026-10-05 10:30."
+parent with locale fr-SN:
+                     Rendez-vous confirmé   "Votre rendez-vous avec Demo Teacher au sujet
+                                             de Demo Student est confirmé pour le …"
+```
+The English teacher and the French parent from ONE booking — per-recipient
+rendering doing its job end to end for the first time on this key.
+// `meeting.cancelled` IS KEYED ONLY WHEN THE PARENT IS THE ONE TOLD. Its text
+names "{host}", so sending it to the host names them to themselves; the teacher
+keeps the plain sentence until an entry is worded for them. A translation that
+reads oddly is not an improvement on English — the same judgement the catalogue
+header makes about migrating incrementally.
+// ONE `meetingWhen`, because the booking notice and the cancellation notice are
+two readings of the same instant, which is how a pair drifts.
+// `document.shared` IS ALSO WIRED, and it is the one that matters most: a
+REPORT CARD is shared through that path, so this is the artifact the catalogue's
+own header names. It needed the pupil's NAME, which `notifyGuardians` did not
+have — a guardian of three otherwise opens all three documents to find out which.
+// STILL UNWIRED, and recorded rather than left silent: `exam.scheduled` (needs
+hall and seat) and `reportcard.available` (needs the TERM, which the Document
+Vault does not know — the report card reaches families through
+`document.shared`, deliberately, so that no alert is sent before real bytes
+exist).
+// GOTCHA, and it is the trap this file already records one level up: my first
+version of the documents test did not compile, and I read `Tests: 191 passed`
+as a pass. **The line that mattered was `Test Suites: 1 failed`** — eight tests
+had not run at all, and the mutation I then ran "passed" against a suite that
+was never executed. Grep both lines, never just the test count.
+// GOTCHA, twice more: the meeting and documents fixtures had no
+`school.findFirst` and no `user.findFirst`, which every real `TenantTx` has —
+and in `notifyGuardians` the missing lookup was swallowed by the method's own
+try/catch, so the notice silently vanished rather than erroring.
+Mutation-validated four ways: drop the parent notice, restore the UTC time, drop
+the meeting key, drop the document key.
+
 ### The half of the clock sweep that keyed on the wrong thing
 `timeOfDay` / `weekdayDate` (`lib/format.ts`), and a second assertion on
 `school-dates-use-the-schools-region`. The previous sweep asked "who calls

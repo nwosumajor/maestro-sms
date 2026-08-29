@@ -428,13 +428,25 @@ export class DocumentsService {
 
   private async notifyGuardians(p: Principal, studentId: string, title: string) {
     try {
-      const guardians = await this.db.runAsTenant(this.ctx(p), (tx) =>
-        tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
-      );
-      for (const g of guardians as { parentId: string }[]) {
+      const { guardians, studentName } = await this.db.runAsTenant(this.ctx(p), async (tx) => ({
+        guardians: (await tx.parentChild.findMany({
+          where: { studentId },
+          select: { parentId: true },
+        })) as { parentId: string }[],
+        // The catalogue entry names the pupil, and a document notice that does
+        // not say WHOSE document it is makes a guardian of three open all three.
+        studentName: (await tx.user.findFirst({ where: { id: studentId }, select: { name: true } }))?.name ?? "",
+      }));
+      for (const g of guardians) {
         await this.notifications.enqueue(this.ctx(p), {
           recipientId: g.parentId,
           type: "DOCUMENT_AVAILABLE",
+          // A KEY, not a composed sentence. This is the path a REPORT CARD is
+          // shared on — one of the three artifacts the message catalogue names
+          // as what a francophone parent actually reads — and its translation
+          // had been sitting there with no producer.
+          key: "document.shared",
+          params: { title, student: studentName },
           title: "New document available",
           body: `A new document "${title}" is available in the school portal.`,
           channels: ["EMAIL"],

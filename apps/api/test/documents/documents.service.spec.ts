@@ -24,6 +24,9 @@ function makeService(f: Fakes) {
       ),
       delete: jest.fn().mockResolvedValue({}),
     },
+    // Every real TenantTx has this: the guardian notice names the PUPIL, so
+    // the producer resolves their name.
+    user: { findFirst: jest.fn().mockResolvedValue({ name: "Demo Student" }) },
     parentChild: {
       findFirst: jest.fn().mockResolvedValue(f.parentLink ?? null),
       findMany: jest.fn().mockResolvedValue([]),
@@ -154,5 +157,25 @@ describe("DocumentsService", () => {
       contentType: "application/pdf",
     });
     expect(res.upload.url).toBe("https://up");
+  });
+
+  it("carries the catalogue KEY, so a francophone guardian reads French", async () => {
+    // This is the path a REPORT CARD is shared on — one of the three artifacts
+    // the message catalogue names as what a francophone parent actually reads —
+    // and `document.shared` had been sitting in that catalogue with no
+    // producer. A composed sentence has already picked a language; the key
+    // defers that to the moment the row is written, per recipient.
+    const { service, notifications, tx } = makeService({
+      docRow: { id: "doc-1", studentId: "stu-1", type: "REPORT_CARD", status: "PENDING", title: "Term 1 Report" },
+    });
+    (tx.parentChild.findMany as jest.Mock).mockResolvedValue([{ parentId: "mum-1" }]);
+    await service.confirmUpload(principal(["school_admin"]), "doc-1");
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: "document.shared",
+        params: expect.objectContaining({ student: "Demo Student", title: "Term 1 Report" }),
+      }),
+    );
   });
 });

@@ -81,6 +81,9 @@ function harness(opts: {
   const created: Array<Record<string, unknown>> = [];
   let slotWhere: Record<string, unknown> | null = null;
   const tx = {
+    // Every real TenantTx has this: the notice carries the meeting time in the
+    // SCHOOL's clock, so the producer resolves the school's region.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
   // Capacity checks lock the contended row first (the class / route / slot),
   // so the count and the insert are atomic — the same guard hostel allocation
   // uses for a bed. The mock just has to answer.
@@ -255,6 +258,9 @@ describe("a parent sees only what their family is invited to", () => {
 function announceHarness(guardians: string[], opts: { stageClasses?: string[] } = {}) {
   const calls: string[][] = [];
   const tx = {
+    // Every real TenantTx has this: the notice carries the meeting time in the
+    // SCHOOL's clock, so the producer resolves the school's region.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
   // Capacity checks lock the contended row first (the class / route / slot),
   // so the count and the insert are atomic — the same guard hostel allocation
   // uses for a bed. The mock just has to answer.
@@ -402,6 +408,9 @@ function selectHarness(realParents: string[]) {
   // Every `where` the pupil lookup was handed, so a null id is visible.
   const userLookups: Array<Record<string, unknown>> = [];
   const tx = {
+    // Every real TenantTx has this: the notice carries the meeting time in the
+    // SCHOOL's clock, so the producer resolves the school's region.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
     class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
     user: {
@@ -502,6 +511,9 @@ describe("book() — the capacity claim itself", () => {
   function bookHarness(kind: string) {
     const counted: string[] = [];
     const tx = {
+    // Every real TenantTx has this: the notice carries the meeting time in the
+    // SCHOOL's clock, so the producer resolves the school's region.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
       // The appointment branch locks the slot row before counting, so the claim
       // is atomic — a briefing deliberately skips both.
       $executeRaw: jest.fn().mockResolvedValue(1),
@@ -572,6 +584,9 @@ function cohostHarness(staffIds: string[], seeingIds?: string[], goneIds: string
   const cohosts: Array<Record<string, unknown>> = [];
   const notified: string[][] = [];
   const tx = {
+    // Every real TenantTx has this: the notice carries the meeting time in the
+    // SCHOOL's clock, so the producer resolves the school's region.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
     class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
     // HONOURS THE WHERE, for the same reason the userRole stub does. This used
@@ -705,6 +720,9 @@ describe("a co-host is a host for the things that matter", () => {
 
   function listHarness(cohostOf: string[]) {
     const tx = {
+    // Every real TenantTx has this: the notice carries the meeting time in the
+    // SCHOOL's clock, so the producer resolves the school's region.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
       meetingCohost: {
         findMany: jest.fn(({ where }: { where: Record<string, unknown> }) =>
           Promise.resolve(
