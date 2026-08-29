@@ -1,5 +1,5 @@
 // =============================================================================
-// AdmissionsService — maker-checker (Admin → HR → Principal) unit tests
+// AdmissionsService — maker-checker (Admin → Principal) unit tests
 // =============================================================================
 // Proves the staged enrolment review: each stage needs the right granular
 // permission, a user can act at most once (separation of duties), APPROVE advances
@@ -93,14 +93,15 @@ describe("AdmissionsService maker-checker", () => {
     await expect(service.review(principal, "app1", "APPROVE")).resolves.toBeDefined();
   });
 
-  it("advances Admin → HR → Principal and ACCEPTS on the final stage, then emails the applicant", async () => {
+  it("advances Admin → Principal and ACCEPTS on the final stage, then emails the applicant", async () => {
+    // The HR stage was removed from this chain deliberately: it was copied from
+    // STAFF_REQUEST_CHAIN, where HR belongs because HR owns employment, and
+    // admitting a child is not an employment decision. Two people still sign,
+    // and the separation-of-duties test below is what keeps that real.
     const { service, channel, state } = makeService(baseApp());
     let r = await service.review(admin, "app1", "APPROVE");
     expect(r.status).toBe("REVIEWING");
     expect(r.currentStage).toBe(1);
-    r = await service.review(hr, "app1", "APPROVE");
-    expect(r.status).toBe("REVIEWING");
-    expect(r.currentStage).toBe(2);
     r = await service.review(principal, "app1", "APPROVE");
     expect(r.status).toBe("ACCEPTED");
     expect(state.app.status).toBe("ACCEPTED");

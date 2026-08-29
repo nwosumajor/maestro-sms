@@ -134,7 +134,7 @@ describe("the chain a school can actually staff", () => {
   it("keeps every stage the school CAN staff", async () => {
     const { service, created } = makeService();
     await service.submit({ schoolSlug: "s", applicantName: "P", applicantEmail: "p@e.com", childName: "C" });
-    expect((created[0].stages as Array<{ key: string }>).map((s) => s.key)).toEqual(["ADMIN", "HR", "PRINCIPAL"]);
+    expect((created[0].stages as Array<{ key: string }>).map((s) => s.key)).toEqual(["ADMIN", "PRINCIPAL"]);
   });
 
   it("keeps the FULL chain when it can staff none of it", async () => {
@@ -142,7 +142,7 @@ describe("the chain a school can actually staff", () => {
     // sail through because the checks were empty.
     const { service, created } = makeService({ holders: { [ADMIN]: [], [HR]: [], [HEAD]: [] } });
     await service.submit({ schoolSlug: "s", applicantName: "P", applicantEmail: "p@e.com", childName: "C" });
-    expect((created[0].stages as Array<{ key: string }>)).toHaveLength(3);
+    expect((created[0].stages as Array<{ key: string }>)).toHaveLength(2);
   });
 });
 
@@ -174,7 +174,7 @@ describe("spending a signature you are going to need", () => {
   it("lets the principal act at their OWN stage", async () => {
     // Being the only final approver is exactly why they must be free here.
     const { service } = makeService({
-      app: { currentStage: 2, status: "REVIEWING", approvals: [{ approverId: "admin-1" }, { approverId: "hr-1" }] },
+      app: { currentStage: 1, status: "REVIEWING", approvals: [{ approverId: "admin-1" }] },
     });
     await expect(service.review(who("head-1", [ADMIN, HEAD]), "app-1", "APPROVE")).resolves.toMatchObject({
       status: "ACCEPTED",

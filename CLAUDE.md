@@ -2113,12 +2113,34 @@ manager is not stalled, which was the failure I went looking for.
 // The duplicate-name case is the one a school of 900 actually hits, and
 `allocateLoginEmail(..., { autoSuffix: true })` handles it, with the RLS caveat
 and "P2002 is the final guarantee" written down beside it.
-// **A DESIGN DECISION I AM NOT TAKING, flagged rather than changed:**
-`ADMISSION_REVIEW_CHAIN` is School admin -> **HR manager** -> Principal, and its
-own comment says it "Mirrors STAFF_REQUEST_CHAIN". That chain is right for a
-STAFF request; whether the HR manager should gate admitting a CHILD is a
-question about how a school runs, not a correctness bug — and `resolveChain`
-already means a school without one is unaffected. Worth the owner confirming.
+// **THAT DESIGN QUESTION WAS PUT TO THE OWNER AND DECIDED: THE HR STAGE IS
+GONE.** `ADMISSION_REVIEW_CHAIN` was School admin -> **HR manager** -> Principal,
+and its own comment said it "Mirrors STAFF_REQUEST_CHAIN" — which is where it
+came from. That chain is right for a STAFF request, because HR owns employment;
+admitting a CHILD is not an employment decision, and the copied stage put an
+approver in front of every family who had nothing to decide. It is now
+**School admin -> Principal (final)**. Live: admin approves -> REVIEWING stage 1,
+the HR manager gets **403 "You are not the Principal (final) approver"**,
+principal approves -> ACCEPTED, convert 201.
+// WHAT DID NOT CHANGE, and three tests pin it: two people still sign, no user
+may decide two stages, and `workflow.review.hr` still gates STAFF_REQUEST_CHAIN's
+middle stage — this removes HR from admissions, not from the platform.
+// **THE CONSTANT ALONE WOULD HAVE LEFT PENDING APPLICATIONS WAITING FOR IT.**
+The resolved chain is STORED per application and `currentStage` is an INDEX into
+it — deliberately, so an application in flight is decided by the route it started
+on. So migration `20270117000000` rewrites PENDING rows only, and the index
+shifts with the array. Verified on real rows in a rolled-back transaction:
+```
+NEW        awaiting ADMIN     -> ADMIN->PRINCIPAL, awaiting ADMIN
+REVIEWING  awaiting HR        -> ADMIN->PRINCIPAL, awaiting PRINCIPAL
+REVIEWING  awaiting PRINCIPAL -> ADMIN->PRINCIPAL, awaiting PRINCIPAL  (index 2 -> 1)
+ACCEPTED   (finished)         -> untouched, still ADMIN->HR->PRINCIPAL
+```
+A finished application keeps its route because that route is part of the record,
+and the `approvals` log — who decided what, and when — is a separate column this
+never touches. It rewrites the ROUTE, never the EVIDENCE.
+// Without the migration the failure is silent and is this file's own recurring
+shape: the school removes the HR step, and the queue goes on waiting for it.
 // GOTCHA in my own probe: I took "the first non-platform school" for the slug
 and applied to a DIFFERENT tenant, then read the resulting 404s as a defect for
 a minute. They were correct isolation. Scope a probe's own fixture query to the

@@ -21,9 +21,24 @@ export interface AdmissionStage {
   permission: string;
 }
 
-/** Parent enrolment review: School admin → HR → Principal (final). */
+/**
+ * Parent enrolment review: School admin → Principal (final).
+ *
+ * THE HR MANAGER IS DELIBERATELY NOT IN THIS CHAIN. It used to be
+ * ADMIN → HR → PRINCIPAL, and the comment above said it "mirrors
+ * STAFF_REQUEST_CHAIN" — which is where it came from. That chain is right for a
+ * STAFF request (leave, a salary change, a contract), because HR owns
+ * employment. Admitting a CHILD is not an employment decision, and routing it
+ * through HR put a stage in front of every family that had nothing to decide.
+ *
+ * Two people still sign off, and the separation of duties is unchanged: the
+ * service enforces that no user may decide two stages, so a school administrator
+ * and the principal are still two different people.
+ *
+ * `workflow.review.hr` is untouched and still gates STAFF_REQUEST_CHAIN's middle
+ * stage — this removes HR from admissions, not from the platform.
+ */
 export const ADMISSION_REVIEW_CHAIN: AdmissionStage[] = [
   { key: "ADMIN", label: "School administrator", permission: "admission.review" },
-  { key: "HR", label: "HR manager", permission: "workflow.review.hr" },
   { key: "PRINCIPAL", label: "Principal (final)", permission: "workflow.review.principal" },
 ];
