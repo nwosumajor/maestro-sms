@@ -112,7 +112,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     // with a stub below; everything else must work without it. Stripe stub:
     // the Paystack path never calls getCharge.
     const stripeStub = { getCharge: jest.fn().mockResolvedValue(null) };
-    svc = new DisputesService(tenant, audit, notifications, { client: null } as never, stripeStub as never);
+    svc = new DisputesService(tenant, audit, notifications, { client: null } as never, stripeStub as never, regionStub as never);
   });
 
   afterAll(async () => {
@@ -212,7 +212,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     const tenant = new PrismaTenantService() as never;
     const audit = new AuditLogService();
     const stripeStub = { getCharge: jest.fn().mockResolvedValue(null) };
-    const escalating = new DisputesService(tenant, audit, notifications, privileged as never, stripeStub as never);
+    const escalating = new DisputesService(tenant, audit, notifications, privileged as never, stripeStub as never, regionStub as never);
 
     // Already 2 dispute rows exist (D1 + the LOST one); pushing to the
     // threshold must escalate.
@@ -247,7 +247,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
       },
     };
     const tenant = new PrismaTenantService() as never;
-    const stripeSvc = new DisputesService(tenant, new AuditLogService(), notifications, privileged as never, stripeStub as never);
+    const stripeSvc = new DisputesService(tenant, new AuditLogService(), notifications, privileged as never, stripeStub as never, regionStub as never);
 
     await stripeSvc.applyStripeDisputeEvent({
       type: "charge.dispute.created",
@@ -345,7 +345,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
   it("STRIPE: an unmappable dispute (no schoolId metadata) is dropped, never guessed", async () => {
     const stripeStub = { getCharge: jest.fn().mockResolvedValue({ metadata: {} }) };
     const tenant = new PrismaTenantService() as never;
-    const dropSvc = new DisputesService(tenant, new AuditLogService(), notifications, { client: null } as never, stripeStub as never);
+    const dropSvc = new DisputesService(tenant, new AuditLogService(), notifications, { client: null } as never, stripeStub as never, regionStub as never);
     const before = (await dropSvc.list(staffA())).items.length;
     const res = await dropSvc.applyStripeDisputeEvent({
       type: "charge.dispute.created",
@@ -354,4 +354,30 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     expect(res).toEqual({ ok: true });
     expect((await dropSvc.list(staffA())).items.length).toBe(before);
   });
+
+  it("dates the evidence deadline by the SCHOOL's day, not the server's", async () => {
+    // `dueAt` is a real instant from the gateway. Read in UTC, a school west of
+    // it is told a day LATER than the deadline falls — the direction that loses
+    // the money, on a notice whose own words are "lost by default". The
+    // disputes screen renders this same field in the school's zone, so a UTC
+    // notice would disagree with the page it tells staff to open.
+    const id = "disp-tz-" + randomUUID();
+    // 02:00Z on 1 September is still 31 August in Toronto.
+    const ev = disputeEvent({ event: "charge.dispute.create", disputeId: id });
+    ev.data.due_at = "2026-09-01T02:00:00.000Z";
+    await svc.applyDisputeEvent(ev);
+
+    const { rows } = await admin.query(
+      `SELECT body FROM notification WHERE "schoolId" = $1 AND body LIKE '%Evidence deadline%' ORDER BY "createdAt" DESC LIMIT 1`,
+      [SA],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].body).toContain("Evidence deadline: 2026-08-31.");
+    expect(rows[0].body).not.toContain("2026-09-01");
+  });
 });
+// A school WEST of UTC, so the notice's deadline day differs from the server's
+// and the test can tell which clock was used.
+const regionStub = { forSchool: async () => ({ timezone: "America/Toronto" }) };
+
+

@@ -2040,6 +2040,33 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A chargeback deadline, a day late, on the notice that says "lost by default"
+`DisputesService` (`fees/disputes.service.ts`). The sibling of the entry below,
+found by arriving from it: once the disputes SCREEN rendered the evidence
+deadline in the school's timezone, the NOTICE that tells staff to open that
+screen was still reading it `toISOString().slice(0, 10)` — the server's UTC day.
+`dueAt` is a real instant from the gateway, so the two surfaces could name
+different days for one deadline.
+**AND THE ERROR RUNS THE WRONG WAY FOR A SCHOOL WEST OF UTC.** Measured by
+mutation, a deadline at `2026-09-01T02:00:00Z` for a Toronto school:
+```
+UTC (before)          Evidence deadline: 2026-09-01.
+the school's day      Evidence deadline: 2026-08-31.
+```
+A day LATER than it falls, in a message whose own closing words are "an
+unanswered dispute is lost by default". Uses `schoolDateString(tz, at)` — the
+helper the school-day rule already turns on — via the @Global 60s-cached
+`SchoolRegionService`. Twelfth surface in that class.
+// THE OWNER'S COPY IS DELIBERATELY DIFFERENT and is now LABELLED `(UTC)` rather
+than silently converted. The platform owner reads every tenant's alerts in one
+list, and a deadline rendered in each school's own zone cannot be compared down
+it — the same judgement the operator console makes about its clock. Labelled UTC
+is honest; unlabelled UTC was the defect.
+// GOTCHA in my own verification: my first mutation run was grepped with
+`head -8` and cut off before the new test's line, so I saw eight ticks and no
+verdict. A mutation you did not WATCH fail proves nothing — re-run, it names the
+test and prints both days.
+
 ### The money followed the school and the clock did not
 `shortDate` / `dateTime` / `longDate` (`apps/web/lib/format.ts`) take an optional
 region and fall back to `PLATFORM_REGION` — `en-NG` / `Africa/Lagos`. Right for

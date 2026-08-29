@@ -30,7 +30,7 @@
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { DISPUTE_ALERT_THRESHOLD, DISPUTE_ALERT_WINDOW_DAYS, formatMoney} from "@sms/types";
+import { DISPUTE_ALERT_THRESHOLD, DISPUTE_ALERT_WINDOW_DAYS, formatMoney, schoolDateString } from "@sms/types";
 import type { DisputeStatus, PaymentDisputeDto, PaymentDisputePageDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -46,6 +46,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import type { PaystackEvent } from "../payments/paystack.service";
 import { StripeService, type StripeEvent } from "../payments/stripe.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 /** Roles alerted in-school when a dispute opens/updates/resolves. */
 const FINANCE_ROLES = ["accountant", "school_admin", "principal"];
@@ -107,6 +108,7 @@ export class DisputesService {
     private readonly notifications: NotificationService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly stripe: StripeService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -305,7 +307,14 @@ export class DisputesService {
     const notify = (outcome.created && opts.notify) || opts.remind;
     if (notify) {
       const amount = this.formatAmount(n.amountMinor, n.currency);
-      const deadline = n.dueAt ? ` Evidence deadline: ${n.dueAt.toISOString().slice(0, 10)}.` : "";
+      // THE SCHOOL'S DAY, not the server's. `dueAt` is a real instant from the
+      // gateway, and this deadline is the whole point of the notice — an
+      // unanswered dispute is lost by default. Read in UTC, a school west of it
+      // is told a day LATER than the deadline actually falls, which is the
+      // direction that loses the money. The disputes screen renders the same
+      // field in the school's zone, so the two would otherwise disagree.
+      const tz = (await this.region.forSchool(n.schoolId)).timezone;
+      const deadline = n.dueAt ? ` Evidence deadline: ${schoolDateString(tz, n.dueAt)}.` : "";
       const what = n.platformCharge
         ? `the school's ${amount} subscription payment`
         : `a ${amount} card payment${outcome.invoiceRef ? ` on invoice ${outcome.invoiceRef}` : ""}`;
@@ -324,7 +333,10 @@ export class DisputesService {
       await this.notifyOwners(
         `Subscription payment disputed (${this.formatAmount(n.amountMinor, n.currency)})`,
         `A school's subscription charge (ref ${n.reference}) is being disputed by their bank.${
-          n.dueAt ? ` Evidence deadline: ${n.dueAt.toISOString().slice(0, 10)}.` : ""
+          // Labelled UTC deliberately: the owner watches every tenant, and a
+          // deadline silently rendered in each school's own zone cannot be
+          // compared down a list. Same call as the operator console's clock.
+          n.dueAt ? ` Evidence deadline: ${n.dueAt.toISOString().slice(0, 10)} (UTC).` : ""
         } Respond on the gateway dashboard; review the school's standing in the operator console.`,
         { schoolId: n.schoolId, disputeId: n.disputeId, reference: n.reference },
       );
