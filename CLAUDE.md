@@ -3663,6 +3663,73 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### Four owner decisions, taken
+Four things this file had recorded as DEFERRED — each written down as "a
+decision to take rather than a correctness fix to slip in". The owner took them.
+
+**1. AN AWARD DECIDED BEFORE THE FEES EXIST.** `disburseFeesCredit` posted
+against the pupil's open invoice and returned `no_open_invoice` otherwise: the
+award stood, nothing posted, NOTHING EVER RETRIED — four AWARDED applications,
+NGN 800,000, had credited nobody. That is the ORDINARY case, not an edge one.
+Every other path already handles it (library/hostel/transport CREATE an invoice;
+a dedicated-account transfer posts to the CREDIT LEDGER), and a scholarship is
+not a charge, so it takes the credit ledger — spendable through the existing
+apply-credit path, no second posting route. Live: award -> NGN 100,000 credit
+stamped NGN; re-award -> still one entry; revoke -> negative entry, balance zero.
+// ONLY IN THE AWARD'S CURRENCY: a credit is spendable only against an invoice
+in its own currency, so an NGN credit in a school billing cedis is money nobody
+can use. Refused loudly, the same line the invoice arm already draws.
+// REVOKE TAKES IT BACK — the revoke arm reversed a PAYMENT and would have left
+a CREDIT standing, so a family kept a balance for a withdrawn award.
+// GOTCHA: `if (false && …)` in front of that reversal left every string a
+source assertion looks for in place and passed. It had to be DRIVEN.
+
+**2. AN ALUMNUS IS NOT A USER THE SCHOOL NOTIFIES.** A broadcast was a
+NOTIFICATION addressed to a user account, and `persist` drops every external
+channel for a non-ACTIVE recipient — which an alumnus is BY DEFINITION. So a
+properly-exited alumnus got nothing, and the few reached were those whose exit
+had never been processed. The audience is now the ALUMNI REGISTER'S OWN EMAIL,
+sent through EmailService — the use `NotificationModule` already documents it
+for. It also reaches the majority the old audience excluded: the schema calls
+`userId` "null if recorded after the fact", which is most of a register.
+// THE DEPARTED-RECIPIENT RULE IS UNTOUCHED — no exemption was carved into the
+funnel; nothing here writes a notification at all.
+// `closedAccounts` is REMOVED rather than reported as zero for ever: a field
+pinned at zero is a worse answer than no field.
+
+**3. A VETO THE BOARD CAN ACTUALLY USE.** `VETO` was reachable ONLY from
+APPROVED — the one moment it cannot work, since every reactor has already run
+and each opens `if (state !== "APPROVED") return`. It is now reachable from
+PENDING_REVIEW too, where the request never reaches APPROVED, no reactor runs
+and there is nothing to unwind. That is what a board veto is in governance:
+blocking a decision, not undoing one. The post-approval veto stays, because a
+board must be able to record disapproval of something already done.
+// TWO NOTICES, keyed on the state the veto was cast FROM — both produce
+REJECTED, so reading the OUTCOME cannot tell them apart. Same trap the cancelled
+-invoice notice records: key on the TRANSITION.
+// DRAFT and REVISION_REQUESTED stay closed: nothing has been put to the board,
+and a veto there would pre-empt the initiator's own resubmission.
+// THE PREMISE TEST EARNED ITS KEEP. `what-the-board-is-told-a-veto-does`
+asserted `["APPROVED"]` and went red — which is exactly why it exists: it forced
+/help and the onboarding manual to move with the behaviour.
+
+**4. A CHILD WHO HAS LEFT, ON THEIR FAMILY'S PAGE.** A student exit closes the
+account, every enrolment, the bed and the bus seat, and DELIBERATELY keeps the
+guardian link — a leaver keeps their guardians, and the family still needs the
+invoices, documents and report cards. Nothing SAID so: with no ACTIVE enrolment
+`className` goes null, which is exactly what a pupil whose class was never set
+looks like. Measured live on a real exit — blank class, no way to tell.
+`ChildOverviewDto.exitedAt` carries it and the card reads "Left the school on
+<date>", on the SCHOOL's clock. Same rule as "no register yet" versus "attended
+nothing": a blank must not stand in for two different answers.
+// CHECKED AND SOUND while there, so it is not re-chased: class announcements
+already key on ACTIVE enrolment, so a departed pupil's guardian is not in that
+audience; the school calendar is a PULL, so reading it is harmless; and fee
+reminders key on open invoices, which a leaver may genuinely still owe.
+// GOTCHA: my first probe asked for `/family` and got a 404 I nearly read as a
+finding. The route is `/family/overview` — a probe that gets the path wrong
+reports the absence of the path, which this file already records.
+
 ### Told when their child is due back, on the server's clock
 `schoolTimeString` (`@sms/types/region.ts`), beside `schoolDateString`. Found by
 sweeping the hostel module for a path that had never executed, and reading what

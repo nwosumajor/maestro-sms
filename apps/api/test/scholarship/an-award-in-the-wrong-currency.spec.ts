@@ -64,6 +64,14 @@ function make(invoiceCurrency: string | null) {
       update: jest.fn().mockResolvedValue({}),
     },
     payment: { create: paymentCreate, findMany: jest.fn().mockResolvedValue([]) },
+    // Every real privileged client can reach the credit ledger; an award with
+    // no open invoice is now held there rather than given up on.
+    studentCreditEntry: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({ id: "credit-1", ...data }),
+      ),
+    },
     school: { findFirst: jest.fn().mockResolvedValue({ currency: invoiceCurrency ?? "NGN" }) },
   };
   const s = Object.create(ScholarshipAdminService.prototype) as ScholarshipAdminService;
@@ -144,10 +152,16 @@ describe("what anyone is told about it", () => {
   });
 
   it("distinguishes that from simply having no open invoice", async () => {
+    // NO OPEN INVOICE IS NO LONGER A DEAD END. This asserted `disbursed: 0`
+    // with `no_open_invoice`, which was the defect: the award stood, nothing
+    // posted and nothing ever retried. It now goes to the pupil's CREDIT
+    // LEDGER — the mechanism a dedicated-account transfer already uses when
+    // there is no invoice to settle — so the money reaches the family and the
+    // audit row says where it went.
     const t = make(null);
     await award(t.s);
-    expect(t.auditOwn.mock.calls[0][3]).toMatchObject({ disbursed: 0, notDisbursedReason: "no_open_invoice" });
-    expect(t.errors).toHaveLength(0); // not an incident: nothing was owed
+    expect(t.auditOwn.mock.calls[0][3]).toMatchObject({ disbursed: 5_000_000, disbursedTo: "CREDIT" });
+    expect(t.errors).toHaveLength(0); // not an incident: it was disbursed
   });
 
   it("tells the family the money moved only when it did", async () => {

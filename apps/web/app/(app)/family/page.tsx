@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
-import { money, regionOf } from "@/lib/format";
+import { money, regionOf, shortDate } from "@/lib/format";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -90,6 +90,24 @@ export default async function FamilyPage() {
                     {c.studentName}
                   </Link>
                   {c.className && <span className="text-muted-foreground"> · {c.className}</span>}
+                  {/* SAY THAT THEY HAVE LEFT.
+
+                      A departed pupil has no ACTIVE enrolment, so `className`
+                      goes null — which is exactly what a pupil whose class was
+                      never set looks like. Measured live on a real exit: the
+                      card showed the child with a blank class, and a parent had
+                      no way to tell that from an unassigned one while the
+                      school's own record said they had gone.
+
+                      The guardian link is retained deliberately (a leaver keeps
+                      their guardians, and the family still needs invoices,
+                      documents and report cards), so this card has to say which
+                      it is or it presents a former pupil as a current one. */}
+                  {c.exitedAt && (
+                    <span className="ml-2 rounded-md bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                      Left the school on {shortDate(c.exitedAt, region)}
+                    </span>
+                  )}
                 </CardTitle>
                 {c.grades?.sessionAverage != null && (
                   <Badge>Session avg {c.grades.sessionAverage}</Badge>

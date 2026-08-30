@@ -63,7 +63,12 @@ export class ParentService {
 
       const [children, enrollments, attendance, results, complaints, assignments, invoices] =
         await Promise.all([
-          tx.user.findMany({ where: { id: { in: childIds } }, select: { id: true, name: true } }),
+          // `exitedAt` too: a departed pupil has no ACTIVE enrolment, so their class
+          // goes null and reads exactly like a pupil whose class was never set.
+          tx.user.findMany({
+            where: { id: { in: childIds } },
+            select: { id: true, name: true, exitedAt: true, status: true },
+          }),
           tx.enrollment.findMany({
             where: { studentId: { in: childIds }, status: "ACTIVE" },
             select: { studentId: true, classId: true },
@@ -160,6 +165,10 @@ export class ParentService {
             studentId: child.id,
             studentName: child.name,
             className: classNameById.get(classByStudent.get(child.id) ?? "") ?? null,
+            // Only for a pupil the school has actually exited — a null status
+            // or an ACTIVE one is on roll, and reporting a date for either
+            // would tell a family their child had left.
+            exitedAt: child.status === "ACTIVE" ? null : (child.exitedAt ?? null),
             attendance: {
               present, absent, late, excused, total,
               // Same rule as the card, kept to one decimal place here because a

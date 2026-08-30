@@ -85,7 +85,7 @@ describe("disbursing an award", () => {
     expect(created).toHaveLength(0);
     // Returns the payment that already exists, so the application still records
     // which one paid it rather than losing the link.
-    expect(out).toEqual({ ok: true, paymentId: "pay-old", amountMinor: 500_000 });
+    expect(out).toEqual({ ok: true, kind: "INVOICE", paymentId: "pay-old", amountMinor: 500_000 });
   });
 
   it("credits again once the award has been TAKEN BACK", async () => {

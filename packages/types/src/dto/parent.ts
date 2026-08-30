@@ -41,6 +41,20 @@ export interface ChildOverviewDto {
   studentId: string;
   studentName: string;
   className: string | null;
+  /**
+   * WHETHER THIS CHILD HAS LEFT, and when.
+   *
+   * A departed pupil has no ACTIVE enrolment, so `className` goes null — which
+   * is exactly what a pupil whose class was never set looks like. Measured live
+   * on a real exit: the family page showed the child with a blank class and no
+   * way to tell the two apart, and the school's own record said they had gone.
+   *
+   * Null `exitedAt` means the child is on roll. The guardian LINK is retained
+   * deliberately — a leaver keeps their guardians, and the family still needs
+   * their invoices, documents and report cards — so the page has to say which,
+   * or it quietly presents a former pupil as a current one.
+   */
+  exitedAt: Date | null;
   attendance: ChildAttendanceSummaryDto;
   /** Null until the school has a current session / published results. */
   grades: ChildGradesSummaryDto | null;

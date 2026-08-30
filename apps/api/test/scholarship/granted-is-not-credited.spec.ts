@@ -39,8 +39,15 @@ describe("an award that never reached a bill", () => {
     // manifest exists to remove, one module over.
     for (const f of ["src/scholarship/scholarship.service.ts", "src/scholarship/scholarship-admin.service.ts"]) {
       const src = readFileSync(join(__dirname, "../..", f), "utf8");
-      expect({ f, guarded: /disbursed: r\.status === "AWARDED" \? Boolean\(r\.disbursementPaymentId\) : null/.test(src) })
-        .toEqual({ f, guarded: true });
+      // ANCHORED TO THE PROPERTY, not to the literal line. This matched the
+      // exact source and went red when the award gained a SECOND way to be
+      // disbursed (the credit ledger) — a change that preserves the three
+      // states it exists to guard. What matters is that a non-AWARDED row
+      // reports null, and that EITHER link counts as credited.
+      const guarded =
+        /disbursed:\s*\n?\s*r\.status === "AWARDED" \? Boolean\([^)]*\) : null/.test(src) &&
+        /disbursementPaymentId \|\| r\.disbursementCreditEntryId/.test(src);
+      expect({ f, guarded }).toEqual({ f, guarded: true });
     }
   });
 
