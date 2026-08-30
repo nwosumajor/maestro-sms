@@ -2040,6 +2040,40 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A pupil made the subject teacher of English
+`assertMayTeach` (`lms/lms.service.ts`). Found by asking the class-teacher
+question one method over: the fix that stopped a PUPIL being made a CLASS
+teacher was never applied to the two paths that hand out a SUBJECT.
+```
+assign a class teacher   staff + still here          (fixed earlier)
+assign a subject teacher assertStillHere only        — "exists and has not left",
+                                                       which a pupil also does
+bulk-assign subjects     tx.user.findMany exists     — WEAKER still: no staff
+                                                       check AND no still-here check
+```
+Proven live: a pupil was made the subject teacher of English in History 101 and
+the call returned **201**. Via the bulk path too.
+// **NOTHING LEAKED, AND THAT IS WORTH STATING PRECISELY.** A pupil holds none
+of the staff permissions, so every read stayed shut — measured: `/students`
+returned only themselves and the class roster was 403. Golden Rule #2 working,
+and the reason this is a records defect rather than a breach. What it DID do is
+make the school's own records say a child teaches a subject: the class's subject
+list names them, the timetable generator would roster them for its lessons, and
+the staff-handover report would list it as a duty to reassign.
+// AND `canGradeClassSubject` KEYS ON EXACTLY THAT ROW. The gate pinned one
+commit earlier asks for the offering `(classId, subjectId, teacherId)` and would
+have answered TRUE for the pupil; only `grade.write`, which no pupil holds, stood
+between them and entering marks. One layer, where this product's rule is three.
+// ONE BATCHED RULE for all three paths, because the bulk path assigns a whole
+class's subjects at once and a check per row would be a round trip per subject.
+The single-assignment callers pass `[id]`.
+// Live after: pupil 400 on both subject paths, naming them; a real teacher 201.
+// GOTCHA, twice, and both caught by watching `Test Suites:` rather than
+`Tests:` — a `Tests: 0 total` that is not a pass: the new tests called
+`assignClassSubject` with an options object when it takes positional arguments,
+and the harness then carried two `classSubjectTeacher` keys.
+Mutation-validated on both paths.
+
 ### Told to ask a class teacher the class has not got
 `assertCanTakeRegister` (`attendance/attendance.service.ts`). The code defect
 sitting next to the data gap: 30 of the demo school's 31 classes have no class

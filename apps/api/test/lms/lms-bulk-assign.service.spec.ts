@@ -30,7 +30,19 @@ function makeService(over: {
     subject: { findMany: jest.fn().mockResolvedValue(over.subjects ?? []) },
     // enrollStudentsBulk now verifies every id is a pupil on roll in this
     // school before it writes anything (#248), so both reads answer the same.
-    user: { findMany: jest.fn().mockResolvedValue(over.users ?? []) },
+    // The bulk path checks the teachers are STAFF who are STILL HERE, so the
+    // rows carry a status and there are role rows to match — a stub answering
+    // with bare ids models a user table the database cannot produce.
+    user: {
+      findMany: jest.fn().mockResolvedValue(
+        (over.users ?? []).map((u: { id: string }) => ({ status: "ACTIVE", name: u.id, ...u })),
+      ),
+    },
+    userRole: {
+      findMany: jest.fn(({ where }: { where: { userId: { in: string[] } } }) =>
+        Promise.resolve(where.userId.in.map((userId) => ({ userId, role: { name: "teacher" } }))),
+      ),
+    },
     room: { findMany: jest.fn().mockResolvedValue(over.rooms ?? []) },
     classSubjectTeacher: { upsert, findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {

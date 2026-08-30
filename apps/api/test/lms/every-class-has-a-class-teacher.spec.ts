@@ -30,7 +30,6 @@ function harness(opts: {
   const created: Array<Record<string, unknown>> = [];
   const updated: Array<Record<string, unknown>> = [];
   const tx = {
-    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: {
       // HONOURS THE WHERE: create asks "is this name taken" and update asks
       // "which class is this". A stub answering both with a row made the create
@@ -52,12 +51,39 @@ function harness(opts: {
       }),
       findMany: jest.fn().mockResolvedValue([]),
     },
+    // The staff check is BATCHED now — one user query and one role query for a
+    // class teacher or a whole class's subjects alike.
     user: {
       findFirst: jest.fn().mockResolvedValue({ id: "t1", name: "James Adams", status: opts.status ?? "ACTIVE" }),
+      findMany: jest.fn(({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id, name: "James Adams", status: opts.status ?? "ACTIVE" }))),
+      ),
     },
     userRole: {
-      findMany: jest.fn().mockResolvedValue((opts.roles ?? ["teacher"]).map((name) => ({ role: { name } }))),
+      findMany: jest.fn(({ where }: { where: { userId: { in: string[] } } }) =>
+        Promise.resolve(
+          where.userId.in.flatMap((userId) =>
+            (opts.roles ?? ["teacher"]).map((name) => ({ userId, role: { name } })),
+          ),
+        ),
+      ),
     },
+    // The subject paths look the subject and the offering up first — every
+    // real TenantTx answers these.
+    subject: {
+      findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "English" }),
+      findMany: jest.fn(({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id, name: "English" }))),
+      ),
+    },
+    classSubjectTeacher: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+      upsert: jest.fn().mockResolvedValue({ id: "o1" }),
+      createMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    timetableEntry: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+    room: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   } as unknown as TenantTx;
   const db = {
@@ -116,5 +142,40 @@ describe("a class teacher is changed, never removed", () => {
     const { svc, updated } = harness({ currentSupervisor: null });
     await svc.updateClass(admin, "c1", { supervisorId: null });
     expect(updated).toHaveLength(1);
+  });
+});
+
+describe("a teaching duty goes to staff, on every path that hands one out", () => {
+  // SIBLING ASYMMETRY, found by asking the same question one method over. The
+  // class-teacher path was given a staff check; the two SUBJECT-teacher paths
+  // were not. Proven live: a PUPIL was made the subject teacher of English in
+  // History 101 and the call returned 201.
+  //
+  // Nothing leaked — a pupil holds none of the staff permissions, so the reads
+  // stayed shut — but the school's own records then said a child taught a
+  // subject, the timetable would roster them for its lessons, and the
+  // staff-handover report would list it as a duty to reassign.
+  it("refuses a PUPIL as a subject teacher", async () => {
+    const { svc } = harness({ roles: ["student"] });
+    await expect(
+      svc.assignClassSubject(admin, "c1", "s1", "t1"),
+    ).rejects.toThrow(/not a member of staff/i);
+  });
+
+  it("refuses a pupil in the BULK path too, which checked even less", async () => {
+    // That path asked only that the ids resolved to users — no staff check and
+    // no still-here check, so it was weaker than the single assignment beside
+    // it. One batched rule now serves both.
+    const { svc } = harness({ roles: ["student"] });
+    await expect(
+      svc.assignClassSubjectsBulk(admin, "c1", [{ subjectId: "s1", teacherId: "t1" }]),
+    ).rejects.toThrow(/not a member of staff/i);
+  });
+
+  it("refuses somebody who has LEFT, in the bulk path", async () => {
+    const { svc } = harness({ status: "EXITED" });
+    await expect(
+      svc.assignClassSubjectsBulk(admin, "c1", [{ subjectId: "s1", teacherId: "t1" }]),
+    ).rejects.toThrow(/has left the school/i);
   });
 });

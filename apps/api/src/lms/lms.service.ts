@@ -155,26 +155,52 @@ export class LmsService {
   }
 
   /**
-   * WHO MAY BE A CLASS TEACHER.
+   * WHO MAY BE GIVEN A TEACHING DUTY — a class, or a subject in one.
    *
-   * A class teacher IS the class supervisor: the person who takes the register
-   * and answers for the class. So the check is the same one every other duty in
-   * this product makes before handing work out — a real member of STAFF of this
-   * school who is STILL HERE. `updateClass` previously asked only that the id
-   * resolved to a user, so a PUPIL or a departed teacher could be made
-   * responsible for a register.
+   * Both are duties handed to a person, so both ask the question every other
+   * duty in this product asks before handing work out: a real member of STAFF
+   * of this school who is STILL HERE.
+   *
+   * ONE helper for both, because they diverged. `updateClass` asked only that
+   * the id resolved to a user — which a PUPIL does — and `assignSubjectTeacher`
+   * asked `assertStillHere` alone, which answers "exists and has not left" and
+   * says nothing about being staff. Proven live: a pupil was made the subject
+   * teacher of English in History 101 and the call returned 201. Nothing leaked
+   * — a pupil holds none of the staff permissions, so the reads stayed shut —
+   * but the school's own records then said a child taught a subject, the
+   * timetable would roster them for its lessons, and the staff-handover report
+   * would list it as a duty to reassign.
    */
-  private async assertMayBeClassTeacher(tx: TenantTx, userId: string): Promise<void> {
-    // RLS scopes the lookup, so somebody from another school is simply absent
-    // and this never confirms that they exist.
-    const who = await assertStillHere(tx, userId, "Class teacher");
-    const roles = (await tx.userRole.findMany({
-      where: { userId },
-      select: { role: { select: { name: true } } },
-    })) as Array<{ role: { name: string } }>;
-    if (!isStaffRoles(roles.map((r) => r.role.name))) {
+  private async assertMayTeach(tx: TenantTx, userIds: string[], duty: string): Promise<void> {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) return;
+    // BATCHED, because the bulk path assigns a whole class's subjects at once
+    // and a check per row would be a round trip per subject. RLS scopes the
+    // lookup, so somebody from another school is simply absent and this never
+    // confirms that they exist.
+    const people = (await tx.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, status: true },
+    })) as Array<{ id: string; name: string; status: string }>;
+    const byId = new Map(people.map((u) => [u.id, u]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length > 0) throw new NotFoundException("Teacher not found");
+    const gone = ids.filter((id) => byId.get(id)!.status !== STILL_HERE.status);
+    if (gone.length > 0) {
       throw new BadRequestException(
-        `${who.name} is not a member of staff, so they cannot be a class teacher.`,
+        `${gone.map((id) => byId.get(id)!.name).join(", ")} has left the school and cannot ${duty}.`,
+      );
+    }
+    const roleRows = (await tx.userRole.findMany({
+      where: { userId: { in: ids } },
+      select: { userId: true, role: { select: { name: true } } },
+    })) as Array<{ userId: string; role: { name: string } }>;
+    const rolesOf = new Map<string, string[]>();
+    for (const r of roleRows) rolesOf.set(r.userId, [...(rolesOf.get(r.userId) ?? []), r.role.name]);
+    const notStaff = ids.filter((id) => !isStaffRoles(rolesOf.get(id) ?? []));
+    if (notStaff.length > 0) {
+      throw new BadRequestException(
+        `${notStaff.map((id) => byId.get(id)!.name).join(", ")} is not a member of staff, so they cannot ${duty}.`,
       );
     }
   }
@@ -183,7 +209,7 @@ export class LmsService {
     p: Principal,
     input: {
       name: string;
-      /** The class teacher — see assertMayBeClassTeacher. Required. */
+      /** The class teacher — see assertMayTeach. Required. */
       supervisorId: string;
       level?: number | null;
       nextClassId?: string | null;
@@ -206,7 +232,7 @@ export class LmsService {
       // for its register — which is the state 30 of this school's 31 classes
       // were in. Requiring it here is what stops the gap being re-created while
       // the existing ones are being filled in.
-      await this.assertMayBeClassTeacher(tx, input.supervisorId);
+      await this.assertMayTeach(tx, [input.supervisorId], "be a class teacher");
       const code = await this.nextCode(tx, "class", input.name, input.code);
       const cls = await tx.class.create({
         data: {
@@ -265,7 +291,7 @@ export class LmsService {
           );
         }
       }
-      if (input.supervisorId) await this.assertMayBeClassTeacher(tx, input.supervisorId);
+      if (input.supervisorId) await this.assertMayTeach(tx, [input.supervisorId], "be a class teacher");
       const cls = await tx.class.update({
         where: { id: classId },
         data: {
@@ -539,7 +565,9 @@ export class LmsService {
       if (!subj) throw new NotFoundException("Subject not found");
       // Still employed, not merely on file: a class handed to somebody who left
       // has no teacher, and the screen says it does.
-      await assertStillHere(tx, teacherId, "Teacher");
+      // STAFF, not merely somebody who has not left: `assertStillHere` answers
+      // "exists and is still here", which a PUPIL also does.
+      await this.assertMayTeach(tx, [teacherId], "teach a subject");
 
       // Who is being replaced, if anyone — read BEFORE the upsert overwrites it.
       const prev = (await tx.classSubjectTeacher.findFirst({
@@ -834,6 +862,10 @@ export class LmsService {
       ]);
       if (subjects.length !== subjectIds.length) throw new NotFoundException("Subject not found");
       if (teachers.length !== teacherIds.length) throw new NotFoundException("Teacher not found");
+      // …and they must be STAFF who are STILL HERE. This asked only that the
+      // ids resolved to users, which a PUPIL does — worse than the single-
+      // assignment path beside it, which at least checked they had not left.
+      await this.assertMayTeach(tx, teacherIds, "teach a subject");
       const roomIds = [...new Set(items.map((i) => i.preferredRoomId).filter((r): r is string => !!r))];
       if (roomIds.length > 0) {
         const rooms = await tx.room.findMany({ where: { id: { in: roomIds } }, select: { id: true } });

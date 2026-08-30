@@ -44,7 +44,9 @@ function makeService(over: {
     subject: { findFirst: jest.fn().mockResolvedValue(over.subject ?? { id: "s1" }) },
     // Every real `user` row carries a status, and a class handed to somebody
     // who has left is refused now — so the stub has to model the column.
-    user: { findFirst: jest.fn().mockResolvedValue(over.user ?? { id: "t1", name: "T One", status: "ACTIVE" }) },
+    // Assigning a teaching duty checks they are STAFF, not merely present.
+    userRole: { findMany: jest.fn(({ where }: { where: { userId: { in: string[] } } }) => Promise.resolve(where.userId.in.map((userId) => ({ userId, role: { name: "teacher" } })))) },
+    user: { findFirst: jest.fn().mockResolvedValue(over.user ?? { id: "t1", name: "T One", status: "ACTIVE" }), findMany: jest.fn(({ where }: { where: { id: { in: string[] } } }) => Promise.resolve(where.id.in.map((id) => ({ id, name: id, status: "ACTIVE" })))) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

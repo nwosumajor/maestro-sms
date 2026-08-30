@@ -39,7 +39,18 @@ function harness(opts: { classExists?: boolean; assignment?: { id: string } | nu
       findFirst: jest.fn().mockResolvedValue(
         opts.teacherExists === false ? null : { id: "t1", name: "T One", status: "ACTIVE" },
       ),
+      findMany: jest.fn(({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id, name: "T One", status: "ACTIVE" }))),
+      ),
     },
+    // A teaching duty goes to STAFF who are still here — one batched check for
+    // a class teacher and for a whole class's subjects.
+    userRole: {
+      findMany: jest.fn(({ where }: { where: { userId: { in: string[] } } }) =>
+        Promise.resolve(where.userId.in.map((userId) => ({ userId, role: { name: "teacher" } }))),
+      ),
+    },
+
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   } as unknown as TenantTx;
@@ -119,7 +130,17 @@ describe("reassigning a class's subject teacher", () => {
         update: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }), findMany: jest.fn().mockResolvedValue([]) },
       subject: { findFirst: jest.fn().mockResolvedValue({ id: "phy", name: "Physics" }) },
-      user: { findFirst: jest.fn().mockResolvedValue({ id: "t2", name: "Mr Previous", status: "ACTIVE" }) },
+      user: {
+        findFirst: jest.fn().mockResolvedValue({ id: "t2", name: "Mr Previous", status: "ACTIVE" }),
+        findMany: jest.fn(({ where }: { where: { id: { in: string[] } } }) =>
+          Promise.resolve(where.id.in.map((id) => ({ id, name: "Mr Previous", status: "ACTIVE" }))),
+        ),
+      },
+      userRole: {
+        findMany: jest.fn(({ where }: { where: { userId: { in: string[] } } }) =>
+          Promise.resolve(where.userId.in.map((userId) => ({ userId, role: { name: "teacher" } }))),
+        ),
+      },
       room: { findFirst: jest.fn().mockResolvedValue({ id: "r1" }) },
       classSubjectTeacher: {
         findFirst: jest.fn().mockResolvedValue(
