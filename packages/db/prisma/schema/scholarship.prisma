@@ -161,6 +161,10 @@ model ScholarshipApplication {
   reviewNote            String?
   /// The Fees Payment posted as the credit when AWARDED (disbursement link).
   disbursementPaymentId String?                      @db.Uuid
+  /// The credit-ledger entry, when the award was held as credit because the
+  /// pupil had no open invoice at the moment it was decided. Exactly one of
+  /// this and `disbursementPaymentId` is set on a disbursed award.
+  disbursementCreditEntryId String?                  @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

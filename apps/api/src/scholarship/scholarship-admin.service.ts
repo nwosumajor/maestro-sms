@@ -15,8 +15,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, type PrismaClient } from "@sms/db";
 import { SCHOLARSHIP_MAX_AWARDS, type ScholarshipApplicationDto, type ScholarshipProgramDto,
-  scholarshipSubjectConcept,
-} from "@sms/types";
+  scholarshipSubjectConcept, resolveRegion } from "@sms/types";
 import { scholarshipSupervisorStage, uniqueEntityCode } from "@sms/types";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -41,11 +40,21 @@ import { formatMoney } from "@sms/types";
  */
 const AWARD_CURRENCY = "NGN";
 
-/** What happened when an award tried to reach the fees ledger. */
+/**
+ * What happened when an award tried to reach the fees ledger.
+ *
+ * TWO WAYS TO SUCCEED, and they are different facts about a family's balance.
+ * `INVOICE` moved an open bill down today. `CREDIT` put the money on the
+ * pupil's credit ledger because there was no open invoice at the moment the
+ * award was decided — which is the ORDINARY case, since an award is often
+ * granted before a term's fees are raised, not an edge one.
+ */
 type DisbursementOutcome =
-  | { ok: true; paymentId: string; amountMinor: number }
-  | { ok: false; reason: "no_open_invoice" | "nothing_outstanding" }
-  | { ok: false; reason: "currency_mismatch"; invoiceCurrency: string };
+  | { ok: true; kind: "INVOICE"; paymentId: string; amountMinor: number }
+  | { ok: true; kind: "CREDIT"; creditEntryId: string; amountMinor: number }
+  | { ok: false; reason: "nothing_outstanding" }
+  | { ok: false; reason: "currency_mismatch"; invoiceCurrency: string }
+  | { ok: false; reason: "school_bills_another_currency"; schoolCurrency: string };
 
 interface ProgramInput {
   title: string;
@@ -230,7 +239,12 @@ export class ScholarshipAdminService {
       awardMinorOffered: prog.get(r.programId)?.awardMinor ?? 0,
       // Granted is not CREDITED — see the DTO. This is the operator's own
       // review queue, so it is the screen that most needs to say so.
-      disbursed: r.status === "AWARDED" ? Boolean(r.disbursementPaymentId) : null,
+      // EITHER LINK counts as disbursed. Reading only the payment id was true
+      // while an award could reach nowhere else; an award held on the credit
+      // ledger has moved real money and would have read "not yet credited".
+      disbursed:
+        r.status === "AWARDED" ? Boolean(r.disbursementPaymentId || r.disbursementCreditEntryId) : null,
+      disbursementKind: r.disbursementPaymentId ? "INVOICE" : r.disbursementCreditEntryId ? "CREDIT" : null,
       schoolId: r.schoolId,
       schoolName: school.get(r.schoolId) ?? null,
       studentId: r.studentId,
@@ -377,7 +391,15 @@ export class ScholarshipAdminService {
         disbursement = await this.disburseFeesCredit(db, app.schoolId, app.studentId, awardMinor, app.id, p.userId);
       }
       if (disbursement?.ok) {
-        await db.scholarshipApplication.update({ where: { id }, data: { disbursementPaymentId: disbursement.paymentId } });
+        // Exactly one link is set, so a reader can always tell an award that
+        // moved a bill from one waiting on the credit ledger.
+        await db.scholarshipApplication.update({
+          where: { id },
+          data:
+            disbursement.kind === "INVOICE"
+              ? { disbursementPaymentId: disbursement.paymentId }
+              : { disbursementCreditEntryId: disbursement.creditEntryId },
+        });
       }
       // The audit row records WHY nothing was posted, not just that nothing was.
       // "disbursed: 0" is the same entry for a family with no open invoice and
@@ -389,8 +411,21 @@ export class ScholarshipAdminService {
         awardMinor,
         position,
         disbursed: disbursement?.ok ? disbursement.amountMinor : 0,
+        // WHERE it went, not only how much. A credit held against a future bill
+        // and a payment against an open one are different facts to reconcile.
+        disbursedTo: disbursement?.ok ? disbursement.kind : null,
         notDisbursedReason: disbursement && !disbursement.ok ? disbursement.reason : null,
       });
+      if (disbursement && !disbursement.ok && disbursement.reason === "school_bills_another_currency") {
+        // Same class as the currency mismatch below, reached by the other door:
+        // the pupil has no open invoice AND the school does not bill in the
+        // award's currency, so a credit written here could never be spent.
+        this.logger.error(
+          `scholarship ${id}: award of ${formatMoney(awardMinor, AWARD_CURRENCY)} not posted — ` +
+            `the school bills in ${disbursement.schoolCurrency} and a scholarship is denominated ` +
+            `in ${AWARD_CURRENCY}. Post the credit manually in the school's own currency.`,
+        );
+      }
       if (disbursement && !disbursement.ok && disbursement.reason === "currency_mismatch") {
         // ERROR, not warn: an award has been granted and the money has not moved.
         // Recoverable — the application stands and the credit can be posted by
@@ -412,9 +447,14 @@ export class ScholarshipAdminService {
         // family to check a balance that had not moved, and the two cases where
         // it legitimately does not post — no open invoice, nothing outstanding —
         // are good news that reads as a mistake when described wrongly.
-        disbursement?.ok
-          ? `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, AWARD_CURRENCY)} has been credited against the student's school fees.`
-          : `Congratulations on finishing in ${posLabel} position! The award has been granted; the school will apply it to the student's fees.`,
+        // THREE OUTCOMES, THREE SENTENCES. "Credited against the fees" is only
+        // true when a bill actually moved; saying it of a credit held for the
+        // next invoice sends a family to check a balance that has not changed.
+        !disbursement?.ok
+          ? `Congratulations on finishing in ${posLabel} position! The award has been granted; the school will apply it to the student's fees.`
+          : disbursement.kind === "INVOICE"
+            ? `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, AWARD_CURRENCY)} has been credited against the student's school fees.`
+            : `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, AWARD_CURRENCY)} is being held as credit on the student's account and will come off the next school bill.`,
       );
       const [row] = await this.listApplicationById(db, id);
       return row;
@@ -496,6 +536,9 @@ export class ScholarshipAdminService {
     const claimed = await db.scholarshipApplication.updateMany({
       where: { id, status: "AWARDED" },
       data: { status: "QUALIFIED" as never, awardPosition: null, awardMinor: null, disbursementPaymentId: null,
+              // BOTH links, or a revoked award keeps reading as disbursed on the
+              // funder's screen through the other one.
+              disbursementCreditEntryId: null,
               reviewedById: p.userId, reviewNote: reason },
     });
     if (claimed.count === 0) throw new BadRequestException("This award has already been taken back");
@@ -535,6 +578,39 @@ export class ScholarshipAdminService {
           where: { id: credit.invoiceId },
           data: { status: net >= (invoice?.totalMinor ?? 0) ? "PAID" : net > 0 ? "PARTIALLY_PAID" : "ISSUED" },
         });
+      }
+    }
+
+    // A CREDIT IS TAKEN BACK THE SAME WAY A PAYMENT IS.
+    //
+    // The arm above reverses an award that landed on an invoice. An award held
+    // on the CREDIT LEDGER had no such arm, so revoking one nulled the link and
+    // left the money — the family kept a balance for an award the platform had
+    // withdrawn, and nothing anywhere said so.
+    //
+    // A NEGATIVE ENTRY, never a delete: this ledger is append-only in posture
+    // and the pair reads as what happened. Idempotent on its own reference for
+    // the same reason the award is.
+    if (app.disbursementCreditEntryId) {
+      const held = await db.studentCreditEntry.findFirst({ where: { id: app.disbursementCreditEntryId } });
+      const reversalRef = `SCHOLARSHIP-REVERSAL:${id}`;
+      const already = await db.studentCreditEntry.findFirst({
+        where: { schoolId: app.schoolId, studentId: app.studentId, reference: reversalRef },
+      });
+      if (held && !already) {
+        await db.studentCreditEntry.create({
+          data: {
+            schoolId: app.schoolId,
+            studentId: app.studentId,
+            deltaMinor: -held.deltaMinor,
+            currency: held.currency,
+            reason: "REFUNDED",
+            reference: reversalRef,
+            note: `Scholarship award taken back: ${reason}`,
+            createdById: p.userId,
+          },
+        });
+        refunded = held.deltaMinor;
       }
     }
 
@@ -890,7 +966,21 @@ export class ScholarshipAdminService {
       include: { payments: true },
       orderBy: { createdAt: "desc" },
     });
-    if (!invoice) return { ok: false, reason: "no_open_invoice" };
+    // NO OPEN INVOICE IS NOT A DEAD END — it is the ordinary case.
+    //
+    // An award is frequently decided before the term's fees are raised, and
+    // this used to give up: the award stood, nothing posted, and NOTHING EVER
+    // RETRIED. Measured on the demo tenant, four AWARDED applications totalling
+    // NGN 800,000 had credited nobody.
+    //
+    // Every other path that moves money against a pupil already handles it —
+    // the library, hostel and transport runs CREATE an invoice, and a
+    // dedicated-account transfer posts to the CREDIT LEDGER and tells finance
+    // to apply it from the next invoice's page. Raising an invoice would be
+    // wrong here (a scholarship is not a charge), so this takes the credit
+    // ledger, which is the mechanism built for exactly "money arrived and there
+    // is no invoice yet".
+    if (!invoice) return this.holdAsCredit(db, schoolId, studentId, awardMinor, applicationId, actorId);
     // THE CURRENCY MUST MATCH BEFORE ANYTHING POSTS.
     //
     // `awardMinor` is a platform figure in kobo; `invoice.currency` is the
@@ -933,7 +1023,7 @@ export class ScholarshipAdminService {
       (pay) => pay.reference === `SCHOLARSHIP-REVERSAL:${applicationId}` && pay.status === "POSTED",
     );
     const outstanding = credited[reversed.length];
-    if (outstanding) return { ok: true, paymentId: outstanding.id, amountMinor: outstanding.amountMinor };
+    if (outstanding) return { ok: true, kind: "INVOICE", paymentId: outstanding.id, amountMinor: outstanding.amountMinor };
     const paid = invoice.payments
       .filter((pay) => pay.status === "POSTED")
       .reduce((s, pay) => s + (pay.kind === "REFUND" ? -pay.amountMinor : pay.amountMinor), 0);
@@ -958,7 +1048,62 @@ export class ScholarshipAdminService {
       where: { id: invoice.id },
       data: { status: newPaid >= invoice.totalMinor ? "PAID" : "PARTIALLY_PAID" },
     });
-    return { ok: true, paymentId: payment.id, amountMinor: credit };
+    return { ok: true, kind: "INVOICE", paymentId: payment.id, amountMinor: credit };
+  }
+
+  /**
+   * Hold the award on the pupil's CREDIT LEDGER, for the case where there is no
+   * open invoice to post it against.
+   *
+   * The balance sums every entry for a pupil grouped by currency, so this is
+   * spendable the moment the school raises a bill — through the ordinary
+   * apply-credit path, with no new mechanism and no second posting route.
+   *
+   * IDEMPOTENT ON THE APPLICATION, exactly like the invoice arm: the award is
+   * claimed before this runs, but a crash between the claim and the write would
+   * otherwise credit a family twice on the retry. The reference already
+   * identifies the award uniquely.
+   *
+   * ONLY IN THE AWARD'S OWN CURRENCY. A credit is spendable only against an
+   * invoice in its own currency, so writing an NGN credit into a school that
+   * bills in cedis creates money the family can never use and a ledger line
+   * nobody can explain — worse than refusing, and the same reasoning the
+   * invoice arm's `currency_mismatch` already applies. There is no FX rate in
+   * this platform and inventing one to move an award would be worse than the
+   * gap.
+   */
+  private async holdAsCredit(
+    db: PrismaClient,
+    schoolId: string,
+    studentId: string,
+    awardMinor: number,
+    applicationId: string,
+    actorId: string,
+  ): Promise<DisbursementOutcome> {
+    const school = await db.school.findFirst({ where: { id: schoolId }, select: { country: true, currency: true } });
+    const schoolCurrency = resolveRegion(school ?? {}).currency;
+    if (schoolCurrency !== AWARD_CURRENCY) {
+      return { ok: false, reason: "school_bills_another_currency", schoolCurrency };
+    }
+    const reference = `SCHOLARSHIP:${applicationId}`;
+    const existing = await db.studentCreditEntry.findFirst({ where: { schoolId, studentId, reference } });
+    if (existing) return { ok: true, kind: "CREDIT", creditEntryId: existing.id, amountMinor: existing.deltaMinor };
+    const entry = await db.studentCreditEntry.create({
+      data: {
+        schoolId,
+        studentId,
+        deltaMinor: awardMinor,
+        // STAMPED, never left null: null means "the school's own currency", and
+        // an award is denominated by the PLATFORM. They agree today because the
+        // guard above requires it, and saying so keeps that true if it changes.
+        currency: AWARD_CURRENCY,
+        reason: "SCHOLARSHIP",
+        reference,
+        note: "Platform-sponsored scholarship — no open invoice when awarded",
+        createdById: actorId,
+      },
+    });
+    return { ok: true, kind: "CREDIT", creditEntryId: entry.id, amountMinor: entry.deltaMinor };
   }
 
   private async listApplicationById(db: PrismaClient, id: string): Promise<ScholarshipApplicationDto[]> {
@@ -976,7 +1121,12 @@ export class ScholarshipAdminService {
     ]);
     return [{
       id: r.id, programId: r.programId, programTitle: program?.title ?? "Scholarship", awardMinorOffered: program?.awardMinor ?? 0,
-      disbursed: r.status === "AWARDED" ? Boolean(r.disbursementPaymentId) : null,
+      // EITHER LINK counts as disbursed. Reading only the payment id was true
+      // while an award could reach nowhere else; an award held on the credit
+      // ledger has moved real money and would have read "not yet credited".
+      disbursed:
+        r.status === "AWARDED" ? Boolean(r.disbursementPaymentId || r.disbursementCreditEntryId) : null,
+      disbursementKind: r.disbursementPaymentId ? "INVOICE" : r.disbursementCreditEntryId ? "CREDIT" : null,
       schoolId: r.schoolId, schoolName: school?.name ?? null, studentId: r.studentId, studentName: student?.name ?? "Student",
       applicantId: r.applicantId, applicantName: applicant?.name ?? "Applicant", applicantRole: r.applicantRole,
       answers: r.answers ?? null, signals: (r.signals as ScholarshipApplicationDto["signals"]) ?? null, status: r.status,

@@ -149,11 +149,11 @@ export function ScholarshipAdmin() {
     const posLabel = pos === 1 ? "1st" : pos === 2 ? "2nd" : "3rd";
     const prog = programs.find((pr) => pr.id === a.programId);
     const amount = pos === 3 ? (prog?.award3Minor ?? a.awardMinorOffered) : pos === 2 ? (prog?.award2Minor ?? a.awardMinorOffered) : a.awardMinorOffered;
-    if (!confirm(`Award ${posLabel} position (${money(amount)}) to ${a.studentName} (${a.schoolName})? A fees credit is posted to their invoice.`)) return;
+    if (!confirm(`Award ${posLabel} position (${money(amount)}) to ${a.studentName} (${a.schoolName})? It is credited against an open invoice, or held on their account until one is raised.`)) return;
     setBusy(`award-${a.id}`); setMsg(null);
     const res = await sendWithStepUp("POST", `scholarships/applications/${a.id}/award`, { position: pos });
     setBusy(null);
-    if (res.ok) { setMsg({ ok: true, text: `Awarded ${posLabel} position — fees credit disbursed to ${a.studentName}.` }); void loadApps(); }
+    if (res.ok) { setMsg({ ok: true, text: `Awarded ${posLabel} position to ${a.studentName} — the row below says whether it landed on an invoice or is held as credit.` }); void loadApps(); }
     else setMsg({ ok: false, text: await readApiError(res) });
   };
 
@@ -359,13 +359,23 @@ export function ScholarshipAdmin() {
                         The award standing is correct (a decision is not thrown
                         away over a posting problem) and the family is told the
                         truth; it was the FUNDER's own screen that was wrong.
+
+                        SINCE THEN the no-invoice case stopped being a dead end:
+                        the award goes onto the pupil's CREDIT LEDGER, the same
+                        mechanism a dedicated-account transfer already uses when
+                        there is no invoice to settle. So there are now three
+                        outcomes, and "credited" alone would hide the difference
+                        between money that moved a bill today and money waiting
+                        for the next one.
                       */
                       <p className={`mt-1 text-xs ${a.disbursed === false ? "text-amber-600 dark:text-amber-400" : "text-primary"}`}>
                         {a.awardPosition ? `${a.awardPosition === 1 ? "🥇 1st" : a.awardPosition === 2 ? "🥈 2nd" : "🥉 3rd"} place — ` : ""}
                         Awarded {money(a.awardMinor)} ·{" "}
                         {a.disbursed === false
-                          ? "NOT yet credited — the pupil had no open invoice when this was awarded. Post the credit once their fees are raised."
-                          : "fees credit posted."}
+                          ? "NOT yet credited — the school does not bill in the award's currency, so this needs posting by hand."
+                          : a.disbursementKind === "CREDIT"
+                            ? "held as credit on the pupil's account — it comes off their next bill."
+                            : "fees credit posted against an open invoice."}
                       </p>
                     )}
                   </div>

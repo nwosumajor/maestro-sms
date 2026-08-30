@@ -576,6 +576,7 @@ export class ScholarshipService {
       rejectedStage: string | null; examScorePct: number | null; awardPosition: number | null;
       awardMinor: number | null; reviewNote: string | null; createdAt: Date; updatedAt: Date;
       disbursementPaymentId?: string | null;
+      disbursementCreditEntryId?: string | null;
     }>,
   ): Promise<ScholarshipApplicationDto[]> {
     if (rows.length === 0) return [];
@@ -601,7 +602,12 @@ export class ScholarshipService {
       // "not awarded" and "awarded but not yet credited" stay distinguishable —
       // the ambiguity the export bundle's coverage manifest exists to remove,
       // applied to money.
-      disbursed: r.status === "AWARDED" ? Boolean(r.disbursementPaymentId) : null,
+      // EITHER LINK counts as disbursed. Reading only the payment id was true
+      // while an award could reach nowhere else; an award held on the credit
+      // ledger has moved real money and would have read "not yet credited".
+      disbursed:
+        r.status === "AWARDED" ? Boolean(r.disbursementPaymentId || r.disbursementCreditEntryId) : null,
+      disbursementKind: r.disbursementPaymentId ? "INVOICE" : r.disbursementCreditEntryId ? "CREDIT" : null,
       schoolId: r.schoolId,
       schoolName: null,
       studentId: r.studentId,

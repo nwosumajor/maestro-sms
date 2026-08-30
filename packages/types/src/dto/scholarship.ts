@@ -230,6 +230,19 @@ export interface ScholarshipApplicationDto {
    * credited — a state a human needs to resolve, not an error.
    */
   disbursed: boolean | null;
+  /**
+   * HOW it reached the family, because "credited" meant two different things.
+   *
+   * INVOICE — posted against an open invoice, so the balance has already moved.
+   * CREDIT  — held on the pupil's credit ledger because there was no open
+   *           invoice when the award was decided, which is the ORDINARY case:
+   *           an award is often granted before the term's fees are raised. It
+   *           comes off the next bill.
+   *
+   * Null when nothing was disbursed. A funder reading "credited" needs to know
+   * which, because only one of them shows up on a balance today.
+   */
+  disbursementKind: "INVOICE" | "CREDIT" | null;
   reviewNote: string | null;
   createdAt: Date;
   updatedAt: Date;
