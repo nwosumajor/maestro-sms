@@ -55,8 +55,15 @@ function makeService(doc: Record<string, unknown> = OFFICE_DOC) {
     // parent is linked — so BOTH pass the read predicate. That is the premise:
     // this test is about what happens once you can see it.
     parentChild: { findFirst: jest.fn(async () => ({ id: "link" })), findMany: jest.fn(async () => []) },
+    // All three teaching links + the pupil's own ACTIVE enrolments — see
+    // common/teaches.ts. Every real TenantTx answers all four.
     classTeacher: { findMany: jest.fn(async () => [{ classId: "c1" }]) },
-    enrollment: { findFirst: jest.fn(async () => ({ id: "e1" })), findMany: jest.fn(async () => []) },
+    class: { findMany: jest.fn(async () => []) },
+    classSubjectTeacher: { findMany: jest.fn(async () => []) },
+    enrollment: {
+      findFirst: jest.fn(async () => ({ id: "e1" })),
+      findMany: jest.fn(async () => [{ classId: "c1" }]),
+    },
     user: { findFirst: jest.fn(async () => ({ name: "A Pupil" })), findMany: jest.fn(async () => []) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
@@ -116,9 +123,11 @@ describe("seeing a record is not destroying it", () => {
     const del = jest.fn();
     const tx = {
       document: { findFirst: jest.fn(async () => OFFICE_DOC), delete: del },
-      parentChild: { findFirst: jest.fn(async () => null) },
+      parentChild: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) },
       classTeacher: { findMany: jest.fn(async () => []) },
-      enrollment: { findFirst: jest.fn(async () => null) },
+      class: { findMany: jest.fn(async () => []) },
+      classSubjectTeacher: { findMany: jest.fn(async () => []) },
+      enrollment: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     } as unknown as TenantTx;
     const svc = new DocumentsService(
       { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) } as never,

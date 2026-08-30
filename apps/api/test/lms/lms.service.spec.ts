@@ -253,7 +253,12 @@ describe("LmsService roster", () => {
     // so the tile and the page cannot drift apart.
     const tx = {
       user: { count: jest.fn(), findMany: jest.fn().mockResolvedValue([{ id: "s1" }, { id: "s2" }]) },
+      // All three teaching links — see common/teaches.ts. Every real TenantTx
+      // answers all three; this teacher happens to tutor c1 and take no
+      // subjects, which is the shape the old single-table stub described.
       classTeacher: { findMany: jest.fn().mockResolvedValue([{ classId: "c1" }]) },
+      class: { findMany: jest.fn().mockResolvedValue([]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { findMany: jest.fn().mockResolvedValue([{ studentId: "s1" }, { studentId: "s2" }]) },
       parentChild: { findMany: jest.fn().mockResolvedValue([]) },
     };

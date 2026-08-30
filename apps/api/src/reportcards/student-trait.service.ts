@@ -22,6 +22,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { classIdsTaughtBy, teachesStudent as teachesThisStudent } from "../common/teaches";
 import { isTraitKey, TRAIT_SCORE_MAX, TRAIT_SCORE_MIN, type StudentTraitsDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -53,18 +54,16 @@ export class StudentTraitService {
   }
 
   /** A teacher or supervisor of a class the pupil is enrolled in. */
-  private async teachesStudent(tx: TenantTx, p: Principal, studentId: string): Promise<boolean> {
-    const enrolments = (await tx.enrollment.findMany({
-      where: { studentId, status: "ACTIVE" },
-      select: { classId: true },
-    })) as Array<{ classId: string }>;
-    if (enrolments.length === 0) return false;
-    const classIds = enrolments.map((e) => e.classId);
-    const [supervises, teaches] = await Promise.all([
-      tx.class.findFirst({ where: { id: { in: classIds }, supervisorId: p.userId }, select: { id: true } }),
-      tx.classSubjectTeacher.findFirst({ where: { classId: { in: classIds }, teacherId: p.userId }, select: { id: true } }),
-    ]);
-    return !!supervises || !!teaches;
+  /**
+   * ALL THREE teaching links — see common/teaches.ts.
+   *
+   * This copy asked `supervisorId` OR `class_subject_teacher` and never
+   * `class_teacher`, so a FORM TUTOR could not write a remark about their own
+   * tutee. It was one of three different answers the platform gave to "do I
+   * teach this child"; the roster gave a fourth by returning nothing at all.
+   */
+  private teachesStudent(tx: TenantTx, p: Principal, studentId: string): Promise<boolean> {
+    return teachesThisStudent(tx, p.userId, studentId);
   }
 
   private async assertCanRead(tx: TenantTx, p: Principal, studentId: string): Promise<void> {
@@ -181,11 +180,12 @@ export class StudentTraitService {
   ): Promise<Array<{ studentId: string; studentName: string; ratings: Array<{ traitKey: string; score: number }> }>> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       if (!this.staffWide(p)) {
-        const [supervises, teaches] = await Promise.all([
-          tx.class.findFirst({ where: { id: classId, supervisorId: p.userId }, select: { id: true } }),
-          tx.classSubjectTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } }),
-        ]);
-        if (!supervises && !teaches) throw new NotFoundException("Class not found");
+        // ALL THREE teaching links — see common/teaches.ts. This asked
+        // supervisor OR subject and never `class_teacher`, so a FORM TUTOR was
+        // refused the trait grid for their own tutor group.
+        if (!(await classIdsTaughtBy(tx, p.userId)).includes(classId)) {
+          throw new NotFoundException("Class not found");
+        }
       }
       const enrolments = (await tx.enrollment.findMany({
         where: { classId, status: "ACTIVE" },

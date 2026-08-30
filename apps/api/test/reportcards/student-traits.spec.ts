@@ -36,9 +36,14 @@ function makeService(opts: { teaches?: boolean; existing?: Array<{ traitKey: str
   const upserts: Array<{ traitKey: string; score: number; ratedById: string }> = [];
   const audits: Array<{ action: string; metadata?: Record<string, unknown> }> = [];
   const tx = {
+    // "Do I teach this child" is ONE definition now (common/teaches.ts): it
+    // asks all three link tables with findMany, where this module used to ask
+    // two of them with findFirst — and omitted `class_teacher`, so a FORM TUTOR
+    // could not rate their own tutee. `teaches` still means "supervises c-1".
     enrollment: { findMany: jest.fn(async () => [{ classId: "c-1" }]) },
-    class: { findFirst: jest.fn(async () => (teaches ? { id: "c-1" } : null)) },
-    classSubjectTeacher: { findFirst: jest.fn(async () => null) },
+    class: { findMany: jest.fn(async () => (teaches ? [{ id: "c-1" }] : [])) },
+    classTeacher: { findMany: jest.fn(async () => []) },
+    classSubjectTeacher: { findMany: jest.fn(async () => []) },
     parentChild: { findFirst: jest.fn(async () => null) },
     term: { findFirst: jest.fn(async () => ({ id: "t-1" })) },
     user: { findFirst: jest.fn(async () => ({ name: "A Teacher" })), findMany: jest.fn(async () => []) },

@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { randomUUID } from "node:crypto";
+import { teachesStudent } from "../common/teaches";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
@@ -1049,24 +1050,11 @@ export class AttendanceService {
     });
     if (link) return;
 
-    const taught = await tx.classTeacher.findMany({
-      where: { teacherId: p.userId },
-      select: { classId: true },
-    });
-    if (taught.length > 0) {
-      // SECURITY: ACTIVE only. Without the status filter this asked "was this
-      // pupil EVER in a class I teach", so a teacher kept access to a pupil who
-      // had since withdrawn, transferred or been promoted out — indefinitely,
-      // and to their records rather than merely their name. Proven live: a
-      // pupil was set to WITHDRAWN and their old teacher still fetched a signed
-      // download URL for their report card. Whole-school staff are unaffected,
-      // so the school can still produce a departed pupil's paperwork.
-      const enrolled = await tx.enrollment.findFirst({
-        where: { studentId, status: "ACTIVE", classId: { in: taught.map((t: { classId: string }) => t.classId) } },
-        select: { id: true },
-      });
-      if (enrolled) return;
-    }
+    // ALL THREE teaching links, ACTIVE enrolment only — see common/teaches.ts.
+    // This asked `class_teacher` alone, so a subject teacher who saw the pupil
+    // on their own roster got 404 on that pupil's attendance: the list offered
+    // what the record refused.
+    if (await teachesStudent(tx, p.userId, studentId)) return;
     throw new NotFoundException("Student not found");
   }
 }

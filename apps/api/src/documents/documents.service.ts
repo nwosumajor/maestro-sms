@@ -13,6 +13,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { studentIdsTaughtBy, teachesStudent } from "../common/teaches";
 import { randomUUID } from "node:crypto";
 import type { DocumentTypeValue } from "@sms/types";
 import {
@@ -383,29 +384,17 @@ export class DocumentsService {
   private async visibleStudentIds(tx: TenantTx, p: Principal): Promise<string[]> {
     const ids = new Set<string>();
     if (p.roles.includes("student")) ids.add(p.userId);
-    const links = await tx.parentChild.findMany({
+    const children = (await tx.parentChild.findMany({
       where: { parentId: p.userId },
       select: { studentId: true },
-    });
-    links.forEach((l: { studentId: string }) => ids.add(l.studentId));
-    const taught = await tx.classTeacher.findMany({
-      where: { teacherId: p.userId },
-      select: { classId: true },
-    });
-    if (taught.length > 0) {
-      // SECURITY: ACTIVE only. Without the status filter this asked "was this
-      // pupil EVER in a class I teach", so a teacher kept access to a pupil who
-      // had since withdrawn, transferred or been promoted out — indefinitely,
-      // and to their records rather than merely their name. Proven live: a
-      // pupil was set to WITHDRAWN and their old teacher still fetched a signed
-      // download URL for their report card. Whole-school staff are unaffected,
-      // so the school can still produce a departed pupil's paperwork.
-      const enrolled = await tx.enrollment.findMany({
-        where: { status: "ACTIVE", classId: { in: taught.map((t: { classId: string }) => t.classId) } },
-        select: { studentId: true },
-      });
-      enrolled.forEach((e: { studentId: string }) => ids.add(e.studentId));
-    }
+    })) as Array<{ studentId: string }>;
+    for (const c of children) ids.add(c.studentId);
+    // ALL THREE teaching links — see common/teaches.ts. This asked
+    // `class_teacher` alone, so a subject teacher saw none of their pupils'
+    // documents while the same person could write those pupils' report-card
+    // remarks. Medical stays out of reach either way: it is gated on a
+    // permission no teacher holds.
+    for (const id of await studentIdsTaughtBy(tx, p.userId)) ids.add(id);
     return [...ids];
   }
 
@@ -417,24 +406,11 @@ export class DocumentsService {
       select: { id: true },
     });
     if (link) return;
-    const taught = await tx.classTeacher.findMany({
-      where: { teacherId: p.userId },
-      select: { classId: true },
-    });
-    if (taught.length > 0) {
-      // SECURITY: ACTIVE only. Without the status filter this asked "was this
-      // pupil EVER in a class I teach", so a teacher kept access to a pupil who
-      // had since withdrawn, transferred or been promoted out — indefinitely,
-      // and to their records rather than merely their name. Proven live: a
-      // pupil was set to WITHDRAWN and their old teacher still fetched a signed
-      // download URL for their report card. Whole-school staff are unaffected,
-      // so the school can still produce a departed pupil's paperwork.
-      const enrolled = await tx.enrollment.findFirst({
-        where: { studentId, status: "ACTIVE", classId: { in: taught.map((t: { classId: string }) => t.classId) } },
-        select: { id: true },
-      });
-      if (enrolled) return;
-    }
+    // ALL THREE teaching links, ACTIVE enrolment only — see common/teaches.ts.
+    // The LIST path in this same file was consolidated first; leaving this one
+    // asking `class_teacher` alone would have meant a subject teacher seeing a
+    // pupil's document in the list and being refused when they opened it.
+    if (await teachesStudent(tx, p.userId, studentId)) return;
     // SECURITY: 404 (not 403) — never reveal another student's document.
     throw new NotFoundException("Document not found");
   }

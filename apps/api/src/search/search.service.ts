@@ -10,6 +10,7 @@
 // =============================================================================
 
 import { Inject, Injectable } from "@nestjs/common";
+import { studentIdsTaughtBy } from "../common/teaches";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
 import type { SearchResultDto, SearchHitDto } from "@sms/types";
 import {
@@ -202,15 +203,11 @@ export class SearchService {
     if (p.roles.includes("student")) ids.add(p.userId);
     const kids = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });
     kids.forEach((k: { studentId: string }) => ids.add(k.studentId));
-    const taught = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
-    if (taught.length) {
-      const enr = await tx.enrollment.findMany({
-        where: { classId: { in: taught.map((t: { classId: string }) => t.classId) } },
-        select: { studentId: true },
-        distinct: ["studentId"],
-      });
-      enr.forEach((e: { studentId: string }) => ids.add(e.studentId));
-    }
+    // ALL THREE teaching links — see common/teaches.ts. This asked
+    // `class_teacher` alone, so a subject teacher searching for a pupil they
+    // teach every day found nothing, while `visibleClassIds` directly below
+    // already consulted all three and found their CLASS.
+    for (const id of await studentIdsTaughtBy(tx, p.userId)) ids.add(id);
     return [...ids];
   }
 }

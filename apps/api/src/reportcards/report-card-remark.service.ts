@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { teachesStudent as teachesThisStudent } from "../common/teaches";
 import type { ReportCardRemarkDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -91,16 +92,16 @@ export class ReportCardRemarkService {
     throw new NotFoundException("Not found");
   }
 
-  private async teachesStudent(tx: TenantTx, p: Principal, studentId: string): Promise<boolean> {
-    const taught = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
-    const supervised = await tx.class.findMany({ where: { supervisorId: p.userId }, select: { id: true } });
-    const classIds = [
-      ...taught.map((t: { classId: string }) => t.classId),
-      ...supervised.map((c: { id: string }) => c.id),
-    ];
-    if (classIds.length === 0) return false;
-    const enr = await tx.enrollment.findFirst({ where: { studentId, classId: { in: classIds } }, select: { id: true } });
-    return !!enr;
+  /**
+   * ALL THREE teaching links — see common/teaches.ts.
+   *
+   * This copy asked `supervisorId` OR `class_subject_teacher` and never
+   * `class_teacher`, so a FORM TUTOR could not write a remark about their own
+   * tutee. It was one of three different answers the platform gave to "do I
+   * teach this child"; the roster gave a fourth by returning nothing at all.
+   */
+  private teachesStudent(tx: TenantTx, p: Principal, studentId: string): Promise<boolean> {
+    return teachesThisStudent(tx, p.userId, studentId);
   }
 
   async get(p: Principal, studentId: string, termId: string): Promise<ReportCardRemarkDto> {

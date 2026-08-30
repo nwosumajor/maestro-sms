@@ -27,6 +27,10 @@ function makeService(f: Fakes) {
     // Every real TenantTx has this: the guardian notice names the PUPIL, so
     // the producer resolves their name.
     user: { findFirst: jest.fn().mockResolvedValue({ name: "Demo Student" }) },
+    // One definition of who a teacher teaches (common/teaches.ts) asks all
+    // three link tables; every real TenantTx answers all three.
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     parentChild: {
       findFirst: jest.fn().mockResolvedValue(f.parentLink ?? null),
       findMany: jest.fn().mockResolvedValue([]),
@@ -34,7 +38,13 @@ function makeService(f: Fakes) {
     classTeacher: { findMany: jest.fn().mockResolvedValue(f.taughtClasses ?? []) },
     enrollment: {
       findFirst: jest.fn().mockResolvedValue(f.enrolledForStudent ?? null),
-      findMany: jest.fn().mockResolvedValue([]),
+      // The pupil's OWN classes: "do I teach this child" intersects the
+      // teacher's classes with the pupil's. `enrolledForStudent` keeps its
+      // meaning — whether this pupil is in the class the fixture gave the
+      // teacher (`taughtClasses`, conventionally c-1).
+      findMany: jest.fn().mockResolvedValue(
+        f.enrolledForStudent ? [{ classId: (f.taughtClasses?.[0]?.classId ?? "c-1"), studentId: "stu-1" }] : [],
+      ),
     },
   } as unknown as TenantTx;
 

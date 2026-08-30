@@ -32,8 +32,18 @@ function makeService(f: Fakes) {
       upsert: jest.fn().mockResolvedValue({ id: "med-1" }),
     },
     parentChild: { findFirst: jest.fn().mockResolvedValue(f.parentChild?.[0] ?? null) },
+    // "Do I teach this child" is now ONE definition (common/teaches.ts) and it
+    // asks all three link tables plus the pupil's own ACTIVE enrolments — every
+    // real TenantTx answers all four. The fixture keys keep their meaning:
+    // `classTeacher` is the class this teacher takes, `enrollment` is whether
+    // the pupil is in it.
     classTeacher: { findMany: jest.fn().mockResolvedValue(f.classTeacher ?? []) },
-    enrollment: { findFirst: jest.fn().mockResolvedValue(f.enrollment ?? null) },
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+    enrollment: {
+      findFirst: jest.fn().mockResolvedValue(f.enrollment ?? null),
+      findMany: jest.fn().mockResolvedValue(f.enrollment ? [{ classId: "c-1" }] : []),
+    },
     // The registry row, because allocating an admission number now asks which
     // year it is WHERE THE SCHOOL IS. The real transaction always has this; a
     // stub without it was simply an incomplete model of one.

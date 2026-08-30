@@ -2040,6 +2040,66 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Four answers to "do I teach this child", and a teacher of 899 who saw none
+`common/teaches.ts` (`classIdsTaughtBy` / `studentIdsTaughtBy` / `teachesStudent`).
+A class carries a teacher THREE ways — `class_teacher` (form tutor),
+`class.supervisorId` (supervisor), `class_subject_teacher` (subject) — and the
+platform asked which pupils were a teacher's with four different answers:
+```
+class_teacher only                     /students, search, documents, SIS,
+                                       attendance, notification send
+class_teacher + class_subject_teacher  dashboard, messaging, meetings,
+                                       discipline, staff handover
+supervisorId + class_subject_teacher   report-card remarks, trait ratings
+(nothing at all)                       what a subject-only teacher actually got
+```
+**Measured on the demo school: of 61 teachers, ONE is a form tutor and NINE
+teach only subjects** — and that is the ordinary shape of a secondary school,
+where most staff take a subject across many classes and tutor none. A teacher
+with 30 offerings across 899 pupils:
+```
+before   GET /classes/mine   200, their classes
+         GET /students       []          <- the platform knew they taught
+         GET /search?q=…     no hits        and would not say who
+         .../attendance/summary  404
+after    /students 899 pupils · search 6 hits · attendance 200 · documents 200
+         form tutor unchanged: 1 pupil, and a pupil not theirs still 404
+```
+while the SAME person could already write those pupils' report-card remarks and
+character ratings, because that module used the third definition. No reading of
+the product makes somebody a teacher for the purpose of GRADING a child and a
+stranger for the purpose of LISTING them — so this is drift, not policy.
+// THE UNION IS WHAT A SCHOOL WOULD SAY: you teach a pupil if you tutor,
+supervise or teach a subject to a class they are ACTIVELY in. Medical is
+unaffected either way — it is gated on a permission no teacher holds — so
+consolidating does not hand anyone a child's medical record.
+// **THE FORM TUTOR WAS THE VICTIM OF THE THIRD DEFINITION**, which is what
+makes this a consolidation rather than a widening: `student-trait.service`
+asked supervisor-or-subject and never `class_teacher`, so a tutor could not rate
+or read the trait grid for their own tutor group.
+// GOTCHA, MINE, and a test caught it: my sweep regex hit `visibleClassIds`
+instead of `visibleStudentIds` in the search service and DELETED the
+family-direction logic — the part that lets a parent see the classes their child
+is in — along with the comment explaining why it deliberately does not reuse the
+teacher set. `teacher-access-ends-when-a-pupil-leaves` went red on exactly that.
+Reverted and reapplied to the right function.
+// GOTCHA: that same guard test asserts `status: "ACTIVE"` inside SIX named
+function bodies, and consolidating moved those queries into one file — so it
+went red on a change that PRESERVES the property. Re-anchored to where the rule
+now lives, plus a new assertion that the delegating sites hold no enrolment
+query of their own, so nobody can re-inline an unfiltered one beside the call.
+// **THE BACKLOG IS LISTED, NOT HIDDEN.** Ten more sites still derive their own
+answer (gradebook, three integrity services, four game services, scholarship,
+and three further attendance methods). Each carries its own semantics, so they
+are named in `AWAITING_CONSOLIDATION` with what they ask — a list the gate
+requires to SHRINK: an entry that stops matching must be removed, so it cannot
+outlive the divergence it records. `lms/syllabus.service.ts` is a genuine
+exemption rather than backlog: it asks about ONE offering (class + subject +
+teacher), which is narrower on purpose.
+Gate: `one-answer-to-do-i-teach-this-child.spec.ts`, mutation-validated three
+ways — narrow the helper back to one table, drop its ACTIVE filter, and add a
+new file that derives its own answer.
+
 ### A filter the caller could not satisfy, answered with somebody else
 Found by probing the gap in the probe set: the four hand-run probes cover a
 PARENT and a PUPIL, and nothing systematically checks a TEACHER against a pupil

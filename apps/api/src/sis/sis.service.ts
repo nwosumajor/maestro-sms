@@ -19,6 +19,7 @@
 import {
   BadRequestException, Inject, Injectable, NotFoundException, ConflictException } from "@nestjs/common";
 import { allocateAdmissionNumber, loadUsedAdmissionNumbers, schoolAdmissionYear } from "../foundation/admission-number";
+import { teachesStudent } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import type { MedicalRecordDto, StudentGuardianDto } from "@sms/types";
 import { missingProfileFields, deliverableEmail } from "@sms/types";
@@ -683,28 +684,14 @@ export class SisService {
     if (link) return;
 
     // Teacher of a class this student is enrolled in?
-    const taught = await tx.classTeacher.findMany({
-      where: { teacherId: p.userId },
-      select: { classId: true },
-    });
-    if (taught.length > 0) {
-      // SECURITY: ACTIVE only. Without the status filter this asked "was this
-      // pupil EVER in a class I teach", so a teacher kept access to a pupil who
-      // had since withdrawn, transferred or been promoted out — indefinitely,
-      // and to their records rather than merely their name. Proven live: a
-      // pupil was set to WITHDRAWN and their old teacher still fetched a signed
-      // download URL for their report card. Whole-school staff are unaffected,
-      // so the school can still produce a departed pupil's paperwork.
-      const enrolled = await tx.enrollment.findFirst({
-        where: {
-          studentId,
-          status: "ACTIVE",
-          classId: { in: taught.map((t: { classId: string }) => t.classId) },
-        },
-        select: { id: true },
-      });
-      if (enrolled) return;
-    }
+    //
+    // ALL THREE teaching links, and ACTIVE enrolment only — see
+    // common/teaches.ts. This asked `class_teacher` alone, so a subject teacher
+    // got 404 on the profile of a pupil they teach every day, while the same
+    // person could write that pupil's report-card remark. The ACTIVE rule is
+    // unchanged and is why the helper filters it: a teacher must not keep
+    // access to a pupil who has withdrawn, transferred or been promoted out.
+    if (await teachesStudent(tx, p.userId, studentId)) return;
 
     // SECURITY: 404 (not 403) — never reveal a student the caller can't see.
     throw new NotFoundException("Student not found");

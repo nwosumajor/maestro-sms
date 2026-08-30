@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { studentIdsTaughtBy } from "../common/teaches";
 import { SchoolRegionService } from "../foundation/school-region.service";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
@@ -1373,18 +1374,11 @@ export class LmsService {
       // narrow the rows, exactly as before.
       const ids = new Set<string>();
       if (p.roles.includes("student")) ids.add(p.userId);
-      const taught = await tx.classTeacher.findMany({
-        where: { teacherId: p.userId },
-        select: { classId: true },
-      });
-      if (taught.length > 0) {
-        const enr = await tx.enrollment.findMany({
-          where: { classId: { in: taught.map((t: { classId: string }) => t.classId) } },
-          select: { studentId: true },
-          distinct: ["studentId"],
-        });
-        enr.forEach((e: { studentId: string }) => ids.add(e.studentId));
-      }
+      // ALL THREE LINKS. This asked `class_teacher` alone, so a teacher who
+      // takes a subject and tutors no class — nine of this school's 61, and the
+      // normal shape of a secondary school — got an EMPTY roster while
+      // /classes/mine listed their classes.
+      for (const id of await studentIdsTaughtBy(tx, p.userId)) ids.add(id);
       const children = await tx.parentChild.findMany({
         where: { parentId: p.userId },
         select: { studentId: true },

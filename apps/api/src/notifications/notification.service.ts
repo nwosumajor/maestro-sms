@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { InjectQueue } from "@nestjs/bullmq";
+import { studentIdsTaughtBy } from "../common/teaches";
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { MessageCreditsService } from "./message-credits.service";
 import { Prisma } from "@sms/db";
@@ -899,17 +900,14 @@ export class NotificationService {
       return;
     }
     // Teacher: students in their classes, or those students' guardians.
-    const taught = await tx.classTeacher.findMany({
-      where: { teacherId: p.userId },
-      select: { classId: true },
-    });
-    if (taught.length > 0) {
-      const classIds = taught.map((t: { classId: string }) => t.classId);
-      const myStudents = await tx.enrollment.findMany({
-        where: { status: "ACTIVE", classId: { in: classIds } },
-        select: { studentId: true },
-      });
-      const studentIds = myStudents.map((e: { studentId: string }) => e.studentId);
+    //
+    // ALL THREE teaching links — see common/teaches.ts. This asked
+    // `class_teacher` alone, so a subject teacher could not notify a single one
+    // of their own pupils or their families, while MESSAGING let the same
+    // person open a conversation with them. Two communication surfaces, the
+    // same pair of people, opposite answers.
+    const studentIds = await studentIdsTaughtBy(tx, p.userId);
+    if (studentIds.length > 0) {
       if (studentIds.includes(recipientId)) return; // a student of theirs
       const guardian = await tx.parentChild.findFirst({
         where: { parentId: recipientId, studentId: { in: studentIds } },

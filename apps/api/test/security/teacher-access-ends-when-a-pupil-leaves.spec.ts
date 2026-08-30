@@ -41,10 +41,13 @@ const SRC = (p: string) => readFileSync(join(__dirname, "../../src", p), "utf8")
 
 /** The teacher-direction checks: "is this pupil in a class I teach?" */
 const TEACHER_DIRECTION: Array<[string, string]> = [
-  ["documents/documents.service.ts", "assertCanAccessStudent"],
-  ["documents/documents.service.ts", "visibleStudentIds"],
-  ["sis/sis.service.ts", "assertCanAccessStudent"],
-  ["attendance/attendance.service.ts", "assertCanAccessStudent"],
+  // WHERE THE RULE LIVES NOW. "Do I teach this child" had FOUR different
+  // answers across ten services — class_teacher only, class_teacher plus
+  // subject, supervisor plus subject, and (for a subject-only teacher) nothing
+  // at all — so it was consolidated into common/teaches.ts. The ACTIVE filter
+  // moved with it, and this is the one place it has to hold.
+  ["common/teaches.ts", "studentIdsTaughtBy"],
+  ["common/teaches.ts", "teachesStudent"],
   ["reportcards/reportcard.service.ts", "assertCanAccess"],
   ["gradebook/term-result.service.ts", "canReadReport"],
   // MESSAGING decides the same question and was not on this list. It applies
@@ -75,7 +78,12 @@ function balanced(src: string, open: number, o = "{", c = "}"): string {
  * no test.
  */
 function bodyOf(src: string, name: string): string {
-  const decl = new RegExp(`^\\s*(private |protected |public )?(async )?${name}\\s*\\(`, "m");
+  // Class METHOD or exported FUNCTION: the rule now lives in a plain module,
+  // and a matcher that only knew about methods reported "no declaration".
+  const decl = new RegExp(
+    `^\\s*(?:export\\s+)?(?:private |protected |public )?(?:async )?(?:function\\s+)?${name}\\s*\\(`,
+    "m",
+  );
   const m = decl.exec(src);
   if (!m) throw new Error(`no declaration of ${name}`);
   return balanced(src, src.indexOf("{", src.indexOf(")", m.index + m[0].length - 1)));
@@ -105,6 +113,11 @@ describe("the six checks that decided a teacher's reach", () => {
     // Otherwise the fix would strand a departed pupil's records entirely: the
     // office must still be able to issue a transcript or a final report.
     for (const [file] of TEACHER_DIRECTION) {
+      // The shared helper answers "do I teach this child" and nothing else —
+      // whether the caller is whole-school staff is decided BY the caller,
+      // before it is consulted. Asserting a wide-role check inside it would be
+      // asserting the wrong thing about the wrong file.
+      if (file === "common/teaches.ts") continue;
       const src = SRC(file);
       // `_WIDE\b` did not match SCHOOL_WIDE_SENDERS — an underscore is a word
       // character, so there is no boundary after WIDE. The property held; the
@@ -138,8 +151,27 @@ describe("what must NOT be narrowed", () => {
 
 describe("the rule, stated once", () => {
   it("is written down where the next person will change it", () => {
-    const doc = SRC("documents/documents.service.ts");
-    expect(doc).toMatch(/SECURITY: ACTIVE only/);
-    expect(doc).toMatch(/withdrawn, transferred or been promoted out/);
+    // It moved with the query: the enrolment check that decides a teacher's
+    // reach now lives in ONE file, so that is where the reasoning has to be.
+    const rule = SRC("common/teaches.ts");
+    expect(rule).toMatch(/ACTIVE enrolment only/);
+    expect(rule).toMatch(/withdrawn, transferred or been promoted out/);
+  });
+
+  it("the services that delegate do not re-inline an unfiltered query", () => {
+    // The danger of consolidating: somebody later writes their own enrolment
+    // lookup beside the call and loses the ACTIVE filter, which is exactly the
+    // defect this whole file exists for. These two must keep DELEGATING.
+    for (const [file, fn] of [
+      ["documents/documents.service.ts", "visibleStudentIds"],
+      ["documents/documents.service.ts", "assertCanAccessStudent"],
+      ["attendance/attendance.service.ts", "assertCanAccessStudent"],
+      ["sis/sis.service.ts", "assertCanAccessStudent"],
+    ] as const) {
+      const body = bodyOf(SRC(file), fn);
+      expect([file, /studentIdsTaughtBy|teachesStudent/.test(body)]).toEqual([file, true]);
+      // …and hold no enrolment query of their own, filtered or not.
+      expect([file, enrolmentQueries(body).length]).toEqual([file, 0]);
+    }
   });
 });

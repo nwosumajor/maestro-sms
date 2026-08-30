@@ -40,7 +40,11 @@ function makeService(f: Fakes, provider?: { deliver: jest.Mock }, credits?: { ba
     // Recipient preferences: null => the producer delivers all requested channels.
     notificationPreference: { findFirst: jest.fn().mockResolvedValue(null) },
     user: { findFirst: jest.fn().mockResolvedValue(f.recipientUser ?? null) },
+    // One definition of who a teacher teaches (common/teaches.ts) asks all
+    // three link tables; every real TenantTx answers all three.
     classTeacher: { findMany: jest.fn().mockResolvedValue(f.taughtClasses ?? []) },
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: jest.fn().mockResolvedValue(f.myStudents ?? []) },
     parentChild: { findFirst: jest.fn().mockResolvedValue(f.guardian ?? null) },
   } as unknown as TenantTx;
