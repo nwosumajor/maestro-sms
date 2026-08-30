@@ -140,7 +140,7 @@ export class StudentTraitService {
       // row per (pupil, term, trait), so a subject teacher rating a child's
       // HONESTY overwrote the class teacher's rating of it outright.
       if (!this.staffWide(p) && !(await supervisesStudent(tx, p.userId, studentId))) {
-        throw new ForbiddenException(await classTeacherOnlyRefusal(tx, p.userId, studentId, "these ratings"));
+        throw new ForbiddenException(await classTeacherOnlyRefusal(tx, p.userId, studentId, "record these ratings"));
       }
       const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true } });
       if (!term) throw new NotFoundException("Term not found");

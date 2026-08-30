@@ -111,13 +111,13 @@ describe("who may write the class teacher's remark", () => {
 
 describe("the refusal", () => {
   it("names the class teacher to somebody who teaches the pupil, so they know who to ask", async () => {
-    const msg = await classTeacherOnlyRefusal(world, SUBJECT_TEACHER, PUPIL, "this remark");
+    const msg = await classTeacherOnlyRefusal(world, SUBJECT_TEACHER, PUPIL, "write this remark");
     expect(msg).toContain("James Adams");
     expect(msg).toContain("SS1A");
   });
 
   it("stays GENERIC for somebody with no link — a refusal is not a way to ask who a pupil is", async () => {
-    const msg = await classTeacherOnlyRefusal(world, STRANGER, PUPIL, "this remark");
+    const msg = await classTeacherOnlyRefusal(world, STRANGER, PUPIL, "write this remark");
     expect(msg).not.toContain("James Adams");
     expect(msg).not.toContain("SS1A");
     expect(msg).toContain("class teacher");
@@ -129,7 +129,7 @@ describe("the refusal", () => {
       classes: [{ id: FORM, name: "SS1A", supervisorId: null }],
       offerings: [{ classId: FORM, teacherId: SUBJECT_TEACHER }],
     });
-    const msg = await classTeacherOnlyRefusal(none, SUBJECT_TEACHER, PUPIL, "this remark");
+    const msg = await classTeacherOnlyRefusal(none, SUBJECT_TEACHER, PUPIL, "write this remark");
     expect(msg).toContain("no class teacher yet");
     expect(msg).toContain("SS1A");
   });
@@ -202,5 +202,28 @@ describe("the READ scope deliberately stays the union", () => {
     for (const file of ["report-card-remark.service.ts", "student-trait.service.ts"]) {
       expect(methodBody(file, "assertCanRead(")).toMatch(/teachesStudent|teachesThisStudent/);
     }
+  });
+});
+
+/**
+ * AND THE CAPABILITY THE WEB IS TOLD, which is the half a mutation caught me
+ * leaving unguarded: hard-coding either flag to `true` passed every assertion
+ * above. The server would still refuse the write — so it is not a hole — but
+ * the control would be offered to eleven people per class again and refused for
+ * ten of them, which is the screen-level defect this fix exists to remove.
+ *
+ * Asserted as the SAME question the write asks, not merely as "a flag exists".
+ */
+describe.each([
+  ["report-card-remark.service.ts", "async toDto(", "mayWriteClassTeacherRemark"],
+  ["student-trait.service.ts", "async getTraits(", "mayWrite"],
+])("%s tells the web the truth", (file, sig, field) => {
+  it(`computes ${field} from supervision, never a constant`, () => {
+    const body = methodBody(file, sig);
+    const line = body.split("\n").find((l) => l.includes(`${field}:`)) ?? "";
+    expect(line).not.toMatch(/:\s*(true|false)\s*,/);
+    // The flag and the guard must ask one question; a second spelling is how
+    // the remark and the ratings drifted apart in the first place.
+    expect(body).toContain("supervisesStudent");
   });
 });

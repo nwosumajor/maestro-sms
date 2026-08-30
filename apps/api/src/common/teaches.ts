@@ -192,7 +192,10 @@ export async function classTeacherOnlyRefusal(
   }
   const cls = await supervisorOfStudent(tx, studentId);
   if (!cls) return `Only the pupil's class teacher or a school administrator may ${act}.`;
+  // `act` carries its own verb ("write this remark", "record these ratings") so
+  // one sentence serves both without agreeing with a plural: the first draft
+  // read "These ratings IS the class teacher's to write".
   return cls.supervisorName
-    ? `${act.charAt(0).toUpperCase()}${act.slice(1)} is ${cls.className}'s class teacher's to write — ask ${cls.supervisorName}, or a school administrator.`
+    ? `Only ${cls.className}'s class teacher may ${act} — ask ${cls.supervisorName}, or a school administrator.`
     : `${cls.className} has no class teacher yet, so nobody is responsible for this. Ask a school administrator to assign one.`;
 }

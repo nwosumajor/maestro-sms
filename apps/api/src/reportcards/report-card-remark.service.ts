@@ -147,7 +147,7 @@ export class ReportCardRemarkService {
       // subject teacher's and re-signed with their name, with no history.
       const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
       if (!staffWide && !(await supervisesStudent(tx, p.userId, studentId))) {
-        throw new ForbiddenException(await classTeacherOnlyRefusal(tx, p.userId, studentId, "this remark"));
+        throw new ForbiddenException(await classTeacherOnlyRefusal(tx, p.userId, studentId, "write this remark"));
       }
       await this.assertTermExists(tx, termId);
       const row = await tx.reportCardRemark.upsert({

@@ -3663,6 +3663,55 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### A remark signed by the class teacher, written by whoever went last
+`supervisesStudent` / `classTeacherOnlyRefusal` (`common/teaches.ts`),
+`setClassTeacherRemark`, `setTraits`. Found by verifying a claim the user asked
+about — that one member of staff can be class teacher of one class and subject
+teacher in others — and then asking what each duty actually reaches.
+`setClassTeacherRemark` refused with *"Only the student's class teacher or a
+school administrator may set this remark"* and authorised on `teachesStudent`,
+the UNION of supervising a class and teaching one subject to it. So each of a
+class's eleven subject teachers could do the thing the refusal reserved for one
+of them. `setTraits` had the identical defect in almost the identical words.
+**IT IS NOT A PERMISSION SLIP, IT IS AN OVERWRITE.** The remark is ONE column
+keyed on (pupil, term) and a rating ONE row per (pupil, term, trait), so writing
+replaces somebody else's signed judgement about a child — and the card then
+attributes it to whoever wrote last. Measured live on the demo school:
+```
+class teacher writes    "Steady and conscientious."   signed Demo Teacher
+subject teacher writes  "OVERWRITTEN..."              signed Volume Teacher 1
+after                   403 "Only History 101's class teacher may write this
+                        remark — ask Demo Teacher, or a school administrator."
+```
+// THE READ SCOPE DELIBERATELY STAYS THE UNION, and a test pins it. Narrowing it
+too would hide a child's report card from staff who teach them every week —
+a different question, and this fix does not answer it. What is narrowed is the
+WRITE, which is the one act the sentence was already reserving.
+// ONE REFUSAL, SHARED. Two spellings of one rule is how this pair drifted in
+the first place: both already SAID the same thing while both did the other.
+// IT NAMES THE CLASS TEACHER ONLY TO SOMEBODY WHO ALREADY TEACHES THE PUPIL —
+to anyone else it stays generic, so a refusal cannot become a way of asking who
+a pupil is or which class they are in. And it says "no class teacher yet" when
+that is the real answer, the same fork the register refusal already draws.
+// **THE WEB OFFERED IT TO ELEVEN PEOPLE AND THE SERVER ACCEPTED IT FROM ONE.**
+`canWrite` was `hasPermission("grade.write")`, which every subject teacher
+holds, while the component's own header said "teacher/supervisor". Supervision
+is per-pupil and no session can answer it, so the server does, on the DTO each
+editor already fetches — the mirror of the defect this repo records the other
+way round, gating a route whose UI still calls it.
+// GOTCHA, and the repo already records it: `git checkout <file>` to undo a
+mutation on an UNCOMMITTED file discards the fix, not the mutation. It happened
+three times in one run and cost a full redo of both services. Commit first, then
+mutate.
+// GOTCHA in my own gate, caught by its own magnitude assertion: the method
+extractor took the first `{` after the signature, and `setTraits(... ratings:
+Array<{ traitKey: string }>)` opens one inside its parameter list — a
+35-character "method body". Walk the parameter parens to their match first.
+// GOTCHA: a mutation that hard-codes the DTO flag to `true` passed everything I
+had written — the server would still refuse, so not a hole, but the control
+would be re-offered to ten people who cannot use it. The flag is now asserted to
+be computed from the same question as the guard.
+
 ### Reviewing my own new screen: a count the page could not see
 The first thing reviewed after building the report-card console was the console
 itself, and "Print all" claimed something it cannot observe. It fires ONE BLOB
