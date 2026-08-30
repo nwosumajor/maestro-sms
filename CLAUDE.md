@@ -2040,6 +2040,54 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Step 4 attempted and REVERTED: what retiring `class_teacher` actually costs
+The last step of the class-teacher strategy — move the reads onto the two
+predicates and drop the redundant join table — was driven end to end and then
+BACKED OUT. Recorded because the measurement is the useful part and a half-done
+refactor is worse than none.
+**IT IS VIABLE, and the source side works.** The reads are ~40 call sites across
+20 services in three regular shapes plus six specials:
+```
+findMany({ where:{ teacherId: p.userId }, select:{ classId }})   -> classIdsTaughtBy
+findFirst({ where:{ classId: X, teacherId: p.userId }})          -> teachesClass
+findMany({ where:{ classId:{ in: X }}, select:{ teacherId }})    -> teacherIdsOfClasses
+```
+plus `teachesAnyOf` for "any of these classes". With those four helpers the
+table became UNREFERENCED in `apps/api/src`, the Prisma model came out, and
+`tsc` was clean — the type-safety spine then found the only two typed fixtures
+that still named it.
+**WHAT STOPPED IT: ~31 TEST FIXTURES**, each stubbing `classTeacher` to mean
+"this teacher teaches class X". Translating that is per-file judgement — the old
+`findMany` returned `[{classId}]` and the new one returns `[{id}]`, and a
+`findFirst` fixture encodes a class id the stub does not otherwise name. My
+attempt to automate it emitted broken property assignments and took the suite
+from 29 failing to 44. Reverted to a clean tree: 519 suites, 5,223 tests, zero
+modified files.
+// **THE MIGRATION IS WRITTEN AND WORTH KEEPING**, so it is recorded here rather
+than re-derived. Backfill BEFORE dropping and never overwrite: a class with no
+supervisor takes the teacher from its join row, one that already has a
+supervisor keeps it, and a class with SEVERAL join rows (the shape the
+many-to-many allowed and the product never intended) takes the EARLIEST by
+`createdAt`, which is the one a school assigned first.
+```sql
+UPDATE "class" c SET "supervisorId" = t."teacherId"
+FROM (SELECT DISTINCT ON ("classId") "classId","teacherId"
+      FROM "class_teacher" ORDER BY "classId","createdAt" ASC) t
+WHERE c.id = t."classId" AND c."supervisorId" IS NULL;
+DROP TABLE IF EXISTS "class_teacher";
+```
+Measured on the demo school: the ONE existing join row already matches its
+class's supervisor, so nothing there is at risk.
+// THE ORDER TO DO IT IN, next time: fixtures FIRST — add the two link stubs
+beside every `classTeacher` stub while the table still exists, so the suite
+stays green at every step — THEN the reads, THEN the writes, THEN the drop. I
+did it the other way round, which is why every intermediate state was red and
+the fixtures had to be guessed at rather than checked.
+// NOTHING IS LOST BY DEFERRING IT. The DEFECTS are fixed and shipped: a class
+teacher can take their own register, every new class has one, and it cannot be
+removed. What remains is redundancy — a join table nothing needs — and
+`common/teaches.ts` already answers the question in one place.
+
 ### Every class has a class teacher — required at creation, never removable
 Steps 2 and 3 of the entry below. **Step 2 was already built**, which is worth
 recording rather than rebuilding: `/classes` carries a "Needs attention (N)"
