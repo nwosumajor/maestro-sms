@@ -20,7 +20,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
-import { NotificationService } from "../notifications/notification.service";
+import { EmailService } from "../notifications/email.service";
 
 interface AlumnusInput {
   userId?: string | null;
@@ -45,7 +45,7 @@ export class AlumniService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
-    private readonly notifications: NotificationService,
+    private readonly email: EmailService,
     @InjectQueue(ALUMNI_BROADCAST_QUEUE) private readonly queue: Queue,
   ) {}
 
@@ -139,26 +139,16 @@ export class AlumniService {
   async broadcast(
     p: Principal,
     input: { title: string; body: string; year?: number },
-  ): Promise<{ queued: number; unreachable: number; closedAccounts: number }> {
-    const { queued, unreachable, closedAccounts } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+  ): Promise<{ queued: number; unreachable: number; noEmail: number }> {
+    const { queued, unreachable, noEmail } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const audience: Record<string, unknown> = {};
       if (input.year) audience.graduationYear = input.year;
-      // HAVING AN ACCOUNT IS NOT THE SAME AS BEING REACHABLE.
+      // WHO IS REACHABLE, and it is not "who has an account".
       //
-      // `queued` counted alumni with a linked account, and `unreachable` counted
-      // those without one. But `NotificationService.persist` drops every
-      // EXTERNAL channel for a recipient whose status is not ACTIVE — and an
-      // alumnus has LEFT by definition, so their account is exactly that.
-      //
-      // Measured live: broadcast to one alumna linked to a departed pupil ->
-      // `{"queued":1,"unreachable":0}`, ONE in-app row, and ZERO email
-      // deliveries. She cannot open the inbox either, because a non-ACTIVE user
-      // cannot sign in. The field that exists to report who was not reached
-      // counted the wrong population, and the larger one.
-      //
-      // The UI already went through the first layer of this — "a school with
-      // fifty on file and three linked accounts was told it had gone out" — and
-      // the second layer is the majority case.
+      // `queued` once counted alumni with a linked account and `unreachable`
+      // those without one — then, after a first fix, alumni whose account was
+      // still ACTIVE. Both were the wrong population: see the note below on why
+      // the register's own email is the audience.
       // COUNTED IN THE DATABASE, never by loading the register.
       //
       // An alumni roll only ever grows — nobody stops being an alumnus — so
@@ -170,30 +160,44 @@ export class AlumniService {
       // The raw count carries the join the schema has no Prisma relation for:
       // `alumnus.userId` is a scalar with a DB FK, the documented pattern that
       // keeps the User model lean.
-      const year = input.year ?? null;
-      const [linkedTotal, missing] = await Promise.all([
-        tx.alumnus.count({ where: { ...audience, userId: { not: null } } }),
-        tx.alumnus.count({ where: { ...audience, userId: null } }),
-      ]);
-      const reachable = (await tx.$queryRaw`
-        SELECT count(*) AS n
-        FROM "alumnus" a
-        JOIN "user" u ON u.id = a."userId"
-        WHERE u.status = 'ACTIVE'
-          AND (${year}::int IS NULL OR a."graduationYear" = ${year}::int)
-      `) as Array<{ n: bigint }>;
-      const active = Number(reachable[0]?.n ?? 0);
-      const closed = Math.max(0, linkedTotal - active);
+      // AN ALUMNI BROADCAST DOES NOT GO THROUGH THE NOTIFICATION FUNNEL.
+      //
+      // It used to fan out to the alumni who still had an ACTIVE user account,
+      // and that was the wrong target twice over. An alumnus has LEFT by
+      // definition, so a properly-exited one is not ACTIVE, cannot sign in and
+      // is dropped by `persist`'s departed-recipient rule — the feature reached
+      // almost nobody and said so honestly. And the few it DID reach were the
+      // ones whose exit had never been processed: people the school still
+      // believes are enrolled.
+      //
+      // So the audience is the ALUMNI REGISTER'S OWN EMAIL — the contact detail
+      // this module exists to keep precisely because the account is closed —
+      // sent directly, the use `NotificationModule` already documents
+      // EmailService for ("DIRECT sends to non-users"). The departed-recipient
+      // rule is left completely intact: nothing here writes a notification, so
+      // no message lands in an inbox its owner cannot open.
+      const emailable = await tx.alumnus.count({
+        where: { ...audience, email: { not: null } },
+      });
+      const missing = await tx.alumnus.count({
+        where: { ...audience, email: null },
+      });
+      const active = emailable;
+      const closed = 0;
       // The screen is read once; the audit row is what answers "why did the
       // class of 2015 never hear from us" a year later — and it now records the
       // reason, not just the shortfall.
       await this.log(tx, p, "alumni.broadcast", "broadcast", {
         year: input.year,
         count: active,
-        unreachable: missing + closed,
-        closedAccounts: closed,
+        unreachable: missing,
+        noEmail: missing,
       });
-      return { queued: active, unreachable: missing + closed, closedAccounts: closed };
+      // `closedAccounts` is gone rather than reported as zero for ever: it
+      // counted alumni whose USER ACCOUNT was closed, and the audience is no
+      // longer user accounts. A field pinned at zero is a worse answer than no
+      // field, because a reader takes it for a measurement.
+      return { queued: active, unreachable: missing, noEmail: missing };
     });
     if (queued > 0) {
       await this.queue.add(
@@ -202,7 +206,7 @@ export class AlumniService {
         { removeOnComplete: true, removeOnFail: 50 },
       );
     }
-    return { queued, unreachable, closedAccounts };
+    return { queued, unreachable, noEmail };
   }
 
   /**
@@ -220,36 +224,34 @@ export class AlumniService {
   ): Promise<number> {
     const actor = { schoolId: ctx.schoolId, userId: ctx.actorId };
     const recipients = await this.db.runAsTenant(actor, async (tx) => {
-      const where: Record<string, unknown> = { userId: { not: null } };
+      const where: Record<string, unknown> = { email: { not: null } };
       if (input.year) where.graduationYear = input.year;
-      const rows = await tx.alumnus.findMany({ where, select: { userId: true } });
-      const linked = rows.map((r: { userId: string | null }) => r.userId).filter((u): u is string => Boolean(u));
-      if (linked.length === 0) return [];
-      // ONLY THOSE THE FUNNEL WILL ACTUALLY DELIVER TO, so `sent` is a true
-      // number and no message is written into an inbox its owner cannot open.
-      const active = (await tx.user.findMany({
-        where: { id: { in: linked }, status: "ACTIVE" },
-        select: { id: true },
-      })) as Array<{ id: string }>;
-      return active.map((u) => u.id);
+      const rows = (await tx.alumnus.findMany({ where, select: { email: true } })) as Array<{ email: string | null }>;
+      return rows.map((r) => r.email).filter((e): e is string => Boolean(e));
     });
     let sent = 0;
+    let failed = 0;
     for (let i = 0; i < recipients.length; i += BROADCAST_CHUNK) {
       const chunk = recipients.slice(i, i + BROADCAST_CHUNK);
-      try {
-        await this.notifications.enqueueMany(actor, chunk, {
-          type: "ALUMNI_BROADCAST",
-          title: input.title,
-          body: input.body,
-          data: {},
-          channels: ["EMAIL"],
-        });
-        sent += chunk.length;
-      } catch (err) {
-        // Reported, never silently dropped: a half-landed broadcast that claims
-        // success is how alumni get written to twice.
-        this.logger.error(`Alumni broadcast chunk ${i}-${i + chunk.length} failed: ${String(err)}`);
+      // ONE SEND PER ADDRESS, and a failure costs that address rather than the
+      // chunk: `EmailService.send` never throws, it reports. A half-landed
+      // broadcast that claims success is how alumni get written to twice.
+      const results = await Promise.all(
+        chunk.map((to) =>
+          this.email
+            .send(to, input.title, input.body)
+            .catch((err: unknown) => ({ ok: false, error: String(err) })),
+        ),
+      );
+      for (const r of results) {
+        if (r.ok) sent += 1;
+        else failed += 1;
       }
+    }
+    if (failed > 0) {
+      // Said out loud, for the reason this module already records about the
+      // shortfall: a count nobody surfaces is a count nobody acts on.
+      this.logger.error(`Alumni broadcast: ${failed} of ${recipients.length} address(es) were not accepted.`);
     }
     return sent;
   }

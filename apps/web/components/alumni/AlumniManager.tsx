@@ -40,7 +40,7 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
   const sendBroadcast = async () => {
     setBusy(true);
     setMsg(null);
-    const res = await postSms<{ queued: number; unreachable: number; closedAccounts: number }>("alumni/broadcast", {
+    const res = await postSms<{ queued: number; unreachable: number; noEmail: number }>("alumni/broadcast", {
       title: bTitle,
       body: bBody,
     });
@@ -50,25 +50,24 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
       return;
     }
     const queued = res.data?.queued ?? 0;
-    const unreachable = res.data?.unreachable ?? 0;
-    const closed = res.data?.closedAccounts ?? 0;
-    const noAccount = Math.max(0, unreachable - closed);
+    const noEmail = res.data?.noEmail ?? 0;
+    /*
+      A BROADCAST IS AN EMAIL TO THE REGISTER, NOT A NOTIFICATION.
+
+      It used to be a notification addressed to a user account, and the funnel
+      drops every external channel for a recipient whose status is not ACTIVE —
+      which an alumnus is BY DEFINITION. So it reached almost nobody, and the
+      few it did reach were the ones whose exit had never been processed.
+
+      The audience is now the email on the alumni record itself, which is the
+      contact detail this register exists to hold. Nothing is written into an
+      account nobody can sign in to.
+    */
     setMsg(
-      `Queued for ${queued} alumn${queued === 1 ? "us" : "i"} the school can still write to.` +
-        (noAccount > 0
-          ? ` ${noAccount} ${noAccount === 1 ? "has" : "have"} no account — add one to reach them.`
-          : "") +
-        /*
-          THE SECOND REASON, and it is the commoner one. A broadcast is a
-          notification addressed to a user account, and the notification funnel
-          drops every external channel for a recipient whose status is not
-          ACTIVE — which an alumnus is BY DEFINITION. Measured live: one alumna
-          with a linked account gave {"queued":1,"unreachable":0}, one in-app row
-          and zero emails, to somebody who cannot sign in to read it.
-        */
-        (closed > 0
-          ? ` ${closed} ${closed === 1 ? "has a closed account" : "have closed accounts"} and cannot be written to at all —` +
-            ` the school's messaging does not deliver to a departed account.`
+      `Emailed ${queued} alumn${queued === 1 ? "us" : "i"} from the register.` +
+        (noEmail > 0
+          ? ` ${noEmail} ${noEmail === 1 ? "has" : "have"} no email address on file and could not be reached —` +
+            ` add one to include them next time.`
           : ""),
     );
     setBTitle("");
