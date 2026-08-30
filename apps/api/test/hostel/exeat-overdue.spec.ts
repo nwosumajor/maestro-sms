@@ -27,10 +27,14 @@ function makeService(
   exeats: Array<Record<string, unknown>>,
   staff = [{ userId: "head-warden-1" }],
   hostels: Array<{ id: string; wardenId: string | null }> = [{ id: "h-1", wardenId: "warden-1" }],
+  timezone = "Africa/Lagos",
 ) {
   const updateMany = jest.fn().mockResolvedValue({ count: exeats.length });
   const enqueueMany = jest.fn().mockResolvedValue(undefined);
   const client = {
+    // Every real privileged client can read the school registry; the sweep asks
+    // for each school's timezone so "due back at 18:00" is the school's clock.
+    school: { findMany: jest.fn().mockResolvedValue([{ id: SCHOOL, country: null, timezone }]) },
     hostelExeat: { findMany: jest.fn().mockResolvedValue(exeats), updateMany },
     userRole: { findMany: jest.fn().mockResolvedValue(staff) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "kid-1", name: "Ada Obi" }]) },
@@ -78,8 +82,28 @@ describe("the overdue sweep", () => {
     expect(recipients.sort()).toEqual(["head-warden-1", "warden-1"]);
     expect(payload.title).toMatch(/Ada Obi is late back/);
     // The alert has to say what to DO, not just that something is wrong.
-    expect(payload.body).toMatch(/due back at 2026-08-13 18:00/);
+    // THE SCHOOL'S CLOCK, not the server's. This asserted 18:00 — the raw UTC
+    // the sweep used to print — on the sentence that tells a family, and the
+    // staff about to go looking for a child, when they were due back. The
+    // fixture's school is on Africa/Lagos, so 18:00Z is 19:00 there.
+    expect(payload.body).toMatch(/due back at 2026-08-13 19:00/);
     expect(payload.body).toMatch(/record the return/);
+  });
+
+  it("reads that time in the SCHOOL's zone, not the server's", async () => {
+    // Without this the fix is unfalsifiable: a sweep that resolved the timezone
+    // and then printed UTC anyway would pass every assertion above.
+    const west = makeService([overdueExeat], undefined, undefined, "America/Toronto");
+    await west.svc.sweep(NOW);
+    const body = (west.enqueueMany.mock.calls[0][2] as { body: string }).body;
+    expect(body).toMatch(/due back at 2026-08-13 14:00/);
+
+    const east = makeService([overdueExeat], undefined, undefined, "Pacific/Auckland");
+    await east.svc.sweep(NOW);
+    const later = (east.enqueueMany.mock.calls[0][2] as { body: string }).body;
+    // Far enough east that the school is already on the NEXT day — the failure
+    // that makes this more than a wrong hour.
+    expect(later).toMatch(/due back at 2026-08-14 06:00/);
   });
 
   it("is ESSENTIAL, so a per-type mute cannot silence it", () => {

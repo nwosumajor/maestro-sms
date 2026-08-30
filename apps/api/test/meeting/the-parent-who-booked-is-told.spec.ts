@@ -19,6 +19,7 @@
  *    hour early and one in Toronto four hours late — on the single message that
  *    says when to turn up.
  */
+import { resolveRegion } from "@sms/types";
 import { MeetingService } from "../../src/meeting/meeting.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 import type { TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
@@ -66,7 +67,15 @@ function harness(timezone: string | null) {
     enqueueMany: jest.fn().mockResolvedValue({}),
   };
   return {
-    svc: new MeetingService(db as never, { record: jest.fn() } as never, notifications as never),
+    svc: new MeetingService(db as never, { record: jest.fn() } as never, notifications as never,
+      // The harness's OWN zone — this suite exists to prove a school west of UTC
+      // is dated by its own day, so a fixed stub here would assert nothing.
+      // `resolveRegion` still supplies the platform default when it is null.
+      {
+        forSchool: jest.fn().mockResolvedValue({ timezone: resolveRegion({ timezone }).timezone }),
+        inTx: jest.fn().mockResolvedValue({ timezone: resolveRegion({ timezone }).timezone }),
+      } as never,
+    ),
     sent,
   };
 }

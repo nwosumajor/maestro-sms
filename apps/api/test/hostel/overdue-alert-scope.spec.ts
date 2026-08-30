@@ -38,6 +38,9 @@ function makeService(opts: {
   const updateMany = jest.fn().mockResolvedValue({ count: 0 });
   const enqueueMany = jest.fn().mockResolvedValue(undefined);
   const client = {
+    // Every real privileged client can read the school registry; the sweep asks
+    // for each school's timezone so "due back at 18:00" is the school's clock.
+    school: { findMany: jest.fn().mockResolvedValue([]) },
     hostelExeat: { findMany: jest.fn().mockResolvedValue(opts.exeats), updateMany },
     userRole: { findMany: jest.fn().mockResolvedValue(opts.staff ?? []) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "kid-1", name: "Ada Obi" }, { id: "kid-2", name: "Bola Ade" }]) },

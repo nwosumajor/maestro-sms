@@ -29,6 +29,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { NotificationService } from "../notifications/notification.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
+import { resolveRegion, schoolTimeString } from "@sms/types";
 
 /** Who is told. The warden of that hostel is the first responder; the seniors
  *  are told too, because a late boarder is not a matter for one person. */
@@ -85,6 +86,25 @@ export class ExeatOverdueService {
     // the same isolation the dunning sweep keeps.
     const bySchool = new Map<string, typeof due>();
     for (const e of due) bySchool.set(e.schoolId, [...(bySchool.get(e.schoolId) ?? []), e]);
+
+    // "DUE BACK AT 18:00" IS A TIME AT THE SCHOOL, not on the server.
+    //
+    // This read `toISOString()` — UTC in a container — in the one sentence that
+    // says when a child was expected, sent to the family AND to the staff going
+    // to look for them. Its pair, the approval notice in `hostel.service`, is
+    // the same instant read a second time and had the same bug.
+    //
+    // Resolved ONCE PER SCHOOL for the whole run rather than per notice: this
+    // is a fleet sweep, the lesson the dunning and HR reminder sweeps already
+    // record.
+    const PLATFORM_TZ = resolveRegion({}).timezone;
+    const tzOf = new Map<string, string>();
+    for (const row of await client.school.findMany({
+      where: { id: { in: [...bySchool.keys()] } },
+      select: { id: true, country: true, timezone: true },
+    })) {
+      tzOf.set(row.id, resolveRegion(row).timezone);
+    }
 
     for (const [schoolId, exeats] of bySchool) {
       try {
@@ -175,7 +195,7 @@ export class ExeatOverdueService {
             );
             continue;
           }
-          const dueAt = e.expectedReturnAt.toISOString().slice(0, 16).replace("T", " ");
+          const dueAt = schoolTimeString(tzOf.get(schoolId) ?? PLATFORM_TZ, e.expectedReturnAt);
           const from = e.destination ? ` from ${e.destination}` : "";
           const data = { exeatId: e.id, studentId: e.studentId, hostelId: e.hostelId };
           // ESSENTIAL type, so a per-type mute cannot silence it — a late

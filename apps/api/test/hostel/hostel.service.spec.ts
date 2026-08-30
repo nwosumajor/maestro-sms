@@ -56,7 +56,17 @@ function svc(tx: TenantTx) {
   const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf1" }), submit: jest.fn().mockResolvedValue({}) };
   const hooks = { onFinalized: jest.fn() };
   const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
-  return new HostelService(db as never, audit as never, workflow as never, hooks as never, notifications as never);
+  // The region is how a notice renders an instant the way the school reads a
+  // clock; a stub here keeps the fixture off the platform default.
+  const region = { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) };
+  return new HostelService(
+    db as never,
+    audit as never,
+    workflow as never,
+    hooks as never,
+    notifications as never,
+    region as never,
+  );
 }
 
 describe("HostelService", () => {
@@ -196,6 +206,7 @@ describe("HostelService", () => {
         {} as never, // workflow (unused on this path)
         { onFinalized: jest.fn() } as never, // hooks — the ctor registers a reactor
         { enqueue: jest.fn() } as never,
+        { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
       );
     };
     const wide: Principal = { schoolId: "A", userId: "adm", roles: ["school_admin"], permissions: ["hostel.read", "hostel.manage"] };

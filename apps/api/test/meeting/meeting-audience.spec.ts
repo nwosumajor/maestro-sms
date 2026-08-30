@@ -118,7 +118,9 @@ function harness(opts: {
     runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { svc: new MeetingService(db as never, audit as never, undefined as never), created, where: () => slotWhere };
+  return { svc: new MeetingService(db as never, audit as never, undefined as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    ), created, where: () => slotWhere };
 }
 
 const WHEN = { startsAt: "2027-03-01T09:00:00Z", endsAt: "2027-03-01T09:30:00Z" };
@@ -293,7 +295,9 @@ function announceHarness(guardians: string[], opts: { stageClasses?: string[] } 
     enqueue: jest.fn().mockResolvedValue({}),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { svc: new MeetingService(db as never, audit as never, notifications as never), calls, notifications };
+  return { svc: new MeetingService(db as never, audit as never, notifications as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    ), calls, notifications };
 }
 
 const CALLED = { startsAt: "2027-03-01T09:00:00Z", endsAt: "2027-03-01T10:00:00Z" };
@@ -438,7 +442,9 @@ function selectHarness(realParents: string[]) {
   };
   const notifications = { enqueueMany: jest.fn().mockResolvedValue({ created: 0, failed: 0 }), enqueue: jest.fn().mockResolvedValue({}) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { svc: new MeetingService(db as never, audit as never, notifications as never), invitees, notifications, userLookups };
+  return { svc: new MeetingService(db as never, audit as never, notifications as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    ), invitees, notifications, userLookups };
 }
 
 const PICK = { startsAt: "2027-05-01T09:00:00Z", endsAt: "2027-05-01T10:00:00Z" };
@@ -539,7 +545,9 @@ describe("book() — the capacity claim itself", () => {
     };
     const notifications = { enqueue: jest.fn().mockResolvedValue({}), enqueueMany: jest.fn().mockResolvedValue({}) };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
-    return { svc: new MeetingService(db as never, audit as never, notifications as never), counted };
+    return { svc: new MeetingService(db as never, audit as never, notifications as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    ), counted };
   }
 
   it("COUNTS for an appointment — a scarce half-hour must serialise", async () => {
@@ -637,7 +645,9 @@ function cohostHarness(staffIds: string[], seeingIds?: string[], goneIds: string
     enqueue: jest.fn().mockResolvedValue({}),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { svc: new MeetingService(db as never, audit as never, notifications as never), cohosts, notified, tx };
+  return { svc: new MeetingService(db as never, audit as never, notifications as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    ), cohosts, notified, tx };
 }
 
 const CO = { startsAt: "2027-07-01T09:00:00Z", endsAt: "2027-07-01T10:00:00Z" };
@@ -764,7 +774,9 @@ describe("a co-host is a host for the things that matter", () => {
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
     const notifications = { enqueue: jest.fn(), enqueueMany: jest.fn() };
-    return new MeetingService(db as never, audit as never, notifications as never);
+    return new MeetingService(db as never, audit as never, notifications as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
   }
 
   it("SEES a meeting they were added to, though they do not own it", async () => {

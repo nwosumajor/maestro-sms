@@ -211,6 +211,39 @@ export function schoolDateString(timezone: string, at: Date = new Date()): strin
 }
 
 /**
+ * An INSTANT written the way the school reads a clock: `YYYY-MM-DD HH:MM`.
+ *
+ * The day half of this file fixes registers; this is the other half, for the
+ * messages that say WHEN — a meeting time, when a boarder is due back. Those
+ * were rendered `toISOString().slice(0, 16)`, which is the SERVER's UTC: a
+ * 09:30Z slot at a Lagos school reads 09:30 and should read 10:30, and a
+ * guardian told when their child is expected back at the boarding house was
+ * told an hour out.
+ *
+ * ONE function, because the pairs that render an instant are always a pair —
+ * the booking notice and the cancellation, the exeat approval and the overdue
+ * alert — and each pair is two readings of the same moment. Two spellings is
+ * how they drift.
+ *
+ * NOT for a `@db.Date`. A day-typed column is midnight UTC standing for a DAY,
+ * and converting it into a zone west of UTC moves it to the previous one; use
+ * `schoolDateString` for those. This is for true timestamps only.
+ */
+export function schoolTimeString(timezone: string, at: Date): string {
+  try {
+    return `${schoolDateString(timezone, at)} ${new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(at)}`;
+  } catch {
+    // Same fail-safe as the day: an invalid zone must not lose the notice.
+    return at.toISOString().slice(0, 16).replace("T", " ");
+  }
+}
+
+/**
  * The school's current calendar day as a UTC-midnight Date — the form every
  * `@db.Date` column in this schema stores.
  *

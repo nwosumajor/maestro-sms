@@ -43,7 +43,9 @@ function makeService() {
     runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
   };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
-  const service = new MeetingService(db as never, audit as never, notifications as never);
+  const service = new MeetingService(db as never, audit as never, notifications as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
   return { service, create };
 }
 

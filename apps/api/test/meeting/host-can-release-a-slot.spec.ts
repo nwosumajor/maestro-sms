@@ -66,7 +66,8 @@ function makeService() {
     db as never,
     { record: jest.fn() } as never,
     { enqueue: jest.fn(), enqueueMany: jest.fn() } as never,
-  );
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
   return { service, tx };
 }
 

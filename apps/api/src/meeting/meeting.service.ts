@@ -15,7 +15,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { STILL_HERE } from "../common/still-here";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
-import { CLASS_STREAM_LABELS, MEETING_PERMISSIONS, MEETING_PROVIDERS, NON_STAFF_ROLE_NAMES, SUBJECT_STAGES, describeAudience, isAppointment, isMeetingJoinOpen, meetingAudienceProblem, meetingJoinOpensAt, normalizeMeetingUrl, parseStreamRef, resolveRegion, schoolDateString, streamAudienceRef, type MeetingAudience, type MeetingAudienceKind } from "@sms/types";
+import { CLASS_STREAM_LABELS, MEETING_PERMISSIONS, MEETING_PROVIDERS, NON_STAFF_ROLE_NAMES, SUBJECT_STAGES, describeAudience, isAppointment, isMeetingJoinOpen, meetingAudienceProblem, meetingJoinOpensAt, normalizeMeetingUrl, parseStreamRef, resolveRegion, schoolTimeString, streamAudienceRef, type MeetingAudience, type MeetingAudienceKind } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -27,6 +27,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 /** Guardians told per transaction. Small enough that each is a short
  *  transaction, large enough that a year group is a handful of them. */
@@ -64,13 +65,6 @@ function streamLabel(stage: string | null, level: number | null, stream: string 
  * things drift. Both used `toISOString()` — the server's UTC — on the message
  * that tells a family when to turn up.
  */
-function meetingWhen(timezone: string, at: Date): string {
-  return `${schoolDateString(timezone, at)} ${at.toLocaleTimeString("en-GB", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-  })}`;
-}
 
 @Injectable()
 export class MeetingService {
@@ -80,7 +74,22 @@ export class MeetingService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    private readonly region: SchoolRegionService,
   ) {}
+
+  /**
+   * The school's clock, cached.
+   *
+   * FOUR readings of one meeting instant live in this file — the announcement,
+   * the co-host notice, the booking confirmation and the cancellation — and the
+   * fix that introduced `schoolTimeString` reached two of them, leaving the two
+   * WIDEST (an announcement goes to a whole audience) on the server's UTC. It
+   * also left two hand-rolled copies of "read the school row, resolveRegion it".
+   * One accessor, so a fifth reading cannot be written a fifth way.
+   */
+  private async timezoneOf(p: Principal): Promise<string> {
+    return (await this.region.forSchool(p.schoolId)).timezone;
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -234,7 +243,7 @@ export class MeetingService {
     try {
       const recipients = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.resolveAudience(tx, audience, slot.id));
       if (recipients.length === 0) return;
-      const when = slot.startsAt.toISOString().slice(0, 16).replace("T", " ");
+      const when = schoolTimeString(await this.timezoneOf(p), slot.startsAt);
       for (let i = 0; i < recipients.length; i += ANNOUNCE_CHUNK) {
         const chunk = recipients.slice(i, i + ANNOUNCE_CHUNK);
         await this.notifications.enqueueMany(this.ctx(p), chunk, {
@@ -454,12 +463,16 @@ export class MeetingService {
     const cohostIds = [...new Set(input.cohostIds ?? [])].filter((id) => id && id !== teacherId);
     if (cohostIds.length > 0) {
       try {
+        // ONCE, into a const: the translated `params.date` and the English
+        // fallback `body` are the same moment, and rendering it twice is how a
+        // pair says two different things.
+        const when = schoolTimeString(await this.timezoneOf(p), startsAt);
         await this.notifications.enqueueMany(this.ctx(p), cohostIds, {
           type: "GENERIC",
           key: "meeting.cohost_added",
-          params: { date: startsAt.toISOString().slice(0, 16).replace("T", " "), audience: dto.audienceLabel },
+          params: { date: when, audience: dto.audienceLabel },
           title: "You have been added to a meeting",
-          body: `${dto.audienceLabel} — ${startsAt.toISOString().slice(0, 16).replace("T", " ")}.`,
+          body: `${dto.audienceLabel} — ${when}.`,
           data: { slotId: dto.id },
           channels: ["EMAIL"],
         });
@@ -695,21 +708,18 @@ export class MeetingService {
       // school's clock. It was `toISOString()` — the server's UTC — which tells
       // a parent in Lagos to come an hour early and one in Toronto four hours
       // late, on the one message that says when to turn up.
-      const school = await tx.school.findFirst({
-        where: { id: p.schoolId },
-        select: { country: true, timezone: true },
-      });
+
       return {
         row,
         teacherId: slot.teacherId,
         startsAt: slot.startsAt,
         studentName: student?.name ?? "",
         hostName: host?.name ?? "the teacher",
-        timezone: resolveRegion(school ?? {}).timezone,
+        timezone: await this.region.inTx(tx, p.schoolId).then((r) => r.timezone),
       };
     });
 
-    const when = meetingWhen(outcome.timezone, outcome.startsAt);
+    const when = schoolTimeString(outcome.timezone, outcome.startsAt);
     try {
       await this.notifications.enqueue(this.ctx(p), {
         recipientId: outcome.teacherId,
@@ -762,20 +772,17 @@ export class MeetingService {
       // Notify the OTHER party.
       const notifyId = p.userId === b.parentId ? b.slot.teacherId : b.parentId;
       const host = await tx.user.findFirst({ where: { id: b.slot.teacherId }, select: { name: true } });
-      const school = await tx.school.findFirst({
-        where: { id: p.schoolId },
-        select: { country: true, timezone: true },
-      });
+
       return {
         notifyId,
         startsAt: b.slot.startsAt,
         toParent: notifyId === b.parentId,
         hostName: host?.name ?? "the teacher",
-        timezone: resolveRegion(school ?? {}).timezone,
+        timezone: await this.region.inTx(tx, p.schoolId).then((r) => r.timezone),
       };
     });
     try {
-      const when = meetingWhen(outcome.timezone, outcome.startsAt);
+      const when = schoolTimeString(outcome.timezone, outcome.startsAt);
       await this.notifications.enqueue(this.ctx(p), {
         recipientId: outcome.notifyId,
         type: "GENERIC",

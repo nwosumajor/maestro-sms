@@ -3663,6 +3663,67 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### Told when their child is due back, on the server's clock
+`schoolTimeString` (`@sms/types/region.ts`), beside `schoolDateString`. Found by
+sweeping the hostel module for a path that had never executed, and reading what
+its notices actually say. SIX readings of a true instant were rendered
+`toISOString().slice(0, 16)` — the SERVER's UTC, which in a container is always
+UTC:
+```
+meeting called      an audience-wide announcement, chunked, up to a whole school
+co-host added       rendered TWICE in one call, so the pair could disagree
+meeting booked      fixed earlier
+meeting cancelled   fixed earlier
+exeat approved      "Expected back …", to a boarder's guardian
+boarder overdue     "was due back at …", to the family AND to the staff who are
+                    about to go looking for the child
+```
+**THE EARLIER FIX INTRODUCED A HELPER AND REACHED TWO OF ITS OWN FILE'S FIVE.**
+CLAUDE.md records it as *"ONE `meetingWhen`, because the booking notice and the
+cancellation notice are two readings of the same instant, which is how a pair
+drifts"* — correct, and applied to the pair in front of the author while the
+ANNOUNCEMENT, which reaches the widest audience of the four, kept the UTC. Same
+shape as the sibling asymmetry this file keeps recording, committed inside the
+fix for it.
+Live on the demo school (no region set, so the platform default UTC+1), one
+exeat with `expectedReturnAt` 18:00Z:
+```
+guardian, on approval   "Expected back 2026-09-05 19:00."          (was 18:00)
+family, overdue sweep   "due back at the hostel at 2026-08-29 19:00"
+staff, overdue sweep    "due back at 2026-08-29 19:00"
+```
+// FOURTEENTH SURFACE in the "today is the SCHOOL's day" class, and the second
+that is a TIME rather than a day. The hour is the small half: far enough east
+and the school is already on the NEXT DAY, so a family reads the wrong date for
+when their child was expected.
+// ONE HELPER, IN `@sms/types` BESIDE THE DAY ONE, and the meeting service's
+private `meetingWhen` was retired onto it in the same change — otherwise this
+would have been a third spelling of the rule rather than a fix for the second.
+It also replaced FOUR hand-rolled copies of "read the school row, resolveRegion
+it" in that one file with the @Global 60s-cached `SchoolRegionService`.
+// NOT FOR A `@db.Date`, and the doc says so: a day-typed column is midnight UTC
+standing for a DAY, and converting it into a zone west of UTC moves it to the
+previous one — the rule `isCalendarDate` already carries on the web.
+// THE FLEET SWEEP RESOLVES ONCE PER SCHOOL, not per notice — the lesson the
+dunning and HR reminder sweeps already record — and falls back to the platform
+region for a school it cannot read, exactly as they do.
+// A TEST PINNED THE DEFECT: `exeat-overdue.spec` asserted `due back at
+2026-08-13 18:00`, the raw UTC. Rewritten to the property, with a case in
+Toronto and one in Auckland so the zone is load-bearing — without that, a sweep
+that resolved the timezone and then printed UTC anyway would pass, which is
+exactly the mutation that proved it.
+Gate: `a-time-a-family-can-act-on.spec.ts`. Deliberately NARROW — it asks only
+about the instants a notice names (`startsAt`, `expectedReturnAt`, `endsAt`),
+never `toISOString()` generally, since a filename stamp, an export header, an
+audit value and an API timestamp are all correctly UTC and a rule wide enough to
+catch those is the over-wide gate this repo treats as the same failure as a
+blind one. One exemption, named with its reason: the staff HANDOVER report is a
+staff-facing duty list built with no school context to resolve a zone from.
+// GOTCHA, twice: the privileged-client stubs for the sweep had no `school`
+model, which every real one has; and my blanket fixture patch stubbed the region
+with a fixed zone, which silently overrode the zone the meeting suite sets up to
+prove the west-of-UTC case. The suite caught it.
+
 ### A remark signed by the class teacher, written by whoever went last
 `supervisesStudent` / `classTeacherOnlyRefusal` (`common/teaches.ts`),
 `setClassTeacherRemark`, `setTraits`. Found by verifying a claim the user asked

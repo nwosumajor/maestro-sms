@@ -53,7 +53,9 @@ d("MeetingService (real Postgres)", () => {
     const audit = new AuditLogService();
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     const notifications = new NotificationService(tenant, audit, queue as never);
-    svc = new MeetingService(tenant, audit, notifications);
+    svc = new MeetingService(tenant, audit, notifications,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
   });
 
   afterAll(async () => {

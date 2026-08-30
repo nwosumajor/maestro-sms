@@ -224,7 +224,9 @@ describe("open meeting slots", () => {
     // 260 slots, the first 200 all taken — precisely the shape that returned an
     // empty list while 60 times stood open.
     const { db, pages } = meetingDb(260, 200);
-    const svc = new MeetingService(db, { record: jest.fn() } as never, { enqueue: jest.fn() } as never);
+    const svc = new MeetingService(db, { record: jest.fn() } as never, { enqueue: jest.fn() } as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
     const rows = (await svc.openSlots(parent)) as Array<{ id: string }>;
     expect(rows.length).toBe(60);
     expect(rows[0].id).toBe("slot-200");
@@ -234,7 +236,9 @@ describe("open meeting slots", () => {
 
   it("stops once the source is exhausted rather than paging for ever", async () => {
     const { db, pages } = meetingDb(10, 10); // every slot full
-    const svc = new MeetingService(db, { record: jest.fn() } as never, { enqueue: jest.fn() } as never);
+    const svc = new MeetingService(db, { record: jest.fn() } as never, { enqueue: jest.fn() } as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
     const rows = (await svc.openSlots(parent)) as unknown[];
     expect(rows).toEqual([]);
     expect(pages.length).toBe(1);

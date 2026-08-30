@@ -21,7 +21,7 @@ import type {
   HostelRoomDto,
   HostelSummaryDto,
 } from "@sms/types";
-import { HOSTEL_PERMISSIONS, FEE_SOURCES, formatMoney } from "@sms/types";
+import { HOSTEL_PERMISSIONS, FEE_SOURCES, formatMoney, schoolTimeString } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -36,6 +36,7 @@ import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { NotificationService } from "../notifications/notification.service";
 import { assertStillHere } from "../common/still-here";
 import { asDuplicate } from "../common/unique-violation";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 type Json = Record<string, string>;
 
@@ -86,6 +87,7 @@ export class HostelService {
     private readonly workflow: WorkflowService,
     hooks: WorkflowHooksService,
     private readonly notifications: NotificationService,
+    private readonly region: SchoolRegionService,
   ) {
     // Maker-checker reactor: when an admin APPROVES a FEE_SCHEDULE request that a
     // (head-)warden raised, post the fee run in the SAME tenant tx as the
@@ -695,7 +697,18 @@ export class HostelService {
       return { dto: await this.exeatDto(tx, updated.id), studentId: row.studentId };
     });
     if (approve) {
-      await this.notifyGuardians(p, studentId, "Exeat approved", `An exeat has been approved for your child: ${dto.reason}. Expected back ${dto.expectedReturnAt.toISOString().slice(0, 16).replace("T", " ")}.`);
+      // WHEN, AS THE SCHOOL READS A CLOCK. This said `toISOString()` — the
+      // SERVER's UTC — on the one message that tells a family when their child
+      // is due back at the boarding house. Its pair, the overdue alert in
+      // `exeat-overdue.service`, is the same instant read a second time and had
+      // the same bug; both go through `schoolTimeString` now.
+      const tz = (await this.region.forSchool(p.schoolId)).timezone;
+      await this.notifyGuardians(
+        p,
+        studentId,
+        "Exeat approved",
+        `An exeat has been approved for your child: ${dto.reason}. Expected back ${schoolTimeString(tz, dto.expectedReturnAt)}.`,
+      );
     }
     return dto;
   }
