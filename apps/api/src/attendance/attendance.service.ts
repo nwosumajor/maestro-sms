@@ -1028,8 +1028,19 @@ export class AttendanceService {
 
     // Can they at least SEE it? If not, keep the 404 so nothing is disclosed.
     await this.assertTeacherOfClass(tx, p, classId);
+    // TWO DIFFERENT SITUATIONS, AND THEY HAD ONE MESSAGE.
+    //
+    // "Only X's class teacher takes its register — ask an administrator to
+    // cover it" is right when the class HAS one and you are not them. Said of a
+    // class with NOBODY, it names a person who does not exist and asks for the
+    // wrong remedy: cover is what you arrange when the class teacher is away,
+    // and an assignment is what is missing here. Measured live on the demo
+    // school, where 30 of 31 classes have no class teacher, so this was the
+    // sentence a teacher actually got.
     throw new ForbiddenException(
-      `Only ${cls.name}'s supervisor takes its register — ask a school administrator to cover it`,
+      cls.supervisorId
+        ? `Only ${cls.name}'s class teacher takes its register — ask a school administrator to cover it`
+        : `${cls.name} has no class teacher yet, so nobody is responsible for its register. Ask a school administrator to assign one.`,
     );
   }
 

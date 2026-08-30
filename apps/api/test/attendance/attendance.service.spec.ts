@@ -14,7 +14,7 @@ jest.setTimeout(60_000);
 
 
 interface Fakes {
-  classRow?: { id: string; supervisorId?: string | null } | null;
+  classRow?: { id: string; name?: string; supervisorId?: string | null } | null;
   classTeacher?: { id: string } | null; // is caller a teacher of the class?
   enrollmentRows?: { studentId: string }[]; // enrolled in the class
   parentChild?: { id: string } | null;
@@ -216,6 +216,44 @@ describe("AttendanceService scoping", () => {
         records: [{ studentId: "stu-1", status: "PRESENT" }],
       }),
     ).resolves.toBeTruthy();
+  });
+
+  it("says the class has NOBODY, rather than naming a class teacher it has not got", async () => {
+    // The refusal read "Only X's supervisor takes its register — ask a school
+    // administrator to cover it" whether or not the class HAD one. Said of a
+    // class with nobody it names a person who does not exist and asks for the
+    // wrong remedy: cover is what you arrange when the class teacher is away,
+    // and an assignment is what is missing. Measured live on a school where 30
+    // of 31 classes were in exactly that state, so this was the sentence a
+    // teacher actually got.
+    const { service } = makeService({
+      classRow: { id: "c-1", name: "JSS1 A", supervisorId: null },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "stu-1" }],
+    });
+    await expect(
+      service.markAttendance(principal(["teacher"]), "c-1", {
+        date: recent(),
+        records: [{ studentId: "stu-1", status: "PRESENT" }],
+      }),
+    ).rejects.toThrow(/has no class teacher yet[\s\S]*assign one/i);
+  });
+
+  it("still points at COVER when the class does have one", async () => {
+    // The half that must not be traded away: a class WITH a class teacher who
+    // is simply not this caller is a cover question, and "assign one" would be
+    // wrong there in the other direction.
+    const { service } = makeService({
+      classRow: { id: "c-1", name: "JSS1 A", supervisorId: "someone-else" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "stu-1" }],
+    });
+    await expect(
+      service.markAttendance(principal(["teacher"]), "c-1", {
+        date: recent(),
+        records: [{ studentId: "stu-1", status: "PRESENT" }],
+      }),
+    ).rejects.toThrow(/class teacher takes its register[\s\S]*cover it/i);
   });
 
   it("marking ABSENT notifies the student's guardians", async () => {

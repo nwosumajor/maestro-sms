@@ -2040,6 +2040,38 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Told to ask a class teacher the class has not got
+`assertCanTakeRegister` (`attendance/attendance.service.ts`). The code defect
+sitting next to the data gap: 30 of the demo school's 31 classes have no class
+teacher, and the refusal a teacher of such a class got was
+```
+403 "Only VOL JSS1 A's supervisor takes its register —
+     ask a school administrator to cover it"
+```
+**TWO DIFFERENT SITUATIONS SHARED ONE SENTENCE.** It is right when the class HAS
+a class teacher and you are not them. Said of a class with NOBODY it names a
+person who does not exist, and asks for the wrong remedy — cover is what you
+arrange when the class teacher is away; an ASSIGNMENT is what is missing. So the
+one message a school in exactly this state would see was the wrong one, and it
+sent the reader looking for somebody rather than to the screen that fixes it.
+Live after, same class, same teacher:
+**"VOL JSS1 A has no class teacher yet, so nobody is responsible for its
+register. Ask a school administrator to assign one."**
+// SAME CLASS OF DEFECT this file already records twice — the pupil told a
+classmate is "not in this school", and the help page telling a locked-out
+teacher to ask an administrator who has no such button. A refusal may decline to
+say what it hides; it must not assert something untrue, and it should name the
+way out.
+// THE OTHER BRANCH IS KEPT AND PINNED, because "assign one" would be wrong in
+the other direction for a class that HAS a class teacher: that is a cover
+question. Also renamed "supervisor" to "class teacher" in the sentence — one
+term for one person, matching the UI and the seed.
+// GOTCHA, twice in one edit and both caught by watching `Test Suites:` rather
+than `Tests:`: my first insertion landed INSIDE the existing test and jest
+reported "Tests cannot be nested"; and my first mutation (`false ?`) did not
+compile, reporting 5 failed suites and 43 passing tests with no ✕ at all. Re-run
+as a swap of the two branches, it fails the two tests written for it.
+
 ### The two accesses the model turns on, driven and pinned
 Asked to confirm that a class teacher can mark attendance for their class and a
 subject teacher can grade the pupils in each class offering their subject. Both
