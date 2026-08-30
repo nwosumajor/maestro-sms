@@ -16,16 +16,22 @@ import type { Principal, TenantTx } from "../../src/integrity/integrity.foundati
 const admin = { userId: "a1", schoolId: "s1", roles: ["school_admin"], permissions: [] } as unknown as Principal;
 
 function harness(opts: { classExists?: boolean; assignment?: { id: string } | null; teacherExists?: boolean } = {}) {
-  const deleted: string[] = [];
-  const upserts: Array<Record<string, unknown>> = [];
+  const supervisorWrites: string[] = [];
   const tx = {
-    // A class teacher IS the supervisor, so assigning one writes
-    // `class.supervisorId` and removing one clears it — every real TenantTx can
-    // do both.
+    // A class teacher IS the class supervisor: assigning one writes
+    // `class.supervisorId`. The join table this used to write has been retired.
     class: {
-      findFirst: jest.fn().mockResolvedValue(opts.classExists === false ? null : { id: "c1", name: "JSS2" }),
-      update: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue(
+        opts.classExists === false
+          ? null
+          : { id: "c1", name: "JSS2", supervisorId: opts.assignment === null ? null : "t1" },
+      ),
+      update: jest.fn((args: { data: { supervisorId: string } }) => {
+        supervisorWrites.push(args.data.supervisorId);
+        return Promise.resolve({});
+      }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     // Same row the database would return, status included: a teacher who has
     // left can no longer be given a class.
@@ -34,41 +40,28 @@ function harness(opts: { classExists?: boolean; assignment?: { id: string } | nu
         opts.teacherExists === false ? null : { id: "t1", name: "T One", status: "ACTIVE" },
       ),
     },
-    classTeacher: {
-      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-      findFirst: jest.fn().mockResolvedValue(opts.assignment === undefined ? { id: "ct1" } : opts.assignment),
-      upsert: jest.fn((args: Record<string, unknown>) => {
-        upserts.push(args);
-        return Promise.resolve({ id: "ct1" });
-      }),
-      delete: jest.fn((args: { where: { id: string } }) => {
-        deleted.push(args.where.id);
-        return Promise.resolve({ id: args.where.id });
-      }),
-    },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: unknown, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { svc: new LmsService(db as never, audit as never), tx, deleted, upserts, audit };
+  return { svc: new LmsService(db as never, audit as never), tx, supervisorWrites, audit };
 }
 
 describe("removing a class teacher", () => {
-  it("deletes the assignment and audits it", async () => {
-    const { svc, deleted, audit } = harness();
-    await expect(svc.removeTeacher(admin, "c1", "t1")).resolves.toMatchObject({ removed: true });
-    expect(deleted).toEqual(["ct1"]);
-    // record(payload, tx) — assert the payload, not the arity.
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "lms.teacher.remove", entityId: "c1", metadata: { teacherId: "t1" } }),
-      expect.anything(),
-    );
+  it("REFUSES, because a class cannot be left without a class teacher", async () => {
+    // This used to delete a join row, and removing the last one left a class
+    // whose register was nobody's job — the state 30 of 31 classes were in.
+    // A class teacher is the class SUPERVISOR and every class must have one, so
+    // taking somebody off is done by putting somebody else on.
+    const { svc } = harness();
+    await expect(svc.removeTeacher(admin, "c1", "t1")).rejects.toThrow(/must have a class teacher/i);
   });
 
   it("404s when that teacher is not assigned here", async () => {
-    const { svc, deleted } = harness({ assignment: null });
+    const { svc } = harness({ assignment: null });
     await expect(svc.removeTeacher(admin, "c1", "t1")).rejects.toThrow(NotFoundException);
-    expect(deleted).toHaveLength(0);
+    // Nothing was written: the refusal comes before any change.
   });
 
   it("404s on a class in another school", async () => {
@@ -78,25 +71,21 @@ describe("removing a class teacher", () => {
     await expect(svc.removeTeacher(admin, "other", "t1")).rejects.toThrow(NotFoundException);
   });
 
-  it("removes the LAST teacher too", async () => {
-    // A class with no class teacher is a normal state — it is how every class
-    // starts. Refusing here would make a mistake unfixable in exactly the case
-    // you most need to fix it.
-    const { svc, deleted } = harness();
-    await svc.removeTeacher(admin, "c1", "t1");
-    expect(deleted).toEqual(["ct1"]);
+  it("names the way out rather than just refusing", async () => {
+    // A refusal that does not say what to do instead sends somebody to support.
+    const { svc } = harness();
+    await expect(svc.removeTeacher(admin, "c1", "t1")).rejects.toThrow(/Assign a different one/i);
   });
 });
 
 describe("assigning a class teacher", () => {
   it("is idempotent — a double click is not an error", async () => {
-    // A plain create hits the (classId, teacherId) unique index and surfaces a
-    // raw 500 on the second click.
-    const { svc, upserts } = harness();
+    // It sets a single column now, so a second click simply writes the same
+    // value. The join table it used to upsert into has been retired.
+    const { svc, supervisorWrites } = harness();
     await svc.assignTeacher(admin, "c1", "t1");
     await svc.assignTeacher(admin, "c1", "t1");
-    expect(upserts).toHaveLength(2);
-    expect(upserts[0]).toMatchObject({ where: { classId_teacherId: { classId: "c1", teacherId: "t1" } } });
+    expect(supervisorWrites).toEqual(["t1", "t1"]);
   });
 
   it("404s on a teacher who does not exist", async () => {
@@ -128,8 +117,7 @@ describe("reassigning a class's subject teacher", () => {
       class: {
         findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "SS1 Science A" }),
         update: jest.fn().mockResolvedValue({}),
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }), findMany: jest.fn().mockResolvedValue([]) },
       subject: { findFirst: jest.fn().mockResolvedValue({ id: "phy", name: "Physics" }) },
       user: { findFirst: jest.fn().mockResolvedValue({ id: "t2", name: "Mr Previous", status: "ACTIVE" }) },
       room: { findFirst: jest.fn().mockResolvedValue({ id: "r1" }) },
@@ -137,8 +125,7 @@ describe("reassigning a class's subject teacher", () => {
         findFirst: jest.fn().mockResolvedValue(
           opts.previous === undefined ? { teacherId: "t-old" } : opts.previous ? { teacherId: opts.previous } : null,
         ),
-        upsert: jest.fn().mockResolvedValue({ id: "o1", lessonsPerWeek: 2, preferredRoomId: null }),
-      },
+        upsert: jest.fn().mockResolvedValue({ id: "o1", lessonsPerWeek: 2, preferredRoomId: null }), findMany: jest.fn().mockResolvedValue([]) },
       timetableEntry: {
         // The first call finds the previous teacher's lessons; the second looks
         // for slots the NEW teacher already occupies.

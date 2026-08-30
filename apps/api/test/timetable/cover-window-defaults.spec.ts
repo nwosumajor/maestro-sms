@@ -42,6 +42,7 @@ function makeService(timezone: string) {
         return [];
       }),
     },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findMany: jest.fn(async () => []) },
     period: { findMany: jest.fn(async () => []) },
   } as unknown as TenantTx;

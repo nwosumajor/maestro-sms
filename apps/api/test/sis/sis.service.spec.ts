@@ -37,8 +37,10 @@ function makeService(f: Fakes) {
     // real TenantTx answers all four. The fixture keys keep their meaning:
     // `classTeacher` is the class this teacher takes, `enrollment` is whether
     // the pupil is in it.
-    classTeacher: { findMany: jest.fn().mockResolvedValue(f.classTeacher ?? []) },
-    class: { findMany: jest.fn().mockResolvedValue([]) },
+    // A class teacher IS the class supervisor; the join table is retired, so
+    // the classes somebody takes are read off `class`. The fixture key keeps
+    // its meaning.
+    class: { findMany: jest.fn().mockResolvedValue((f.classTeacher ?? []).map((c) => ({ id: c.classId }))) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {
       findFirst: jest.fn().mockResolvedValue(f.enrollment ?? null),
@@ -117,7 +119,11 @@ describe("SisService relationship scoping", () => {
       studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: "prof-1" }) },
       emergencyContact: { create: jest.fn().mockResolvedValue({ id: "ec-1" }) },
       parentChild: { findFirst: jest.fn().mockResolvedValue(null) },
-      classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+      // One definition of who teaches a class (common/teaches.ts) reads the
+      // class SUPERVISOR and the subject offerings too — every real TenantTx
+      // answers all three.
+      class: { findMany: jest.fn().mockResolvedValue([]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { findFirst: jest.fn().mockResolvedValue(null) },
     } as unknown as TenantTx;
     const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

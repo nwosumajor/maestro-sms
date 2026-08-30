@@ -35,6 +35,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { classIdsTaughtBy, teachesClass } from "../common/teaches";
 import {
   computeRaceStandings,
   generateSecret,
@@ -267,7 +268,7 @@ export class RaceService {
         });
       } else {
         const [taught, enrolled, seats] = await Promise.all([
-          tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
+          classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId }))),
           tx.enrollment.findMany({ where: { studentId: p.userId }, select: { classId: true } }),
           tx.gamePlayer.findMany({ where: { userId: p.userId }, select: { gameId: true } }),
         ]);
@@ -449,10 +450,7 @@ export class RaceService {
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
     if (!cls) throw new NotFoundException("Class not found");
     if (this.isSchoolWide(p)) return;
-    const teaches = await tx.classTeacher.findFirst({
-      where: { classId, teacherId: p.userId },
-      select: { id: true },
-    });
+    const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     if (!teaches) throw new NotFoundException("Class not found");
   }
 
@@ -476,10 +474,7 @@ export class RaceService {
     const seat = await tx.gamePlayer.findFirst({ where: { gameId: race.id, userId: p.userId } });
     if (seat) return;
     if (race.classId) {
-      const teaches = await tx.classTeacher.findFirst({
-        where: { classId: race.classId, teacherId: p.userId },
-        select: { id: true },
-      });
+      const teaches = (await teachesClass(tx, p.userId, race.classId) ? { id: "" } : null);
       if (teaches) return;
       const enrolled = await tx.enrollment.findFirst({
         where: { status: "ACTIVE", classId: race.classId, studentId: p.userId },

@@ -38,7 +38,7 @@ function makeService(rows: Array<Record<string, unknown>>) {
   const count = jest.fn().mockResolvedValue(rows.length);
   const tx = {
     assessment: { findMany, count },
-    classTeacher: { findMany: jest.fn().mockResolvedValue([{ classId: "c-1" }]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findMany: jest.fn().mockResolvedValue([{ id: "c-1", name: "JSS2A" }]) },
     submission: {

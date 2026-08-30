@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { scholarshipSupervisorStage, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { classIdsTaughtBy, teacherIdsOfClasses, teachesAnyOf } from "../common/teaches";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto } from "@sms/types";
 import {
@@ -63,9 +64,10 @@ export class ScholarshipService {
     }
     const children = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });
     children.forEach((c: { studentId: string }) => ids.add(c.studentId));
-    const taught = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
-    const subjectTaught = await tx.classSubjectTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
-    const classIds = [...new Set([...taught, ...subjectTaught].map((t: { classId: string }) => t.classId))];
+    // ONE definition — see common/teaches.ts. This used to union the class
+    // teacher's classes with the subject teacher's by hand; the helper already
+    // does both, and asking twice was the drift this consolidation removes.
+    const classIds = await classIdsTaughtBy(tx, p.userId);
     if (classIds.length) {
       const enrolled = await tx.enrollment.findMany({
         where: { classId: { in: classIds }, status: "ACTIVE" },
@@ -144,7 +146,7 @@ export class ScholarshipService {
    *  see decideStage) → school-wide. */
   private async pendingForMe(tx: TenantTx, p: Principal) {
     const out: Array<Awaited<ReturnType<TenantTx["scholarshipApplication"]["findMany"]>>[number]> = [];
-    const supervised = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
+    const supervised = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
     if (supervised.length) {
       const enrolled = await tx.enrollment.findMany({
         where: { classId: { in: supervised.map((c: { classId: string }) => c.classId) }, status: "ACTIVE" },
@@ -348,7 +350,7 @@ export class ScholarshipService {
           await tx.enrollment.findMany({ where: { studentId: app.studentId, status: "ACTIVE" }, select: { classId: true } })
         ).map((e: { classId: string }) => e.classId);
         const supervises = classIds.length
-          ? await tx.classTeacher.findFirst({ where: { teacherId: p.userId, classId: { in: classIds } }, select: { id: true } })
+          ? (await teachesAnyOf(tx, p.userId, classIds) ? { id: "" } : null)
           : null;
         if (!supervises) throw new NotFoundException("Application not found"); // 404 not 403
         data = {
@@ -667,8 +669,7 @@ export class ScholarshipService {
       })) as Array<{ classId: string }>
     ).map((e) => e.classId);
     if (classIds.length === 0) return false; // no class at all — nobody supervises them
-    const one = await tx.classTeacher.findFirst({ where: { classId: { in: classIds } }, select: { id: true } });
-    return !!one;
+    return (await teacherIdsOfClasses(tx, classIds)).length > 0;
   }
 
   private async notifySupervisors(p: Principal, studentId: string, title: string, body: string) {
@@ -677,7 +678,7 @@ export class ScholarshipService {
         await tx.enrollment.findMany({ where: { studentId, status: "ACTIVE" }, select: { classId: true } })
       ).map((e: { classId: string }) => e.classId);
       if (!classIds.length) return [] as string[];
-      const teachers = await tx.classTeacher.findMany({ where: { classId: { in: classIds } }, select: { teacherId: true } });
+      const teachers = (await teacherIdsOfClasses(tx, classIds)).map((teacherId) => ({ teacherId }));
       return [...new Set(teachers.map((t: { teacherId: string }) => t.teacherId))];
     });
     for (const id of teacherIds) await this.notifyUser(p, id, title, body);

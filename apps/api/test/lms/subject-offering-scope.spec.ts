@@ -75,9 +75,25 @@ function harness(opts: {
       ),
     },
     enrollment: { findMany: jest.fn().mockResolvedValue([{ classId: "cls1" }]), findFirst: jest.fn().mockResolvedValue({ id: "e1" }) },
-    class: { findMany: jest.fn().mockResolvedValue([{ id: "cls1", name: "JSS2" }]), findFirst: jest.fn().mockResolvedValue({ id: "cls1" }) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(opts.staff ? { id: "ct1" } : null) },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(opts.staff ? { id: "o1" } : null) },
+    // HONOURS THE WHERE. "Which classes exist" and "which classes do I
+    // supervise" are different questions, and a stub answering both with the
+    // same row makes every caller — including a pupil — a class teacher.
+    class: {
+      findMany: jest.fn(({ where }: { where?: { supervisorId?: string } } = {}) =>
+        Promise.resolve(
+          where?.supervisorId
+            ? opts.staff
+              ? [{ id: "cls1" }]
+              : []
+            : [{ id: "cls1", name: "JSS2" }],
+        ),
+      ),
+      findFirst: jest.fn().mockResolvedValue({ id: "cls1" }),
+    },
+    classSubjectTeacher: {
+      findFirst: jest.fn().mockResolvedValue(opts.staff ? { id: "o1" } : null),
+      findMany: jest.fn().mockResolvedValue(opts.staff ? [{ classId: "cls1" }] : []),
+    },
     parentChild: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
     lmsProgress: { findMany: jest.fn().mockResolvedValue([]) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "Teacher" }]) },
@@ -202,9 +218,13 @@ describe("attaching a PDF to a material", () => {
           return Promise.resolve({ ...row, ...args.data });
         }),
       },
-      classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o1" }) },
-      classTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "ct1" }) },
-      class: { findFirst: jest.fn().mockResolvedValue({ id: "cls1" }) },
+      classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o1" }), findMany: jest.fn().mockResolvedValue([]) },
+      // This caller is the CLASS TEACHER of cls1 — the class-wide bypass the
+      // retired join row used to grant, now read off `class.supervisorId`.
+      class: {
+        findFirst: jest.fn().mockResolvedValue({ id: "cls1" }),
+        findMany: jest.fn().mockResolvedValue([{ id: "cls1" }]),
+      },
     } as unknown as TenantTx;
     const presignUpload = jest.fn().mockResolvedValue({ url: "https://storage/put" });
     const db = { runAsTenant: <T>(_c: unknown, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
@@ -269,9 +289,13 @@ describe("content created against a syllabus topic", () => {
       subjectSyllabus: {
         findFirst: jest.fn().mockResolvedValue({ classId: "cls1", subjectId: syllabusSubjectId }),
       },
-      classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o1" }) },
-      classTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "ct1" }) },
-      class: { findFirst: jest.fn().mockResolvedValue({ id: "cls1" }) },
+      classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o1" }), findMany: jest.fn().mockResolvedValue([]) },
+      // This caller is the CLASS TEACHER of cls1 — the class-wide bypass the
+      // retired join row used to grant, now read off `class.supervisorId`.
+      class: {
+        findFirst: jest.fn().mockResolvedValue({ id: "cls1" }),
+        findMany: jest.fn().mockResolvedValue([{ id: "cls1" }]),
+      },
       subject: { findFirst: jest.fn().mockResolvedValue({ id: "phys", name: "Physics" }) },
       term: { findFirst: jest.fn().mockResolvedValue({ id: "term1" }) },
       lmsContent: {
@@ -355,7 +379,6 @@ describe("a subject teacher with no ClassTeacher row", () => {
     const created: Array<Record<string, unknown>> = [];
     const tx = {
       // Not class-wide. Only the offerings below.
-      classTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
       classSubjectTeacher: {
         // THREE different questions reach this table and they must not share one
         // answer:
@@ -374,7 +397,7 @@ describe("a subject teacher with no ClassTeacher row", () => {
       },
       subjectSyllabusItem: { findFirst: jest.fn().mockResolvedValue({ syllabusId: "syl1" }) },
       subjectSyllabus: { findFirst: jest.fn().mockResolvedValue({ classId: "cls1", subjectId: "phys" }) },
-      class: { findFirst: jest.fn().mockResolvedValue({ id: "cls1" }) },
+      class: { findFirst: jest.fn().mockResolvedValue({ id: "cls1" }), findMany: jest.fn().mockResolvedValue([]) },
       subject: { findFirst: jest.fn().mockResolvedValue({ id: "phys", name: "ZZ Physics" }) },
       term: { findFirst: jest.fn().mockResolvedValue({ id: "term1" }) },
       lmsContent: {

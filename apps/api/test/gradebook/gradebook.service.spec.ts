@@ -21,7 +21,14 @@ function makeService(over: {
       findMany: jest.fn().mockResolvedValue([]),
     },
     assessment: { findFirst: jest.fn().mockResolvedValue(over.assessment ?? null) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(over.classTeacher ?? null) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    // `classTeacher` truthy meant "teaches the assessment's class" (c1). A
+    // class teacher is now the class SUPERVISOR, so that is what `class`
+    // answers; the join table is retired.
+    class: { findMany: jest.fn().mockResolvedValue(over.classTeacher ? [{ id: "c1" }] : []) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     parentChild: { findFirst: jest.fn().mockResolvedValue(over.parentChild ?? null) },
     grade: {
       upsert,

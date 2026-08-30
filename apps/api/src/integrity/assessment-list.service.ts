@@ -10,6 +10,7 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { classIdsTaughtBy, teachesClass } from "../common/teaches";
 import {
   ASSESSMENT_PAGE_SIZE,
   INTEGRITY_PERMISSIONS,
@@ -72,7 +73,7 @@ export class AssessmentListService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       let where: Record<string, unknown> = {};
       if (!this.schoolWide(p)) {
-        const taught = (await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } })).map((c) => c.classId);
+        const taught = (await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })))).map((c) => c.classId);
         const enrolled = (await tx.enrollment.findMany({ where: { studentId: p.userId }, select: { classId: true } })).map((e) => e.classId);
         where = { OR: [{ createdById: p.userId }, { classId: { in: [...taught, ...enrolled] } }] };
       }
@@ -294,7 +295,7 @@ export class AssessmentListService {
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
     if (!cls) throw new NotFoundException("Class not found");
     if (this.schoolWide(p)) return;
-    const t = await tx.classTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } });
+    const t = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     if (!t) throw new ForbiddenException("You do not teach that class");
   }
 
@@ -302,7 +303,7 @@ export class AssessmentListService {
     if (this.schoolWide(p)) return true;
     if (assessment.createdById === p.userId) return true;
     if (assessment.classId) {
-      const t = await tx.classTeacher.findFirst({ where: { classId: assessment.classId, teacherId: p.userId }, select: { id: true } });
+      const t = (await teachesClass(tx, p.userId, assessment.classId) ? { id: "" } : null);
       if (t) return true;
     }
     return false;

@@ -58,7 +58,12 @@ function makeService(over: {
       findMany: jest.fn().mockResolvedValue(over.children ?? []),
       findFirst: jest.fn().mockResolvedValue(over.guardianLink ?? null),
     },
-    classTeacher: { findMany: jest.fn().mockResolvedValue(over.taught ?? []) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    // The classes this teacher RUNS — the fixture's own `taught` list, which
+    // the retired join table used to carry.
+    class: { findMany: jest.fn().mockResolvedValue((over.taught ?? []).map((t: { classId: string }) => ({ id: t.classId }))) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: jest.fn().mockResolvedValue(over.enrolled ?? []) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "stu1", name: "Ada" }, { id: "par1", name: "Mum" }]) },

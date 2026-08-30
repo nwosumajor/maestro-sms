@@ -35,7 +35,11 @@ function makeTx() {
     // Created by somebody else, and the caller teaches nothing: the only way
     // through is being school-wide.
     assessment: { findFirst: jest.fn().mockResolvedValue({ id: "a-1", title: "Essay", createdById: "someone-else", classId: "c-1" }) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     integritySignal: { findMany: jest.fn().mockResolvedValue([]) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "stu-1" }) },
     studentIntegrityExemption: { findMany: jest.fn().mockResolvedValue([]) },

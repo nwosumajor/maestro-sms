@@ -18,6 +18,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { teachesClass } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import type {
   ClassProgressDto,
@@ -2125,10 +2126,7 @@ export class LmsContentService {
   /** True if the caller may author/manage content for this class (teacher/admin). */
   private async canAuthor(tx: TenantTx, p: Principal, classId: string): Promise<boolean> {
     if (this.isSchoolWide(p)) return true;
-    const teaches = await tx.classTeacher.findFirst({
-      where: { classId, teacherId: p.userId },
-      select: { id: true },
-    });
+    const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     if (teaches) return true;
     // ...or they hold a SUBJECT OFFERING in the class. Assigning someone to
     // teach SS3 Physics writes a classSubjectTeacher row and no ClassTeacher
@@ -2183,10 +2181,7 @@ export class LmsContentService {
 
   private async subjectsTaughtBy(tx: TenantTx, p: Principal, classId: string): Promise<Set<string> | null> {
     if (this.isSchoolWide(p)) return null;
-    const classWide = await tx.classTeacher.findFirst({
-      where: { classId, teacherId: p.userId },
-      select: { id: true },
-    });
+    const classWide = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     if (classWide) return null;
     const rows = (await tx.classSubjectTeacher.findMany({
       where: { classId, teacherId: p.userId },

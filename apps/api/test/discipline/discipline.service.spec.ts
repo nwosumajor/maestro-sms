@@ -43,7 +43,6 @@ function makeTx(over: Record<string, unknown> = {}) {
       findFirst: jest.fn().mockResolvedValue("targetEnrollment" in over ? over.targetEnrollment : { id: "en1" }),
     },
     parentChild: { findMany: jest.fn().mockResolvedValue(over.children ?? []) },
-    classTeacher: { findMany: jest.fn().mockResolvedValue(over.classTeachers ?? []) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue(over.subjectTeachers ?? []) },
     class: { findMany: jest.fn().mockResolvedValue(over.supervised ?? []), findFirst: jest.fn().mockResolvedValue(null) },
   } as unknown as TenantTx;

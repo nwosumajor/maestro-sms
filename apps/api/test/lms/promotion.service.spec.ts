@@ -28,6 +28,7 @@ function makeService(opts: {
   const enrollCreateMany = jest.fn().mockResolvedValue({ count: 1 });
   const existingTarget = opts.existingTargetEnrollments ?? [];
   const tx = {
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: {
       findFirst: jest.fn((a: { where: { id: string } }) => {
         const all = [opts.source, opts.target, ...(opts.others ?? [])].filter(Boolean) as Row[];

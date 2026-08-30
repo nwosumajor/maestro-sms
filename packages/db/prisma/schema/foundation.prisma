@@ -138,7 +138,6 @@ model School {
 
   // LMS relations
   classes              Class[]
-  classTeachers        ClassTeacher[]
   enrollments          Enrollment[]
   parentChildren       ParentChild[]
   subjects             Subject[]
@@ -733,7 +732,6 @@ model User {
   consentsRevoked   IntegrityConsent[] @relation("ConsentRevokedBy")
 
   // LMS relations
-  teacherClasses     ClassTeacher[]        @relation("TeacherClasses")
   studentEnrollments Enrollment[]          @relation("StudentEnrollments")
   parentLinks        ParentChild[]         @relation("ParentLinks")
   childLinks         ParentChild[]         @relation("ChildLinks")

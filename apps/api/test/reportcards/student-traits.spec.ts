@@ -42,7 +42,6 @@ function makeService(opts: { teaches?: boolean; existing?: Array<{ traitKey: str
     // could not rate their own tutee. `teaches` still means "supervises c-1".
     enrollment: { findMany: jest.fn(async () => [{ classId: "c-1" }]) },
     class: { findMany: jest.fn(async () => (teaches ? [{ id: "c-1" }] : [])) },
-    classTeacher: { findMany: jest.fn(async () => []) },
     classSubjectTeacher: { findMany: jest.fn(async () => []) },
     parentChild: { findFirst: jest.fn(async () => null) },
     term: { findFirst: jest.fn(async () => ({ id: "t-1" })) },

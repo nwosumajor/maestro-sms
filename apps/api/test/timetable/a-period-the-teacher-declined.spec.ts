@@ -133,6 +133,7 @@ function makeCover(declined: boolean) {
       }),
     },
     lessonCover: { findFirst: jest.fn(async () => null), upsert },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findFirst: jest.fn(async () => ({ name: "JSS1" })) },
     period: { findFirst: jest.fn(async () => ({ name: "P1", startTime: "08:00" })) },
     // A real TenantTx has both: the cover path takes an advisory lock on the

@@ -36,8 +36,26 @@ function makeService(rows: Partial<Record<string, unknown[]>> = {}) {
   const table = (key: string) => ({ findMany: jest.fn().mockResolvedValue(rows[key] ?? []) });
   const tx = {
     user: { findFirst: jest.fn().mockResolvedValue({ name: "Ada Obi" }) },
-    class: { findMany: jest.fn().mockResolvedValue([{ id: "c1", name: "JSS1 A" }]) },
-    classTeacher: table("classTeacher"),
+    // The classes they are CLASS TEACHER of, defaulting to none like every
+    // other row here. A stub that answered unconditionally would make a leaver
+    // who holds nothing hold a class, which is the case this suite opens with.
+    // HONOURS THE WHERE, because `class.findMany` now answers two different
+    // questions: "which classes do they RUN" (by supervisorId) and "what are
+    // these classes called" (by id). A stub answering both the same way either
+    // makes a leaver who holds nothing hold a class, or leaves the class it
+    // names as a bare id.
+    class: {
+      findMany: jest.fn(({ where }: { where?: { supervisorId?: string; id?: { in: string[] } } } = {}) =>
+        Promise.resolve(
+          where?.supervisorId
+            ? (rows.classSupervised ?? [])
+            : // The school's classes, for naming whatever ids the report holds —
+              // a subject assignment names its class too, and it need not be one
+              // this person runs.
+              [{ id: "c1", name: "JSS1 A" }].filter((c) => where?.id?.in?.includes(c.id)),
+        ),
+      ),
+    },
     classSubjectTeacher: table("classSubjectTeacher"),
     timetableEntry: table("timetableEntry"),
     lessonCover: table("lessonCover"),
@@ -133,7 +151,8 @@ describe("what a departing member of staff is still holding", () => {
     // The failure this guards is a new duty table being added and silently not
     // appearing in the handover — the report would still look complete.
     const { svc, tx } = makeService({
-      classTeacher: [{ classId: "c1" }],
+      // The class they are CLASS TEACHER of, named so the report can print it.
+      classSupervised: [{ id: "c1" }],
       classSubjectTeacher: [{ classId: "c1", subjectId: "s1" }],
       timetableEntry: [{ subject: "Maths", dayOfWeek: "MON" }],
       lessonCover: [{ date: new Date("2026-12-01") }],

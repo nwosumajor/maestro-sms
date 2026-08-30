@@ -28,7 +28,6 @@ function makeService() {
         { classId: "c2", _count: { _all: 31 } },
       ]),
     },
-    classTeacher: { groupBy: jest.fn().mockResolvedValue([{ classId: "c1", _count: { _all: 2 } }]) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "Mrs Bello" }]) },
     // The subject COUNT now comes from reading the offerings themselves — the
     // same query that supplies who teaches what — so the raw COUNT is gone.
@@ -63,7 +62,9 @@ describe("LmsService.listClassOverview", () => {
       name: "JSS1A",
       students: 28,
       capacity: 30,
-      teachers: 2,
+      // ONE class teacher per class, read off `class.supervisorId` — c1 has
+      // one, so this is 1. It used to count rows in the retired join table.
+      teachers: 1,
       subjects: 2,
       supervisorName: "Mrs Bello",
     });
@@ -89,7 +90,8 @@ describe("LmsService.listClassOverview", () => {
     const { service, tx } = makeService();
     await service.listClassOverview(admin);
     expect(tx.enrollment.groupBy).toHaveBeenCalledTimes(1);
-    expect(tx.classTeacher.groupBy).toHaveBeenCalledTimes(1);
+    // The class teacher is a COLUMN on the class now, so there is no separate
+    // per-class query to count — one fewer round trip for the same page.
     expect(tx.classSubjectTeacher.findMany).toHaveBeenCalledTimes(1);
     expect(tx.subject.findMany).toHaveBeenCalledTimes(1);
     // One lookup for every supervisor, not one per class.

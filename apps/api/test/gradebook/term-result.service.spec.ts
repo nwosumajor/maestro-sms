@@ -49,8 +49,7 @@ function makeService(over: {
       findFirst: jest.fn().mockResolvedValue(over.subject ?? null),
       findMany: jest.fn().mockResolvedValue((over.results ?? []).map((r) => ({ id: (r as { subjectId: string }).subjectId, name: "Math" }))),
     },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(over.classSubjectTeacher ?? null) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(over.classTeacher ?? null) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(over.classSubjectTeacher ?? null), findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {
       findFirst: jest.fn().mockResolvedValue(over.enrollment ?? null),
       // Default: when a single enrollment is modelled, the class roster
@@ -106,7 +105,7 @@ describe("TermResultService — grading", () => {
   it("the assigned class-subject teacher can grade an enrolled student, and it's audited", async () => {
     const { service, upsert, audit } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { id: "e1" },
       student: { id: "stu1", name: "Ada" },
     });
@@ -141,7 +140,7 @@ describe("TermResultService — grading", () => {
   it("grading a student not enrolled in the class is rejected", async () => {
     const { service } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollment: null, // not enrolled
     });
     await expect(
@@ -154,7 +153,7 @@ describe("TermResultService — grading", () => {
   it("a component mark above its own maximum is rejected (exam max 60)", async () => {
     const { service } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { id: "e1" },
       student: { id: "stu1", name: "Ada" },
     });
@@ -168,7 +167,7 @@ describe("TermResultService — grading", () => {
   it("a component mark above a SMALLER maximum is rejected (midterm max 20)", async () => {
     const { service } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { id: "e1" },
       student: { id: "stu1", name: "Ada" },
     });
@@ -182,7 +181,7 @@ describe("TermResultService — grading", () => {
   it("editing is blocked while the batch awaits head-teacher/principal approval", async () => {
     const { service } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { id: "e1" },
       student: { id: "stu1", name: "Ada" },
       existingResult: { status: "PENDING_APPROVAL" },
@@ -197,7 +196,7 @@ describe("TermResultService — grading", () => {
   it("APPROVED selections narrow who can be graded: a non-taker is refused", async () => {
     const { service } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { id: "e1" },
       student: { id: "stu1", name: "Ada" },
       // Selections govern this class+term, and stu1's approved pick does NOT
@@ -214,7 +213,7 @@ describe("TermResultService — grading", () => {
   it("APPROVED selections narrow the roster to students whose pick includes the subject", async () => {
     const { service } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollments: [{ studentId: "stu1" }, { studentId: "stu2" }],
       student: { id: "stu1", name: "Ada" },
       approvedSelections: [
@@ -229,7 +228,7 @@ describe("TermResultService — grading", () => {
   it("editing a PUBLISHED grade reverts it to DRAFT (re-approval required)", async () => {
     const { service, upsert } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { id: "e1" },
       student: { id: "stu1", name: "Ada" },
       existingResult: { status: "PUBLISHED" },
@@ -246,7 +245,7 @@ describe("TermResultService — GRADE_PUBLISH maker-checker", () => {
   it("publish CLAIMS the draft batch and raises a head→principal workflow request", async () => {
     const { service, updateMany, workflow, audit } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       updateManyCount: 3,
     });
     const res = await service.publishResults(p(), { classId: "c1", subjectId: "sub1", termId: "t1" });
@@ -269,7 +268,7 @@ describe("TermResultService — GRADE_PUBLISH maker-checker", () => {
   it("publish with no draft rows is rejected (already pending/published or nothing saved)", async () => {
     const { service, workflow } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       updateManyCount: 0,
     });
     await expect(
@@ -281,7 +280,7 @@ describe("TermResultService — GRADE_PUBLISH maker-checker", () => {
   it("if raising the request fails, the claim is RELEASED back to DRAFT", async () => {
     const { service, updateMany, workflow } = makeService({
       ...baseGrade,
-      classSubjectTeacher: { id: "cst1" },
+      classSubjectTeacher: { id: "cst1", findMany: jest.fn().mockResolvedValue([]) },
       updateManyCount: 2,
     });
     workflow.createRequest.mockRejectedValueOnce(new Error("engine down"));
@@ -376,8 +375,7 @@ describe("TermResultService — report read scope", () => {
           academicSession: { findFirst: jest.fn().mockResolvedValue(session) },
           user: { findFirst: jest.fn().mockResolvedValue(student) },
           class: { findFirst: jest.fn().mockResolvedValue(null) },
-          classTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
-          classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
+          classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
           enrollment: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
           parentChild: { findFirst: jest.fn().mockResolvedValue({ id: "pc1" }) },
           term: { findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "Term 1", sequence: 1 }]) },
@@ -428,8 +426,7 @@ describe("TermResultService — report read scope", () => {
           academicSession: { findFirst: jest.fn().mockResolvedValue(session) },
           user: { findFirst: jest.fn().mockResolvedValue(student) },
           class: { findFirst: jest.fn().mockResolvedValue(null) },
-          classTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
-          classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
+          classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
           enrollment: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
           parentChild: { findFirst: jest.fn().mockResolvedValue(null) },
           term: { findMany: jest.fn().mockResolvedValue([]) },

@@ -209,6 +209,7 @@ describe("open meeting slots", () => {
       },
       meetingCohost: { findMany: () => Promise.resolve([]) },
       user: { findMany: () => Promise.resolve([{ id: "t-1", name: "A Teacher" }]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       class: { findMany: () => Promise.resolve([]) },
       student: { findMany: () => Promise.resolve([]) },
     };

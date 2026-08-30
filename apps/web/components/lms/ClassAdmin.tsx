@@ -192,34 +192,28 @@ export function ClassAdmin({
             revocable, and revoking starts with being able to see it. */}
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">
-            Class teachers of {classes.find((c) => c.id === at.classId)?.name ?? "this class"}
+            Class teacher of {classes.find((c) => c.id === at.classId)?.name ?? "this class"}
           </p>
           {assigned === null ? (
             <p className="text-xs text-muted-foreground">Loading…</p>
           ) : assigned.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nobody yet — a class with no class teacher is normal until you assign one.</p>
+            <p className="text-xs text-muted-foreground">
+              Nobody yet — this class has no one responsible for its register. Assign a class teacher above.
+            </p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {assigned.map((t) => (
                 <span key={t.id} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs">
                   {t.name}
-                  <button
-                    type="button"
-                    title={`Remove ${t.name} from this class`}
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={async () => {
-                      if (!confirm(`Remove ${t.name} as a class teacher? They keep any subjects they teach here.`)) return;
-                      const res = await fetch(`/api/sms/classes/${at.classId}/teachers/${t.id}`, { method: "DELETE" });
-                      if (res.ok) { setMsg("Removed."); void loadAssigned(at.classId); router.refresh(); }
-                      else setMsg(await readApiError(res));
-                    }}
-                  >
-                    ×<span className="sr-only">Remove {t.name}</span>
-                  </button>
                 </span>
               ))}
             </div>
           )}
+          {/* NO REMOVE. A class teacher is the class SUPERVISOR — they take its
+              register — and every class must have one, so the server refuses to
+              take the last one off. Handing the class to somebody else is what
+              replaces them, and that is the form above; an × that always failed
+              would be an affordance that cannot work. */}
         </div>
 
         <form

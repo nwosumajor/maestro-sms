@@ -14,7 +14,7 @@ function svc(over: Record<string, unknown>) {
     // The capacity check locks the class row first, so the count and the insert
     // are atomic — the same guard hostel allocation uses for a bed.
     $executeRaw: jest.fn().mockResolvedValue(1),
-    class: { findFirst: jest.fn().mockResolvedValue(over.cls ?? null) },
+    class: { findFirst: jest.fn().mockResolvedValue(over.cls ?? null), findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {
       count: jest.fn().mockResolvedValue(over.activeCount ?? 0),
       create: jest.fn().mockResolvedValue({ id: "en" }),
@@ -22,7 +22,6 @@ function svc(over: Record<string, unknown>) {
       findMany: jest.fn().mockResolvedValue(over.enrolled ?? []),
       update: jest.fn((a: { data: Record<string, unknown> }) => Promise.resolve({ id: "en", ...a.data })),
     },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
     classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue(over.subjects ?? []) },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
     grade: { findMany: jest.fn().mockResolvedValue(over.grades ?? []) },
@@ -120,6 +119,8 @@ describe("LmsService lifecycle", () => {
   it("getClassInfo returns subjects+supervisor for an enrolled student", async () => {
     const { service } = svc({
       cls: { id: "c1", supervisorId: "sup1" },
+      class: { findMany: jest.fn().mockResolvedValue([]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { id: "en1" }, // student is enrolled
       subjects: [{ subject: { name: "Maths" }, teacher: { name: "Mr A" } }],
       supervisor: { name: "Ms Super" },

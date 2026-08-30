@@ -28,7 +28,13 @@ function makeService(tables: FakeTables) {
   const classFindMany = jest.fn(({ where }: { where?: { id?: { in: string[] }; supervisorId?: string } } = {}) => {
     if (where?.id?.in) return Promise.resolve(allClasses.filter((c) => where.id!.in.includes(c.id)));
     // The supervised-classes lookup selects by supervisorId, id only.
-    if (where?.supervisorId) return Promise.resolve((tables.supervised ?? []).map((s) => ({ id: s.classId })));
+    // A class teacher IS the class supervisor now, so both fixture keys answer
+    // here: `supervised` and the classes the old join table used to name.
+    if (where?.supervisorId)
+      return Promise.resolve([
+        ...(tables.supervised ?? []).map((s) => ({ id: s.classId })),
+        ...(tables.classTeacher ?? []).map((c) => ({ id: c.classId })),
+      ]);
     return Promise.resolve(allClasses); // school-wide
   });
   const enrollmentFindMany = jest.fn(({ where }: { where?: { studentId?: unknown } }) => {
@@ -45,10 +51,6 @@ function makeService(tables: FakeTables) {
   $executeRaw: jest.fn().mockResolvedValue(1),
 
     class: { findMany: classFindMany, findFirst: jest.fn().mockResolvedValue(null) },
-    classTeacher: {
-      findMany: jest.fn().mockResolvedValue(tables.classTeacher ?? []),
-      findFirst: jest.fn().mockResolvedValue(null),
-    },
     classSubjectTeacher: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue(tables.classSubjectTeacher ?? []),
@@ -166,8 +168,8 @@ describe("LmsService relationship scoping", () => {
   it("junior_admin may read any class roster (no teaching relationship needed)", async () => {
     const { service, tx } = makeService({});
     (tx.class.findFirst as jest.Mock).mockResolvedValue({ id: "c1", name: "A" });
-    (tx.classTeacher.findFirst as jest.Mock).mockResolvedValue(null);
-    (tx.classTeacher.findMany as jest.Mock).mockResolvedValue([]);
+    // A class teacher IS the class supervisor; the join table is retired.
+    (tx.classSubjectTeacher.findMany as jest.Mock).mockResolvedValue([]);
     (tx.enrollment.findMany as jest.Mock).mockResolvedValue([]);
     await expect(service.getClassRoster(principal(["junior_admin"]), "c1")).resolves.toEqual(
       expect.objectContaining({ class: { id: "c1", name: "A" } }),
@@ -177,7 +179,8 @@ describe("LmsService relationship scoping", () => {
   it("roster access for a non-member of the class is 404", async () => {
     const { service, tx } = makeService({});
     (tx.class.findFirst as jest.Mock).mockResolvedValue({ id: "c1", name: "A" });
-    (tx.classTeacher.findFirst as jest.Mock).mockResolvedValue(null); // not a teacher of it
+    // Teaches nothing: supervises no class, offers no subject.
+    (tx.classSubjectTeacher.findMany as jest.Mock).mockResolvedValue([]);
     await expect(service.getClassRoster(principal(["teacher"]), "c1")).rejects.toThrow(/not found/i);
   });
 });
@@ -236,14 +239,18 @@ describe("LmsService roster", () => {
   $executeRaw: jest.fn().mockResolvedValue(1),
 
       user: { count: jest.fn().mockResolvedValue(901), findMany: jest.fn().mockResolvedValue([{ id: "s1" }]) },
-      classTeacher: { findMany: jest.fn() },
       enrollment: { findMany: jest.fn() },
       parentChild: { findMany: jest.fn() },
+      // The two links that say who teaches a class. Present so the assertion
+      // below can prove the whole-school path never asks them.
+      class: { findMany: jest.fn() },
+      classSubjectTeacher: { findMany: jest.fn() },
     };
     const rows = (await mk(tx).listStudents(principal(["junior_admin"]))) as unknown[];
     expect(rows).toHaveLength(1);
     // No membership joins on the whole-school path.
-    expect(tx.classTeacher.findMany).not.toHaveBeenCalled();
+    expect(tx.class.findMany).not.toHaveBeenCalled();
+    expect(tx.classSubjectTeacher.findMany).not.toHaveBeenCalled();
     expect(tx.parentChild.findMany).not.toHaveBeenCalled();
     await expect(mk(tx).countStudents(principal(["junior_admin"]))).resolves.toEqual({ students: 901 });
   });
@@ -253,11 +260,9 @@ describe("LmsService roster", () => {
     // so the tile and the page cannot drift apart.
     const tx = {
       user: { count: jest.fn(), findMany: jest.fn().mockResolvedValue([{ id: "s1" }, { id: "s2" }]) },
-      // All three teaching links — see common/teaches.ts. Every real TenantTx
-      // answers all three; this teacher happens to tutor c1 and take no
-      // subjects, which is the shape the old single-table stub described.
-      classTeacher: { findMany: jest.fn().mockResolvedValue([{ classId: "c1" }]) },
-      class: { findMany: jest.fn().mockResolvedValue([]) },
+      // The two teaching links — see common/teaches.ts. This teacher is the
+      // CLASS TEACHER of c1 (its supervisor) and takes no subjects elsewhere.
+      class: { findMany: jest.fn().mockResolvedValue([{ id: "c1" }]) },
       classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { findMany: jest.fn().mockResolvedValue([{ studentId: "s1" }, { studentId: "s2" }]) },
       parentChild: { findMany: jest.fn().mockResolvedValue([]) },

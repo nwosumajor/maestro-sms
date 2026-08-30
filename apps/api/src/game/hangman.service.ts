@@ -26,6 +26,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { classIdsTaughtBy, teachesClass } from "../common/teaches";
 import {
   HANGMAN_DIFFICULTY_SPECS,
   guessLetter,
@@ -231,7 +232,7 @@ export class HangmanService {
         });
       } else {
         const [taught, enrolled, joined] = await Promise.all([
-          tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
+          classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId }))),
           tx.enrollment.findMany({ where: { studentId: p.userId }, select: { classId: true } }),
           tx.hangmanPlayer.findMany({ where: { userId: p.userId }, select: { gameId: true } }),
         ]);
@@ -319,7 +320,7 @@ export class HangmanService {
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
     if (!cls) throw new NotFoundException("Class not found");
     if (this.isSchoolWide(p)) return;
-    const teaches = await tx.classTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } });
+    const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     if (!teaches) throw new NotFoundException("Class not found");
   }
 
@@ -331,10 +332,7 @@ export class HangmanService {
 
   private async assertHost(tx: TenantTx, p: Principal, game: { hostId: string; classId: string }): Promise<void> {
     if (this.isSchoolWide(p) || game.hostId === p.userId) return;
-    const teaches = await tx.classTeacher.findFirst({
-      where: { classId: game.classId, teacherId: p.userId },
-      select: { id: true },
-    });
+    const teaches = (await teachesClass(tx, p.userId, game.classId) ? { id: "" } : null);
     if (!teaches) throw new NotFoundException("Round not found");
   }
 
@@ -346,10 +344,7 @@ export class HangmanService {
     if (this.isSchoolWide(p) || game.hostId === p.userId) return;
     const seat = await tx.hangmanPlayer.findFirst({ where: { gameId: game.id, userId: p.userId } });
     if (seat) return;
-    const teaches = await tx.classTeacher.findFirst({
-      where: { classId: game.classId, teacherId: p.userId },
-      select: { id: true },
-    });
+    const teaches = (await teachesClass(tx, p.userId, game.classId) ? { id: "" } : null);
     if (teaches) return;
     const enrolled = await tx.enrollment.findFirst({
       where: { status: "ACTIVE", classId: game.classId, studentId: p.userId },

@@ -26,6 +26,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { classIdsTaughtBy, teachesClass } from "../common/teaches";
 import {
   QUIZ_DIFFICULTY_SPECS,
   isGameDifficulty,
@@ -455,7 +456,7 @@ export class LiveQuizService {
         });
       } else {
         const [taught, enrolled, joined] = await Promise.all([
-          tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
+          classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId }))),
           tx.enrollment.findMany({ where: { studentId: p.userId }, select: { classId: true } }),
           tx.liveQuizParticipant.findMany({ where: { userId: p.userId }, select: { sessionId: true } }),
         ]);
@@ -518,7 +519,7 @@ export class LiveQuizService {
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
     if (!cls) throw new NotFoundException("Class not found");
     if (this.isSchoolWide(p)) return;
-    const teaches = await tx.classTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } });
+    const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     if (!teaches) throw new NotFoundException("Class not found");
   }
 
@@ -537,10 +538,7 @@ export class LiveQuizService {
     if (this.isSchoolWide(p) || session.hostId === p.userId) return;
     // A teacher of the class may also drive the session.
     if (session.classId) {
-      const teaches = await tx.classTeacher.findFirst({
-        where: { classId: session.classId, teacherId: p.userId },
-        select: { id: true },
-      });
+      const teaches = (await teachesClass(tx, p.userId, session.classId) ? { id: "" } : null);
       if (teaches) return;
     }
     throw new NotFoundException("Session not found");
@@ -555,10 +553,7 @@ export class LiveQuizService {
     const seat = await tx.liveQuizParticipant.findFirst({ where: { sessionId: session.id, userId: p.userId } });
     if (seat) return;
     if (session.classId) {
-      const teaches = await tx.classTeacher.findFirst({
-        where: { classId: session.classId, teacherId: p.userId },
-        select: { id: true },
-      });
+      const teaches = (await teachesClass(tx, p.userId, session.classId) ? { id: "" } : null);
       if (teaches) return;
       const enrolled = await tx.enrollment.findFirst({
         where: { status: "ACTIVE", classId: session.classId, studentId: p.userId },

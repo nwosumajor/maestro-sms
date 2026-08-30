@@ -48,7 +48,11 @@ function makeService(over: { profile?: Record<string, unknown> | null; superviso
       findMany: jest.fn().mockResolvedValue([]),
     },
     parentChild: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
-    classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     user: {
       findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Ada" }),
       findMany: jest.fn().mockResolvedValue([{ id: "adm1", name: "Admin" }]),

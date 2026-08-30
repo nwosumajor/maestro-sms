@@ -10,11 +10,23 @@ import { IntegrityReportService } from "../../src/integrity/integrity-report.ser
 import type { Principal, TenantTx } from "../../src/integrity/integrity.foundation";
 import { INTEGRITY_PERMISSIONS } from "@sms/types";
 
-function makeTx(submission: unknown, assessment: unknown, classTeacher: unknown = null) {
+/** `teaches` names the CLASS TEACHER of c-1, or null if it has none. */
+function makeTx(submission: unknown, assessment: unknown, teaches: string | null = null) {
   return {
     submission: { findFirst: jest.fn().mockResolvedValue(submission) },
     assessment: { findFirst: jest.fn().mockResolvedValue(assessment) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(classTeacher) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    // HONOURS THE WHERE: only the named co-teacher runs c-1. Answering every
+    // caller with the class would make the "neither created nor teaches it"
+    // case impossible to express.
+    class: {
+      findMany: jest.fn(({ where }: { where?: { supervisorId?: string } } = {}) =>
+        Promise.resolve(where?.supervisorId === teaches ? [{ id: "c-1" }] : []),
+      ),
+    },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     integritySignal: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
 }
@@ -63,7 +75,7 @@ describe("IntegrityReportService", () => {
     const tx = makeTx(
       SUB,
       { id: "a-1", title: "T", createdById: "teacher-1", classId: "c-1" },
-      { id: "ct-1" }, // teacher-2 teaches class c-1
+      "teacher-2", // teacher-2 is the CLASS TEACHER of c-1
     );
     const { service } = makeService(tx);
     const report = await service.getSubmissionReport(teacher("teacher-2"), "sub-1");

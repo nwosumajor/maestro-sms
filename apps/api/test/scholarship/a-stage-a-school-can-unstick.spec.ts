@@ -32,7 +32,11 @@ function make() {
       id: "app-1", studentId: "pupil-1", status: "PENDING_PRINCIPAL", applicantRole: "student",
     }), update },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     parentChild: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const s = Object.create(ScholarshipService.prototype) as ScholarshipService;
@@ -91,7 +95,11 @@ describe("the queue and the gate", () => {
   function queueFor(roles: string[], permissions: string[]) {
     const findMany = jest.fn().mockResolvedValue([]);
     const tx = {
-      classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+      // One definition of who teaches a class (common/teaches.ts) reads the
+      // class SUPERVISOR and the subject offerings too — every real TenantTx
+      // answers all three.
+      class: { findMany: jest.fn().mockResolvedValue([]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { findMany: jest.fn().mockResolvedValue([]) },
       parentChild: { findMany: jest.fn().mockResolvedValue([]) },
       scholarshipApplication: { findMany },

@@ -47,7 +47,11 @@ function makeService(doc: { type: string; studentId: string | null }, student: {
       findFirst: jest.fn().mockResolvedValue({ id: "link-1" }),
       findMany: jest.fn().mockResolvedValue([{ studentId: "pupil-1" }]),
     },
-    classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   } as unknown as TenantTx;

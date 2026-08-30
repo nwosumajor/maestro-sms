@@ -50,6 +50,7 @@ function makeService(opts: {
   const created: Array<{ studentId: string }> = [];
   const createdMany: Array<{ studentId: string }> = [];
   const tx = {
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findFirst: jest.fn(async () => ({ id: "c-1", capacity: opts.capacity ?? null })) },
     user: {
       // Two reads: everyone in the school by id, then the ON_ROLL_STUDENT

@@ -105,7 +105,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
       );
     }
     await admin.query(`INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'Class A',now())`, [CLS, SA]);
-    await admin.query(`INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, CLS, T]);
+    await admin.query(`UPDATE "class" SET "supervisorId" = $2 WHERE id = $1`, [CLS, T]);
     // THE CHAIN HAS TO BE DECIDABLE. Content publish routes head -> principal,
     // and submitting now refuses when a stage has nobody in it — a chain nobody
     // can decide is a dead end, not a control. These principals held the review
@@ -160,7 +160,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     for (const t of ["lms_content_revision", "xapi_statement", "forum_post", "quiz_attempt", "lms_content", "workflow_audit_log", "workflow_request"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     }
-    for (const t of ["enrollment", "class_teacher", "class", "audit_log"]) {
+    for (const t of ["enrollment", "class", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     }
     await admin.query(`DELETE FROM user_role WHERE "schoolId" = ANY($1)`, [[SA, SB]]);

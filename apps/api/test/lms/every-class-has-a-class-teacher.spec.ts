@@ -30,6 +30,7 @@ function harness(opts: {
   const created: Array<Record<string, unknown>> = [];
   const updated: Array<Record<string, unknown>> = [];
   const tx = {
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: {
       // HONOURS THE WHERE: create asks "is this name taken" and update asks
       // "which class is this". A stub answering both with a row made the create

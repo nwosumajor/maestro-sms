@@ -75,8 +75,7 @@ function makeService() {
         })),
       ),
     },
-    classSubjectTeacher: { findFirst: jest.fn(async () => ({ id: "cst-1" })) },
-    classTeacher: { findFirst: jest.fn(async () => null) },
+    classSubjectTeacher: { findFirst: jest.fn(async () => ({ id: "cst-1" })), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),

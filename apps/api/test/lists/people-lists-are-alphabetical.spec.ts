@@ -52,6 +52,13 @@ describe("the staff register", () => {
   function makeHr() {
     const tx = {
       employee: { findMany: jest.fn(async () => STAFF.map((s) => ({ userId: s.userId, id: s.userId }))) },
+      // The caller is the CLASS TEACHER of this class — what the retired join
+      // row used to say, now read off `class.supervisorId`.
+      class: {
+        findFirst: jest.fn().mockResolvedValue({ id: "c-1", name: "JSS2A" }),
+        findMany: jest.fn().mockResolvedValue([{ id: "c-1" }]),
+      },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       user: {
         findMany: jest.fn(async () => STAFF.map((s) => ({ id: s.userId, name: s.name, email: null }))),
       },
@@ -103,15 +110,13 @@ describe("the class roster", () => {
     let enrolmentArgs: { orderBy?: unknown } = {};
     let teacherArgs: { orderBy?: unknown } = {};
     const tx = {
-      class: { findFirst: jest.fn(async () => ({ id: "c-1", name: "SS2 C", schoolId: "S" })) },
-      classTeacher: {
-        findMany: jest.fn(async (a: { orderBy?: unknown }) => {
-          teacherArgs = a;
-          return [];
-        }),
-        findFirst: jest.fn(async () => ({ id: "ct-1" })),
+      // The caller is the CLASS TEACHER of c-1 — the relationship the retired
+      // join row carried, now `class.supervisorId`.
+      class: {
+        findFirst: jest.fn(async () => ({ id: "c-1", name: "SS2 C", schoolId: "S" })),
+        findMany: jest.fn().mockResolvedValue([{ id: "c-1" }]),
       },
-      classSubjectTeacher: { findFirst: jest.fn(async () => null) },
+      classSubjectTeacher: { findFirst: jest.fn(async () => null), findMany: jest.fn().mockResolvedValue([]) },
       enrollment: {
         findMany: jest.fn(async (a: { orderBy?: unknown }) => {
           enrolmentArgs = a;
@@ -128,7 +133,9 @@ describe("the class roster", () => {
     await svc.getClassRoster({ ...p, roles: ["school_admin"], permissions: ["class.read"] }, "c-1");
 
     expect(enrolmentArgs.orderBy).toEqual({ student: { name: "asc" } });
-    expect(teacherArgs.orderBy).toEqual({ teacher: { name: "asc" } });
+    // The class teacher is a single column on the class now, so there is no
+    // list of teachers to order — one fewer query, and nothing to sort.
+
   });
 });
 

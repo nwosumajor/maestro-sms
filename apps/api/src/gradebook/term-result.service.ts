@@ -24,6 +24,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { teachesAnyOf, teachesClass } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import PDFDocument from "pdfkit";
 import {
@@ -855,10 +856,7 @@ export class TermResultService {
         select: { id: true },
       });
       if (supervises) return true;
-      const teaches = await tx.classTeacher.findFirst({
-        where: { classId: { in: classIds }, teacherId: p.userId },
-        select: { id: true },
-      });
+      const teaches = (await teachesAnyOf(tx, p.userId, classIds) ? { id: "" } : null);
       if (teaches) return true;
       const teachesSubject = await tx.classSubjectTeacher.findFirst({
         where: { classId: { in: classIds }, teacherId: p.userId },
@@ -1280,10 +1278,7 @@ export class TermResultService {
     if (this.isReadWide(p)) return true;
     const klass = await tx.class.findFirst({ where: { id: classId }, select: { supervisorId: true } });
     if (klass?.supervisorId === p.userId) return true;
-    const teaches = await tx.classTeacher.findFirst({
-      where: { classId, teacherId: p.userId },
-      select: { id: true },
-    });
+    const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     if (teaches) return true;
     const teachesSubject = await tx.classSubjectTeacher.findFirst({
       where: { classId, teacherId: p.userId },

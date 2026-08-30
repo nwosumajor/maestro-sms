@@ -100,7 +100,7 @@ function harness(opts: {
       ),
       create: jest.fn(() => maybeReject()),
     },
-    classSubjectTeacher: { count: jest.fn().mockResolvedValue(opts.offeringsPreferringRoom ?? 0) },
+    classSubjectTeacher: { count: jest.fn().mockResolvedValue(opts.offeringsPreferringRoom ?? 0), findMany: jest.fn().mockResolvedValue([]) },
     teacherUnavailability: {
       // Placing or MOVING a lesson now asks whether the teacher declared that
       // period unavailable — the generator always treated it as a hard

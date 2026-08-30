@@ -30,7 +30,7 @@ function makeService(parents: Array<Record<string, unknown>>) {
     parentChild: { findMany: jest.fn(async () => parents.map((p) => ({ parentId: p.id }))) },
     user: { findMany: jest.fn(async () => parents), findFirst: jest.fn(async () => ({ id: "stu", name: "A Pupil" })) },
     enrollment: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
-    classTeacher: { findMany: jest.fn(async () => []) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

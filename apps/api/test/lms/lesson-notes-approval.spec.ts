@@ -50,8 +50,12 @@ const teacher: Principal = { schoolId: "A", userId: "t1", roles: ["teacher"], pe
 function svc(topic: { itemId: string; classId: string } | null) {
   const created: Array<Record<string, unknown>> = [];
   const tx = {
-    classTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "ct" }) },
-    class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", supervisorId: "t1" }) },
+    // A class teacher IS the class supervisor: t1 runs c1, which is what the
+    // retired join row used to say.
+    class: {
+      findFirst: jest.fn().mockResolvedValue({ id: "c1", supervisorId: "t1" }),
+      findMany: jest.fn().mockResolvedValue([{ id: "c1" }]),
+    },
     subjectSyllabusItem: {
       findFirst: jest.fn(({ where }: { where: { id: string } }) =>
         Promise.resolve(topic && where.id === topic.itemId ? { syllabusId: "syl" } : null),
@@ -66,7 +70,7 @@ function svc(topic: { itemId: string; classId: string } | null) {
     },
     lmsContentRevision: { create: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
     user: { findFirst: jest.fn().mockResolvedValue({ name: "T" }), findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "T" }]) },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     term: { findFirst: jest.fn().mockResolvedValue(null) },
   } as unknown as TenantTx;
   const db = {

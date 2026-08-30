@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { randomUUID } from "node:crypto";
-import { teachesStudent } from "../common/teaches";
+import { classIdsTaughtBy, teachesClass, teachesStudent } from "../common/teaches";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
@@ -734,10 +734,7 @@ export class AttendanceService {
             select: { id: true, name: true, supervisorId: true },
           })) as Array<{ id: string; name: string; supervisorId: string | null }>)
         : await (async () => {
-            const taught = (await tx.classTeacher.findMany({
-              where: { teacherId: p.userId },
-              select: { classId: true },
-            })) as Array<{ classId: string }>;
+            const taught = (await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })))) as Array<{ classId: string }>;
             const supervised = (await tx.class.findMany({
               where: { supervisorId: p.userId },
               select: { id: true },
@@ -870,7 +867,7 @@ export class AttendanceService {
       const classes = this.isSchoolWide(p)
         ? ((await tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })) as Array<{ id: string; name: string }>)
         : await (async () => {
-            const mine = (await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } })) as Array<{ classId: string }>;
+            const mine = (await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })))) as Array<{ classId: string }>;
             const ids = [...new Set(mine.map((m) => m.classId))];
             if (ids.length === 0) return [] as Array<{ id: string; name: string }>;
             return (await tx.class.findMany({ where: { id: { in: ids } }, orderBy: { name: "asc" }, select: { id: true, name: true } })) as Array<{
@@ -995,10 +992,7 @@ export class AttendanceService {
     if (!cls) throw new NotFoundException("Class not found");
     if (this.isSchoolWide(p)) return;
     if (cls.supervisorId && cls.supervisorId === p.userId) return;
-    const teaches = await tx.classTeacher.findFirst({
-      where: { classId, teacherId: p.userId },
-      select: { id: true },
-    });
+    const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
     // SECURITY: 404 (not 403) — don't reveal a class the caller can't see.
     if (!teaches) throw new NotFoundException("Class not found");
   }

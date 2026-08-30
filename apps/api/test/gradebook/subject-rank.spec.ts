@@ -59,8 +59,7 @@ function svc(peers: Row[], me: string) {
         ),
       ),
     },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),

@@ -21,6 +21,7 @@
 // =============================================================================
 
 import { Inject, Injectable } from "@nestjs/common";
+import { classIdsTaughtBy } from "../common/teaches";
 import type { DashboardSummaryDto } from "@sms/types";
 import {
   TENANT_DATABASE,
@@ -81,7 +82,7 @@ export class DashboardService {
       return tx.class.count() as Promise<number>;
     }
     const [taught, subjectTaught, supervised] = await Promise.all([
-      tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }) as Promise<
+      classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId }))) as Promise<
         Array<{ classId: string }>
       >,
       tx.classSubjectTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }) as Promise<

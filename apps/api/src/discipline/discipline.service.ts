@@ -10,6 +10,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { teacherIdsOfClasses } from "../common/teaches";
 import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
@@ -692,7 +693,7 @@ export class DisciplineService {
   /** Every teacher tied to a set of classes: form teacher, subject teacher, supervisor. */
   private async teacherIdsOfClasses(tx: TenantTx, classIds: string[]): Promise<string[]> {
     const ids = new Set<string>();
-    const ct = await tx.classTeacher.findMany({ where: { classId: { in: classIds } }, select: { teacherId: true } });
+    const ct = (await teacherIdsOfClasses(tx, classIds)).map((teacherId: string) => ({ teacherId }));
     ct.forEach((t: { teacherId: string }) => ids.add(t.teacherId));
     const cst = await tx.classSubjectTeacher.findMany({ where: { classId: { in: classIds } }, select: { teacherId: true } });
     cst.forEach((t: { teacherId: string }) => ids.add(t.teacherId));

@@ -63,18 +63,15 @@ const MAY_ASK_DIRECTLY: Record<string, string> = {
  * listing them keeps the divergence VISIBLE and stops it growing, which an
  * empty offender list would not.
  */
-const AWAITING_CONSOLIDATION: Record<string, string> = {
-  "attendance/attendance.service.ts": "the READ scope is consolidated; three other methods still resolve a teacher's own classes for register lists — class_teacher only",
-  "gradebook/gradebook.service.ts": "may I grade this class — class_teacher only",
-  "integrity/assessment-list.service.ts": "which assessments are mine — class_teacher only",
-  "integrity/exemption.service.ts": "may I grant an exemption here — class_teacher only",
-  "integrity/integrity.service.ts": "may I read this submission's signals — class_teacher only",
-  "game/race.service.ts": "may I open a race for this class — class_teacher only",
-  "game/live-quiz.service.ts": "may I host for this class — class_teacher only",
-  "game/hangman.service.ts": "may I host for this class — class_teacher only",
-  "game/typing-race.service.ts": "may I host for this class — class_teacher only",
-  "scholarship/scholarship.service.ts": "which pupils may I nominate — tutor + subject, missing supervisor",
-};
+/**
+ * SAME question, not yet moved. A BACKLOG, not a set of exemptions.
+ *
+ * EMPTY, and that is the point: retiring `class_teacher` finished the job. An
+ * entry here must name a file that still derives its own answer, and the gate
+ * refuses one that no longer does — so this list can only shrink.
+ */
+const AWAITING_CONSOLIDATION: Record<string, string> = {};
+
 
 describe("one answer to \"do I teach this child\"", () => {
   const files = walkSources(SRC_ROOT);
@@ -116,12 +113,13 @@ describe("one answer to \"do I teach this child\"", () => {
     }
   });
 
-  it("the definition includes all three links", () => {
+  it("the definition includes BOTH links", () => {
     // Without this the gate would pass against a helper that quietly narrowed
-    // back to one table — every call site would look consolidated and a subject
-    // teacher would be blind again.
+    // back to one link — every call site would look consolidated and a subject
+    // teacher would be blind again. There were THREE until `class_teacher` was
+    // retired; the class teacher IS the class supervisor.
     const rule = readFileSync(join(SRC_ROOT, "common/teaches.ts"), "utf8");
-    for (const link of ["classTeacher", "supervisorId", "classSubjectTeacher"]) {
+    for (const link of ["supervisorId", "classSubjectTeacher"]) {
       expect([link, rule.includes(link)]).toEqual([link, true]);
     }
   });

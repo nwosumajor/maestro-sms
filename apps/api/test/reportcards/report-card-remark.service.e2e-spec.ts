@@ -62,8 +62,8 @@ d("ReportCardRemarkService scoping (real Postgres)", () => {
     await admin.query(`INSERT INTO parent_child (id,"schoolId","parentId","studentId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, GUARDIAN, STUDENT]);
     await admin.query(`INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'JSS1',now()),($3,$2,'JSS2',now())`, [classId, SA, otherClassId]);
     await admin.query(`INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, classId, STUDENT]);
-    await admin.query(`INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, classId, CLASS_TEACHER]);
-    await admin.query(`INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, otherClassId, OTHER_TEACHER]);
+    await admin.query(`UPDATE "class" SET "supervisorId" = $2 WHERE id = $1`, [classId, CLASS_TEACHER]);
+    await admin.query(`UPDATE "class" SET "supervisorId" = $2 WHERE id = $1`, [otherClassId, OTHER_TEACHER]);
     await admin.query(`INSERT INTO academic_session (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'2025/2026',now())`, [sessionId, SA]);
     await admin.query(`INSERT INTO term (id,"schoolId","sessionId",name,sequence,"updatedAt") VALUES ($1,$2,$3,'First Term',1,now())`, [termId, SA, sessionId]);
 
@@ -71,7 +71,7 @@ d("ReportCardRemarkService scoping (real Postgres)", () => {
   });
 
   afterAll(async () => {
-    for (const t of ["report_card_remark", "term", "academic_session", "class_teacher", "enrollment", "class", "parent_child", "audit_log"]) {
+    for (const t of ["report_card_remark", "term", "academic_session", "enrollment", "class", "parent_child", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);

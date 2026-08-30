@@ -39,9 +39,18 @@ function harness(fx: Fixture = {}) {
         Promise.resolve(where.id.in.map((id) => ({ id, name: `Name ${id}` }))),
       ),
     },
-    classTeacher: {
-      findMany: jest.fn(() => Promise.resolve(taught.map((classId) => ({ classId })))),
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    // The classes this teacher RUNS — the fixture's own `taught` list, which
+    // the retired join row used to carry.
+    // Honours the where for the same reason the enrolment stub below does.
+    class: {
+      findMany: jest.fn(({ where }: { where?: { supervisorId?: string } } = {}) =>
+        Promise.resolve(where?.supervisorId ? taught.map((id) => ({ id })) : []),
+      ),
     },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {
       // Honours the where — a mock that ignored it would pass every scoping test
       // by accident, which is the trap this suite exists to avoid.

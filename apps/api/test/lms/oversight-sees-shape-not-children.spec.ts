@@ -44,7 +44,6 @@ function make() {
     user: { findMany: userFindMany, count: userCount },
     // The relationship branch finds nothing for a caller with no teaching or
     // parental link — which is what board is.
-    classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },

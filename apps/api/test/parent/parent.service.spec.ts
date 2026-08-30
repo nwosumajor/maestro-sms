@@ -30,6 +30,7 @@ function makeService(over: {
     subjectResult: { findMany: resultFindMany },
     disciplineComplaint: { findMany: jest.fn().mockResolvedValue(over.complaints ?? []) },
     taskAssignment: { findMany: jest.fn().mockResolvedValue(over.assignments ?? []) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findMany: jest.fn().mockResolvedValue([{ id: "c1", name: "JSS1" }]) },
     invoice: { findMany: jest.fn().mockResolvedValue(over.invoices ?? []) },
   } as unknown as TenantTx;

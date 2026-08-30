@@ -43,6 +43,8 @@ const AUDIT = /this\.audit\.record|auditLog\.create|workflowAuditLog\.create|thi
 const SELF = /this\.(\w+)\(|this\.\w+\.(\w+)\(/g;
 
 const ALLOWED: Record<string, string> = {
+  "DELETE /classes/:classId/teachers/:teacherId":
+    "Mutates nothing: every class must have a class teacher, so this refuses and names the hand-over instead. There is no change to record, and auditing a refusal would fill the log with rejected clicks.",
   "POST /billing/stripe/webhook": "The verified Stripe event is written to `gateway_event` before dispatch, exactly as the Paystack route is; that append-only log is the record.",
   "POST /notifications/credits/reconcile/run": "Reconciles the message-credit ledger, which is append-only — every correction it makes IS a ledger row.",
   "POST /payments/webhook": "The verified event is written to `gateway_event` BEFORE dispatch; that append-only log is the record.",

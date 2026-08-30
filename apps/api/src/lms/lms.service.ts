@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
-import { studentIdsTaughtBy } from "../common/teaches";
+import { classIdsTaughtBy, studentIdsTaughtBy, teachesClass } from "../common/teaches";
 import { SchoolRegionService } from "../foundation/school-region.service";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
@@ -305,7 +305,8 @@ export class LmsService {
       const [enroll, teachers, subjects, assessments, attendance, content, timetable, games, nextRefs, promoSrc, promoTgt] =
         await Promise.all([
           tx.enrollment.count({ where: { classId } }),
-          tx.classTeacher.count({ where: { classId } }),
+          // The class teacher is a column on the class now, not a row to count.
+          tx.class.count({ where: { id: classId, supervisorId: { not: null } } }),
           tx.classSubjectTeacher.count({ where: { classId } }),
           tx.assessment.count({ where: { classId } }),
           tx.attendanceSession.count({ where: { classId } }),
@@ -689,19 +690,10 @@ export class LmsService {
       // Single-valued, so assigning REPLACES: the shape of `supervisorId` is
       // the rule, rather than an invariant something has to police.
       await tx.class.update({ where: { id: classId }, data: { supervisorId: teacherId } });
-      // The join row is kept IN STEP for now because fifty reads still consult
-      // it; it is the redundant half and is being retired. Any other row for
-      // this class goes, so the two can never disagree about who it is.
-      await tx.classTeacher.deleteMany({ where: { classId, teacherId: { not: teacherId } } });
-      // Idempotent: assigning twice is a duplicate click, not an error, and the
-      // unique index would otherwise surface it as a raw 500.
-      const row = await tx.classTeacher.upsert({
-        where: { classId_teacherId: { classId, teacherId } },
-        update: {},
-        create: { schoolId: p.schoolId, classId, teacherId },
-      });
+      // Idempotent: assigning twice is a duplicate click, not an error. The
+      // join table that used to shadow this column has been retired.
       await this.log(tx, p, "lms.teacher.assign", "class", classId, { teacherId });
-      return row;
+      return { classId, teacherId };
     });
   }
 
@@ -725,19 +717,20 @@ export class LmsService {
       await this.requireClass(tx, classId);
       // 404-not-403, and the same answer whether the class or the assignment is
       // missing — never disclose which.
-      const existing = await tx.classTeacher.findFirst({
-        where: { classId, teacherId },
-        select: { id: true },
-      });
-      if (!existing) throw new NotFoundException("That teacher is not assigned to this class");
-      await tx.classTeacher.delete({ where: { id: existing.id } });
-      // Take the supervision with it. Leaving `supervisorId` behind would keep
-      // the register in the hands of somebody the school has just removed —
-      // "assigning without revoking is not an assignment", one line up, applied
-      // to the half that carries the duty.
-      await tx.class.updateMany({ where: { id: classId, supervisorId: teacherId }, data: { supervisorId: null } });
-      await this.log(tx, p, "lms.teacher.remove", "class", classId, { teacherId });
-      return { classId, teacherId, removed: true };
+      const cls = (await tx.class.findFirst({
+        where: { id: classId },
+        select: { name: true, supervisorId: true },
+      })) as { name: string; supervisorId: string | null } | null;
+      if (!cls || cls.supervisorId !== teacherId) {
+        throw new NotFoundException("That teacher is not assigned to this class");
+      }
+      // A HAND-OVER, NOT A REMOVAL. While this was a join row, removing the
+      // last one left a class whose register was nobody's job — the state 30 of
+      // 31 classes were in. `updateClass` refuses the same thing from the other
+      // side; refusing here too leaves no door open.
+      throw new BadRequestException(
+        `${cls.name} must have a class teacher. Assign a different one instead — that hands the class over.`,
+      );
     });
   }
 
@@ -1205,10 +1198,7 @@ export class LmsService {
         return tx.class.findMany({ orderBy: { name: "asc" } });
       }
       const classIds = new Set<string>();
-      const taught = await tx.classTeacher.findMany({
-        where: { teacherId: p.userId },
-        select: { classId: true },
-      });
+      const taught = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
       taught.forEach((t: { classId: string }) => classIds.add(t.classId));
       // A subject teacher who isn't the form teacher still "has" the class.
       const subjectTaught = await tx.classSubjectTeacher.findMany({
@@ -1275,17 +1265,12 @@ export class LmsService {
       if (classes.length === 0) return [];
       const ids = classes.map((c) => c.id);
 
-      const [rolls, teachers, offerings] = await Promise.all([
+      const [rolls, offerings] = await Promise.all([
         // ACTIVE only: a promoted or withdrawn pupil is not in the room, and a roll
         // that counts them makes capacity meaningless.
         tx.enrollment.groupBy({
           by: ["classId"],
           where: { classId: { in: ids }, status: "ACTIVE" },
-          _count: { _all: true },
-        } as never) as unknown as Promise<Array<{ classId: string; _count: { _all: number } }>>,
-        tx.classTeacher.groupBy({
-          by: ["classId"],
-          where: { classId: { in: ids } },
           _count: { _all: true },
         } as never) as unknown as Promise<Array<{ classId: string; _count: { _all: number } }>>,
         // The offerings THEMSELVES rather than a count of them. This replaces a
@@ -1341,7 +1326,6 @@ export class LmsService {
       for (const list of pairsBy.values()) list.sort((a, b) => a.subjectName.localeCompare(b.subjectName));
 
       const rollBy = new Map(rolls.map((r) => [r.classId, r._count._all]));
-      const teachBy = new Map(teachers.map((r) => [r.classId, r._count._all]));
       const supBy = teachName;
 
       return classes.map((c) => ({
@@ -1354,7 +1338,9 @@ export class LmsService {
         supervisorName: c.supervisorId ? supBy.get(c.supervisorId) ?? null : null,
         students: rollBy.get(c.id) ?? 0,
         capacity: c.capacity,
-        teachers: teachBy.get(c.id) ?? 0,
+        // One class teacher per class, so this is 0 or 1 and is read off the
+        // class row rather than counted in a table that no longer exists.
+        teachers: c.supervisorId ? 1 : 0,
         subjects: (pairsBy.get(c.id) ?? []).length,
         subjectTeachers: pairsBy.get(c.id) ?? [],
         stage: c.stage,
@@ -1533,7 +1519,7 @@ export class LmsService {
         const isSupervisor = cls.supervisorId === p.userId;
         const teaches = isSupervisor
           ? { id: "supervisor" }
-          : await tx.classTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } });
+          : (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
         const teachesSubject =
           teaches ?? (await tx.classSubjectTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } }));
         // SECURITY: 404 (not 403) — don't reveal a class the caller can't see.
@@ -1547,11 +1533,15 @@ export class LmsService {
       // `orderBy: { student: { name } }` is for; sorting after the fact would
       // be wrong the moment this list is capped.
       const [teachers, students] = await Promise.all([
-        tx.classTeacher.findMany({
-          where: { classId },
-          include: { teacher: { select: { id: true, name: true, email: true } } },
-          orderBy: { teacher: { name: "asc" } },
-        }),
+        // The class teacher, read off the class itself.
+        tx.class
+          .findFirst({
+            where: { id: classId },
+            select: { supervisor: { select: { id: true, name: true, email: true } } },
+          })
+          .then((c: { supervisor: { id: string; name: string; email: string } | null } | null) =>
+            c?.supervisor ? [{ teacher: c.supervisor }] : [],
+          ),
         tx.enrollment.findMany({
           where: { classId, status: "ACTIVE" },
           include: { student: { select: { id: true, name: true, email: true } } },
@@ -1580,7 +1570,7 @@ export class LmsService {
         // teacher, or the supervisor.
         let member = cls.supervisorId === p.userId;
         if (!member) member = Boolean(await tx.enrollment.findFirst({ where: { classId, studentId: p.userId }, select: { id: true } }));
-        if (!member) member = Boolean(await tx.classTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } }));
+        if (!member) member = Boolean((await teachesClass(tx, p.userId, classId) ? { id: "" } : null));
         if (!member) member = Boolean(await tx.classSubjectTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } }));
         if (!member) {
           const children = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });

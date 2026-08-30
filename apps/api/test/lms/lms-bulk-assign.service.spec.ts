@@ -32,7 +32,7 @@ function makeService(over: {
     // school before it writes anything (#248), so both reads answer the same.
     user: { findMany: jest.fn().mockResolvedValue(over.users ?? []) },
     room: { findMany: jest.fn().mockResolvedValue(over.rooms ?? []) },
-    classSubjectTeacher: { upsert },
+    classSubjectTeacher: { upsert, findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {
       findMany: jest.fn().mockResolvedValue(over.existingEnrollments ?? []),
       count: jest.fn().mockResolvedValue(over.enrollmentCount ?? 0),

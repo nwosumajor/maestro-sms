@@ -31,11 +31,17 @@ interface Fakes {
 function makeService(f: Fakes) {
   const session = { id: "sess-1" };
   const tx = {
-    class: { findFirst: jest.fn().mockResolvedValue(f.classRow ?? null), findMany: jest.fn().mockResolvedValue([]) },
-    classTeacher: {
-      findFirst: jest.fn().mockResolvedValue(f.classTeacher ?? null),
-      findMany: jest.fn().mockResolvedValue(f.classTeacherMany ?? []),
+    class: {
+      findFirst: jest.fn().mockResolvedValue(f.classRow ?? null),
+      // The classes this caller TAKES. `classTeacher` meant "teaches the class
+      // under test" and `classTeacherMany` listed classes by id; a class
+      // teacher is now the class supervisor, so both are read off `class`.
+      findMany: jest.fn().mockResolvedValue([
+        ...(f.classTeacher && f.classRow ? [{ id: f.classRow.id }] : []),
+        ...(f.classTeacherMany ?? []).map((c) => ({ id: c.classId })),
+      ]),
     },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {
       findMany: jest.fn().mockResolvedValue(f.enrollmentRows ?? []),
       findFirst: jest.fn().mockResolvedValue(f.enrollmentForStudent ?? null),

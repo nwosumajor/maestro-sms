@@ -29,6 +29,7 @@ const mk = (tx: Record<string, unknown>) => {
 };
 
 const base = (over: Record<string, unknown> = {}) => ({
+  classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
   class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2B" }) },
   enrollment: { findMany: jest.fn().mockResolvedValue([{ studentId: "s1" }, { studentId: "s2" }, { studentId: "s3" }]) },
   user: {

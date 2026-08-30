@@ -86,12 +86,15 @@ describe("the picker and the guard cannot disagree", () => {
 describe("what the teacher's set contains", () => {
   const scope = SRC.slice(SRC.indexOf("private async recipientScope("), SRC.indexOf("/** The caller's threads"));
 
-  it("is built from taught, supervised AND subject-taught classes", () => {
-    // Missing any one of the three silently drops a teacher's own pupils: a
-    // subject teacher who is nobody's form tutor would have had an empty set.
-    expect(scope).toMatch(/tx\.classTeacher\.findMany/);
+  it("is built from the classes they RUN and the ones they teach a subject to", () => {
+    // Missing either silently drops a teacher's own pupils: a subject teacher
+    // who is nobody's form tutor would have had an empty set. There were three
+    // sources until `class_teacher` was retired — a class teacher IS the class
+    // supervisor, so that join table was the first one restated.
     expect(scope).toMatch(/supervisorId: p\.userId/);
     expect(scope).toMatch(/tx\.classSubjectTeacher\.findMany/);
+    // And the retired table cannot come back through this door.
+    expect(scope).not.toMatch(/classTeacher/);
   });
 
   it("counts only ACTIVE enrolments", () => {
@@ -121,7 +124,6 @@ describe("the refusal says which rule was missed", () => {
     const tx = {
       user: { findFirst: jest.fn().mockResolvedValue({ id: "someone" }) },
       hostelAllocation: { findMany: jest.fn().mockResolvedValue([]) },
-      classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       class: { findMany: jest.fn().mockResolvedValue([]) },
       classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { findMany: jest.fn().mockResolvedValue([]) },

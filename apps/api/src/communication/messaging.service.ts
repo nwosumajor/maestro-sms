@@ -2,6 +2,7 @@
 // MessagingService — threaded two-way messages, participant-scoped
 // =============================================================================
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { classIdsTaughtBy } from "../common/teaches";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -188,7 +189,7 @@ export class MessagingService {
     // A teacher's own pupils, and those pupils' guardians.
     if (p.roles.some((r) => CLASS_SCOPED_SENDERS.has(r))) {
       const [taught, supervised, subjectTaught] = await Promise.all([
-        tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
+        classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId }))),
         tx.class.findMany({ where: { supervisorId: p.userId }, select: { id: true } }),
         tx.classSubjectTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
       ]);

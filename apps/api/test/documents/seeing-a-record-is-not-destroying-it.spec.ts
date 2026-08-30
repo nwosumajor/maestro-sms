@@ -57,7 +57,6 @@ function makeService(doc: Record<string, unknown> = OFFICE_DOC) {
     parentChild: { findFirst: jest.fn(async () => ({ id: "link" })), findMany: jest.fn(async () => []) },
     // All three teaching links + the pupil's own ACTIVE enrolments — see
     // common/teaches.ts. Every real TenantTx answers all four.
-    classTeacher: { findMany: jest.fn(async () => [{ classId: "c1" }]) },
     class: { findMany: jest.fn(async () => []) },
     classSubjectTeacher: { findMany: jest.fn(async () => []) },
     enrollment: {
@@ -124,7 +123,6 @@ describe("seeing a record is not destroying it", () => {
     const tx = {
       document: { findFirst: jest.fn(async () => OFFICE_DOC), delete: del },
       parentChild: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) },
-      classTeacher: { findMany: jest.fn(async () => []) },
       class: { findMany: jest.fn(async () => []) },
       classSubjectTeacher: { findMany: jest.fn(async () => []) },
       enrollment: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) },

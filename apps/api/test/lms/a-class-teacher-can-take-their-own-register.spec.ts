@@ -43,18 +43,9 @@ function harness(supervisorId: string | null = null) {
         calls.push({ op: "class.updateMany", args });
         if (args.where.supervisorId === cls.supervisorId) cls.supervisorId = null;
         return Promise.resolve({ count: 1 });
-      }),
-    },
+      }), findMany: jest.fn().mockResolvedValue([]) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "t1", name: "James Adams", status: "ACTIVE" }) },
-    classTeacher: {
-      findFirst: jest.fn().mockResolvedValue({ id: "ct1" }),
-      upsert: jest.fn().mockResolvedValue({ id: "ct1", classId: "c1", teacherId: "t1" }),
-      delete: jest.fn().mockResolvedValue({}),
-      deleteMany: jest.fn((args: unknown) => {
-        calls.push({ op: "classTeacher.deleteMany", args });
-        return Promise.resolve({ count: 0 });
-      }),
-    },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   } as unknown as TenantTx;
   const db = {
@@ -72,28 +63,26 @@ describe("a class teacher can take their own register", () => {
   });
 
   it("assigning REPLACES — a class has one class teacher, not a list", async () => {
-    // `class_teacher` is many-to-many and `supervisorId` is not; the shape of
-    // the surviving column is the rule, so any other row for this class goes.
-    const { svc, calls } = harness("someone-else");
+    // The join table was many-to-many and `supervisorId` is not; the shape of
+    // the surviving column IS the rule, so there is nothing to sweep.
+    const { svc, cls } = harness("someone-else");
     await svc.assignTeacher(admin, "c1", "t1");
-    const swept = calls.find((c) => c.op === "classTeacher.deleteMany");
-    expect(swept).toBeDefined();
-    expect(JSON.stringify(swept!.args)).toContain("t1");
-  });
-
-  it("removing the class teacher takes the register with them", async () => {
-    // Otherwise the school removes somebody and they keep the one duty that
-    // matters — "assigning without revoking is not an assignment".
-    const { svc, cls } = harness("t1");
-    await svc.removeTeacher(admin, "c1", "t1");
-    expect(cls.supervisorId).toBeNull();
-  });
-
-  it("removing a DIFFERENT teacher leaves the supervisor alone", async () => {
-    // The clear is conditional on it being them: a subject teacher being taken
-    // off a class must not silently strip the class teacher's register.
-    const { svc, cls } = harness("t1");
-    await svc.removeTeacher(admin, "c1", "someone-else");
     expect(cls.supervisorId).toBe("t1");
+  });
+
+  it("removal is REFUSED — a class is handed over, never left empty", async () => {
+    // While this was a join row the last removal left a class whose register
+    // was nobody's job. Every class must have a class teacher, so the way to
+    // take somebody off is to put somebody else on.
+    const { svc, cls } = harness("t1");
+    await expect(svc.removeTeacher(admin, "c1", "t1")).rejects.toThrow(/must have a class teacher/i);
+    expect(cls.supervisorId).toBe("t1");
+  });
+
+  it("404s for somebody who is not this class's teacher", async () => {
+    // Same answer whether the class or the assignment is missing — never
+    // disclose which.
+    const { svc } = harness("t1");
+    await expect(svc.removeTeacher(admin, "c1", "someone-else")).rejects.toThrow(/not assigned to this class/i);
   });
 });

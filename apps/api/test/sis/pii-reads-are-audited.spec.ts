@@ -76,7 +76,11 @@ function makeService(opts: { profile?: Record<string, unknown> | null; guardians
       findFirst: jest.fn(async () => ({ id: "s-1", name: "A Pupil" })),
     },
     enrollment: { findFirst: jest.fn(async () => ({ id: "e-1" })), findMany: jest.fn(async () => []) },
-    classTeacher: { findMany: jest.fn(async () => []) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const svc = new SisService(

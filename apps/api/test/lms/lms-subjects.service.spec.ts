@@ -22,10 +22,13 @@ function makeService(over: {
   const tx = {
     class: {
       findFirst: jest.fn().mockResolvedValue(over.cls === undefined ? { id: "c1", supervisorId: null } : over.cls),
-    },
-    classTeacher: {
-      findFirst: jest.fn().mockResolvedValue(over.classTeacher ?? null),
-      findMany: jest.fn().mockResolvedValue([]),
+      // A class teacher IS the class supervisor. Two fixture keys used to say
+      // "runs c1": the class row's own supervisorId, and the retired join row.
+      findMany: jest.fn(({ where }: { where?: { supervisorId?: string } } = {}) => {
+        const cls = over.cls === undefined ? { id: "c1", supervisorId: null } : over.cls;
+        const supervises = cls && where?.supervisorId && cls.supervisorId === where.supervisorId;
+        return Promise.resolve(supervises || over.classTeacher ? [{ id: "c1" }] : []);
+      }),
     },
     classSubjectTeacher: {
       findFirst: jest.fn().mockResolvedValue(over.classSubjectTeacher ?? null),

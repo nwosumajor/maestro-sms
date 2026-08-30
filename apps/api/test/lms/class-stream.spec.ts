@@ -200,7 +200,6 @@ describe("class overview cost", () => {
     const tx = {
       class: { findMany: jest.fn(() => track("class.findMany", classes)) },
       enrollment: { groupBy: jest.fn(() => track("enrollment.groupBy", [])) },
-      classTeacher: { groupBy: jest.fn(() => track("classTeacher.groupBy", [])), findMany: jest.fn(() => track("classTeacher.findMany", [])) },
       classSubjectTeacher: { findMany: jest.fn(() => track("offerings.findMany", offerings)) },
       subject: { findMany: jest.fn(() => track("subject.findMany", [{ id: "s0", name: "Biology" }, { id: "s1", name: "Physics" }])) },
       user: { findMany: jest.fn(() => track("user.findMany", [{ id: "sup1", name: "Form Teacher" }, { id: "t0", name: "Mr Bio" }, { id: "t1", name: "Ms Phys" }])) },

@@ -27,6 +27,7 @@ const admin = { userId: "a1", schoolId: "s1", roles: ["school_admin"], permissio
 function harness(classes: Array<{ id: string; name: string; code: string }>) {
   let staged: Record<string, unknown> | null = null;
   const tx = {
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: {
       findFirst: jest.fn((args: { where: { OR?: Array<Record<string, unknown>> } }) => {
         const or = args.where.OR ?? [];

@@ -58,6 +58,7 @@ function harness() {
         return Promise.resolve({ id: "t1", name: "First Term" });
       }),
     },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: {
       findMany: jest.fn((a: { where: { id: { in: string[] } } }) => {
         count("class")();

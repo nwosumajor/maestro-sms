@@ -48,7 +48,6 @@ function harness(rows: Array<Record<string, unknown>>) {
     class: { findMany: jest.fn().mockResolvedValue([{ id: "c1", name: "JSS2" }]) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
-    classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {

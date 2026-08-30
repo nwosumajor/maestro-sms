@@ -157,7 +157,6 @@ const meetingCohostA = randomUUID();
   // HR + the remaining tenant tables — seeded so the coverage meta-test
   // ("every RLS-enabled table has a deny case") holds for the whole schema.
   const employeeA = randomUUID();
-  const classTeacherA = randomUUID();
   const enrollmentA = randomUUID();
   const parentChildA = randomUUID();
   const userRoleA = randomUUID();
@@ -710,11 +709,10 @@ const documentSubmissionA = randomUUID();
       `INSERT INTO employee (id,"schoolId","userId","jobTitle","startDate","updatedAt") VALUES ($1,$2,$3,'Teacher',current_date,now())`,
       [employeeA, A, userA],
     );
-    // LMS relationship/junction rows (class membership + teaching + guardianship).
-    await a.query(
-      `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`,
-      [classTeacherA, A, classA, userA],
-    );
+    // LMS relationship/junction rows (class membership + guardianship). The
+    // class TEACHER is `class.supervisorId` — a column on a table already
+    // covered here, not a join row of its own.
+    await a.query(`UPDATE "class" SET "supervisorId" = $2 WHERE id = $1`, [classA, userA]);
     // Subjects: a catalog subject + a class subject/teacher offering.
     await a.query(
       `INSERT INTO subject (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'Mathematics',now())`,
@@ -1265,7 +1263,6 @@ const documentSubmissionA = randomUUID();
       // class_subject_teacher references class + subject + user -> purge first;
       // subject is its parent (and FK-free of class), so it follows.
       "class_subject_teacher",
-      "class_teacher",
       "enrollment",
       "parent_child",
       "user_role",
@@ -1519,7 +1516,6 @@ const documentSubmissionA = randomUUID();
     ["xapi_statement", xapiStatementA],
     ["platform_subscription_payment", subPaymentA],
     ["employee", employeeA],
-    ["class_teacher", classTeacherA],
     ["enrollment", enrollmentA],
     ["parent_child", parentChildA],
     ["user_role", userRoleA],

@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { teachesClass } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import { createHash } from "node:crypto";
 import { InjectQueue } from "@nestjs/bullmq";
@@ -218,7 +219,7 @@ export class IntegrityService {
         // was invisible to that gate.
         const schoolWide = p.roles.some((r) => r === "school_admin" || r === "principal");
         const teaches = assessment?.classId
-          ? await tx.classTeacher.findFirst({ where: { classId: assessment.classId, teacherId: p.userId }, select: { id: true } })
+          ? (await teachesClass(tx, p.userId, assessment.classId) ? { id: "" } : null)
           : null;
         const isReviewer = schoolWide || assessment?.createdById === p.userId || Boolean(teaches);
         if (!isReviewer) throw new NotFoundException("Submission file not found"); // 404, not 403

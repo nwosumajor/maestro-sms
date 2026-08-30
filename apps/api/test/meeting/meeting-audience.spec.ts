@@ -95,7 +95,7 @@ function harness(opts: {
       ),
       findMany: jest.fn().mockResolvedValue((opts.stages ?? []).map((stage) => ({ stage }))),
     },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(opts.ownsClass ? { id: "o" } : null) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(opts.ownsClass ? { id: "o" } : null), findMany: jest.fn().mockResolvedValue([]) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "Pupil" }), findMany: jest.fn().mockResolvedValue([]) },
     parentChild: { findMany: jest.fn().mockResolvedValue((opts.children ?? []).map((studentId) => ({ studentId }))) },
     enrollment: { findMany: jest.fn().mockResolvedValue((opts.classes ?? []).map((classId) => ({ classId }))) },
@@ -270,7 +270,7 @@ function announceHarness(guardians: string[], opts: { stageClasses?: string[] } 
       findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }),
       findMany: jest.fn().mockResolvedValue((opts.stageClasses ?? ["c1"]).map((id) => ({ id, stage: "SENIOR_SECONDARY" }))),
     },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }), findMany: jest.fn().mockResolvedValue([]) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "Pupil" }), findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: jest.fn().mockResolvedValue(guardians.map((_, i) => ({ classId: "c1", studentId: `stu${i}` }))) },
     // One guardian per pupil, plus a DUPLICATE to prove de-duplication.
@@ -412,7 +412,7 @@ function selectHarness(realParents: string[]) {
     // SCHOOL's clock, so the producer resolves the school's region.
     school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
     class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }), findMany: jest.fn().mockResolvedValue([]) },
     user: {
       findFirst: jest.fn(({ where }: { where: Record<string, unknown> }) => {
         userLookups.push(where);
@@ -588,7 +588,7 @@ function cohostHarness(staffIds: string[], seeingIds?: string[], goneIds: string
     // SCHOOL's clock, so the producer resolves the school's region.
     school: { findFirst: jest.fn().mockResolvedValue({ country: null, timezone: null }) },
     class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }), findMany: jest.fn().mockResolvedValue([]) },
     // HONOURS THE WHERE, for the same reason the userRole stub does. This used
     // to answer [] to everything, which models a `user_role` row for a user that
     // does not exist — something the database cannot produce — and it went
@@ -755,6 +755,7 @@ describe("a co-host is a host for the things that matter", () => {
       },
       meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), findMany: jest.fn().mockResolvedValue([]) },
       user: { findMany: jest.fn().mockResolvedValue([{ id: "t2", name: "Colleague" }]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       class: { findMany: jest.fn().mockResolvedValue([]) },
     } as unknown as TenantTx;
     const db = {

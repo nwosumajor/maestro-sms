@@ -69,7 +69,12 @@ export class StaffHandoverService {
 
     const [classes, subjects, lessons, covers, invigilations, tasks, cases, slots, hostels, vehicles, appraisals, banks] =
       await Promise.all([
-        tx.classTeacher.findMany({ where: { teacherId: userId }, select: { classId: true } }),
+        // The classes they RUN — the register and the class itself, which is
+        // the duty a handover most needs to name. Read off `class.supervisorId`,
+        // the one place that records it now.
+        tx.class
+          .findMany({ where: { supervisorId: userId }, select: { id: true } })
+          .then((rows: Array<{ id: string }>) => rows.map((c) => ({ classId: c.id }))),
         tx.classSubjectTeacher.findMany({ where: { teacherId: userId }, select: { classId: true, subjectId: true } }),
         tx.timetableEntry.findMany({ where: { teacherId: userId }, select: { subject: true, dayOfWeek: true } }),
         // DATED, and only what is still ahead: a cover lesson last month is

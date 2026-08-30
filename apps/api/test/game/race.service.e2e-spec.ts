@@ -99,8 +99,7 @@ d("RaceService integration (Class Race + tournament, RLS, server authority)", ()
         [c, SA, name],
       );
       await admin.query(
-        `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`,
-        [randomUUID(), SA, c, T],
+        `UPDATE "class" SET "supervisorId" = $2 WHERE id = $1`, [c, T],
       );
     }
     for (const [stu, cls] of [
@@ -123,7 +122,7 @@ d("RaceService integration (Class Race + tournament, RLS, server authority)", ()
     for (const t of ["guess", "game_result", "game_player", "game", "standing", "competition"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     }
-    for (const t of ["enrollment", "class_teacher", "class", "audit_log"]) {
+    for (const t of ["enrollment", "class", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = ANY($1)`, [[SA, SB]]);

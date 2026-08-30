@@ -42,7 +42,6 @@ function capture() {
     document: { findMany },
     user: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
-    classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;

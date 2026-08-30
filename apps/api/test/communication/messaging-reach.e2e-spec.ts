@@ -117,12 +117,10 @@ d("who a teacher may write to (real Postgres)", () => {
     ]);
     // The teacher takes MY_CLASS only.
     await admin.query(
-      `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`,
-      [randomUUID(), SCHOOL, MY_CLASS, TEACHER],
+      `UPDATE "class" SET "supervisorId" = $2 WHERE id = $1`, [MY_CLASS, TEACHER],
     );
     await admin.query(
-      `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`,
-      [randomUUID(), SCHOOL, OTHER_CLASS, OTHER_TEACHER],
+      `UPDATE "class" SET "supervisorId" = $2 WHERE id = $1`, [OTHER_CLASS, OTHER_TEACHER],
     );
 
     await admin.query(
@@ -165,7 +163,6 @@ d("who a teacher may write to (real Postgres)", () => {
     await admin.query(`DELETE FROM notification WHERE "schoolId" = $1`, [SCHOOL]);
     await admin.query(`DELETE FROM parent_child WHERE "schoolId" = $1`, [SCHOOL]);
     await admin.query(`DELETE FROM enrollment WHERE "schoolId" = $1`, [SCHOOL]);
-    await admin.query(`DELETE FROM class_teacher WHERE "schoolId" = $1`, [SCHOOL]);
     await admin.query(`DELETE FROM class WHERE "schoolId" = $1`, [SCHOOL]);
     await admin.query(`DELETE FROM user_role WHERE "schoolId" = $1`, [SCHOOL]);
     await admin.query(`DELETE FROM audit_log WHERE "schoolId" = $1`, [SCHOOL]);

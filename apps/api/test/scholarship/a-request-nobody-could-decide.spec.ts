@@ -40,7 +40,18 @@ function make(opts: { classes: string[]; supervised: boolean }) {
   );
   const tx = {
     enrollment: { findMany: jest.fn().mockResolvedValue(opts.classes.map((classId) => ({ classId }))) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(opts.supervised ? { id: "ct-1" } : null) },
+    // One definition of who teaches a class — see common/teaches.ts. The class
+    // SUPERVISOR is the class teacher, so `supervised` is answered here.
+    class: {
+      findMany: jest.fn(({ where }: { where?: { id?: { in: string[] } } } = {}) =>
+        Promise.resolve(
+          where?.id?.in
+            ? where.id.in.map((id) => ({ id, supervisorId: opts.supervised ? "sup-1" : null }))
+            : [],
+        ),
+      ),
+    },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     scholarshipApplication: { update },
   } as unknown as TenantTx;
   const s = Object.create(ScholarshipService.prototype) as ScholarshipService;
@@ -99,7 +110,7 @@ describe("submitting from a class with NO supervisor", () => {
     await s.submit(PUPIL, "app-1");
     expect(update.mock.calls[0][0].data.status).toBe("PENDING_PARENT");
     // And does not even ask — there are no classes to ask about.
-    expect(tx.classTeacher.findFirst).not.toHaveBeenCalled();
+    expect(tx.classSubjectTeacher.findMany).not.toHaveBeenCalled();
   });
 });
 

@@ -46,6 +46,7 @@ function makeService(opts: { canTouch?: boolean; shuffle?: boolean } = {}) {
     cbtQuestion: { findMany: jest.fn().mockResolvedValue(questions) },
     school: { findFirst: jest.fn().mockResolvedValue({ name: "St Andrews" }) },
     subject: { findFirst: jest.fn().mockResolvedValue({ name: "Biology" }) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findFirst: jest.fn().mockResolvedValue(null) },
   };
   const svc = Object.create(CbtService.prototype) as CbtService;

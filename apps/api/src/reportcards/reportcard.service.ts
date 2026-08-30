@@ -14,6 +14,7 @@
 // =============================================================================
 
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { classIdsTaughtBy } from "../common/teaches";
 import { assertDocumentsReleasable } from "../lms/leaver-documents";
 import PDFDocument from "pdfkit";
 import {
@@ -1008,7 +1009,7 @@ export class ReportCardService {
     if (p.userId === studentId) return;
     const link = await tx.parentChild.findFirst({ where: { parentId: p.userId, studentId }, select: { id: true } });
     if (link) return;
-    const taught = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
+    const taught = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
     if (taught.length) {
       // SECURITY: ACTIVE only. Without the status filter this asked "was this
       // pupil EVER in a class I teach", so a teacher kept access to a pupil who

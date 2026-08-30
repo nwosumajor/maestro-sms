@@ -58,6 +58,7 @@ function makeService(over: Over = {}) {
       groupBy: jest.fn().mockResolvedValue([{ schoolId: A, _count: { _all: 20 } }, { schoolId: B, _count: { _all: 8 } }]),
     },
     invoice: { groupBy: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { count: jest.fn().mockResolvedValue(12) },
     $queryRaw: jest.fn(async (q: unknown) => {
       const sql = JSON.stringify(q);

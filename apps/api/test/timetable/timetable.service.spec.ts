@@ -41,7 +41,7 @@ function makeService(f: Fakes) {
     user: { findFirst: jest.fn().mockResolvedValue({ id: "t-1" }) },
     enrollment: { findMany: jest.fn().mockResolvedValue(f.enrollment ?? []) },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(f.classTeacher ?? null), findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     teacherUnavailability: {
       // Placing or MOVING a lesson now asks whether the teacher declared that
       // period unavailable — the generator always treated it as a hard

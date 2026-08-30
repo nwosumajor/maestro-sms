@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { teachesClass } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import {
   IntegritySignalSeverity,
@@ -98,11 +99,8 @@ export class IntegrityReportService {
         const schoolWide = principal.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
         if (!schoolWide && assessment.createdById !== principal.userId) {
           const teaches = (assessment as { classId?: string | null }).classId
-            ? await tx.classTeacher.findFirst({
-                where: { classId: (assessment as { classId: string }).classId, teacherId: principal.userId },
-                select: { id: true },
-              })
-            : null;
+            ? await teachesClass(tx, principal.userId, (assessment as { classId: string }).classId)
+            : false;
           // SECURITY: 404 not 403 — don't reveal that another teacher's
           // submission exists.
           if (!teaches) throw new NotFoundException("Submission not found");

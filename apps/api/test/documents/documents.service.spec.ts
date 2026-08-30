@@ -29,13 +29,14 @@ function makeService(f: Fakes) {
     user: { findFirst: jest.fn().mockResolvedValue({ name: "Demo Student" }) },
     // One definition of who a teacher teaches (common/teaches.ts) asks all
     // three link tables; every real TenantTx answers all three.
-    class: { findMany: jest.fn().mockResolvedValue([]) },
+    // The classes this caller TEACHES: the fixture's `taughtClasses` named
+    // them via the retired join table; they are the class SUPERVISOR now.
+    class: { findMany: jest.fn().mockResolvedValue((f.taughtClasses ?? []).map((c: { classId: string }) => ({ id: c.classId }))) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     parentChild: {
       findFirst: jest.fn().mockResolvedValue(f.parentLink ?? null),
       findMany: jest.fn().mockResolvedValue([]),
     },
-    classTeacher: { findMany: jest.fn().mockResolvedValue(f.taughtClasses ?? []) },
     enrollment: {
       findFirst: jest.fn().mockResolvedValue(f.enrolledForStudent ?? null),
       // The pupil's OWN classes: "do I teach this child" intersects the

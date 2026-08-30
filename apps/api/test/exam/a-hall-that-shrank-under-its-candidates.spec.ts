@@ -39,6 +39,7 @@ function makeService(opts: { capacity: number; seated: number; roomCapacity?: nu
     // The success path builds the DTO, which reads these. A real TenantTx always
     // has them; a stub without them models something the database cannot produce.
     examInvigilator: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findFirst: jest.fn().mockResolvedValue({ id: "cls-1", name: "JSS2 A" }) },
     cbtExam: { findFirst: jest.fn().mockResolvedValue(null) },
     user: { findMany: jest.fn().mockResolvedValue([]) },

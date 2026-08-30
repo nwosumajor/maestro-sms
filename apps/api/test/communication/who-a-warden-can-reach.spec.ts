@@ -32,7 +32,6 @@ function make(roles: string[], opts: { boarders?: string[] } = {}) {
   const hostelAllocation = { findMany: jest.fn().mockResolvedValue((opts.boarders ?? [BOARDER]).map((studentId) => ({ studentId }))) };
   const tx = {
     hostelAllocation,
-    classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },

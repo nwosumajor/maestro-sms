@@ -77,7 +77,7 @@ model Game {
   deadlineAt          DateTime?
   /// Class Race (RACE mode, spec §5): the class this race belongs to. Null for
   /// duels and league/knockout matches. Scalar uuid (relationship scoping in the
-  /// service joins via Enrollment/ClassTeacher), matching the timetable pattern.
+  /// service joins via Enrollment/Class.supervisorId), matching the timetable pattern.
   classId             String?    @db.Uuid
   /// SECURITY: a Class Race's ONE shared target secret — server-only (spec §9),
   /// like GamePlayer.secret: never serialized to any client, cleared on finish.

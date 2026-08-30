@@ -49,7 +49,6 @@ describe("DashboardService.summary", () => {
     await svc({
       workflowRequest: { count },
       class: { count: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
-      classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: { findMany: jest.fn().mockResolvedValue([]) },
       parentChild: { findMany: jest.fn().mockResolvedValue([]) },
@@ -74,7 +73,6 @@ describe("DashboardService.summary", () => {
     const teacher = await svc({
       workflowRequest: { count: jest.fn().mockResolvedValue(0) },
       class: { count: jest.fn(), findMany: jest.fn().mockResolvedValue([{ id: "c1" }]) },
-      classTeacher: { findMany: jest.fn().mockResolvedValue([{ classId: "c1" }, { classId: "c2" }]) },
       classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([{ classId: "c2" }]) },
       notification: { count: jest.fn().mockResolvedValue(0) },
     }).summary(principal(["teacher"]));
@@ -85,7 +83,6 @@ describe("DashboardService.summary", () => {
     const out = await svc({
       workflowRequest: { count: jest.fn().mockResolvedValue(0) },
       class: { count: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
-      classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       enrollment: {
         findMany: jest

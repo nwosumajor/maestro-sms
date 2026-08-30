@@ -33,6 +33,7 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { classIdsTaughtBy } from "../common/teaches";
 import type { IntegrityExemptionDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -93,10 +94,7 @@ export class ExemptionService {
     if (!student) throw new NotFoundException("Student not found");
     if (this.wide(p)) return;
 
-    const mine = await tx.classTeacher.findMany({
-      where: { teacherId: p.userId },
-      select: { classId: true },
-    });
+    const mine = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
     if (mine.length === 0) throw new NotFoundException("Student not found");
     const enrolled = await tx.enrollment.findFirst({
       where: { studentId, classId: { in: mine.map((c: { classId: string }) => c.classId) } },
@@ -202,10 +200,7 @@ export class ExemptionService {
 
       let allowedStudentIds: string[] | null = null;
       if (!this.wide(p)) {
-        const mine = await tx.classTeacher.findMany({
-          where: { teacherId: p.userId },
-          select: { classId: true },
-        });
+        const mine = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
         const enrolled = mine.length
           ? await tx.enrollment.findMany({
               where: { classId: { in: mine.map((c: { classId: string }) => c.classId) } },

@@ -15,6 +15,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { teachesClass } from "../common/teaches";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -65,10 +66,7 @@ export class GradebookService {
     if (!assessment) return false;
     if (assessment.createdById === p.userId) return true;
     if (assessment.classId) {
-      const teaches = await tx.classTeacher.findFirst({
-        where: { classId: assessment.classId, teacherId: p.userId },
-        select: { id: true },
-      });
+      const teaches = (await teachesClass(tx, p.userId, assessment.classId) ? { id: "" } : null);
       if (teaches) return true;
     }
     return false;

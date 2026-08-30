@@ -20,15 +20,26 @@ const ROWS = [
 
 function makeService() {
   const assessmentFindMany = jest.fn().mockResolvedValue(ROWS);
+  // "Which classes are mine" is answered by `class.findMany({supervisorId})`
+  // now — the join table it used to name has been retired. Kept as one mock so
+  // the assertions about WHEN the membership lookup happens still hold.
   const classTeacherFindMany = jest.fn().mockResolvedValue([]);
   const enrollmentFindMany = jest.fn().mockResolvedValue([]);
   const tx = {
     // The list is a PAGE now: rows plus how many match, so a truncated view
     // cannot read as the complete answer.
     assessment: { findMany: assessmentFindMany, count: jest.fn().mockResolvedValue(1) },
-    classTeacher: { findMany: classTeacherFindMany, findFirst: jest.fn().mockResolvedValue(null) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { findMany: enrollmentFindMany },
-    class: { findMany: jest.fn().mockResolvedValue([{ id: "c-1", name: "JSS2A" }]) },
+    class: {
+      // HONOURS THE WHERE: "which classes exist" and "which do I run" are
+      // different questions, and only the second is the membership lookup.
+      findMany: jest.fn((args: { where?: { supervisorId?: string } } = {}) =>
+        args?.where?.supervisorId
+          ? classTeacherFindMany(args)
+          : Promise.resolve([{ id: "c-1", name: "JSS2A" }]),
+      ),
+    },
     // The count is a grouped COUNT and the caller's own status a targeted read —
     // the list must never hydrate every submission just to add them up.
     submission: {

@@ -22,6 +22,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { classIdsTaughtBy, teachesClass } from "../common/teaches";
 // VALUE import — Prisma.PrismaClientKnownRequestError is a class, so `import
 // type` would compile and then fail every instanceof at runtime.
 import { Prisma } from "@sms/db";
@@ -1576,10 +1577,7 @@ export class TimetableService {
   }
 
   private async taughtClassIds(tx: TenantTx, p: Principal): Promise<string[]> {
-    const taught = await tx.classTeacher.findMany({
-      where: { teacherId: p.userId },
-      select: { classId: true },
-    });
+    const taught = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
     return taught.map((t: { classId: string }) => t.classId);
   }
 
@@ -1622,10 +1620,7 @@ export class TimetableService {
     if (!cls) throw new NotFoundException("Class not found");
     if (this.isStaffWide(p)) return;
     if (p.roles.includes("teacher")) {
-      const teaches = await tx.classTeacher.findFirst({
-        where: { classId, teacherId: p.userId },
-        select: { id: true },
-      });
+      const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
       if (teaches) return;
     }
     const visible = await this.visibleClassIds(tx, p);

@@ -38,6 +38,7 @@ function makeCover(row: Record<string, unknown> | null) {
       deleteMany: jest.fn().mockResolvedValue({ count: row ? 1 : 0 }),
     },
     timetableEntry: { findFirst: jest.fn().mockResolvedValue({ subject: "Maths", classId: "c1" }) },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { findFirst: jest.fn().mockResolvedValue({ name: "JSS1 A" }) },
   } as unknown as TenantTx;
   const svc = Object.create(LessonCoverService.prototype) as LessonCoverService;
@@ -95,6 +96,7 @@ describe("deleting the lesson the cover was attached to", () => {
         delete: jest.fn().mockResolvedValue({}),
       },
       lessonCover: { findMany: jest.fn().mockResolvedValue(covers) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
       class: { findFirst: jest.fn().mockResolvedValue({ name: "JSS1 A" }) },
     } as unknown as TenantTx;
     const svc = Object.create(TimetableService.prototype) as TimetableService;

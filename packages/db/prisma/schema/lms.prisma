@@ -2,7 +2,7 @@
 // LMS core — Classes, Enrollment, Teaching assignments, Guardian links
 // =============================================================================
 // The keystone for relationship-scoping (RBAC beyond role, per CLAUDE.md):
-//   - a teacher sees only THEIR classes      (ClassTeacher)
+//   - a teacher sees only THEIR classes      (Class.supervisorId + ClassSubjectTeacher)
 //   - a student sees only THEIR classes      (Enrollment)
 //   - a parent sees only THEIR children      (ParentChild) and their classes
 // All tenant-scoped (non-null schoolId, RLS-enforced). These are MEMBERSHIP
@@ -48,7 +48,6 @@ model Class {
   updatedAt    DateTime @updatedAt
 
   school             School                @relation(fields: [schoolId], references: [id])
-  teachers           ClassTeacher[]
   enrollments        Enrollment[]
   assessments        Assessment[]
   attendanceSessions AttendanceSession[]
@@ -178,23 +177,6 @@ model ClassSubjectTeacher {
 
 /// Teaching assignment: which teachers teach a class. Drives "teacher sees only
 /// their classes".
-model ClassTeacher {
-  id        String   @id @default(uuid()) @db.Uuid
-  schoolId  String   @db.Uuid
-  classId   String   @db.Uuid
-  teacherId String   @db.Uuid
-  createdAt DateTime @default(now())
-
-  school  School @relation(fields: [schoolId], references: [id])
-  class   Class  @relation(fields: [classId], references: [id])
-  teacher User   @relation("TeacherClasses", fields: [teacherId], references: [id])
-
-  @@unique([classId, teacherId])
-  @@index([schoolId])
-  @@index([schoolId, teacherId])
-  @@map("class_teacher")
-}
-
 /// Student enrollment in a class. Drives "student sees only their classes" and
 /// (via ParentChild) "parent sees only their children's classes".
 model Enrollment {

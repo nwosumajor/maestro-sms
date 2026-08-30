@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { Inject, Injectable } from "@nestjs/common";
-import { studentIdsTaughtBy } from "../common/teaches";
+import { classIdsTaughtBy, studentIdsTaughtBy } from "../common/teaches";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
 import type { SearchResultDto, SearchHitDto } from "@sms/types";
 import {
@@ -170,7 +170,7 @@ export class SearchService {
   private async visibleClassIds(tx: TenantTx, p: Principal): Promise<string[] | "all"> {
     if (p.roles.some((r) => ROSTER_WIDE.has(r))) return "all";
     const ids = new Set<string>();
-    const taught = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
+    const taught = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
     taught.forEach((t: { classId: string }) => ids.add(t.classId));
     const subjectTaught = await tx.classSubjectTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
     subjectTaught.forEach((t: { classId: string }) => ids.add(t.classId));

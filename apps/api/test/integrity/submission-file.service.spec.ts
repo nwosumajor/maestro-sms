@@ -19,7 +19,18 @@ function make(opts: {
   const tx = {
     submission: { findFirst: jest.fn().mockResolvedValue(opts.submission ?? null), update },
     assessment: { findFirst: jest.fn().mockResolvedValue(opts.assessment ?? null) },
-    classTeacher: { findFirst: jest.fn().mockResolvedValue(opts.classTeacher ?? null) },
+    // One definition of who teaches a class (common/teaches.ts) reads the
+    // class SUPERVISOR and the subject offerings too — every real TenantTx
+    // answers all three.
+    // HONOURS THE WHERE: teacher-1 is the CLASS TEACHER of c1 and a stranger
+    // is not. A stub answering every caller with the class makes everyone a
+    // teacher, which is the opposite of what this suite tests.
+    class: {
+      findMany: jest.fn(({ where }: { where?: { supervisorId?: string } } = {}) =>
+        Promise.resolve(where?.supervisorId === "teacher-1" ? [{ id: "c1" }] : []),
+      ),
+    },
+    classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };

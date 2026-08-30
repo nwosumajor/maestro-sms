@@ -68,7 +68,7 @@ function harness(opts: {
     enrollment: {
       findMany: jest.fn().mockResolvedValue((opts.enrolled ?? ["c1"]).map((classId) => ({ classId }))),
     },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(opts.teaches === false ? null : { id: "o1" }) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(opts.teaches === false ? null : { id: "o1" }), findMany: jest.fn().mockResolvedValue([]) },
     class: { findFirst: jest.fn().mockResolvedValue(opts.supervises ? { id: "c1" } : null) },
     school: { findFirst: jest.fn().mockResolvedValue({ requireMeetingApproval: opts.requireApproval ?? false }) },
     meetingRequest: {
