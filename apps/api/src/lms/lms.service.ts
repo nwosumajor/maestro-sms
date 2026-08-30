@@ -640,6 +640,29 @@ export class LmsService {
       // Still employed, not merely on file: a class handed to somebody who left
       // has no teacher, and the screen says it does.
       await assertStillHere(tx, teacherId, "Teacher");
+      // ONE CLASS TEACHER, AND THEY ARE THE SUPERVISOR.
+      //
+      // A class teacher and a class supervisor are the same person: the one who
+      // takes the register and answers for the class. The platform stored them
+      // TWICE — `class_teacher` (many-to-many, written by THIS action) and
+      // `class.supervisorId` (single, read by attendance) — and this action set
+      // only the first. So a school assigned a class teacher through the
+      // product and that person could not take their own register. Proven live
+      // on History 101: its assigned teacher got
+      //   403 "Only History 101's supervisor takes its register"
+      //
+      // Subject teaching is a DIFFERENT relationship and keeps its own table
+      // (`class_subject_teacher`): eleven subject teachers to one class, each
+      // owning that subject's syllabus, assessments and marks, none of them
+      // taking the register.
+      //
+      // Single-valued, so assigning REPLACES: the shape of `supervisorId` is
+      // the rule, rather than an invariant something has to police.
+      await tx.class.update({ where: { id: classId }, data: { supervisorId: teacherId } });
+      // The join row is kept IN STEP for now because fifty reads still consult
+      // it; it is the redundant half and is being retired. Any other row for
+      // this class goes, so the two can never disagree about who it is.
+      await tx.classTeacher.deleteMany({ where: { classId, teacherId: { not: teacherId } } });
       // Idempotent: assigning twice is a duplicate click, not an error, and the
       // unique index would otherwise surface it as a raw 500.
       const row = await tx.classTeacher.upsert({
@@ -678,6 +701,11 @@ export class LmsService {
       });
       if (!existing) throw new NotFoundException("That teacher is not assigned to this class");
       await tx.classTeacher.delete({ where: { id: existing.id } });
+      // Take the supervision with it. Leaving `supervisorId` behind would keep
+      // the register in the hands of somebody the school has just removed —
+      // "assigning without revoking is not an assignment", one line up, applied
+      // to the half that carries the duty.
+      await tx.class.updateMany({ where: { id: classId, supervisorId: teacherId }, data: { supervisorId: null } });
       await this.log(tx, p, "lms.teacher.remove", "class", classId, { teacherId });
       return { classId, teacherId, removed: true };
     });

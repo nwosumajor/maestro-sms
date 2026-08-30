@@ -2040,6 +2040,58 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A class teacher IS the class supervisor, and could not take their own register
+Told by the owner, plainly: a class teacher and a class supervisor are ONE
+person with one job — monitor the class, take its register, answer for class
+matters — and every class must have one. A SUBJECT teacher is a different
+relationship: SS1A offers eleven subjects taught by eleven people, each owning
+that subject's syllabus, assignments, tests and marks, none of them taking the
+register.
+**THE PLATFORM STORED THE FIRST CONCEPT TWICE.**
+```
+class.supervisorId   single, nullable    READ by attendance; the UI calls it
+                                         "Form teacher" and flags a class
+                                         without one as needing attention
+class_teacher        many-to-many join   WRITTEN by the visible "assign
+                                         teacher" action; 1 write site, 50 reads
+```
+The write set only the second. So a school assigned a class teacher through the
+product and that person could not take their own register. Proven live on
+History 101, whose assigned teacher got
+**403 "Only History 101's supervisor takes its register"** — and the same probe
+measured the rest of it: of 31 classes, **0 had a supervisor, 1 had a
+class_teacher row, and 30 had NEITHER**, so "every class has a class teacher"
+was neither met nor enforceable.
+Live after: assign the class teacher **201**, they take the register **201**.
+// **THE STRATEGY, and why `supervisorId` is the survivor.** It is already the
+column attendance reads — the defining duty; it is SINGLE-VALUED, so "one class
+teacher per class" is the shape of the field rather than an invariant something
+has to police; it sits on the class row, so "every class must have one" can
+become NOT NULL and be enforced by the database rather than remembered; and the
+UI already names it. `class_teacher` is many-to-many — the wrong shape for the
+thing it stores — and grants the widest read access in the product while
+carrying no duty.
+// **TWO PREDICATES, NEVER ONE UNION.** The entry below consolidated "do I teach
+this child" into one helper, which is right for READ SCOPE (may I see this pupil
+at all) and wrong for DUTIES. Supervision — taking and amending a register,
+approving class matters — is the class teacher ALONE, and `assertCanTakeRegister`
+already reads `supervisorId` and is deliberately untouched by that consolidation.
+Subject teaching is `class_subject_teacher` and owns that subject's academic
+work.
+// THIS COMMIT IS STEP ONE and keeps the join row IN STEP rather than removing
+it: fifty reads still consult it, so assigning writes both and any other row for
+the class is swept, which makes the two unable to disagree about who it is.
+Removing a class teacher clears `supervisorId` only when it is THEM — a subject
+teacher being taken off a class must not silently strip the register from
+somebody else.
+// REMAINING, in order: report the classes with no class teacher (30 of 31) so a
+school can fill them; require one at class creation; make the column NOT NULL
+once backfilled; then move the fifty reads onto the two predicates and drop
+`class_teacher`.
+Mutation-validated three ways: stop setting the supervisor on assign, stop
+clearing it on remove, and clear it unconditionally (which would let removing a
+subject teacher take the class teacher's register away).
+
 ### Four answers to "do I teach this child", and a teacher of 899 who saw none
 `common/teaches.ts` (`classIdsTaughtBy` / `studentIdsTaughtBy` / `teachesStudent`).
 A class carries a teacher THREE ways — `class_teacher` (form tutor),

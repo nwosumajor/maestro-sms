@@ -19,7 +19,14 @@ function harness(opts: { classExists?: boolean; assignment?: { id: string } | nu
   const deleted: string[] = [];
   const upserts: Array<Record<string, unknown>> = [];
   const tx = {
-    class: { findFirst: jest.fn().mockResolvedValue(opts.classExists === false ? null : { id: "c1", name: "JSS2" }) },
+    // A class teacher IS the supervisor, so assigning one writes
+    // `class.supervisorId` and removing one clears it — every real TenantTx can
+    // do both.
+    class: {
+      findFirst: jest.fn().mockResolvedValue(opts.classExists === false ? null : { id: "c1", name: "JSS2" }),
+      update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     // Same row the database would return, status included: a teacher who has
     // left can no longer be given a class.
     user: {
@@ -28,6 +35,7 @@ function harness(opts: { classExists?: boolean; assignment?: { id: string } | nu
       ),
     },
     classTeacher: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       findFirst: jest.fn().mockResolvedValue(opts.assignment === undefined ? { id: "ct1" } : opts.assignment),
       upsert: jest.fn((args: Record<string, unknown>) => {
         upserts.push(args);
@@ -117,7 +125,11 @@ describe("reassigning a class's subject teacher", () => {
     }));
     let movedWhere: unknown = null;
     const tx = {
-      class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "SS1 Science A" }) },
+      class: {
+        findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "SS1 Science A" }),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       subject: { findFirst: jest.fn().mockResolvedValue({ id: "phy", name: "Physics" }) },
       user: { findFirst: jest.fn().mockResolvedValue({ id: "t2", name: "Mr Previous", status: "ACTIVE" }) },
       room: { findFirst: jest.fn().mockResolvedValue({ id: "r1" }) },
