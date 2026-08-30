@@ -26,7 +26,7 @@
 // =============================================================================
 
 import { Inject, Injectable } from "@nestjs/common";
-import { schoolToday, type OpenDutyDto, type StaffHandoverDto } from "@sms/types";
+import { schoolTimeString, schoolToday, type OpenDutyDto, type StaffHandoverDto } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   TENANT_DATABASE,
@@ -119,6 +119,9 @@ export class StaffHandoverService {
       ...classes.map((c: { classId: string }) => c.classId),
       ...subjects.map((s: { classId: string }) => s.classId),
     ]);
+    // A `@db.Date` is a DAY, and its UTC midnight IS that day — converting it
+    // into a zone west of UTC would move it to the previous one. Cover lessons
+    // and exam sittings are both day-typed, so this is right as it stands.
     const day = (d: Date) => d.toISOString().slice(0, 10);
 
     const duties: OpenDutyDto[] = [
@@ -133,7 +136,12 @@ export class StaffHandoverService {
       duty(
         "MEETING_SLOT",
         "Meeting slots a parent can still book",
-        slots.map((s: { startsAt: Date }) => s.startsAt.toISOString().slice(0, 16).replace("T", " ")),
+        // A MEETING SLOT IS A TRUE TIMESTAMP, not a day column — the one entry
+        // in this list that is. It printed the server's UTC while the two dated
+        // duties above it were already resolved against `timezone`, three lines
+        // from where that zone is in scope. The person reading this is arranging
+        // cover for a slot a parent can still book, so the hour is the point.
+        slots.map((s: { startsAt: Date }) => schoolTimeString(timezone, s.startsAt)),
         true,
       ),
       duty("CLASS_TEACHER", "Classes they are the class teacher of",

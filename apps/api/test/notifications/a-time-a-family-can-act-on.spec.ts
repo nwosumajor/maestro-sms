@@ -34,17 +34,20 @@ const OFFENDER = new RegExp(
 );
 
 /**
- * Named, with the reason — not a blanket pass.
+ * EMPTY, AND THAT IS THE POINT.
  *
- * The staff HANDOVER report is a STAFF-facing list of a leaver's duties across
- * every module, built without a school context to resolve a zone from; it is
- * read beside other UTC stamps in the same artifact. Recorded here rather than
- * fixed silently, so it is a decision somebody can revisit.
+ * The first version of this gate exempted the staff HANDOVER report on the
+ * reason "no school context resolved on that path". That reason was FALSE:
+ * `openDuties` resolves the school's timezone on its very first line and passes
+ * it in, and the two dated duties above the offending line already use it. The
+ * meeting slot was simply the one true timestamp in a list of day columns.
+ *
+ * An exemption granted on a wrong reason is a hole with a note on it — the
+ * thing this repo warns about — so it was checked rather than kept, and the
+ * list is empty. A future entry must survive the same question: does this path
+ * really have no school to ask?
  */
-const EXEMPT: Record<string, string> = {
-  "hr/staff-handover.service.ts":
-    "a staff-facing duty list, not a notice to a family; no school context resolved on that path",
-};
+const EXEMPT: Record<string, string> = {};
 
 describe("no notice tells a reader the server's clock", () => {
   const files = walkSources();
@@ -74,6 +77,16 @@ describe("no notice tells a reader the server's clock", () => {
     for (const rel of Object.keys(EXEMPT)) {
       expect(() => readFileSync(join(__dirname, "..", "..", "src", rel), "utf8")).not.toThrow();
     }
+  });
+
+  it("the handover report resolves the zone it already had in hand", () => {
+    // Kept as a named case because this file was briefly EXEMPTED from the rule
+    // above on a reason that was not true.
+    const src = readFileSync(join(__dirname, "..", "..", "src", "hr", "staff-handover.service.ts"), "utf8");
+    expect(src).toContain("schoolTimeString(timezone,");
+    // …and its DAY columns deliberately stay on UTC midnight, which is what a
+    // `@db.Date` means. Narrowing those would date a cover lesson a day early.
+    expect(src).toContain("d.toISOString().slice(0, 10)");
   });
 
   it("and every exemption gives a reason", () => {

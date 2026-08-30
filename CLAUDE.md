@@ -3717,8 +3717,20 @@ about the instants a notice names (`startsAt`, `expectedReturnAt`, `endsAt`),
 never `toISOString()` generally, since a filename stamp, an export header, an
 audit value and an API timestamp are all correctly UTC and a rule wide enough to
 catch those is the over-wide gate this repo treats as the same failure as a
-blind one. One exemption, named with its reason: the staff HANDOVER report is a
-staff-facing duty list built with no school context to resolve a zone from.
+blind one. The exemption list is EMPTY, and that took a correction: it first
+exempted the staff HANDOVER report on the reason "no school context resolved on
+that path". **That reason was false** — `openDuties` resolves the school's
+timezone on its FIRST LINE and passes it in, and the two dated duties directly
+above the offending line already use it. The meeting slot was simply the one
+true timestamp in a list of `@db.Date` columns, three lines from a zone already
+in hand. An exemption granted on a wrong reason is a hole with a note on it, so
+it was checked rather than kept. Live after: an 18:30Z slot reads **19:30** on
+the handover a leaver's duties are handed over from.
+// AND THE DAY COLUMNS BESIDE IT DELIBERATELY STAY ON UTC MIDNIGHT, pinned by
+its own case and mutation-validated: `lesson_cover.date` and `exam_sitting.date`
+are `@db.Date`, so "converting" them into a zone west of UTC would date a cover
+lesson a day early — the exact failure `isCalendarDate` exists to prevent, and
+the reason this fix is one line rather than three.
 // GOTCHA, twice: the privileged-client stubs for the sweep had no `school`
 model, which every real one has; and my blanket fixture patch stubbed the region
 with a fixed zone, which silently overrode the zone the meeting suite sets up to
