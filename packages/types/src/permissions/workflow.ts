@@ -162,7 +162,8 @@ export type WorkflowAction = (typeof WORKFLOW_ACTIONS)[number];
  *   DRAFT/REVISION_REQUESTED --SUBMIT--> PENDING_REVIEW
  *   PENDING_REVIEW --APPROVE--> APPROVED | --REJECT--> REJECTED
  *                  --REQUEST_REVISION--> REVISION_REQUESTED
- *   APPROVED --VETO--> REJECTED   (board override; terminal otherwise)
+ *   PENDING_REVIEW --VETO--> REJECTED   (board stops it before it takes effect)
+ *   APPROVED       --VETO--> REJECTED   (board records disapproval; does NOT undo)
  */
 export const WORKFLOW_TRANSITIONS: Record<
   WorkflowState,
@@ -174,7 +175,23 @@ export const WORKFLOW_TRANSITIONS: Record<
     APPROVE: "APPROVED",
     REJECT: "REJECTED",
     REQUEST_REVISION: "REVISION_REQUESTED",
+    // THE BOARD CAN STOP IT BEFORE IT HAPPENS.
+    //
+    // VETO used to be reachable ONLY from APPROVED, which is the one moment it
+    // cannot work: a veto is only reachable after the approval's reactor has
+    // already run in-tx — the role granted, the charges on families' invoices,
+    // the register amended, the marks published — and every reactor opens
+    // `if (state !== "APPROVED") return`, so the REJECTED fan-out a veto
+    // produces is a no-op by construction in every module. The board's only
+    // veto was a post-hoc one that changed nothing.
+    //
+    // From PENDING_REVIEW it is a real control: the request never reaches
+    // APPROVED, no reactor runs, and there is nothing to unwind. That is what a
+    // board veto is in governance — blocking a decision, not undoing one.
+    VETO: "REJECTED",
   },
+  // Kept, because a board must still be able to RECORD disapproval of something
+  // already done. It does not reverse it, and the notice says so.
   APPROVED: { VETO: "REJECTED" },
   REJECTED: {},
 };

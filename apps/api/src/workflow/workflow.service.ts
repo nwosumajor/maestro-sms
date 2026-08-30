@@ -795,6 +795,10 @@ export class WorkflowService {
       return {
         id,
         state: nextState,
+        // The state it came FROM. A veto cast on a PENDING_REVIEW request stops
+        // it; one cast on an APPROVED request cannot, and the two notices must
+        // not say the same thing.
+        priorState: req.state as WorkflowState,
         currentStage: nextStage,
         initiatorId: req.initiatorId,
         title: req.title,
@@ -827,7 +831,15 @@ export class WorkflowService {
    */
   private async announce(
     p: Principal,
-    out: { id: string; state: string; currentStage: number; initiatorId: string; title: string; stages: WorkflowStage[] },
+    out: {
+      id: string;
+      state: string;
+      priorState: WorkflowState;
+      currentStage: number;
+      initiatorId: string;
+      title: string;
+      stages: WorkflowStage[];
+    },
     action: WorkflowAction,
     comments?: string,
   ): Promise<void> {
@@ -857,13 +869,22 @@ export class WorkflowService {
         const approvers = await this.approversFor(p, out.stages, out.currentStage, "");
         const to = [...new Set([out.initiatorId, ...approvers])].filter((id) => id !== p.userId);
         if (to.length > 0) {
+          // TWO VETOES, TWO SENTENCES, and the difference is whether anything
+          // happened. Vetoing a PENDING_REVIEW request STOPS it — no reactor has
+          // run and there is nothing to unwind. Vetoing an APPROVED one cannot,
+          // and telling somebody "this has been stopped" when the role is
+          // already granted and the charges are already on families' invoices
+          // would be the same false statement the old single message made.
+          const stopped = out.priorState === "PENDING_REVIEW";
           await this.notifications.enqueueMany(this.ctx(p), to, {
             type: "WORKFLOW_UPDATE",
-            title: "A decision was overturned by the board",
-            body:
-              `${out.title} — the board has vetoed this AFTER it was approved. ` +
-              `The approval has already taken effect and a veto does not undo it: ` +
-              `reverse it in the module it belongs to.`,
+            title: stopped ? "The board has stopped a request" : "A decision was overturned by the board",
+            body: stopped
+              ? `${out.title} — the board has vetoed this before it was approved. ` +
+                `It will not go ahead, and nothing has taken effect.`
+              : `${out.title} — the board has vetoed this AFTER it was approved. ` +
+                `The approval has already taken effect and a veto does not undo it: ` +
+                `reverse it in the module it belongs to.`,
             data: { requestId: out.id },
           });
         }

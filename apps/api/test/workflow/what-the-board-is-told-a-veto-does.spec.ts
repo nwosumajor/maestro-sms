@@ -29,13 +29,27 @@ const MANUAL = readFileSync(join(__dirname, "../../../../docs/ONBOARDING-MANUAL.
 const help = HELP.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 describe("what the board is told a veto does", () => {
-  it("VETO really is reachable only from APPROVED", () => {
-    // The premise of the wording. If a future change allowed it elsewhere, the
-    // help text would become wrong in the other direction.
+  it("VETO is reachable from PENDING_REVIEW as well as APPROVED", () => {
+    // THE PREMISE, AND IT CHANGED. This asserted `["APPROVED"]` — the one moment
+    // a veto cannot work, since every reactor has already run by then. That is
+    // now the SECOND of two: the board can stop a request under review, where
+    // the veto is a real control, and can still record disapproval of one
+    // already approved. This test failing is what forced the guide and the
+    // manual to move with the behaviour, which is exactly why it exists.
     const from = Object.entries(WORKFLOW_TRANSITIONS)
       .filter(([, actions]) => "VETO" in (actions as Record<string, unknown>))
-      .map(([state]) => state);
-    expect(from).toEqual(["APPROVED"]);
+      .map(([state]) => state)
+      .sort();
+    expect(from).toEqual(["APPROVED", "PENDING_REVIEW"]);
+  });
+
+  it("a veto from REVISION_REQUESTED or DRAFT is still refused", () => {
+    // Nothing has been put to the board yet, so there is no decision to veto —
+    // and widening it there would let a veto pre-empt the initiator's own
+    // resubmission.
+    for (const state of ["DRAFT", "REVISION_REQUESTED", "REJECTED"] as const) {
+      expect("VETO" in (WORKFLOW_TRANSITIONS[state] as Record<string, unknown>)).toBe(false);
+    }
   });
 
   it("no longer tells the board it works on any workflow", () => {
@@ -54,7 +68,9 @@ describe("what the board is told a veto does", () => {
   it("the onboarding manual says the same thing", () => {
     // Two documents describing one power, and they must not drift: the manual
     // is what a school owner reads before anyone signs in.
-    expect(MANUAL).toMatch(/veto[^<]*already been approved/i);
-    expect(MANUAL).toMatch(/does not undo what the approval already did/i);
+    // BOTH halves of the power, because the manual now describes both and a
+    // reader who sees only the second would think the veto never works.
+    expect(MANUAL).toMatch(/still under review[^<]*STOPS it/i);
+    expect(MANUAL).toMatch(/already been approved[^<]*does not undo what the approval did/i);
   });
 });
