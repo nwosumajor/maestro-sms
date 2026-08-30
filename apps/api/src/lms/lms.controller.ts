@@ -27,7 +27,13 @@ const classShape = {
   stream: z.enum(CLASS_STREAMS).nullish(),
   arm: z.enum(CLASS_ARMS).nullish(),
 };
-const createClassSchema = z.object({ name: z.string().min(1), ...classShape });
+// A class is created WITH its class teacher: they take its register and answer
+// for it, so a class without one has a roll and nobody responsible for it.
+const createClassSchema = z.object({
+  name: z.string().min(1),
+  supervisorId: z.string().uuid({ message: "Choose the class teacher for this class" }),
+  ...classShape,
+});
 const updateClassSchema = z.object({
   name: z.string().min(1).optional(),
   supervisorId: z.string().uuid().nullish(),

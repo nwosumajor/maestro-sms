@@ -17,20 +17,7 @@ import { SchoolRegionService } from "../foundation/school-region.service";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
-import {
-  NON_STAFF_ROLE_NAMES,
-  MAX_GUARDIANS_PER_STUDENT,
-  ROSTER_CAP,
-  SEARCH_CAP,
-  DEFAULT_CURRICULUM,
-  normaliseEntityCode,
-  subjectCatalogueFor,
-  uniqueEntityCode,
-  type ClassOverviewDto,
-  type SubjectStage,
-  type UserKind,
-  MEETING_PERMISSIONS,
-} from "@sms/types";
+import { DEFAULT_CURRICULUM, MAX_GUARDIANS_PER_STUDENT, MEETING_PERMISSIONS, NON_STAFF_ROLE_NAMES, ROSTER_CAP, SEARCH_CAP, isStaffRoles, normaliseEntityCode, subjectCatalogueFor, type ClassOverviewDto, type SubjectStage, type UserKind, uniqueEntityCode } from "@sms/types";
 import { LMS_PERMISSIONS } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -167,10 +154,37 @@ export class LmsService {
     return derived || `${entity === "subject" ? "SUBJ" : "CLS"}${Date.now() % 1000000}`;
   }
 
+  /**
+   * WHO MAY BE A CLASS TEACHER.
+   *
+   * A class teacher IS the class supervisor: the person who takes the register
+   * and answers for the class. So the check is the same one every other duty in
+   * this product makes before handing work out — a real member of STAFF of this
+   * school who is STILL HERE. `updateClass` previously asked only that the id
+   * resolved to a user, so a PUPIL or a departed teacher could be made
+   * responsible for a register.
+   */
+  private async assertMayBeClassTeacher(tx: TenantTx, userId: string): Promise<void> {
+    // RLS scopes the lookup, so somebody from another school is simply absent
+    // and this never confirms that they exist.
+    const who = await assertStillHere(tx, userId, "Class teacher");
+    const roles = (await tx.userRole.findMany({
+      where: { userId },
+      select: { role: { select: { name: true } } },
+    })) as Array<{ role: { name: string } }>;
+    if (!isStaffRoles(roles.map((r) => r.role.name))) {
+      throw new BadRequestException(
+        `${who.name} is not a member of staff, so they cannot be a class teacher.`,
+      );
+    }
+  }
+
   async createClass(
     p: Principal,
     input: {
       name: string;
+      /** The class teacher — see assertMayBeClassTeacher. Required. */
+      supervisorId: string;
       level?: number | null;
       nextClassId?: string | null;
       code?: string | null;
@@ -187,6 +201,12 @@ export class LmsService {
         select: { id: true },
       });
       if (dup) throw new ConflictException("A class with that name already exists");
+      // EVERY CLASS HAS A CLASS TEACHER, from the moment it exists. Created
+      // without one, a class has a roll and a timetable and nobody responsible
+      // for its register — which is the state 30 of this school's 31 classes
+      // were in. Requiring it here is what stops the gap being re-created while
+      // the existing ones are being filled in.
+      await this.assertMayBeClassTeacher(tx, input.supervisorId);
       const code = await this.nextCode(tx, "class", input.name, input.code);
       const cls = await tx.class.create({
         data: {
@@ -195,6 +215,7 @@ export class LmsService {
           code,
           level: input.level ?? null,
           nextClassId: input.nextClassId ?? null,
+          supervisorId: input.supervisorId,
           stage: input.stage ?? null,
           stream: input.stream ?? null,
           arm: input.arm ?? null,
@@ -232,10 +253,19 @@ export class LmsService {
       }
       // Validate referenced rows are in-tenant (RLS scopes these lookups).
       if (input.nextClassId) await this.requireClass(tx, input.nextClassId);
-      if (input.supervisorId) {
-        const u = await tx.user.findFirst({ where: { id: input.supervisorId }, select: { id: true } });
-        if (!u) throw new NotFoundException("Supervisor not found");
+      // CHANGE the class teacher, never REMOVE them. A class with nobody
+      // responsible for its register is the state this rule exists to end, and
+      // clearing is not how a school replaces somebody — it is how the gap
+      // comes back. A class that has none yet can still be given one.
+      if (input.supervisorId === null) {
+        const current = await tx.class.findFirst({ where: { id: classId }, select: { supervisorId: true } });
+        if (current?.supervisorId) {
+          throw new BadRequestException(
+            "Every class must have a class teacher. Assign a different one rather than removing this one.",
+          );
+        }
       }
+      if (input.supervisorId) await this.assertMayBeClassTeacher(tx, input.supervisorId);
       const cls = await tx.class.update({
         where: { id: classId },
         data: {

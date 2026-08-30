@@ -217,31 +217,33 @@ export function ClassSubjectsAdmin({
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            // "" clears it. The form could only ever SET a supervisor — once
-            // named, there was no way to remove one from the UI, and the
-            // supervisor is the named approver for subject selections.
+            // CHANGE, never CLEAR. Every class must have a class teacher —
+            // they take its register and answer for it — so the API refuses to
+            // remove the last one, and an affordance that always 400s is worse
+            // than none. Replacing is how a school hands the class over.
             await send(
               "PUT",
               `/classes/${sup.classId}`,
-              { supervisorId: sup.supervisorId || null },
-              sup.supervisorId ? "Supervisor set." : "Supervisor cleared.",
+              { supervisorId: sup.supervisorId },
+              "Class teacher set.",
             );
           }}
           className="flex flex-wrap items-end gap-2 border-t border-border pt-4"
         >
-          <Label className="w-full">Class supervisor (form teacher)</Label>
+          <Label className="w-full">Class teacher (form teacher / supervisor)</Label>
           <select aria-label="Class" value={sup.classId} onChange={(e) => setSup({ ...sup, classId: e.target.value })} className={sel}>
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <select aria-label="Supervisor" value={sup.supervisorId} onChange={(e) => setSup({ ...sup, supervisorId: e.target.value })} className={sel}>
-            <option value="">— no supervisor —</option>
+            <option value="">— choose —</option>
             {staff.map((s) => <option key={s.id} value={s.id}>{personLabel(s)}</option>)}
           </select>
-          <Button type="submit" size="sm" variant="outline">{sup.supervisorId ? "Set supervisor" : "Clear supervisor"}</Button>
+          <Button type="submit" size="sm" variant="outline" disabled={!sup.supervisorId}>Set class teacher</Button>
         </form>
         <p className="-mt-2 text-xs text-muted-foreground">
-          The supervisor is the form teacher: they check subject selections and pupil profiles before the school
-          admin does. With none set, that first check is skipped and the admin is the only reviewer.
+          The class teacher, the form teacher and the class supervisor are one person: they take the class
+          register, and they check subject selections and pupil profiles before the school admin does. Every
+          class must have one — you can hand a class over to somebody else, but not leave it with nobody.
         </p>
 
         {/* Class progression: level + next class */}

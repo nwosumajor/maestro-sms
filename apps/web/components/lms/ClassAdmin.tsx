@@ -35,6 +35,10 @@ export function ClassAdmin({
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const teachers = users.filter((u) => u.roles.includes("teacher"));
+  // EVERY CLASS HAS A CLASS TEACHER. They take its register and answer for it,
+  // so the class cannot be created without naming one — the API refuses, and a
+  // form that let you try would just produce a 400.
+  const [classTeacherId, setClassTeacherId] = React.useState("");
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
   const post = async (path: string, body: unknown, ok: string) => {
@@ -98,6 +102,7 @@ export function ClassAdmin({
               "/classes",
               {
                 name: composed,
+                supervisorId: classTeacherId,
                 stage: shape.stage || null,
                 level: shape.level ? Number(shape.level) : null,
                 stream: shape.stream || null,
@@ -139,12 +144,25 @@ export function ClassAdmin({
             </select>
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="cl-teacher">Class teacher</Label>
+            <select
+              id="cl-teacher"
+              value={classTeacherId}
+              onChange={(e) => setClassTeacherId(e.target.value)}
+              className={sel}
+              required
+            >
+              <option value="">— choose —</option>
+              {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
             <Label>Will be called</Label>
             <p className="flex h-9 items-center rounded-md border border-dashed border-border px-3 text-sm font-medium">
               {composed || "—"}
             </p>
           </div>
-          <Button type="submit" size="sm" disabled={!composed}>Create class</Button>
+          <Button type="submit" size="sm" disabled={!composed || !classTeacherId}>Create class</Button>
         </form>
 
         <form

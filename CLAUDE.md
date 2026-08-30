@@ -2040,6 +2040,48 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### Every class has a class teacher — required at creation, never removable
+Steps 2 and 3 of the entry below. **Step 2 was already built**, which is worth
+recording rather than rebuilding: `/classes` carries a "Needs attention (N)"
+filter, an empty state reading "Every class has a form teacher and is within
+capacity", and a destructive **"No form teacher"** badge whose comment already
+says such a class is "a class whose register nobody is responsible for taking".
+The report existed; what was missing was the rule behind it.
+**STEP 3, at BOTH ENDS, because gating a route whose UI cannot satisfy it just
+breaks the screen.** `createClass` now REQUIRES the class teacher and the create
+form has a picker for them; `updateClass` refuses to CLEAR one. Live:
+```
+create with no class teacher   400 supervisorId: Required
+create naming a PUPIL          400 "Demo Student is not a member of staff, so
+                                    they cannot be a class teacher."
+create naming a teacher        201
+clear the class teacher        400 "Every class must have a class teacher.
+                                    Assign a different one rather than
+                                    removing this one."
+hand it to somebody else       200
+```
+// **THE PUPIL CASE IS THE ONE A COMPILER CANNOT CATCH.** `updateClass` asked
+only that the id resolved to a user — which a pupil does — so a child could be
+made responsible for a class register. `assertMayBeClassTeacher` asks the two
+questions every other duty in this product already asks: a member of STAFF, and
+STILL HERE.
+// CHANGE, NEVER CLEAR — and the UI moved with it. The old control offered
+"Clear supervisor"; an affordance that always 400s is worse than none, so it is
+now "Set class teacher" and the copy says a class can be handed over but not
+left with nobody. Same rule the workflow inbox learned: a button whose server
+refuses it is not a feature.
+// A CLASS THAT HAS NONE YET IS LEFT ALONE, deliberately, and a test pins it: 30
+of 31 classes are in that state, and refusing a null there would block every
+unrelated edit to them until somebody is found. The rule bites on REMOVING one,
+not on the backlog.
+// **NOT NULL IS DELIBERATELY NOT DONE.** It is the honest end state and it
+cannot land yet: 30 classes have no class teacher and there is no correct value
+to invent for them — who runs SS1A is the school's answer, not this codebase's.
+The API now stops the gap being re-created while the existing ones are filled
+in; the column can be made NOT NULL the day the report reads zero.
+Mutation-validated three ways: drop the staff check, allow clearing again, and
+stop storing the class teacher at creation.
+
 ### A class teacher IS the class supervisor, and could not take their own register
 Told by the owner, plainly: a class teacher and a class supervisor are ONE
 person with one job — monitor the class, take its register, answer for class
