@@ -11,8 +11,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 // Report-card remarks + term-scoped PDF generation. A term picker drives both:
 // the class-teacher remark (editable by the student's teacher/supervisor or
 // staff), the head remark (staff-wide only), and a "generate for this term"
-// button that folds the remarks into the PDF. canWrite gates the class-teacher
-// box; canHead gates the head box; the server enforces both regardless.
+// button that folds the remarks into the PDF. canHead gates the head box; the
+// server enforces everything regardless.
+//
+// THE CLASS-TEACHER BOX TAKES TWO ANSWERS, and only one of them is a role.
+// `canWrite` is the `grade.write` permission — which every subject teacher
+// holds — and the remark is the CLASS TEACHER's. Supervision is per-pupil, so
+// the session cannot answer it; the server does, on the DTO this already
+// fetches (`mayWriteClassTeacherRemark`). Until it has loaded the box stays
+// hidden: offering a control and withdrawing it reads worse than showing it a
+// moment late.
 export function RemarksEditor({
   studentId,
   sessions,
@@ -34,6 +42,7 @@ export function RemarksEditor({
   // — so two people could overwrite each other's words about a child with no
   // sign of it, and nobody reading the box knew whose judgement it was.
   const [by, setBy] = React.useState<{ ct: string | null; head: string | null }>({ ct: null, head: null });
+  const [mayWriteCt, setMayWriteCt] = React.useState(false);
 
   const load = React.useCallback(async () => {
     if (!termId) return;
@@ -43,10 +52,12 @@ export function RemarksEditor({
       setCt(data.classTeacherRemark ?? "");
       setHead(data.headRemark ?? "");
       setBy({ ct: data.classTeacherName ?? null, head: data.headName ?? null });
+      setMayWriteCt(data.mayWriteClassTeacherRemark);
     } else {
       setCt("");
       setHead("");
       setBy({ ct: null, head: null });
+      setMayWriteCt(false);
     }
   }, [termId, studentId]);
 
@@ -108,7 +119,7 @@ export function RemarksEditor({
           </Button>
         </div>
 
-        {canWrite && (
+        {canWrite && mayWriteCt && (
           <div className="space-y-1.5">
             <label className="text-sm font-medium">
               Class teacher's remark
@@ -146,7 +157,7 @@ export function RemarksEditor({
           </div>
         )}
 
-        {!canWrite && !canHead && (
+        {!(canWrite && mayWriteCt) && !canHead && (
           <div className="rounded-md border bg-muted/40 p-2 text-sm text-muted-foreground">
             {ct && (
               <p>

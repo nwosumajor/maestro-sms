@@ -104,3 +104,95 @@ export async function teacherIdsOfClasses(tx: TenantTx, classIds: string[]): Pro
   for (const r of subjects as Array<{ teacherId: string }>) ids.add(r.teacherId);
   return [...ids];
 }
+
+/**
+ * Does this user SUPERVISE this pupil — are they the CLASS TEACHER of a class
+ * the pupil is actively enrolled in?
+ *
+ * THE NARROW QUESTION, and it is deliberately not the union above. Everything
+ * else in this file answers "may I see this child", where the union is right:
+ * you teach a pupil if you tutor, supervise or teach a subject to a class they
+ * are in. A handful of acts are the CLASS TEACHER's alone — the remark on a
+ * report card, the character ratings printed beside it — and those asked the
+ * union, so any of a class's eleven subject teachers could perform them.
+ *
+ * Both of those write a SINGLE row keyed on (pupil, term): the remark is one
+ * column, the ratings are one row per trait. So it was not merely a permission
+ * a subject teacher should not have had — it was a silent overwrite of somebody
+ * else's signed judgement about a child, with the card then attributing it to
+ * whoever wrote last. Measured live: a class teacher's remark replaced by a
+ * subject teacher's, re-signed with their name, no history and nothing to say
+ * it had happened.
+ *
+ * ACTIVE enrolment only, like every other reader here.
+ */
+export async function supervisesStudent(tx: TenantTx, userId: string, studentId: string): Promise<boolean> {
+  const enrolments = (await tx.enrollment.findMany({
+    where: { studentId, status: "ACTIVE" },
+    select: { classId: true },
+  })) as Array<{ classId: string }>;
+  if (enrolments.length === 0) return false;
+  const supervised = (await tx.class.findMany({
+    where: { id: { in: enrolments.map((e) => e.classId) }, supervisorId: userId },
+    select: { id: true },
+  })) as Array<{ id: string }>;
+  return supervised.length > 0;
+}
+
+/**
+ * The class teacher of the pupil's class, for WORDING a refusal — never for
+ * deciding one.
+ *
+ * A class with no class teacher and a class whose class teacher is somebody
+ * else need different sentences: one is "ask the office to assign one", the
+ * other is "ask <name>". The register refusal already draws that distinction
+ * and this is the same fork. Returns the pupil's class either way, so a caller
+ * can name it.
+ */
+export async function supervisorOfStudent(
+  tx: TenantTx,
+  studentId: string,
+): Promise<{ className: string; supervisorName: string | null } | null> {
+  const enrolment = (await tx.enrollment.findFirst({
+    where: { studentId, status: "ACTIVE" },
+    select: { classId: true },
+  })) as { classId: string } | null;
+  if (!enrolment) return null;
+  const cls = (await tx.class.findFirst({
+    where: { id: enrolment.classId },
+    select: { name: true, supervisorId: true },
+  })) as { name: string; supervisorId: string | null } | null;
+  if (!cls) return null;
+  const supervisor = cls.supervisorId
+    ? ((await tx.user.findFirst({ where: { id: cls.supervisorId }, select: { name: true } })) as { name: string } | null)
+    : null;
+  return { className: cls.name, supervisorName: supervisor?.name ?? null };
+}
+
+/**
+ * The one refusal for "this is the class teacher's to write".
+ *
+ * Shared by the report-card remark and the character ratings because they are
+ * the same rule, and two spellings of one rule is how the pair drifted in the
+ * first place: both already SAID "only the pupil's class teacher or a school
+ * administrator", in almost the same words, while both authorised the union.
+ *
+ * IT NAMES THE CLASS TEACHER ONLY TO SOMEBODY WHO ALREADY TEACHES THE PUPIL.
+ * To anyone else the sentence stays generic, so the refusal cannot become a way
+ * of asking who a pupil is or which class they are in.
+ */
+export async function classTeacherOnlyRefusal(
+  tx: TenantTx,
+  userId: string,
+  studentId: string,
+  act: string,
+): Promise<string> {
+  if (!(await teachesStudent(tx, userId, studentId))) {
+    return `Only the pupil's class teacher or a school administrator may ${act}.`;
+  }
+  const cls = await supervisorOfStudent(tx, studentId);
+  if (!cls) return `Only the pupil's class teacher or a school administrator may ${act}.`;
+  return cls.supervisorName
+    ? `${act.charAt(0).toUpperCase()}${act.slice(1)} is ${cls.className}'s class teacher's to write — ask ${cls.supervisorName}, or a school administrator.`
+    : `${cls.className} has no class teacher yet, so nobody is responsible for this. Ask a school administrator to assign one.`;
+}

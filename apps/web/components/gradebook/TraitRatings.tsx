@@ -33,7 +33,13 @@ export function TraitRatings({
   studentId: string;
   termId: string | null;
   termName?: string | null;
-  /** grade.write — the class teacher or a school administrator. */
+  /**
+   * grade.write — held by every subject teacher, not only the class teacher.
+   *
+   * The ratings are the CLASS TEACHER's to record, and supervision is per-pupil
+   * so a session cannot answer it. This is the role half; `mayWrite` on the DTO
+   * below is the other half, and the grid needs both.
+   */
   canEdit: boolean;
 }) {
   const [scores, setScores] = React.useState<Record<string, number>>({});
@@ -41,6 +47,7 @@ export function TraitRatings({
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [loaded, setLoaded] = React.useState(false);
+  const [mayWrite, setMayWrite] = React.useState(false);
 
   React.useEffect(() => {
     if (!termId) return;
@@ -51,10 +58,14 @@ export function TraitRatings({
       const d = (await res.json()) as Traits;
       setScores(Object.fromEntries(d.ratings.map((r) => [r.traitKey, r.score])));
       setMeta({ by: d.ratedByName, at: d.ratedAt ? String(d.ratedAt).slice(0, 10) : null });
+      setMayWrite(d.mayWrite);
     })();
   }, [studentId, termId]);
 
   if (!termId) return null;
+  // BOTH halves. Until the read lands `mayWrite` is false, so the grid renders
+  // read-only for a moment rather than offering a control it may withdraw.
+  const editable = canEdit && mayWrite;
   const rated = Object.keys(scores).length;
   // Nothing recorded and no right to record it: a family sees the section only
   // when there is something in it.
@@ -99,7 +110,7 @@ export function TraitRatings({
               {group.traits.map((t) => (
                 <div key={t.key} className="flex items-center justify-between gap-2">
                   <span className="text-sm text-muted-foreground">{t.label}</span>
-                  {canEdit ? (
+                  {editable ? (
                     <select
                       aria-label={t.label}
                       className="h-8 rounded-md border border-input bg-background px-2 text-sm"
@@ -138,7 +149,7 @@ export function TraitRatings({
           ))}
         </div>
 
-        {canEdit && (
+        {editable && (
           <div className="flex items-center gap-2">
             <Button size="sm" disabled={busy || rated === 0} onClick={() => void save()}>
               Save {rated} rating{rated === 1 ? "" : "s"}

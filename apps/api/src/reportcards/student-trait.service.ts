@@ -22,7 +22,12 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { classIdsTaughtBy, teachesStudent as teachesThisStudent } from "../common/teaches";
+import {
+  classIdsTaughtBy,
+  classTeacherOnlyRefusal,
+  supervisesStudent,
+  teachesStudent as teachesThisStudent,
+} from "../common/teaches";
 import { isTraitKey, TRAIT_SCORE_MAX, TRAIT_SCORE_MIN, type StudentTraitsDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -94,6 +99,9 @@ export class StudentTraitService {
         ratings: rows.map((r) => ({ traitKey: r.traitKey, score: r.score })),
         ratedByName: rater?.name ?? null,
         ratedAt: latest?.ratedAt ?? null,
+        // The SAME question the write path asks, so the grid a reader is
+        // offered and the write the server accepts cannot disagree.
+        mayWrite: this.staffWide(p) || (await supervisesStudent(tx, p.userId, studentId)),
       };
     });
   }
@@ -127,8 +135,12 @@ export class StudentTraitService {
     if (seen.size !== ratings.length) throw new BadRequestException("The same trait appears more than once");
 
     await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      if (!this.staffWide(p) && !(await this.teachesStudent(tx, p, studentId))) {
-        throw new ForbiddenException("Only the pupil's class teacher or a school administrator may record these");
+      // THE CLASS TEACHER'S, NOT ANY TEACHER'S — see the remark service, which
+      // had the identical defect in almost the identical words. A rating is one
+      // row per (pupil, term, trait), so a subject teacher rating a child's
+      // HONESTY overwrote the class teacher's rating of it outright.
+      if (!this.staffWide(p) && !(await supervisesStudent(tx, p.userId, studentId))) {
+        throw new ForbiddenException(await classTeacherOnlyRefusal(tx, p.userId, studentId, "these ratings"));
       }
       const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true } });
       if (!term) throw new NotFoundException("Term not found");

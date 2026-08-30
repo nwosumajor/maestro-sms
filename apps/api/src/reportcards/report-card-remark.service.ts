@@ -12,7 +12,11 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { teachesStudent as teachesThisStudent } from "../common/teaches";
+import {
+  classTeacherOnlyRefusal,
+  supervisesStudent,
+  teachesStudent as teachesThisStudent,
+} from "../common/teaches";
 import type { ReportCardRemarkDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -72,12 +76,22 @@ export class ReportCardRemarkService {
     };
   }
 
-  private async toDto(tx: TenantTx, studentId: string, termId: string, r: RemarkRow | null): Promise<ReportCardRemarkDto> {
+  private async toDto(
+    tx: TenantTx,
+    p: Principal,
+    studentId: string,
+    termId: string,
+    r: RemarkRow | null,
+  ): Promise<ReportCardRemarkDto> {
     return {
       studentId,
       termId,
       classTeacherRemark: r?.classTeacherRemark ?? null,
       headRemark: r?.headRemark ?? null,
+      // The SAME question the write path asks, so the box a reader is offered
+      // and the write the server accepts cannot disagree.
+      mayWriteClassTeacherRemark:
+        p.roles.some((role) => STAFF_WIDE.has(role)) || (await supervisesStudent(tx, p.userId, studentId)),
       ...(await this.authorNames(tx, r)),
       updatedAt: r?.updatedAt ?? null,
     };
@@ -108,7 +122,7 @@ export class ReportCardRemarkService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       await this.assertCanRead(tx, p, studentId);
       const row = await tx.reportCardRemark.findFirst({ where: { studentId, termId } });
-      return this.toDto(tx, studentId, termId, row as RemarkRow | null);
+      return this.toDto(tx, p, studentId, termId, row as RemarkRow | null);
     });
   }
 
@@ -121,9 +135,19 @@ export class ReportCardRemarkService {
     remark: string,
   ): Promise<ReportCardRemarkDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // THE CLASS TEACHER'S, NOT ANY TEACHER'S.
+      //
+      // This asked `teachesStudent` — the UNION of supervising a class and
+      // teaching one subject to it — so any of a class's eleven subject
+      // teachers could write the remark that prints as the CLASS TEACHER's.
+      // The refusal it threw has always claimed otherwise.
+      //
+      // The row is a single column keyed on (pupil, term), so it was a silent
+      // OVERWRITE: measured live, a class teacher's remark was replaced by a
+      // subject teacher's and re-signed with their name, with no history.
       const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
-      if (!staffWide && !(await this.teachesStudent(tx, p, studentId))) {
-        throw new ForbiddenException("Only the student's class teacher or a school administrator may set this remark");
+      if (!staffWide && !(await supervisesStudent(tx, p.userId, studentId))) {
+        throw new ForbiddenException(await classTeacherOnlyRefusal(tx, p.userId, studentId, "this remark"));
       }
       await this.assertTermExists(tx, termId);
       const row = await tx.reportCardRemark.upsert({
@@ -135,7 +159,7 @@ export class ReportCardRemarkService {
         { actorId: p.userId, action: "reportcard.remark.class_teacher", entity: "user", entityId: studentId, schoolId: p.schoolId, metadata: { termId } },
         tx,
       );
-      return this.toDto(tx, studentId, termId, row as RemarkRow);
+      return this.toDto(tx, p, studentId, termId, row as RemarkRow);
     });
   }
 
@@ -155,7 +179,7 @@ export class ReportCardRemarkService {
         { actorId: p.userId, action: "reportcard.remark.head", entity: "user", entityId: studentId, schoolId: p.schoolId, metadata: { termId } },
         tx,
       );
-      return this.toDto(tx, studentId, termId, row as RemarkRow);
+      return this.toDto(tx, p, studentId, termId, row as RemarkRow);
     });
   }
 
