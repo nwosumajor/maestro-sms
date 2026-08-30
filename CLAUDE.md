@@ -2040,6 +2040,34 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The two accesses the model turns on, driven and pinned
+Asked to confirm that a class teacher can mark attendance for their class and a
+subject teacher can grade the pupils in each class offering their subject. Both
+hold, measured on the running stack rather than read:
+```
+CLASS TEACHER of History 101      roster 200 · take register 201 · read 200 · correct 201
+an unrelated teacher, same class  roster 404 · register 404
+SUBJECT TEACHER, their subject    roster 200 · enter a mark 201
+the same teacher, another subject roster 404 · mark 404
+```
+// **THE TWO ROLES ARE DELIBERATELY DIFFERENT, and the gates say so.**
+`assertCanTakeRegister` asks `cls.supervisorId === p.userId` — the CLASS teacher
+alone, with `school_admin` as cover — and `canGradeClassSubject` asks for the
+EXACT offering `(classId, subjectId, teacherId)`. So being the class teacher is
+not a licence to enter marks in somebody else's subject, and teaching Maths in
+SS1A is not a licence to enter its English marks. Eleven subjects, eleven
+teachers, one register.
+// THE CONSOLIDATION DELIBERATELY DID NOT REACH EITHER. `common/teaches.ts`
+answers READ SCOPE — may I see this pupil at all — and both of these are
+narrower. A test asserts the grading gate still asks for the exact offering, so
+a later "tidy-up" cannot widen it to the union.
+// WHAT WAS MISSING WAS A TEST, not a behaviour: the attendance half was already
+pinned (`a SUBJECT teacher of the class can no longer take its register`), and
+the grading half was referenced in comments and asserted nowhere.
+`marks-belong-to-the-subject-teacher.spec.ts` closes that, mutation-validated
+two ways — widen the gate to any teaching relationship, and remove the
+school-wide bypass (which stays, because somebody has to be able to fix a mark).
+
 ### Step 4 DONE: `class_teacher` retired, and the order that made it possible
 The join table that shadowed `class.supervisorId` is gone (migration
 `20270118000000`). A class teacher IS the class supervisor — ONE column — and a
