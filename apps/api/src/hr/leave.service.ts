@@ -163,7 +163,13 @@ export class LeaveService implements OnModuleInit {
       `${used} of ${entitled} used this year, ${after} if approved` +
       // Named rather than left for the approver to work out, because it is the
       // one fact that should change a decision.
-      (entitled > 0 && after > entitled ? ` — OVER their ${entitled}-day entitlement` : "");
+      (entitled > 0 && after > entitled ? ` — OVER their ${entitled}-day entitlement` : "") +
+      // SAY THAT EVIDENCE EXISTS. The inbox renders this string and nothing
+      // else, so an approver reading it had no way to know a sick note or a
+      // summons was attached — the document they most want before deciding.
+      // It cannot be a LINK from here (the payload is a string), so it points
+      // at the page that can show it.
+      (input.attachmentDocId ? " · a supporting document is attached — see the leave page" : "");
 
     // 1) staged workflow request (head → HR → principal), 2) the leave row, 3) submit.
     const wf = await this.workflow.createRequest(p, {

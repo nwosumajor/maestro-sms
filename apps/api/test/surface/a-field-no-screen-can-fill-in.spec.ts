@@ -19,6 +19,13 @@
  * AWAITING_A_SCREEN — which the gate requires to SHRINK, so an entry cannot
  * outlive the gap it records. Same shape as `AWAITING_CONSOLIDATION` in
  * `common/teaches.ts`.
+ *
+ * WHAT THIS CANNOT SEE, stated so nobody trusts it further than it goes: it
+ * asks whether the web MENTIONS the identifier, and displaying a value is not
+ * supplying one. `attachmentDocId` left this list the moment the leave page
+ * rendered a link to the attachment, while ATTACHING one remains impossible for
+ * most staff — see `an-approver-who-cannot-see-the-evidence`. A field that is
+ * read but not writable is out of scope here and belongs in a test of its own.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +57,6 @@ const API_ONLY: Record<string, string> = {
 const AWAITING_A_SCREEN: Record<string, string> = {
   allDay: "an all-day calendar event cannot be created from the calendar page",
   recurrenceUntil: "a recurring event cannot be given an end date",
-  attachmentDocId: "a leave request cannot carry its supporting document",
   completedAt: "a checklist item cannot be back-dated to when it was actually done",
   documentId: "a checklist item cannot be linked to the document that satisfies it",
   examQuestions: "a scholarship exam's questions cannot be authored from the operator console",

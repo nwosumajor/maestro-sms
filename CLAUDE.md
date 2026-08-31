@@ -3663,6 +3663,43 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### A sick note nobody could see, and a fix I had to abandon halfway
+`attachmentDocId` — fourth off the `AWAITING_A_SCREEN` backlog, and the first
+where BUILDING IT proved the backlog entry's own reason wrong.
+**WHAT SHIPPED.** The field has been accepted, validated and returned in the DTO
+since the leave module shipped, and no screen read it — so a document supplied
+through the API was invisible to everyone, including the approver it exists for.
+Worse, the workflow inbox renders ONE field from the payload, `summary`, so even
+an approver looking straight at the request could not know evidence was
+attached. The summary now says so when there is one (and only then — a line on
+every request is one nobody reads), and points at the leave page, since a
+payload is a string and cannot carry a link. The leave page renders the link.
+**WHAT I ABANDONED, AND WHY IT IS THE REAL FINDING.** I built the other half —
+a file input on the leave form that uploads to the Vault and attaches the id —
+and it cannot work. The API requires a Vault document the CALLER uploaded
+(`uploadedById`), and `createDocument` REFUSES a non-student document from
+anyone who is not school-wide. `hr.self` is held by all eight staff roles;
+staff-wide is four. So teacher, hr_clerk, warden and librarian — most of the
+people who take leave — cannot produce an attachable document at all.
+That is not a missing form field. It is a decision about where a member of
+staff's own sick note lives and who may read it, and Golden Rule #7 says take
+the more restrictive branch rather than widening a document-visibility rule
+unasked. So the upload half was REVERTED rather than shipped as a control that
+403s for most of its users — the exact defect this session has been fixing.
+// THE BACKLOG ENTRY'S REASON WAS WRONG and is corrected in place: it said "a
+leave request cannot carry its supporting document", which reads as a screen
+somebody forgot. Building it is what found the truth.
+// **AND IT EXPOSED A LIMIT IN MY OWN GATE.** `a-field-no-screen-can-fill-in`
+asks whether the web MENTIONS an identifier, and DISPLAYING a value is not
+supplying one — so `attachmentDocId` fell out of the backlog the moment the
+leave page rendered a link, while attaching one stayed impossible. The gate now
+states that limit in its own header and names this field as the case that taught
+it; a field that is read but not writable is out of scope there and belongs in a
+test of its own, which is where this one now lives.
+// GOTCHA: my first link used `/documents/:id/download`, which is not a route —
+it is `/file`, which streams through the API so the browser never needs bucket
+credentials. A test pins that, because the wrong one 404s silently in a link.
+
 ### Only the SEEDED document requirements could ever expire
 `needsExpiry` — third off the `AWAITING_A_SCREEN` backlog, and the one that
 quietly undid a fix this file already records. That fix

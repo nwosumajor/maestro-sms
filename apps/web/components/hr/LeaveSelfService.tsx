@@ -101,6 +101,7 @@ export function LeaveSelfService({
               <input type="checkbox" checked={halfDay} onChange={(e) => setHalfDay(e.target.checked)} /> Half day
             </label>
             <div className="space-y-1.5 flex-1 min-w-40"><Label htmlFor="lv-reason">Reason</Label><Input id="lv-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional" /></div>
+
             <Button type="submit" disabled={busy || days < 1}>{busy ? "Submitting…" : days > 0 ? `Apply (${days}d)` : "Apply"}</Button>
             {msg && <span className="text-sm text-muted-foreground">{msg}</span>}
           </form>
@@ -123,7 +124,22 @@ export function LeaveSelfService({
                     <td className="px-4 py-2.5">{r.leaveTypeName ?? "—"}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{r.startDate.slice(0, 10)} → {r.endDate.slice(0, 10)}</td>
                     <td className="px-4 py-2.5">{r.days}</td>
-                    <td className="px-4 py-2.5"><Badge variant={STATUS_VARIANT[r.status] ?? "secondary"}>{r.status}</Badge></td>
+                    <td className="px-4 py-2.5">
+                      <Badge variant={STATUS_VARIANT[r.status] ?? "secondary"}>{r.status}</Badge>
+                      {/* The attachment has been on the DTO since the module
+                          shipped and no screen read it, so evidence supplied
+                          through the API was invisible to everyone including
+                          the approver. The BFF is binary-aware, so this is a
+                          plain link to the signed download. */}
+                      {r.attachmentDocId && (
+                        <a
+                          className="ml-2 text-xs text-primary underline-offset-2 hover:underline"
+                          href={`/api/sms/documents/${r.attachmentDocId}/file`}
+                        >
+                          attachment
+                        </a>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
