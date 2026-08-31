@@ -3663,6 +3663,53 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### A document about yourself, and a fresh install that could not read enrolments
+Owner's decision, asked for after the leave-attachment entry below stopped at
+it: **staff may upload a document about themselves — a sick note, a certificate,
+a doctor's report — and the PRINCIPAL, HR and the SCHOOL ADMINISTRATOR may read
+it.** `document.staffUserId` (migration `20270120000000`) is that third subject,
+beside `studentId` and school-level.
+Measured live, one document, seven roles:
+```
+owner / principal / school_admin / HR manager / HR clerk   200 + bytes
+accountant / another teacher                               404
+principal REPLACING the bytes                              404
+uploading one ABOUT SOMEBODY ELSE                          403
+```
+// **READING IS NOT REPLACING.** `requireWritable` is deliberately narrower than
+`requireVisible`: the principal may open a sick note and must not overwrite it.
+Only the subject may, and by construction they are the only person who could
+have created it.
+// NOT `STAFF_WIDE_ROLES`, which includes accountant and board — a doctor's
+report is medical information about an adult and they have no part in a leave
+decision. `STAFF_DOCUMENT_READERS` is its own named set.
+// THE SERVICE RULE WAS NOT ENOUGH ON ITS OWN. `GET /documents/:id` requires
+`document.read`, and hr_manager/hr_clerk held it for NEITHER — measured, HR got
+403 at the guard and never reached the rule. Granting it is narrow: they are not
+staff-wide and have no pupil relationships, so it yields staff documents and
+nothing else. // GOTCHA: a new grant only takes effect when the SEED RE-RUNS.
+// THREE COPIES OF ONE RULE. `confirmUpload` and `uploadBytes` each hand-rolled
+the same two-arm check and neither knew about a staff document, so a teacher
+could create their own sick note and get 404 completing it. One `requireWritable`
+now; a fourth copy is how the next one drifts.
+// **AN EXISTING TEST CAUGHT A REGRESSION I INTRODUCED**, and it is the sharpest
+part: my first list branch answered a filter for ANOTHER FAMILY'S CHILD with the
+caller's own documents when their visible set was empty — the exact defect
+`a-supplied-student-id-is-never-taken-on-trust` exists for, in a new place. The
+refusal now comes BEFORE any widening, and the pre-existing empty-page contract
+for a caller with no pupils is preserved exactly rather than quietly changed.
+// **AND A FRESH INSTALL WAS BROKEN, found by rebuilding the test database.**
+`03_lms_rls.sql` loops `['class','class_teacher','enrollment','parent_child']`
+in ONE DO block under ON_ERROR_STOP — and `class_teacher` was DROPPED by
+migration `20270118000000`. So on a NEW database the file died on the missing
+relation and `enrollment` and `parent_child` got NEITHER policies NOR grants:
+the app role could not read enrolments at all. An existing database was
+unaffected, because the file applied years earlier when the table still existed
+— which is exactly why nobody met it, and why only a rebuild finds it.
+// THE LESSON IS GENERAL: dropping a table means auditing the RLS files too. The
+entrypoint's sentinel makes a file skip; a bare `pnpm rls` makes it die PARTWAY,
+and everything after the failing line is silently absent.
+
 ### Every new hire was recorded as already confirmed
 `probationMonths` — fifth off the `AWAITING_A_SCREEN` backlog, and the one that
 made a whole maker-checker lifecycle unreachable.

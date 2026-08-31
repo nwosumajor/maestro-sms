@@ -37,7 +37,7 @@ export default async function LeavePage() {
       <div className="space-y-6">
         <PageHeader title={<>Leave</>} subtitle={<>Apply for leave and track your balance. Requests are approved by your head of
             teaching/administration, then HR, then the principal.</>} />
-        <LeaveSelfService types={types ?? []} balances={balances ?? []} requests={requests ?? []} />
+        <LeaveSelfService types={types ?? []} balances={balances ?? []} requests={requests ?? []} selfUserId={user.id} />
         <MyAttendance initial={attendance ?? []} />
         <MyDuties initial={duties ?? []} />
         <MyCompensation slips={slips ?? []} loans={loans ?? []} />

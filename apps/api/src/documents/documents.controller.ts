@@ -15,6 +15,8 @@ import { boundedInt } from "../common/status-filter";
 
 const createSchema = z.object({
   studentId: z.string().uuid().nullish(),
+  /** Only ever the caller themselves — the service refuses anybody else. */
+  staffUserId: z.string().uuid().nullish(),
   type: z.enum(DOCUMENT_TYPES),
   title: z.string().min(1).max(200),
   contentType: z.string().min(1).max(120),

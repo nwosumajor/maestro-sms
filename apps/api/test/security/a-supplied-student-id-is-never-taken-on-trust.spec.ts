@@ -106,7 +106,10 @@ describe("a parent asking for their own child", () => {
   it("gets all of them when no child is named", async () => {
     const { db, seen } = capture();
     await docs(db).listDocuments(PARENT, {});
-    expect(seen[0].studentId).toEqual({ in: [OWN_CHILD] });
+    // An OR now, since a staff member must also find a document about
+    // themselves. The property is unchanged: every pupil in scope, and no
+    // other — the second arm is keyed on the CALLER's own id.
+    expect(seen[0].OR).toEqual([{ studentId: { in: [OWN_CHILD] } }, { staffUserId: expect.any(String) }]);
   });
 });
 

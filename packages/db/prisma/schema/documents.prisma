@@ -31,6 +31,14 @@ model Document {
   /// Student this document pertains to (DB FK to user; null = school-level doc,
   /// staff-only). No Prisma relation, to keep the User model lean.
   studentId String? @db.Uuid
+  /// The member of STAFF this document is about — their own sick note,
+  /// certificate or doctor's report, uploaded by them to support a leave
+  /// request. DB FK to user; no Prisma relation, like `studentId`.
+  ///
+  /// Mutually exclusive with `studentId` (enforced in the service): a document
+  /// is about a pupil, about a member of staff, or about the school. Readable
+  /// by the subject and by the principal, HR and the school administrator.
+  staffUserId String? @db.Uuid
 
   type        DocumentType
   title       String
@@ -51,6 +59,7 @@ model Document {
 
   @@index([schoolId])
   @@index([schoolId, studentId])
+  @@index([schoolId, staffUserId])
   @@index([schoolId, type])
   @@map("document")
 }

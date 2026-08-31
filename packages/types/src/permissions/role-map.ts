@@ -217,8 +217,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   // The accountant owns Fees/Billing.
   accountant: ["directory.people.read", "hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "announcement.read", "billing.read",
   ],
-  hr_clerk: ["directory.people.read", "hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read", "announcement.read", "student.import", "parent.import", "class.read", "enrollment.read",
-  ],
+  hr_clerk: ["directory.people.read", "hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read", "announcement.read", "student.import", "parent.import", "class.read", "enrollment.read", "document.read",],
   // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
   // staff-request chain. Salary maker-checker still needs TWO distinct managers.
   hr_manager: ["directory.people.read", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
@@ -231,8 +230,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     // HR may view class lists + rosters (read-only) for onboarding/oversight.
     "class.read", "enrollment.read",
     "notification.read", "notification.send", "security.elevation.request",
-    "message.read", "message.send", "event.read", "announcement.read",
-  ],
+    "message.read", "message.send", "event.read", "announcement.read", "document.read",],
   // Head of teaching: stage-1 approver for teaching staff requests.
   head_teacher: ["directory.people.read", 
     // Stage 1 of a pupil exit — raise it, or approve one a colleague raised.

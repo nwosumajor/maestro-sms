@@ -9,21 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { fileToBase64, MAX_VAULT_BYTES } from "@/lib/vault-upload";
 
 const TYPES = ["REPORT_CARD", "RECEIPT", "CERTIFICATE", "TRANSCRIPT", "OTHER"] as const;
 type Student = Serialized<IdNameDto>;
 
-// Read a File as a bare base64 string (strip the data: URL prefix).
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^;]+;base64,/, ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_BYTES = MAX_VAULT_BYTES;
 
 export function DocumentUpload({ students = [] }: { students?: Student[] }) {
   const router = useRouter();

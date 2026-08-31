@@ -84,7 +84,12 @@ describe("a filter this caller cannot satisfy", () => {
     // The half that must not be traded away for the fix.
     const { svc, queried } = docsHarness();
     await svc.listDocuments(teacher, {});
-    expect(queried[0].studentId).toEqual({ in: MINE });
+    // The scoped list is now an OR: the pupils they may see, or a document
+    // about THEMSELVES — a staff member has to be able to find the sick note
+    // they uploaded, and one query answers both. The property this guards is
+    // unchanged: every pupil in scope is still included, and no other.
+    expect(queried[0].studentId).toBeUndefined();
+    expect(queried[0].OR).toEqual([{ studentId: { in: MINE } }, { staffUserId: expect.any(String) }]);
   });
 });
 

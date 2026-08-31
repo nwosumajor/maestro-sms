@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { fileToBase64, MAX_VAULT_BYTES } from "@/lib/vault-upload";
 
 type Type = Serialized<LeaveTypeDto>;
 type Balance = Serialized<LeaveBalanceDto>;
@@ -30,10 +31,14 @@ export function LeaveSelfService({
   types,
   balances,
   requests,
+  selfUserId,
 }: {
   types: Type[];
   balances: Balance[];
   requests: Request[];
+  /** The signed-in staff member. An attachment is a document about THEM, and
+   *  the API refuses one about anybody else. */
+  selfUserId: string;
 }) {
   const router = useRouter();
   const [leaveTypeId, setLeaveTypeId] = React.useState(types[0]?.id ?? "");
@@ -41,6 +46,17 @@ export function LeaveSelfService({
   const [endDate, setEndDate] = React.useState("");
   const [reason, setReason] = React.useState("");
   const [halfDay, setHalfDay] = React.useState(false);
+  // THE EVIDENCE FOR THE REQUEST — a sick note, a doctor's report, a certificate.
+  //
+  // The API has accepted `attachmentDocId` since the leave module shipped and
+  // no screen sent one. It could not: the attachment must be a Vault document
+  // the CALLER uploaded, and the Vault refused a non-student document from
+  // anyone who was not school-wide — which is most of the people who take
+  // leave. A staff member may now upload a document ABOUT THEMSELVES, readable
+  // by the principal, HR and the school administrator, so this works for the
+  // teacher it was always meant for.
+  const [file, setFile] = React.useState<File | null>(null);
+  const fileRef = React.useRef<HTMLInputElement>(null);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -52,16 +68,67 @@ export function LeaveSelfService({
     if (!leaveTypeId || !startDate || !effectiveEnd || days < 0.5) return;
     setBusy(true);
     setMsg(null);
+    // The document goes to the Vault FIRST, because the API only accepts an
+    // attachment the CALLER uploaded — it checks `uploadedById`, so a request
+    // can never point at somebody else's file. Two steps, the same pair the
+    // Documents page uses: metadata, then the bytes.
+    let attachmentDocId: string | null = null;
+    if (file) {
+      if (file.size > MAX_VAULT_BYTES) {
+        setBusy(false);
+        setMsg("That file is larger than 10 MB.");
+        return;
+      }
+      setMsg("Uploading the attachment…");
+      const meta = await fetch("/api/sms/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // ABOUT ME. This is what the Vault now understands and what makes the
+          // whole attachment possible; it is also what limits who can read it.
+          staffUserId: selfUserId,
+          type: "OTHER",
+          title: `Leave attachment — ${file.name}`.slice(0, 200),
+          contentType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+        }),
+      });
+      if (!meta.ok) {
+        setBusy(false);
+        setMsg(await readApiError(meta));
+        return;
+      }
+      const { document } = (await meta.json()) as { document: { id: string } };
+      const bytes = await fetch(`/api/sms/documents/${document.id}/upload-bytes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataBase64: await fileToBase64(file),
+          contentType: file.type || "application/octet-stream",
+        }),
+      });
+      if (!bytes.ok) {
+        // NOT sent without it. A request that silently drops the evidence is
+        // worse than one that fails: the approver would decide on less than the
+        // person asking believed they had supplied.
+        setBusy(false);
+        setMsg(await readApiError(bytes));
+        return;
+      }
+      attachmentDocId = document.id;
+    }
     const res = await fetch("/api/sms/hr/leave/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leaveTypeId, startDate, endDate: effectiveEnd, days, reason: reason || null }),
+      body: JSON.stringify({ leaveTypeId, startDate, endDate: effectiveEnd, days, reason: reason || null, attachmentDocId }),
     });
     setBusy(false);
     if (res.ok) {
       setStartDate("");
       setEndDate("");
       setReason("");
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = "";
       setMsg("Submitted — routed to your head, then HR, then the principal.");
       router.refresh();
     } else {
@@ -101,6 +168,21 @@ export function LeaveSelfService({
               <input type="checkbox" checked={halfDay} onChange={(e) => setHalfDay(e.target.checked)} /> Half day
             </label>
             <div className="space-y-1.5 flex-1 min-w-40"><Label htmlFor="lv-reason">Reason</Label><Input id="lv-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional" /></div>
+          <div className="space-y-1.5 min-w-56">
+            <Label htmlFor="lv-doc">Supporting document <span className="font-normal text-muted-foreground">(optional)</span></Label>
+            <input
+              id="lv-doc"
+              ref={fileRef}
+              type="file"
+              aria-label="Supporting document for this leave request"
+              className="block w-full text-sm file:mr-2 file:rounded-md file:border file:border-border file:bg-muted file:px-2 file:py-1 file:text-sm"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            <p className="text-xs text-muted-foreground">
+              A sick note, a doctor&apos;s report or a certificate. Only you, the principal, HR and the
+              school administrator can open it.
+            </p>
+          </div>
 
             <Button type="submit" disabled={busy || days < 1}>{busy ? "Submitting…" : days > 0 ? `Apply (${days}d)` : "Apply"}</Button>
             {msg && <span className="text-sm text-muted-foreground">{msg}</span>}

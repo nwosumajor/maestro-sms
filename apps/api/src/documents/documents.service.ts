@@ -33,6 +33,9 @@ import { assertDocumentsReleasable } from "../lms/leaver-documents";
 // and holds document.write; without it here, both student-doc and school-level
 // uploads were blocked (a dead grant). It gains vault access across the school —
 // like accountant/board already have. Mirrors the SIS fix.
+/** Principal, HR and the school administrator — and nobody else. */
+const STAFF_DOCUMENT_READERS = new Set(["principal", "school_admin", "hr_manager", "hr_clerk"]);
+
 const STAFF_WIDE_ROLES = new Set([
   "school_admin",
   "principal",
@@ -45,6 +48,8 @@ const NOTIFYING_TYPES = new Set<DocumentTypeValue>(["REPORT_CARD", "CERTIFICATE"
 
 export interface CreateDocumentInput {
   studentId?: string | null;
+  /** The member of staff it is about — only ever the caller themselves. */
+  staffUserId?: string | null;
   type: DocumentTypeValue;
   title: string;
   contentType: string;
@@ -78,6 +83,25 @@ export class DocumentsService {
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
   }
+  /**
+   * WHO MAY READ A MEMBER OF STAFF'S OWN DOCUMENT — the owner's decision,
+   * written down where it is enforced.
+   *
+   * A sick note or a doctor's report is medical information about an adult, so
+   * this is deliberately NOT `STAFF_WIDE_ROLES`: that set includes accountant
+   * and board, who have no part in a leave decision.
+   *
+   * // NOTE, and it is a real gap rather than an oversight: the leave chain's
+   * FIRST stage is `workflow.review.head` (head teacher / head admin), and they
+   * are NOT in this set. They will approve stage one without being able to open
+   * the evidence. That was the instruction; widening it is a decision about
+   * medical information, not a tidy-up.
+   */
+  private canReadStaffDocument(p: Principal, subjectId: string): boolean {
+    if (p.userId === subjectId) return true;
+    return p.roles.some((r) => STAFF_DOCUMENT_READERS.has(r));
+  }
+
   private isStaffWide(p: Principal): boolean {
     return p.roles.some((r) => STAFF_WIDE_ROLES.has(r));
   }
@@ -86,8 +110,25 @@ export class DocumentsService {
   /** Create metadata (PENDING) and return a presigned upload URL. */
   async createDocument(p: Principal, input: CreateDocumentInput) {
     const { document } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (input.studentId && input.staffUserId) {
+        // A document is about a pupil, about a member of staff, or about the
+        // school. Two subjects would make every read scope ambiguous.
+        throw new BadRequestException("A document is about a pupil or a member of staff, not both");
+      }
       if (input.studentId) {
         await this.assertCanAccessStudent(tx, p, input.studentId);
+      } else if (input.staffUserId) {
+        // THEIR OWN, AND ONLY THEIR OWN.
+        //
+        // This is what makes a sick note possible at all: `createDocument` used
+        // to refuse every non-student document from anyone who was not
+        // school-wide, so a teacher could not produce the evidence their own
+        // leave request needs. Uploading one ABOUT SOMEBODY ELSE is a different
+        // act — that is what the student path and the HR record are for — so it
+        // is refused here even for senior staff, who have their own routes.
+        if (input.staffUserId !== p.userId) {
+          throw new ForbiddenException("You can only upload a document about yourself");
+        }
       } else if (!this.isStaffWide(p)) {
         // SECURITY: only school-wide staff may create non-student (school-level) docs.
         throw new ForbiddenException("Cannot create a school-level document");
@@ -99,6 +140,7 @@ export class DocumentsService {
           id,
           schoolId: p.schoolId,
           studentId: input.studentId ?? null,
+          staffUserId: input.staffUserId ?? null,
           type: input.type,
           title: input.title,
           storageKey,
@@ -126,10 +168,7 @@ export class DocumentsService {
    *  shareable student docs) notifies the guardians. */
   async confirmUpload(p: Principal, id: string, sizeBytes?: number) {
     const doc = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const existing = await tx.document.findFirst({ where: { id } });
-      if (!existing) throw new NotFoundException("Document not found");
-      if (existing.studentId) await this.assertCanAccessStudent(tx, p, existing.studentId);
-      else if (!this.isStaffWide(p)) throw new NotFoundException("Document not found");
+      const existing = await this.requireWritable(tx, p, id);
 
       // THE BYTES MUST ACTUALLY BE THERE.
       //
@@ -169,11 +208,7 @@ export class DocumentsService {
   async uploadBytes(p: Principal, id: string, body: Buffer, contentType?: string) {
     if (body.length === 0) throw new BadRequestException("empty file");
     const existing = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const doc = await tx.document.findFirst({ where: { id } });
-      if (!doc) throw new NotFoundException("Document not found");
-      if (doc.studentId) await this.assertCanAccessStudent(tx, p, doc.studentId);
-      else if (!this.isStaffWide(p)) throw new NotFoundException("Document not found");
-      return doc;
+      return this.requireWritable(tx, p, id);
     });
     await this.storage.upload({
       key: existing.storageKey,
@@ -234,22 +269,37 @@ export class DocumentsService {
         if (opts?.studentId) where.studentId = opts.studentId;
       } else {
         const ids = await this.visibleStudentIds(tx, p);
-        if (ids.length === 0) return { items: [], nextCursor: null };
-        // A FILTER THIS CALLER CANNOT SATISFY IS REFUSED, not widened.
-        //
-        // Measured live: a teacher asked for a pupil they do not teach and got
-        // 200 with a report card belonging to a DIFFERENT child — the same body
-        // a uuid that is nobody returned. Every row was inside their scope, so
-        // nothing leaked; what was wrong is that a downloadable document was
-        // presented as the answer to a filter for another child.
-        //
-        // 404, matching every per-student route, rather than an empty page:
-        // "no documents" reads as a fact about that child and hides the
-        // refusal — the objection the test pinning the old behaviour raised.
-        if (opts?.studentId && !ids.includes(opts.studentId)) {
-          throw new NotFoundException("Document not found");
+        if (ids.length === 0) {
+          // UNCHANGED for a student filter: a caller with no pupils in scope is
+          // answered with nothing rather than an unfiltered query, and `fees`
+          // does the same. (That it is an empty page here and a 404 below is
+          // pre-existing and deliberately left alone — a test pins both, for
+          // both services.)
+          if (opts?.studentId) return { items: [], nextCursor: null };
+          // …but their OWN documents are still theirs. Without this a teacher
+          // who teaches nobody could upload a sick note and then not find it.
+          where.staffUserId = p.userId;
+        } else {
+          // A FILTER THIS CALLER CANNOT SATISFY IS REFUSED, not widened.
+          //
+          // Measured live: a teacher asked for a pupil they do not teach and
+          // got 200 with a report card belonging to a DIFFERENT child — the
+          // same body a uuid that is nobody returned. Every row was inside
+          // their scope, so nothing leaked; what was wrong is that a
+          // downloadable document was presented as the answer to a filter for
+          // another child.
+          //
+          // BEFORE any widening: an earlier version of the staff-document
+          // branch answered such a filter with the caller's OWN documents,
+          // which is the same defect in a new place. The existing test caught it.
+          if (opts?.studentId && !ids.includes(opts.studentId)) {
+            throw new NotFoundException("Document not found");
+          }
+          if (opts?.studentId) where.studentId = opts.studentId;
+          // …OR their own: a teacher with pupils still needs to find the sick
+          // note they uploaded, and one query answers both.
+          else where.OR = [{ studentId: { in: ids } }, { staffUserId: p.userId }];
         }
-        where.studentId = opts?.studentId ?? { in: ids };
       }
       // One extra row tells us whether another page exists, without a second query.
       const rows = (await tx.document.findMany({
@@ -370,11 +420,38 @@ export class DocumentsService {
     }
   }
 
+  /**
+   * MAY THIS CALLER PUT BYTES ON THIS DOCUMENT — the write half of
+   * `requireVisible`, and deliberately NARROWER than it.
+   *
+   * `confirmUpload` and `uploadBytes` each hand-rolled the same two-arm check
+   * and neither knew about a staff-owned document, so a teacher could create
+   * their own sick note and then get 404 completing it. Three copies of one
+   * rule; a fourth is how the next one drifts.
+   *
+   * Narrower on purpose: the principal and HR may READ a member of staff's
+   * document, and replacing its bytes is a different act. Only the person it is
+   * about — who is also the only person who could have created it — may do that.
+   */
+  private async requireWritable(tx: TenantTx, p: Principal, id: string) {
+    const doc = await tx.document.findFirst({ where: { id } });
+    if (!doc) throw new NotFoundException("Document not found");
+    if (doc.studentId) await this.assertCanAccessStudent(tx, p, doc.studentId);
+    else if (doc.staffUserId) {
+      if (doc.staffUserId !== p.userId) throw new NotFoundException("Document not found");
+    } else if (!this.isStaffWide(p)) throw new NotFoundException("Document not found");
+    return doc;
+  }
+
   private async requireVisible(tx: TenantTx, p: Principal, id: string) {
     const doc = await tx.document.findFirst({ where: { id } });
     if (!doc) throw new NotFoundException("Document not found");
     if (doc.studentId) {
       await this.assertCanAccessStudent(tx, p, doc.studentId);
+    } else if (doc.staffUserId) {
+      // 404, not 403, like every other refusal here: a caller who may not see
+      // it learns nothing about whether it exists.
+      if (!this.canReadStaffDocument(p, doc.staffUserId)) throw new NotFoundException("Document not found");
     } else if (!this.isStaffWide(p)) {
       throw new NotFoundException("Document not found");
     }

@@ -10,7 +10,18 @@
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['class','class_teacher','enrollment','parent_child'] LOOP
+  -- `class_teacher` was DROPPED by migration 20270118000000: a class teacher IS
+  -- the class supervisor, one column on `class`, and the join table that
+  -- shadowed it is gone.
+  --
+  -- IT HAD TO COME OUT OF HERE TOO. This file is one DO block looping the array
+  -- IN ORDER under ON_ERROR_STOP, so on a FRESH database it died on the missing
+  -- relation and `enrollment` and `parent_child` — everything after it — got
+  -- neither policies nor grants. An existing database was unaffected, because
+  -- the file had applied years earlier when the table still existed, which is
+  -- exactly why nobody met it: only a NEW deployment breaks, and it breaks
+  -- loudly (the app role cannot read `enrollment` at all).
+  FOREACH t IN ARRAY ARRAY['class','enrollment','parent_child'] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE  ROW LEVEL SECURITY', t);
     EXECUTE format($f$CREATE POLICY %1$s_select ON %1$I FOR SELECT
