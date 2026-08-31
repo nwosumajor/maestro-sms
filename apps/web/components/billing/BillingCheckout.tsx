@@ -4,6 +4,7 @@ import {
   CYCLE_MONTHS,
   MAX_BILLING_PERIODS,
   billedMonths,
+  currencyLabel,
   periodEndAfter,
   type BillingCycle,
   type BillingQuoteDto,
@@ -36,6 +37,7 @@ export function BillingCheckout({
   activeStudents,
   canManage,
   currencyAvailability = [],
+  preferredCurrency = null,
   currentPeriodEnd = null,
 }: {
   quotes: Quote[];
@@ -48,6 +50,8 @@ export function BillingCheckout({
    *  empty list means the page could not establish it — never a reason to
    *  block a purchase that might have worked. */
   currencyAvailability?: Array<{ currency: string; available: boolean; reason: string | null }>;
+  /** The school's OWN currency, when the platform sells in it. */
+  preferredCurrency?: string | null;
 }) {
   // Dates follow the SCHOOL's calendar, not the browser's.
   const { shortDate } = useFormat();
@@ -144,7 +148,8 @@ export function BillingCheckout({
         <CardDescription>
           Per-seat pricing across {activeStudents} active student{activeStudents === 1 ? "" : "s"}. Pay monthly,
           per term (3 months — 5% off) or per year (9 months — 15% off). Every plan, including Enterprise, can
-          be paid in naira or US dollars. Your plan activates automatically once the payment is confirmed.
+          be paid in {planCurrencies.length > 0 ? planCurrencies.join(", ") : "any selling currency"}. Your plan
+          activates automatically once the payment is confirmed.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -190,7 +195,11 @@ export function BillingCheckout({
                 const off = currencyAvailability.find((a) => a.currency === c)?.available === false;
                 return (
                   <option key={c} value={c}>
-                    {c === "NGN" ? "₦ Naira" : "$ US Dollar"}
+                    {/* NAMED FROM THE CODE, never from a two-way ternary. This
+                        read `c === "NGN" ? naira : US Dollar`, so the day a
+                        third selling currency opened, a Ghanaian school's own
+                        cedi option was labelled "$ US Dollar". */}
+                    {currencyLabel(c)}
                     {off ? " — unavailable" : ""}
                   </option>
                 );
@@ -245,6 +254,38 @@ export function BillingCheckout({
             not enabled for USD refused the charge with a 403 that reached the
             school as "Payment provider error" — after they had re-authenticated
             and committed to buying. Say it before the click instead. */}
+        {/* THE SCHOOL'S OWN CURRENCY, WHEN IT CANNOT BE CHARGED.
+            The default already falls back to a chargeable currency, so nobody
+            meets a dead button — but falling back SILENTLY is its own problem:
+            a Ghanaian school was quoted in naira with nothing saying why, which
+            is the confusion that started this. Say which currency is theirs,
+            why it cannot be used yet, and what CAN be. */}
+        {preferredCurrency &&
+          preferredCurrency !== effectiveCurrency &&
+          !(chargeable as string[]).includes(preferredCurrency) && (
+            <div className="mt-3 rounded-md border border-border bg-muted/40 p-3 text-sm">
+              <p>
+                <span className="font-medium">{preferredCurrency}</span> is your school&apos;s currency, but
+                it cannot be charged yet
+                {currencyAvailability.find((a) => a.currency === preferredCurrency)?.reason
+                  ? ` — ${currencyAvailability.find((a) => a.currency === preferredCurrency)?.reason}`
+                  : "."}
+              </p>
+              {chargeable.length > 0 ? (
+                <p className="mt-1 text-muted-foreground">
+                  You can pay in {chargeable.join(" or ")} in the meantime — school fees are unaffected
+                  either way, and you can move to {preferredCurrency} at a later renewal once it is
+                  enabled.
+                </p>
+              ) : (
+                <p className="mt-1 text-muted-foreground">
+                  No currency can be charged right now. Please contact us and we will arrange this plan
+                  for you.
+                </p>
+              )}
+            </div>
+          )}
+
         {unavailable && (
           <p className="mt-3 text-sm text-muted-foreground">
             {effectiveCurrency} payments are not available yet — please contact us and we will arrange this

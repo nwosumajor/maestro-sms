@@ -88,6 +88,31 @@ export function toMinor(amountMajor: number, currency: string): number {
 }
 
 /**
+ * Name a currency for a PICKER, as `GHS — Ghanaian Cedi`.
+ *
+ * Asked of Intl rather than kept as a table, for the reason `minorUnits` is:
+ * a hand-kept map of currency names is one that falls behind the catalogue the
+ * moment a country is added, and this one already had. The checkout's picker
+ * labelled every option with `c === "NGN" ? "naira" : "US Dollar"`, so opening
+ * a third selling currency rendered the Ghana cedi as "$ US Dollar" — the
+ * school's own money, named as somebody else's.
+ *
+ * The CODE leads and is never dropped, because `formatMoneyPdf` records what
+ * this platform learned about symbols: on a platform billing in several
+ * currencies the ISO code is the unambiguous half, and the name is the
+ * courtesy. A runtime with no display names falls back to the code alone,
+ * which is still correct.
+ */
+export function currencyLabel(currency: string, locale = "en"): string {
+  try {
+    const name = new Intl.DisplayNames([locale], { type: "currency" }).of(currency);
+    return name && name !== currency ? `${currency} — ${name}` : currency;
+  } catch {
+    return currency;
+  }
+}
+
+/**
  * Format money held as integer minor units.
  *
  * The one function every surface should use. It divides by the currency's OWN

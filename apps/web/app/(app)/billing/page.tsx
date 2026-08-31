@@ -169,6 +169,7 @@ export default async function BillingPage({
               activeStudents={data.activeStudents}
               canManage={canManage}
               currencyAvailability={data.currencyAvailability}
+              preferredCurrency={data.preferredCurrency}
               currentPeriodEnd={data.subscription.currentPeriodEnd}
             />
 

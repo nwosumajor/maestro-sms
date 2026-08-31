@@ -69,6 +69,21 @@ export interface BillingOverviewDto {
    * offering a tier that cannot be bought.
    */
   currencyAvailability: Array<{ currency: Currency; available: boolean; reason: string | null }>;
+  /**
+   * THE SCHOOL'S OWN CURRENCY, when the platform sells in it.
+   *
+   * `school.currency` is what a school charges FAMILIES; this is that currency
+   * IF it is also one the platform ships prices for. Null when the platform
+   * cannot sell in it at all (a CFA-franc school, say) — a different answer
+   * from "we can sell in it but cannot charge it today", which
+   * `currencyAvailability` carries.
+   *
+   * The page needs both to say the useful thing. Silently billing a Ghanaian
+   * school in naira because the rail is not enabled for cedis is the right
+   * FALLBACK and the wrong SILENCE: the school should be told its own currency
+   * is not chargeable, why, and which ones are.
+   */
+  preferredCurrency: Currency | null;
 }
 
 /** School-initiated checkout input. Currency picks the gateway via

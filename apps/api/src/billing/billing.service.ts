@@ -406,6 +406,12 @@ export class BillingService {
       trueUp,
       seatArrearsMinor: Math.max(0, toMinor(subRow?.seatArrearsMinor)),
       currencyAvailability,
+      // Null when the platform cannot sell in the school's own currency at all
+      // — a different answer from "sellable but not chargeable today", and the
+      // page says different things about the two.
+      preferredCurrency: planCurrencies(DEFAULT_PLAN).includes(schoolCurrency as Currency)
+        ? (schoolCurrency as Currency)
+        : null,
     };
   }
 
