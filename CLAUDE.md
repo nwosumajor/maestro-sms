@@ -898,6 +898,50 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A fifth probe: no response carries ciphertext or a credential
+`apps/web/scripts/no-response-carries-a-secret.mjs`, `probe:no-secrets`. The
+FIELD-level question, which is the half that goes unexamined once row scoping is
+right — this file already records both bites: a deny-list mapper that shipped
+encrypted staff PII, and a driver, the role scoped most tightly in the product,
+correctly limited to their own 15 seat assignments and handed **every child's
+fare** on them.
+The first was found by a ONE-OFF AUDIT that was never made repeatable, so
+nothing has asked the question since. The value is in running it after the NEXT
+mapper is written, which is the argument `probe:no-500` already makes about
+itself.
+**RESULT: 3,910 (role, route) pairs across all 17 seeded roles, CLEAN.** A wide,
+expensive-to-re-derive negative.
+// MARKERS ARE DELIBERATELY UNAMBIGUOUS: `enc:v1:` ciphertext, a bcrypt hash, a
+TOTP secret, a gateway secret key. NOT "anything that looks sensitive" — an
+over-wide rule is the same failure as a blind one, because it teaches whoever
+meets it to add an exemption.
+// **VALIDATED BY MAKING IT FIRE — AND THE FIRST ATTEMPT DID NOT, which is the
+finding worth keeping.** Removing `withoutCiphertext` from the HR mapper (the
+exact historical regression) changed NOTHING, because all six self-service
+encrypted columns are NULL across the whole dev database. Only after setting a
+phone through the real `PUT /hr/me` path did it report:
+```
+principal GET /hr/employees -> field-encrypted ciphertext (enc:v1:)
+admin     GET /hr/employees -> field-encrypted ciphertext (enc:v1:)
+```
+— exactly the two roles that can read that route. So **with those columns empty,
+`withoutCiphertext` protects nothing OBSERVABLE**: removing it in a refactor
+would be caught by nothing at all until a member of staff fills in their own
+profile. A defence whose absence is invisible is one worth knowing about.
+// IT SIGNS IN AS SEVENTEEN ACCOUNTS, so it meets the 10/min login limiter as a
+matter of COURSE rather than by accident. One retry after waiting out the window
+separates a transient limit from a missing account, and only the second survives
+to the summary as `INCOMPLETE` with a non-zero exit — a skipped role is not a
+passed one, the false negative the isolation and family probes both shipped
+with. A full run costs a couple of minutes more than the others.
+// PARAMETERLESS GETs ONLY, and that bound is stated rather than hidden: a
+resource addressed by its own id is unreachable this way, the same gap the
+family probe records for message threads and documents.
+// Listed in the incident runbook beside the other four; `build:runbooks`
+regenerated, which `runbook-freshness` requires.
+// PROBE DATA: the teacher's `phoneEnc` was written through the API and cleared
+afterwards; the mapper mutation was reverted and the sweep re-run clean.
+
 ### A run-rate computed in naira for every school on the platform
 `monthlyRunRateMinor` (`@sms/types/modules.ts`), `PlatformAnalyticsService`,
 `OperatorAttentionService`, `AttentionQueue`. Found by sweeping the remaining
