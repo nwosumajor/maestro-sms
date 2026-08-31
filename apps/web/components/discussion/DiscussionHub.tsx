@@ -106,6 +106,36 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
                   {post.comments.map((c) => (
                     <p key={c.id} className="ml-4 text-sm text-muted-foreground"><span className="font-medium">{c.authorName}:</span> {c.body}
                       {canModerate && !c.deleted && <button className="ml-2 text-xs text-destructive" onClick={() => run(() => deleteSms(`discussion/comments/${c.id}`), "Deleted.", g.id)}>delete</button>}
+                      {/* REPORT THE COMMENT, NOT JUST THE POST.
+                          `reportPost` has always accepted a `commentId` — the
+                          whole point of it — and no screen ever sent one, so a
+                          pupil who saw something harmful in a REPLY could only
+                          report the post it sat under. Most of this group are
+                          children, and the reviewer then got a case whose reason
+                          described something the case did not identify.
+                          Reporting never removes anything; it opens a case a
+                          person reviews. */}
+                      {!c.deleted && (
+                        <button
+                          className="ml-2 text-xs text-muted-foreground underline-offset-2 hover:underline"
+                          aria-label={`Report this reply from ${c.authorName}`}
+                          disabled={busy}
+                          onClick={() => {
+                            const reason = window.prompt(
+                              `What is wrong with this reply from ${c.authorName}? A member of staff will review it.`,
+                            );
+                            if (reason?.trim()) {
+                              void run(
+                                () => postSms(`discussion/posts/${post.id}/report`, { reason, commentId: c.id }),
+                                "Reported. A member of staff will look at this.",
+                                g.id,
+                              );
+                            }
+                          }}
+                        >
+                          report
+                        </button>
+                      )}
                     </p>
                   ))}
                   {!post.deleted && (

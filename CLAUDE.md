@@ -3663,6 +3663,53 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### Reviewing the whole web surface, and a rule for the next time
+Asked to check that every page, screen and button is captured, and to make the
+web catch up at the right time going forward. Two sweeps, and the second is the
+one that mattered.
+**SWEEP 1 — A MUTATING ROUTE NO SCREEN CALLS: CLEAN.** 507 mutating routes,
+4 unmentioned in `apps/web`, and THREE OF THOSE WERE FALSE POSITIVES — the job
+triggers (`index-bloat`, `run-term-sweep`, `breach-deadlines`) are catalogued in
+`SCHEDULED_JOBS` with a `manual.path` and `JobsTable` builds the request path at
+RUNTIME, so the literal never appears in the source. The fourth,
+`PUT /local-storage/*`, is a presigned-URL target. A negative worth recording so
+it is not re-swept; the heuristic cannot see a runtime-constructed path, which
+is exactly why it must not be turned into a gate.
+**SWEEP 2 — AN INPUT THE API ACCEPTS AND NO SCREEN CAN SEND.** This is the real
+class, and the veto button was only its latest instance:
+```
+?open=1        the meetings queue filter; its ONE caller ignored it
+country        provisioning; every school became the platform's own country
+effectiveDate  a salary raise dated for October, paid from August
+stopId         a per-stop bus fare that billed nobody
+commentId      a pupil could report the post, never the harmful REPLY
+```
+256 optional body fields, **22 that no screen mentions**. A one-off sweep had
+found 24 of these once; a sweep rots, so this is now a gate.
+// TWO FIXED, both chosen for consequence rather than count. `commentId` is
+SAFEGUARDING: comments are rendered, the Report button reported the POST, and
+`reportPost` has always taken a `commentId` — so a child seeing something
+harmful in a reply could only report the innocuous post above it, and the
+reviewer got a case whose reason described something the case did not identify.
+`resolutionNote` on a hostel incident: a DISCIPLINE, HEALTH or SECURITY incident
+in a boarding house was closed with nothing recorded but a status, and the next
+warden on duty reads that log. Asked for, never required — demanding a note on
+every one is how people learn to type "done" — and CANCELLING leaves it open
+rather than closing it silently.
+// THE OTHER 20 ARE A DECISION EACH, in one of two lists. `API_ONLY` (7) is
+fields a screen SHOULD never send — tracker telemetry, the server-generated race
+target, a server default the UI is right to leave alone. `AWAITING_A_SCREEN`
+(13) is genuine missing features, NAMED: an all-day event, a leave attachment, a
+lesson's link to its scheme-of-work week, agent attribution on the public form.
+// **THE BACKLOG MUST SHRINK.** An entry that a screen now sends must be
+DELETED, or the list becomes a record of gaps closed years ago and the next
+reader stops trusting it — the same rule `AWAITING_CONSOLIDATION` already
+carries in `common/teaches.ts`. And the reverse: an `API_ONLY` field that a form
+starts sending fails too, because the REASON is what a reader trusts.
+Gate: `a-field-no-screen-can-fill-in.spec.ts`. Three answers for a new optional
+field and every one is written down: a screen sends it, it is API_ONLY with a
+reason, or it goes on the backlog. Mutation-validated three ways.
+
 ### Four owner decisions, taken
 Four things this file had recorded as DEFERRED — each written down as "a
 decision to take rather than a correctness fix to slip in". The owner took them.

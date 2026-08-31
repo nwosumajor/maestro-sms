@@ -250,7 +250,21 @@ function IncidentPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: strin
     if (r.ok) { setTitle(""); void load(); }
   };
   const resolve = async (id: string) => {
-    const r = await send("PUT", `/hostels/incidents/${id}`, { status: "RESOLVED" });
+    // WHAT WAS DONE ABOUT IT, not just that it is closed.
+    //
+    // `updateIncident` has always accepted a `resolutionNote` and no screen ever
+    // sent one, so a DISCIPLINE, HEALTH or SECURITY incident in a boarding
+    // house was closed with nothing recorded but a status. The next warden on
+    // duty reads the log to find out what happened and finds "RESOLVED".
+    //
+    // Asked for, not required: some incidents genuinely are "fixed the light".
+    // Demanding a note on every one is how people learn to type "done".
+    const note = window.prompt("What was done about it? (optional — it goes on the incident log)");
+    if (note === null) return; // cancelled: leave it open rather than closing it silently
+    const r = await send("PUT", `/hostels/incidents/${id}`, {
+      status: "RESOLVED",
+      ...(note.trim() ? { resolutionNote: note.trim() } : {}),
+    });
     onMsg(r.ok ? "Marked resolved." : (r.error ?? "Failed."));
     void load();
   };
@@ -269,7 +283,10 @@ function IncidentPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: strin
           {list.length === 0 && <p className="text-sm text-muted-foreground">No incidents.</p>}
           {list.map((i) => (
             <div key={i.id} className="flex items-center justify-between gap-2 text-sm">
-              <span>{i.hostelName} · {i.title} <Badge variant={i.status === "RESOLVED" ? "secondary" : "outline"}>{i.status.toLowerCase()}</Badge> <span className="text-xs text-muted-foreground">{shortDate(i.createdAt)}</span></span>
+              <span>{i.hostelName} · {i.title} <Badge variant={i.status === "RESOLVED" ? "secondary" : "outline"}>{i.status.toLowerCase()}</Badge> <span className="text-xs text-muted-foreground">{shortDate(i.createdAt)}</span>
+                {i.resolutionNote && (
+                  <span className="block text-xs text-muted-foreground">Resolved: {i.resolutionNote}</span>
+                )}</span>
               {i.status !== "RESOLVED" && <Button size="sm" variant="ghost" className="h-7" onClick={() => resolve(i.id)}>Resolve</Button>}
             </div>
           ))}
