@@ -63,6 +63,16 @@ export interface OnboardingRequestDto {
   currentSystem: string | null;
   /** Referral code the requester quoted (raw; resolved at provisioning). */
   referralCode: string | null;
+  /**
+   * The commissioned partner who introduced this school, if any.
+   *
+   * Stored on the request since the agent programme shipped and carried in no
+   * DTO, so the operator reviewing the queue could not tell an agent-attributed
+   * lead from an organic one — and the agent programme pays on exactly this.
+   * Separate from `referralCode`: a referral is school-to-school and earns both
+   * a free term; an agent is paid commission. A request can carry both.
+   */
+  agentCode: string | null;
   notes: string | null;
   status: string;
   reviewNote: string | null;

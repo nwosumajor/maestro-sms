@@ -155,6 +155,23 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
                   </span>
                 </p>
               )}
+              {/* WHO BROUGHT THIS SCHOOL IN, when it was a paid partner rather
+                  than another school. Stored on the request since the agent
+                  programme shipped and shown nowhere, so the queue could not
+                  tell an agent-attributed lead from an organic one — on the
+                  funnel the programme pays commission from. Distinct chip from
+                  the referral above: one earns a free term, the other is money
+                  the platform owes somebody. */}
+              {r.agentCode && (
+                <p className="mt-0.5 text-xs">
+                  <span className="rounded bg-primary/15 px-1.5 py-0.5 font-mono font-semibold text-primary">
+                    Agent · {r.agentCode}
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    (commission accrues on this school&apos;s first paid subscription)
+                  </span>
+                </p>
+              )}
               {r.notes && <p className="mt-0.5 text-xs text-muted-foreground">{r.notes}</p>}
             </div>
             <div className="flex items-center gap-1.5">

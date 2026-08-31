@@ -48,7 +48,6 @@ const API_ONLY: Record<string, string> = {
  * deleted, so it cannot outlive the gap it records.
  */
 const AWAITING_A_SCREEN: Record<string, string> = {
-  agentCode: "agent attribution on the public onboarding form — a revenue lever the form cannot reach",
   allDay: "an all-day calendar event cannot be created from the calendar page",
   recurrenceUntil: "a recurring event cannot be given an end date",
   attachmentDocId: "a leave request cannot carry its supporting document",

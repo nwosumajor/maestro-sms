@@ -3663,6 +3663,38 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### The agent who signs a school up and is credited with nothing
+`agentCode` — the first item worked off the `AWAITING_A_SCREEN` backlog the
+entry below created, and the sharpest, because it is the only one that is money.
+The agent programme pays commission on the first paid subscription of a school
+it introduced, and THE WHOLE CHAIN EXISTED ON THE SERVER: the public intake
+accepted `agentCode`, stored it on the onboarding request, and provisioning
+resolved it onto `school_subscription.agentId` — falling back to the stored
+request exactly as `country` and `referralCode` already do.
+**NO PAGE EVER SENT ONE.** The public form carried a referral code and no agent
+code, so attribution could not begin; and the operator's review queue did not
+show it either, so a lead an agent had brought in was indistinguishable from an
+organic one on the very screen where it is decided. An agent could sign a school
+up and be credited with nothing, silently, for as long as the programme has
+existed.
+Driven live end to end afterwards, which is the only way to know the fallback
+really fires: form -> the request stores `PROBE-AG-01` -> the operator queue
+shows it -> provisioning resolves it to the agent with `commissionBp 500`, and
+`country: GH` rode the same path.
+// IT ARRIVES BY LINK, like a referral, because that is how it will actually
+arrive: an agent hands a prospect a URL and nobody types a code reliably. The
+field stays visible and editable so a code given verbally is not lost, and ONE
+`clean()` sanitises both — a second spelling is how the pair would drift.
+// A DISTINCT CHIP, not a shared one: a referral is school-to-school and earns
+both a free term, an agent is paid COMMISSION. Rendering them identically would
+hide which the platform owes money for.
+// THE BACKLOG SHRANK, which the gate requires — the entry is deleted, not left
+as a record of a gap that is closed.
+// GOTCHA, third time in two days: `{false && r.agentCode && (` still contains
+`r.agentCode &&`, so the assertion passed against a disabled chip. Anchored at
+the BRACE now. The same mutation got past the veto notice and the DTO capability
+flag; a "does this string appear" assertion cannot see a disabling prefix.
+
 ### Reviewing the whole web surface, and a rule for the next time
 Asked to check that every page, screen and button is captured, and to make the
 web catch up at the right time going forward. Two sweeps, and the second is the

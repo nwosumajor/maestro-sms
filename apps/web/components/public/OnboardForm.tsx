@@ -67,7 +67,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?: string }) {
+export function OnboardForm({
+  defaultReferralCode = "",
+  defaultAgentCode = "",
+}: {
+  defaultReferralCode?: string;
+  defaultAgentCode?: string;
+}) {
   const [f, setF] = React.useState({
     schoolName: "",
     schoolType: "" as string,
@@ -87,6 +93,7 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
     desiredSlug: "",
     currentSystem: "",
     referralCode: defaultReferralCode,
+    agentCode: defaultAgentCode,
     notes: "",
   });
   const [legalAccepted, setLegalAccepted] = React.useState(false);
@@ -194,6 +201,7 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
         desiredModules: [...extras],
         currentSystem: f.currentSystem.trim() || undefined,
         referralCode: f.referralCode.trim() || undefined,
+        agentCode: f.agentCode.trim() || undefined,
         notes: f.notes.trim() || undefined,
         legalAccepted: true,
       }),
@@ -379,6 +387,22 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
           <p className="text-xs text-muted-foreground">
             Referred by a school already on the platform? Enter their code — when you subscribe, BOTH
             schools get one school term of platform usage free.
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="o-agent">
+            Partner or agent code <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <Input
+            id="o-agent"
+            value={f.agentCode}
+            onChange={set("agentCode")}
+            placeholder="e.g. LAGOS-EDU-04"
+            className="uppercase"
+          />
+          <p className="text-xs text-muted-foreground">
+            Were you introduced by one of our partners or representatives? Enter their code so they are
+            credited. This is separate from a referral code, and you can enter both.
           </p>
         </div>
         <div className="space-y-1.5">
