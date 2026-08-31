@@ -243,9 +243,16 @@ export class LmsContentService {
   async updateContent(
     p: Principal,
     contentId: string,
-    input: { title?: string; body?: LmsContentBody; subjectId?: string | null; termId?: string | null },
+    input: {
+      title?: string;
+      body?: LmsContentBody;
+      subjectId?: string | null;
+      termId?: string | null;
+      syllabusItemId?: string | null;
+    },
   ): Promise<LmsContentDto> {
     const tagProvided = input.subjectId !== undefined || input.termId !== undefined;
+    const topicProvided = input.syllabusItemId !== undefined;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const row = await this.requireContent(tx, contentId);
       await this.assertTeacherOfClass(tx, p, row.classId);
@@ -261,12 +268,34 @@ export class LmsContentService {
       // null, which reaches every pupil in the class. A guard on one write path
       // and not the other is not a guard.
       if (tag) await this.assertMayTagSubject(tx, p, row.classId, tag.subjectId);
+      // THE SAME VALIDATION AS CREATE, for the same reason: the id is a plain
+      // uuid, so without this a teacher could point their notes at another
+      // class's week and the notes would surface under a plan they have no part
+      // in.
+      const topic = topicProvided
+        ? await this.validateSyllabusTopic(tx, row.classId, input.syllabusItemId)
+        : undefined;
+      // INHERIT THE SUBJECT, exactly as create does, and for the defect create
+      // documents: an UNTAGGED row is general class material and reaches every
+      // pupil, so attaching notes to a week of the Physics plan without tagging
+      // Physics hands the Physics handout to pupils who never took it.
+      //
+      // Only fills a BLANK. An explicit subject in this request wins, and so
+      // does a subject the row already carries — re-deriving it from the topic
+      // would silently retag content somebody had deliberately tagged.
+      const inherited =
+        topic?.subjectId && !tag && !row.subjectId
+          ? topic.subjectId
+          : null;
+      if (inherited) await this.assertMayTagSubject(tx, p, row.classId, inherited);
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },
         data: {
           ...(input.title ? { title: input.title.trim() } : {}),
           ...(normalized ? { body: normalized as unknown as Prisma.InputJsonValue } : {}),
           ...(tag ? { subjectId: tag.subjectId, termId: tag.termId } : {}),
+          ...(topic ? { syllabusItemId: topic.itemId } : {}),
+          ...(inherited ? { subjectId: inherited } : {}),
         },
       })) as ContentRow;
       await this.snapshot(tx, p, updated, "Edited");

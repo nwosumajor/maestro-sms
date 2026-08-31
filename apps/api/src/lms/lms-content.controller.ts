@@ -57,6 +57,15 @@ const createSchema = z.object({
 const updateSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   body: bodySchema.optional(),
+  // THE LINK HAS TO BE REPAIRABLE. `createSchema` takes a `syllabusItemId` and
+  // this did not, so a lesson's link to its scheme-of-work week was one-way:
+  // editing the plan sets the FK to NULL (ON DELETE SET NULL) and no route
+  // could put it back. A teacher's only recovery was to delete the lesson and
+  // make it again, losing its revision history with it.
+  //
+  // Nullable on purpose — detaching is as legitimate as attaching, and the
+  // absent case still means "leave it alone".
+  syllabusItemId: z.string().uuid().nullish(),
   ...gradeTag,
 });
 const applyGradesSchema = z.object({
@@ -178,6 +187,7 @@ export class LmsContentController {
       body: b.body as unknown as LmsContentBody | undefined,
       subjectId: b.subjectId,
       termId: b.termId,
+      syllabusItemId: b.syllabusItemId,
     });
   }
 

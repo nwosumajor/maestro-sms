@@ -3663,6 +3663,46 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### A lesson that could be filed against its plan once, and never put back
+`syllabusItemId` — second item off the `AWAITING_A_SCREEN` backlog, and the one
+this file had already recorded as unrecoverable: "the FK is ON DELETE SET NULL
+and `updateContent` accepts no `syllabusItemId`, so a teacher CANNOT put it
+back". Editing the scheme of work NULLS every lesson's link to it, and the only
+recovery was to delete the lesson and make it again — losing its revision
+history with it.
+**THE METHOD'S OWN COMMENT STATED THE PRINCIPLE IT WAS BREAKING**, about a
+different field three lines up: *"A guard on one write path and not the other is
+not a guard."* The same is true of the FIELD — a link that can only be made one
+way is a link the product cannot maintain.
+**AND NO SCREEN COULD SET IT EITHER.** `createContent` accepted it from the day
+it shipped and the create form had no picker, so the whole feature was reachable
+only by calling the API directly. That is why the sweep listed it.
+Live, the full cycle for the first time:
+```
+create linked to week 2      201
+RE-LINK to week 1            200   <- impossible before
+detach                       200
+a topic belonging to nobody  400   "That syllabus topic does not exist."
+```
+// **ATTACHING MUST NOT WIDEN WHO SEES IT**, which is the half that needed care.
+An UNTAGGED row is general class material and reaches every pupil, so attaching
+notes to a week of the Physics plan without tagging Physics hands the Physics
+handout to pupils who never took it — the exact defect `createContent` documents,
+reachable through the other door. Update inherits the subject the same way, and
+runs `assertMayTagSubject` on it. Live: untagged content attached to a History
+week came back tagged History.
+// IT ONLY FILLS A BLANK. An explicit subject in the request wins, and so does
+one the row already carries — re-deriving it from the topic would silently
+retag content somebody deliberately tagged. Mutation-validated: removing that
+narrowing fails two tests.
+// THE PICKER IS OFFERED ONLY WHEN THERE IS A PLAN TO POINT AT — a syllabus is
+one (class, subject, term), so it appears once a subject is chosen and the term
+is known, and changing the subject clears the week. A week from the previous
+subject's plan would be refused by the server, and offering it is how somebody
+meets that refusal.
+// The page already resolved `currentTerm` for the syllabus panel; the picker
+rides that rather than fetching a second time.
+
 ### The agent who signs a school up and is credited with nothing
 `agentCode` — the first item worked off the `AWAITING_A_SCREEN` backlog the
 entry below created, and the sharpest, because it is the only one that is money.

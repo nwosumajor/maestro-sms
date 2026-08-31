@@ -59,7 +59,6 @@ const AWAITING_A_SCREEN: Record<string, string> = {
   needsExpiry: "a custom document requirement cannot be marked as expiring, so only the seeded ones track expiry",
   probationMonths: "a probation period cannot be set when the employment record is created",
   reviewerId: "an appraisal cannot be assigned to a reviewer other than the caller",
-  syllabusItemId: "a lesson cannot be linked to its scheme-of-work week, nor re-linked after the plan is edited",
 };
 
 function walkWeb(dir: string, out: string[] = []): string[] {

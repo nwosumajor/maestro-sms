@@ -126,6 +126,9 @@ export default async function ClassContentPage({
               initial={content}
               canAuthor={canAuthor}
               canReview={canReview}
+              // The scheme-of-work picker needs a term: a syllabus is one
+              // (class, subject, term). Already resolved above for the panel.
+              termId={currentTerm?.id ?? null}
             />
             {canGrade && <LmsGradebook classId={classId} />}
           </>

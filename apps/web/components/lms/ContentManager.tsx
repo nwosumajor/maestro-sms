@@ -77,11 +77,15 @@ export function ContentManager({
   initial,
   canAuthor,
   canReview,
+  termId = null,
 }: {
   classId: string;
   initial: Content[];
   canAuthor: boolean;
   canReview: boolean;
+  /** The current term, for the scheme-of-work picker. Null between terms, when
+   *  there is no plan to file against. */
+  termId?: string | null;
 }) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -135,6 +139,7 @@ export function ContentManager({
         <CreateForm
           classId={classId}
           subjects={subjects}
+          termId={termId}
           onDone={() => {
             setMsg("Draft created.");
             router.refresh();
@@ -307,11 +312,15 @@ function ModuleBar({
 function CreateForm({
   classId,
   subjects,
+  termId,
   onDone,
   onError,
 }: {
   classId: string;
   subjects: Array<{ subjectId: string; subjectName: string }>;
+  /** A syllabus is one (class, subject, term); with no current term there is no
+   *  plan to attach to and the picker stays hidden. */
+  termId: string | null;
   onDone: () => void;
   onError: (m: string) => void;
 }) {
@@ -335,6 +344,40 @@ function CreateForm({
   const [quizDrawCount, setQuizDrawCount] = React.useState("");
   // "" = deliberately untagged: general class material every pupil should get.
   const [subjectId, setSubjectId] = React.useState("");
+  // THE WEEK OF THE SCHEME OF WORK this belongs to.
+  //
+  // `createContent` has always accepted a `syllabusItemId` and no screen ever
+  // sent one, so a lesson could not be filed against its plan from the product
+  // at all — and the link is what the plan's "taught" marks and the coverage
+  // view are built on.
+  const [syllabusItemId, setSyllabusItemId] = React.useState("");
+  const [weeks, setWeeks] = React.useState<Array<{ id: string; week: number; topic: string }>>([]);
+  React.useEffect(() => {
+    // The plan hangs off the SUBJECT, so it is only askable once one is chosen.
+    // Clearing the subject clears the week with it — a week from the old
+    // subject's plan would be refused by the server anyway, and offering it is
+    // how somebody meets that refusal.
+    setSyllabusItemId("");
+    if (!subjectId || !termId) {
+      setWeeks([]);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const q = new URLSearchParams({ classId, subjectId, termId });
+      const res = await fetch(`/api/sms/syllabus?${q}`);
+      if (!live) return;
+      if (!res.ok) {
+        setWeeks([]);
+        return;
+      }
+      const j = (await res.json()) as { items?: Array<{ id: string; week: number; topic: string }> } | null;
+      setWeeks(j?.items ?? []);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [classId, subjectId, termId]);
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
   const reset = () => {
@@ -415,6 +458,9 @@ function CreateForm({
       // Sent as null, not omitted, so "everyone in the class" is an explicit
       // choice rather than a field the form forgot.
       subjectId: subjectId || null,
+      // Null, not omitted, for the same reason as the subject: "not part of the
+      // scheme of work" is a choice a teacher makes, not a field the form lost.
+      syllabusItemId: syllabusItemId || null,
     });
     if (res.ok) {
       reset();
@@ -488,6 +534,33 @@ function CreateForm({
                 {subjectId
                   ? "Only pupils offering this subject will see it — useful for an elective. Pupils who do not take it cannot open it, even with a direct link."
                   : "Every pupil in the class will see this once approved. This is the right choice for a streamed class where everyone takes the subject."}
+              </p>
+            </div>
+          )}
+
+          {/* THE WEEK OF THE SCHEME OF WORK.
+              Offered only once a subject is chosen, because a syllabus is one
+              (class, subject, term) — and only when that subject actually has a
+              plan for this term, so the control never appears empty. */}
+          {subjectId !== "" && weeks.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-week">Scheme of work</Label>
+              <select
+                id="ct-week"
+                value={syllabusItemId}
+                onChange={(e) => setSyllabusItemId(e.target.value)}
+                className={`${sel} w-full sm:w-96`}
+              >
+                <option value="">Not part of the scheme of work</option>
+                {weeks.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    Week {w.week} — {w.topic}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Filing it against a week is what lets the plan show which topics have material and which
+                do not. It changes nothing about who can open it.
               </p>
             </div>
           )}
