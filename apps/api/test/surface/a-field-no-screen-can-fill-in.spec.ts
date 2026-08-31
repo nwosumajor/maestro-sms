@@ -55,8 +55,6 @@ const API_ONLY: Record<string, string> = {
  * deleted, so it cannot outlive the gap it records.
  */
 const AWAITING_A_SCREEN: Record<string, string> = {
-  allDay: "an all-day calendar event cannot be created from the calendar page",
-  recurrenceUntil: "a recurring event cannot be given an end date",
   completedAt: "a checklist item cannot be back-dated to when it was actually done",
   documentId: "a checklist item cannot be linked to the document that satisfies it",
   examQuestions: "a scholarship exam's questions cannot be authored from the operator console",

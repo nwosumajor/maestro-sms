@@ -3663,6 +3663,45 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### A calendar that could only hold an instant, and a term of assemblies on one day
+`allDay` + `recurrenceUntil` — two more off the `AWAITING_A_SCREEN` backlog, and
+the pair that proved building a form is how you find the reader's bug.
+**THE FORM'S OWN PLACEHOLDER WAS THE CASE IT COULD NOT DO**: "e.g. Mid-term
+break", a multi-day, all-day event. `endsAt`, `allDay`, `recurrence`,
+`recurrenceDays` and `recurrenceUntil` have all been on the schema since the
+module shipped and the form sent NONE of them, so every entry was a single point
+in time — no holiday, no weekly assembly. The expansion engine (DAILY / WEEKLY /
+MONTHLY, per weekday, with an end date, unit-tested) was reachable from nothing.
+**AND THE READER WAS WRONG, which only the form could reveal.** `GET /events`
+expands a series into one row per occurrence, each carrying the whole series with
+`occurrenceStartsAt` saying WHICH one it is. `CalendarEventDto` exposed only
+`startsAt`, so the page rendered every Monday assembly on the FIRST Monday — a
+term of them stacked on one date, all sharing the React key `e${e.id}`. Latent
+for exactly as long as recurrence was unreachable.
+Verified on the RENDERED page, not the API — the API was right all along:
+```
+Monday assembly   7, 14, 21, 28 Sept · 5, 12, 19, 26 Oct · … · 14 Dec
+Mid-term break    "26 Oct 2026 — 31 Oct 2026"   (a range, and no time)
+```
+// AN ALL-DAY EVENT IS A DAY, so the inputs become plain DATES and the times are
+supplied — midnight to end of day. A `datetime-local` cannot express a whole
+day, and without this "Mid-term break" began at whatever o'clock somebody
+happened to pick. Flipping the toggle CLEARS both dates: the two input types
+take different value formats and a stale one is not a date the browser accepts.
+// THE WEEKDAY LIST IS SENT ONLY FOR A WEEKLY RULE. The engine ignores it
+otherwise, and a value that is ignored is one somebody later assumes is honoured.
+// A BLANK END DATE IS EXPLAINED rather than left to be discovered: "repeats
+indefinitely — fine for an assembly, wrong for something that ends with the
+term."
+// GOTCHA, and it nearly became a false finding: my first probe read `startsAt`
+off the API response and saw four identical dates, which looks exactly like a
+broken expansion. The occurrence is `occurrenceStartsAt`; the API was correct
+and the WEB was not. Read the field the producer actually writes before
+concluding the producer is wrong.
+// GOTCHA: a mutation deleting `allDay` from the payload passed everything —
+the date-construction assertions all read `allDay ? … : …` and still held. The
+gate now asserts the field is SENT, not merely consulted.
+
 ### A document about yourself, and a fresh install that could not read enrolments
 Owner's decision, asked for after the leave-attachment entry below stopped at
 it: **staff may upload a document about themselves — a sick note, a certificate,

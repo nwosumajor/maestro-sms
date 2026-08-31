@@ -41,7 +41,25 @@ export default async function CalendarPage() {
   const cutoff = Date.now() - 86_400_000;
   const entries: Entry[] = [];
   for (const e of events ?? []) {
-    entries.push({ key: `e${e.id}`, at: new Date(e.startsAt).getTime(), title: e.title, when: dateTime(e.startsAt, region), kind: "event", staffOnly: e.audience === "STAFF" });
+    // THE OCCURRENCE, not the series. A repeating event arrives as one row per
+    // occurrence, each carrying the same `startsAt` (the first one) — so this
+    // used to stack a whole term of Monday assemblies on the first Monday, and
+    // `e${e.id}` gave every one of them the same React key.
+    const at = new Date(e.occurrenceStartsAt ?? e.startsAt);
+    entries.push({
+      key: `e${e.id}:${at.getTime()}`,
+      at: at.getTime(),
+      title: e.title,
+      // An ALL-DAY event has no meaningful time — "Mid-term break, 00:00" reads
+      // as a mistake — so it shows as a date, and a multi-day one says so.
+      when: e.allDay
+        ? e.occurrenceEndsAt && new Date(e.occurrenceEndsAt).toDateString() !== at.toDateString()
+          ? `${shortDate(at.toISOString(), region)} — ${shortDate(String(e.occurrenceEndsAt), region)}`
+          : shortDate(at.toISOString(), region)
+        : dateTime(at.toISOString(), region),
+      kind: "event",
+      staffOnly: e.audience === "STAFF",
+    });
   }
   for (const s of sessions ?? []) {
     for (const t of s.terms) {
