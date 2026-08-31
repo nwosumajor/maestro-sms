@@ -895,12 +895,13 @@ The controls already in place, so you know what you are relying on:
 | Family-scope probe | `pnpm --filter @sms/web probe:family` | One parent or pupil reaching another family's child |
 | Permission matrix | `pnpm --filter @sms/web probe:permissions` | A role served rows from an endpoint whose permission it lacks |
 | No request is a 500 | `pnpm --filter @sms/web probe:no-500` | A route that answers 5xx to an ordinary request, a hostile query string, or a malformed id |
+| No response carries a secret | `pnpm --filter @sms/web probe:no-secrets` | A response body carrying field-encrypted ciphertext (`enc:v1:`) or credential material, to any of the 17 roles |
 | Restore drill | `infrastructure/scripts/restore-drill.sh` | Backups that don't actually restore |
 | Fail-closed demo seeding | `packages/db/prisma/seed.ts` | Demo credentials reaching production |
 | 12 CloudWatch alarms → SNS | `alarms.tf` | Infrastructure symptoms |
 | WAF managed rules + rate limit | `waf.tf` | Common attack traffic |
 
-**The four probes need a RUNNING STACK and are not in CI.** They sign in through
+**The five probes need a RUNNING STACK and are not in CI.** They sign in through
 the real front door, so nothing runs them for you — run them by hand after a
 release and when triaging anything that smells like a scoping or isolation
 problem. Two things to know before you do:
@@ -923,6 +924,15 @@ problem. Two things to know before you do:
   (`PROBE ABORTED ... no session, so nothing was tested`) at sign-in and again
   if the session dies mid-run. If you see that, wait for the limiter and re-run;
   do not read the earlier lines as a partial pass.
+- `probe:no-secrets` signs in as ALL SEVENTEEN seeded roles, so it meets the
+  limiter as a matter of course rather than by accident. It waits out the window
+  and retries once per role — a transient limit clears, a missing account does
+  not, and only the second survives to the summary as `INCOMPLETE` with a
+  non-zero exit. A full run therefore takes a couple of minutes longer than the
+  others. It asks a FIELD-level question, which is the half that goes unexamined
+  once row scoping is right: this repo has shipped a deny-list mapper carrying
+  encrypted staff PII, and a driver correctly limited to their own 15 seat
+  assignments with every child's fare on them.
 - The permission matrix RETRIES a role once before giving up, which separates
   the limiter (transient) from an account that does not exist (permanent). A
   role it still cannot sign in as is reported as `INCOMPLETE ... were never
