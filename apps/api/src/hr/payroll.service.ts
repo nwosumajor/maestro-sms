@@ -17,6 +17,8 @@ import {
   computeMonthlyPayslip,
   hasPayrollPack,
   employerPensionMinor,
+  remittanceSchedulesFor,
+  type RemittanceKey,
   type FullPayslipBreakdown,
   type MyPayslipDto,
   type PayrollRunDto,
@@ -383,6 +385,13 @@ export class PayrollService {
     };
   }
 
+  /** Which schedules this school's country files. Empty where statutory
+   *  payroll is unavailable for the country at all. */
+  async remittanceSchedules(p: Principal): Promise<Array<{ key: string; label: string }>> {
+    const region = await this.region.forSchool(p.schoolId);
+    return remittanceSchedulesFor(region.payrollPack).map((r) => ({ key: r.key, label: r.label }));
+  }
+
   /** Statutory remittance schedule (CSV) for a FINALIZED run. Built from each
    *  payslip's SNAPSHOTTED breakdown — never recomputed — so the schedule always
    *  matches what was actually paid.
@@ -393,8 +402,28 @@ export class PayrollService {
   async remittanceExport(
     p: Principal,
     runId: string,
-    type: "paye" | "pension" | "nhf",
+    type: RemittanceKey,
   ): Promise<{ csv: string; filename: string }> {
+    // WHICH SCHEDULES THIS COUNTRY FILES. The three offered to everybody were
+    // Nigeria's, so a British school was handed a PAYE schedule headed "TIN", a
+    // pension schedule keyed on an "RSA PIN" with the employer share at
+    // Nigeria's 10%, and the National Housing Fund — while National Insurance,
+    // which its own payslips compute, had no schedule at all.
+    //
+    // REFUSED, never emitted with the wrong heading: this file is filed with a
+    // revenue authority, and the rule the pack registry already states about
+    // payslips ("a payslip confidently wrong about tax is worse than no
+    // payslip") is strictly truer of the filing itself.
+    const region = await this.region.forSchool(p.schoolId);
+    const schedules = remittanceSchedulesFor(region.payrollPack);
+    const schedule = schedules.find((r) => r.key === type);
+    if (!schedule) {
+      throw new BadRequestException(
+        schedules.length === 0
+          ? "Statutory payroll is not available for this country, so there are no remittance schedules to file."
+          : `${type.toUpperCase()} is not a schedule filed in this country. Available: ${schedules.map((r) => r.label).join(", ")}.`,
+      );
+    }
     const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const run = await tx.payrollRun.findFirst({ where: { id: runId } });
       if (!run) throw new NotFoundException("Payroll run not found");
@@ -425,7 +454,6 @@ export class PayrollService {
     // createRun REFUSES a country without a pack, so no zero-decimal school can
     // reach this yet. It would go wrong silently on the day one is added, which
     // is the worst moment to find it.
-    const region = await this.region.forSchool(p.schoolId);
     const money = (m: number) => toMajor(m, region.currency).toFixed(currencyDecimals(region.currency));
     const period = `${data.run.periodYear}-${String(data.run.periodMonth).padStart(2, "0")}`;
     const lines: string[] = [];
@@ -437,15 +465,26 @@ export class PayrollService {
       const emp = data.empByUser.get(s.userId);
       if (type === "paye") {
         lines.push([csvCell(name), csvCell(dec(emp?.tinEnc)), money(bd.grossMinor), money(bd.payeMinor)].join(","));
+      } else if (type === "ni") {
+        // The EMPLOYEE contribution, which is what the snapshot holds. Employer
+        // NI is a separate rate no pack carries, so it is not stated here
+        // rather than guessed at.
+        const ni = bd.niMinor ?? 0;
+        if (ni <= 0) continue;
+        lines.push([csvCell(name), csvCell(dec(emp?.tinEnc)), money(bd.grossMinor), money(ni)].join(","));
       } else if (type === "pension") {
         if (bd.pensionMinor <= 0) continue; // bonus runs carry no pension
+        // The employer share ONLY where the country fixes a rate in law. Where
+        // it does not, the schedule reports the employee share and stops — the
+        // restrictive option, and the alternative was Nigeria's 10% on a
+        // British filing.
+        const employer = schedule.employerRate == null ? null : employerPensionMinor(bd.grossMinor, schedule.employerRate);
         lines.push([
           csvCell(name),
           csvCell(dec(emp?.rsaPinEnc)),
           money(bd.grossMinor),
           money(bd.pensionMinor),
-          money(employerPensionMinor(bd.grossMinor)),
-          money(bd.pensionMinor + employerPensionMinor(bd.grossMinor)),
+          ...(employer == null ? [] : [money(employer), money(bd.pensionMinor + employer)]),
         ].join(","));
       } else {
         const nhf = bd.otherDeductions.filter((d) => d.name.trim().toUpperCase() === "NHF");
@@ -460,12 +499,23 @@ export class PayrollService {
     // because the number and its unit are read together. The bank export beside
     // this one already interpolates `region.currency`.
     const cur = region.currency;
+    // The IDENTIFIER COLUMN follows the country too. "TIN" and "RSA PIN" are
+    // Nigerian instruments; heading a British filing with them names a number
+    // the employer does not have, which is the same class of defect as heading
+    // the money column with the wrong currency.
+    const id = csvCell(schedule.identifierLabel);
+    const employerPct =
+      schedule.employerRate == null ? null : `${Math.round(schedule.employerRate * 100)}%`;
     const header =
       type === "paye"
-        ? `"Employee","TIN","Gross (${cur})","PAYE (${cur})"`
-        : type === "pension"
-          ? `"Employee","RSA PIN","Gross (${cur})","Employee 8% (${cur})","Employer 10% (${cur})","Total (${cur})"`
-          : `"Employee","Gross (${cur})","NHF (${cur})"`;
+        ? `"Employee",${id},"Gross (${cur})","PAYE (${cur})"`
+        : type === "ni"
+          ? `"Employee",${id},"Gross (${cur})","Employee NI (${cur})"`
+          : type === "pension"
+            ? `"Employee",${id},"Gross (${cur})","Employee (${cur})"${
+                employerPct ? `,"Employer ${employerPct} (${cur})","Total (${cur})"` : ""
+              }`
+            : `"Employee","Gross (${cur})","NHF (${cur})"`;
     return {
       csv: [header, ...lines].join("\n") + "\n",
       filename: `${type}-remittance-${period}${data.run.runType !== "MONTHLY" ? `-${data.run.runType.toLowerCase()}` : ""}.csv`,

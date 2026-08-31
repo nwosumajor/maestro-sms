@@ -16,7 +16,17 @@ type Run = Serialized<PayrollRunDto>;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean }) {
+export function PayrollManager({
+  runs,
+  canRun,
+  schedules = [],
+}: {
+  runs: Run[];
+  canRun: boolean;
+  /** The statutory schedules this school's country files. Empty where the
+   *  country has no payroll pack — payroll cannot run there at all. */
+  schedules?: Array<{ key: string; label: string }>;
+}) {
   // The SCHOOL's currency, not the platform's. `money` from `@/lib/format`
   // defaults to `PLATFORM_REGION.currency`, so this rendered in naira whatever
   // the school bills in — the region rides the session and `useFormat()` is how
@@ -155,13 +165,22 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
                         {canRun && r.status === "FINALIZED" && (
                           <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/bank-export`}>Bank export</a>
                         )}
-                        {canRun && r.status === "FINALIZED" && (
-                          <>
-                            <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/remittance?type=paye`}>PAYE</a>
-                            <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/remittance?type=pension`}>Pension</a>
-                            <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/remittance?type=nhf`}>NHF</a>
-                          </>
-                        )}
+                        {/* THE SCHOOL'S COUNTRY DECIDES WHICH FILINGS EXIST.
+                            These were Nigeria's three, fixed: a British school
+                            was offered a National Housing Fund export it can
+                            never file, and had no National Insurance one at all
+                            though its own payslips compute NI. Same rule as the
+                            comment above — the page should not offer what the
+                            server refuses, and must not hide what it accepts. */}
+                        {canRun && r.status === "FINALIZED" && schedules.map((sch) => (
+                          <a
+                            key={sch.key}
+                            className="text-sm text-primary underline"
+                            href={`/api/sms/hr/payroll/runs/${r.id}/remittance?type=${sch.key}`}
+                          >
+                            {sch.label}
+                          </a>
+                        ))}
                       </span>
                     </td>
                   </tr>

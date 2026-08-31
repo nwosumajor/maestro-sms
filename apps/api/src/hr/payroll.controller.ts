@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query, Res, StreamableFile } from "@nestjs/common";
-import { MODULES, HR_PERMISSIONS } from "@sms/types";
-import type { MyPayslipDto, PayrollRunDto } from "@sms/types";
+import { MODULES, HR_PERMISSIONS, REMITTANCE_KEYS } from "@sms/types";
+import type { MyPayslipDto, PayrollRunDto, RemittanceScheduleDto } from "@sms/types";
 import type { Response } from "express";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -17,7 +17,11 @@ const runSchema = z.object({
   runType: z.enum(["MONTHLY", "THIRTEENTH", "BONUS"]).optional(),
   bonusPercent: z.number().int().min(1).max(1000).optional(),
 });
-const remittanceSchema = z.object({ type: z.enum(["paye", "pension", "nhf"]) });
+// EVERY key any country pack can name — the boundary check. WHICH of them this
+// school may actually file is the SERVICE's question, because it depends on the
+// school's country: two layers, like every other control here. The list was
+// `["paye","pension","nhf"]`, Nigeria's three, offered to every country.
+const remittanceSchema = z.object({ type: z.enum(REMITTANCE_KEYS) });
 
 @RequireModule(MODULES.HR)
 @Controller("hr/payroll")
@@ -78,7 +82,22 @@ export class PayrollController {
     return new StreamableFile(buffer);
   }
 
-  /** Statutory remittance schedule (CSV): ?type=paye|pension|nhf. */
+  /**
+   * Which statutory schedules THIS school files, from its country pack.
+   *
+   * The page listed Nigeria's three as fixed links, so a British school was
+   * offered a National Housing Fund download and had no National Insurance one
+   * at all. Offering a control the server refuses is the defect this repo keeps
+   * recording; so is hiding one it would accept.
+   */
+  @Get("remittance-schedules")
+  @RequirePermission(HR_PERMISSIONS.HR_PAYROLL_RUN)
+  async remittanceSchedules(@CurrentPrincipal() p: Principal): Promise<RemittanceScheduleDto[]> {
+    return this.payroll.remittanceSchedules(p);
+  }
+
+  /** Statutory remittance schedule (CSV). WHICH schedules exist depends on the
+   *  school's country pack — `remittanceSchedulesFor`, refused in the service. */
   @Get("runs/:id/remittance")
   @RequirePermission(HR_PERMISSIONS.HR_PAYROLL_RUN)
   async remittance(

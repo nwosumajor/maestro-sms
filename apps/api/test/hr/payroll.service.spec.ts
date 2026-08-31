@@ -129,7 +129,7 @@ describe("computeMonthlyPayslip (PAYE + pension, pure)", () => {
 });
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-import { computeBonusPayslip, computeFullPayslip, employerPensionMinor } from "@sms/types";
+import { computeBonusPayslip, computeFullPayslip, employerPensionMinor, remittanceSchedulesFor } from "@sms/types";
 
 describe("computeFullPayslip (allowances + deductions + loan recovery, pure)", () => {
   it("gross = base + allowances; statutory computed on the full gross", () => {
@@ -205,9 +205,25 @@ describe("computeBonusPayslip (13th month / bonus, pure)", () => {
 });
 
 describe("employerPensionMinor (pure)", () => {
-  it("is 10% of gross, floored at 0", () => {
-    expect(employerPensionMinor(20_000_000)).toBe(2_000_000);
-    expect(employerPensionMinor(-5)).toBe(0);
+  it("applies the rate it is GIVEN, floored at 0", () => {
+    // The rate used to be hard-coded to Nigeria's 10%, which put a Nigerian
+    // employer contribution on every country's pension filing. It is now the
+    // country schedule's, and required — this test relying on the constant is
+    // exactly what a required parameter is a search for.
+    expect(employerPensionMinor(20_000_000, 0.1)).toBe(2_000_000);
+    expect(employerPensionMinor(20_000_000, 0.03)).toBe(600_000);
+    expect(employerPensionMinor(-5, 0.1)).toBe(0);
+    expect(employerPensionMinor(20_000_000, -1)).toBe(0);
+  });
+
+  it("is only asked for where a country actually fixes an employer rate", () => {
+    // Nigeria fixes 10% in law; the UK sets a statutory MINIMUM that a school's
+    // own scheme may exceed, so there is no figure to state and the schedule
+    // reports the employee share alone.
+    const ng = remittanceSchedulesFor("NG").find((r) => r.key === "pension");
+    const gb = remittanceSchedulesFor("GB").find((r) => r.key === "pension");
+    expect(ng?.employerRate).toBe(0.1);
+    expect(gb?.employerRate).toBeNull();
   });
 });
 

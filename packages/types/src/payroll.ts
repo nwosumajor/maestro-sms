@@ -52,6 +52,13 @@ export const PAYROLL_PACKS: Record<string, PayrollPack> = {
     // so this pack takes no period. If they change, it grows a tax-year table the
     // way the UK pack has one — the interface already allows for it.
     compute: (gross) => computeNigerianPayslip(gross),
+    // Exactly the three schedules this platform has always produced, unchanged:
+    // the only live pack, so nothing moves for any school already running payroll.
+    remittances: [
+      { key: "paye", label: "PAYE", identifierLabel: "TIN", employerRate: null },
+      { key: "pension", label: "Pension", identifierLabel: "RSA PIN", employerRate: 0.1 },
+      { key: "nhf", label: "NHF", identifierLabel: "", employerRate: null },
+    ],
   },
   GB: {
     key: "GB",
@@ -71,6 +78,20 @@ export const PAYROLL_PACKS: Record<string, PayrollPack> = {
       }
       return computeUkPayslip(gross, year);
     },
+    // WHAT A BRITISH EMPLOYER ACTUALLY FILES. Not Nigeria's three: there is no
+    // TIN, no RSA PIN and no National Housing Fund here, and National Insurance
+    // — which every UK payslip this platform produces already computes — had no
+    // schedule at all, so it could not be filed.
+    //
+    // The pension schedule reports the EMPLOYEE share alone (`employerRate:
+    // null`). Auto-enrolment fixes a statutory MINIMUM and a school's scheme may
+    // exceed it, so the employer figure is a scheme setting this platform does
+    // not hold. Reporting what we know beats stating a number we do not.
+    remittances: [
+      { key: "paye", label: "PAYE", identifierLabel: "National Insurance number", employerRate: null },
+      { key: "ni", label: "National Insurance", identifierLabel: "National Insurance number", employerRate: null },
+      { key: "pension", label: "Pension (auto-enrolment)", identifierLabel: "Pension scheme reference", employerRate: null },
+    ],
   },
 };
 
@@ -90,6 +111,49 @@ export interface PayrollPack {
   key: string;
   label: string;
   compute: (grossMonthlyMinor: number, period?: Date) => PayslipBreakdown;
+  /**
+   * The statutory schedules this country actually files, and what to head their
+   * identifier column with.
+   *
+   * THE FILING IS THE STRICTER HALF, and it was the one left un-packed. The
+   * header of this file says a country either has a pack or payroll REFUSES to
+   * run, because a payslip wrong about tax reaches "an employee and a revenue
+   * authority" — and the REMITTANCE SCHEDULE *is* the thing handed to the
+   * revenue authority and the pension administrator. It offered exactly three
+   * Nigerian schedules to every country: a PAYE column headed "TIN", a pension
+   * schedule keyed on an "RSA PIN" with the employer share at Nigeria's 10%,
+   * and the National Housing Fund. A British school got all three, and no way
+   * at all to file the National Insurance its own payslips compute.
+   */
+  remittances: RemittanceSchedule[];
+}
+
+/** One statutory schedule a country files. */
+export interface RemittanceSchedule {
+  key: RemittanceKey;
+  label: string;
+  /** What the per-employee statutory identifier is CALLED here — Nigeria's TIN
+   *  and RSA PIN are not what a British employer files against. */
+  identifierLabel: string;
+  /**
+   * The employer's own contribution rate, where this country fixes one in law.
+   *
+   * NULL where it does not, and the schedule then reports the EMPLOYEE share
+   * alone rather than inventing a figure. UK auto-enrolment sets a statutory
+   * MINIMUM and a school's scheme may exceed it, so it is a scheme setting this
+   * platform does not hold — and stating Nigeria's 10% on a British filing is
+   * the confidently-wrong number this module exists to refuse.
+   */
+  employerRate: number | null;
+}
+
+/** Every schedule key any pack can name. */
+export const REMITTANCE_KEYS = ["paye", "pension", "nhf", "ni"] as const;
+export type RemittanceKey = (typeof REMITTANCE_KEYS)[number];
+
+/** The schedules a country files, or an empty list where payroll is unavailable. */
+export function remittanceSchedulesFor(packKey: string | null | undefined): RemittanceSchedule[] {
+  return (packKey && PAYROLL_PACKS[packKey]?.remittances) || [];
 }
 
 /**
@@ -175,10 +239,18 @@ export interface FullPayslipBreakdown {
  * installments are CLAMPED so net never goes below zero (partial recovery; the
  * remainder stays on the loan balance for the next run). Pure and deterministic.
  */
-/** Nigerian employer pension contribution (10% of monthly emoluments) — an
- *  employer COST shown on the remittance schedule, never a payslip deduction. */
-export function employerPensionMinor(grossMinor: number): number {
-  return Math.round(Math.max(0, grossMinor) * 0.1);
+/**
+ * The employer's pension contribution — an employer COST shown on the
+ * remittance schedule, never a payslip deduction.
+ *
+ * `rate` is REQUIRED. It was hard-coded to Nigeria's 10%, and a required
+ * parameter is a search for every caller relying on that — the same trick that
+ * found the Paystack currency sites and the payment-approval thresholds. The
+ * rate belongs to the country's schedule, so a country that fixes no employer
+ * rate in law has none to pass and reports the employee share alone.
+ */
+export function employerPensionMinor(grossMinor: number, rate: number): number {
+  return Math.round(Math.max(0, grossMinor) * Math.max(0, rate));
 }
 
 /**

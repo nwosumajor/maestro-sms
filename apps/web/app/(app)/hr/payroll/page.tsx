@@ -1,4 +1,4 @@
-import type { PayrollRunDto, Serialized, StaffLoanDto } from "@sms/types";
+import type { PayrollRunDto, RemittanceScheduleDto, Serialized, StaffLoanDto } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -16,9 +16,12 @@ export default async function PayrollPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "hr.read")) redirect("/dashboard");
   const canRun = hasPermission(user.permissions, "hr.payroll.run");
-  const [runs, loans] = await Promise.all([
+  const [runs, loans, schedules] = await Promise.all([
     apiGet<Serialized<PayrollRunDto>[]>("/hr/payroll/runs"),
     apiGet<Serialized<StaffLoanDto>[]>("/hr/loans"),
+    // Which statutory filings this school's COUNTRY has. Only asked for by
+    // somebody who could download one, which is the same gate the route uses.
+    canRun ? apiGet<RemittanceScheduleDto[]>("/hr/payroll/remittance-schedules") : Promise.resolve([]),
   ]);
   const canApprove = hasPermission(user.permissions, "hr.salary.approve");
 
@@ -31,7 +34,7 @@ export default async function PayrollPage() {
             A run already in DRAFT would not be listed, and starting a new one could duplicate it.
           </LoadFailure>
         ) : (
-          <PayrollManager runs={runs} canRun={canRun} />
+          <PayrollManager runs={runs} canRun={canRun} schedules={schedules ?? []} />
         )}
         {loans === null ? (
           <LoadFailure what="Loan requests">

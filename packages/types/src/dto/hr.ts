@@ -463,3 +463,15 @@ export interface StaffHandoverDto {
   duties: OpenDutyDto[];
   total: number;
 }
+
+/**
+ * One statutory schedule the school's country files, for the payroll screen.
+ *
+ * The screen used to hard-code Nigeria's three (PAYE, Pension, NHF), so a
+ * British school was offered a National Housing Fund export and no National
+ * Insurance one — while its payslips computed NI all along.
+ */
+export interface RemittanceScheduleDto {
+  key: string;
+  label: string;
+}
