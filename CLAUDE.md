@@ -898,6 +898,62 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A run-rate computed in naira for every school on the platform
+`monthlyRunRateMinor` (`@sms/types/modules.ts`), `PlatformAnalyticsService`,
+`OperatorAttentionService`, `AttentionQueue`. Found by sweeping the remaining
+`en-NG` / `Africa/Lagos` hard-codings after the currency work.
+`platform-analytics.service.ts` carries a long comment on why the PAYMENTS block
+must not add currencies: *"kobo added to cents, which is not money in any
+currency. It read correctly only because no USD payment had landed yet, so it
+was a bug with a start date."*
+**THE MRR ROLL-UP THIRTY LINES ABOVE IT DID EXACTLY THAT**, reached a different
+way: `PLAN_PRICING[plan].perSeatMonthlyMinor * seats`, where `PLAN_PRICING` is
+the NAIRA fallback table. So every school's monthly run-rate was a naira figure
+whatever it is billed in, and the totals summed them.
+// **THE SUBSCRIPTION QUERY DID NOT EVEN SELECT `currency`**, which is why the
+naira table went unquestioned: there was nothing in scope to compare it against.
+// IT ALSO READ THE CODE DEFAULTS rather than the operator's own `plan_price`
+rows, so a price the platform owner had set was not the price their own revenue
+figures used.
+// THE ATTENTION QUEUE HAD THE SAME COMPUTATION INDEPENDENTLY and rendered it
+through `₦${minor / 100}` — a hard-coded naira sign over a bare divide-by-100,
+on the column that console exists to answer "what does this cost me" with. Its
+own file comment says the point is "not what exists but what changed, and what
+does it cost me".
+// **BOTH SITES WERE EXEMPTED IN `money-is-not-divided-by-a-hundred`, ON REASONS
+THAT HAD ROTTED** — "platform revenue at a glance, platform currency" and
+"subscription billing is the platform's own, NGN or USD". The second stopped
+being true the day GHS opened. An exemption's REASON is what a reader trusts,
+and neither had been revisited.
+Live, one school moved to USD and back:
+```
+all-NGN fleet   total 113,250,000 kobo   byCurrency [NGN 113,250,000 / 2 schools]
+one USD school  total 112,625,000 kobo   byCurrency [NGN …/1, USD 500/1]
+                attention row  625000 with "₦"  ->  500 USD
+```
+That school generates **$5.00** a month and the old code counted it as **₦6,250**
+inside the naira total.
+// ONE HELPER, because two independent spellings of one rule is how these
+diverged. Headline figures stay the HOME currency with `byCurrency` beside them,
+matching the payments block exactly — the shape of the answer is what stops the
+mistake being reintroduced.
+// ARPA DIVIDES BY THE HOME-CURRENCY SCHOOLS ALONE: dividing a naira total by a
+count that includes dollar-billed schools is an average of nothing.
+// AN UNPRICED CURRENCY YIELDS ZERO, never a naira figure. A school billed in
+money the platform does not price is an anomaly an operator should SEE, and a
+plausible naira number would hide it.
+// `PLATFORM_HOME_CURRENCY` ALREADY EXISTED and both services were ignoring it —
+one had grown a private `HOME_CURRENCY`, the other a hard-coded symbol. It lives
+in `permissions/fees.ts`, an odd home, which is probably why.
+// GOTCHA, the compile-only mutation trap again: my fourth mutation left an
+unused import and reported `Tests: 0 total`, which is not a pass. Re-run as a
+naira fallback that compiles, it fails the assertion written for it.
+// PROBE: the demo tenant's `school_subscription.currency` was flipped to USD to
+demonstrate the separation and restored to NGN.
+Mutation-validated four ways: restore the naira table, sum every currency into
+the headline again, print the naira sign again, and fall back to naira for an
+unpriced currency.
+
 ### A British school offered the National Housing Fund
 `PayrollPack.remittances` / `remittanceSchedulesFor` (`@sms/types/payroll.ts`),
 `PayrollService.remittanceExport`. `payroll.ts` opens with the rule that a
