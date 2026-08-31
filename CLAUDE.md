@@ -898,6 +898,81 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The cedi option was labelled "$ US Dollar"
+`currencyLabel` (`@sms/types/currency.ts`), `BillingOverviewDto.preferredCurrency`,
+`BillingCheckout`. Asked why MeastroTest reads GHS on its dashboard and naira in
+its billing console. Three defects behind one symptom, and every one of them is
+the same shape: a TWO-CURRENCY ASSUMPTION written when the platform sold in
+exactly two, left standing when a third opened.
+```
+option label   c === "NGN" ? "₦ Naira" : "$ US Dollar"
+card blurb     "can be paid in naira or US dollars"
+the fallback   silently quotes a chargeable currency and says nothing
+```
+**THE LABEL IS THE SHARPEST, because it is not a missing feature but a WRONG
+STATEMENT on the screen that takes a card.** The ternary has no third arm, so
+the Ghana cedi — the school's OWN money, and the option they are meant to pick —
+rendered as **"$ US Dollar"**. Live after, read out of the running page:
+```
+GHS => GHS — Ghanaian Cedi — unavailable
+NGN => NGN — Nigerian Naira
+USD => USD — US Dollar — unavailable
+```
+// ASKED OF Intl, NOT KEPT AS A TABLE, for the reason `minorUnits` gives about
+itself: a hand-kept map of currency names falls behind the catalogue the moment
+a country is added, and this one already had. The CODE LEADS AND IS NEVER
+DROPPED — the conclusion `formatMoneyPdf` already reached about symbols, that on
+a platform billing in several currencies the code is the unambiguous half and
+the name is the courtesy. A runtime with no display names falls back to the code
+alone, which is still correct rather than blank.
+// THE BLURB IS DERIVED FROM THE QUOTES now. Prose stating a currency list is
+the same rot as a role count typed into a paragraph: true when written, a claim
+nobody rechecks afterwards.
+**AND THE FALLBACK WAS SILENT, which is what the user actually asked about.**
+The default already lands on a currency that CAN be charged, so nobody meets a
+dead button — falling back without a word is its own defect, because the school
+cannot tell a deliberate choice from a bug. The page now names their currency,
+the server's REASON, and the alternatives:
+```
+GHS is your school's currency, but it cannot be charged yet — The PAYSTACK
+account is not enabled for GHS — it settles NGN. Enable GHS on the account, or
+switch on a channel that can settle it.
+You can pay in NGN in the meantime — school fees are unaffected either way, and
+you can move to GHS at a later renewal once it is enabled.
+```
+// `preferredCurrency` IS NULL WHEN THE PLATFORM CANNOT SELL IN THEIR MONEY AT
+ALL, and that is not the same sentence as "sellable but not chargeable today" —
+only the second has alternatives to offer. Two fields, not one flag.
+// THE THREE CONDITIONS ARE EACH LOAD-BEARING and a test pins each: without the
+last it fires for a school being charged in its own currency perfectly happily,
+and a notice that appears when nothing is wrong is one nobody reads — the rule
+this file already states about repeating an alert on the day it matters.
+Verified live on both: the Ghanaian school gets it, the Nigerian one gets NO
+notice at all.
+// IT SAYS SCHOOL FEES ARE UNAFFECTED, because `school.currency` bills FAMILIES
+and the subscription currency bills the PLATFORM. Conflating the two would
+frighten a bursar over a line about our own invoice.
+// AND IT SAYS WHAT TO DO WHEN THERE IS NO ALTERNATIVE — listing nothing and
+stopping leaves a price nobody can pay and no next step.
+// GOTCHA, the trap this file already records one gate over: my first scan
+failed on the COMMENT EXPLAINING THIS FIX, which quotes the ternary it replaced.
+Comments are stripped before scanning, exactly as
+`money-is-not-divided-by-a-hundred` does and says why.
+// GOTCHA that cost the whole debugging session: the notice would not render,
+and the cause was neither the code nor the data — the FRONTEND CONTAINER WAS
+STALE. `grep -rl preferredCurrency /app/apps/web/.next` returned 0. The backend
+had been rebuilt and the frontend had not, so every diagnosis was of a build
+that did not contain the change. Check what the container is actually running
+before believing a live probe, the same rule this file already records for the
+per-row-query measurements.
+// GOTCHA, mine: the page ALSO looked empty because I had set that account's
+`passwordChangedAt` to null — the honest repair for having overwritten its hash
+in an earlier probe — so the platform correctly held them on /account. Lifted to
+verify, and RESTORED afterwards; the forced reset still stands.
+Mutation-validated three ways: restore the ternary, drop the chargeable check so
+the notice fires when nothing is wrong, and make `preferredCurrency` fall back
+instead of going null.
+
 ### Five boot assertions, and knowing our own address
 `main.ts` asserts before serving anything: `assertStorageProviderConfigured`,
 `assertFieldCryptoConfigured`, `assertAuthSecretUsable`,
