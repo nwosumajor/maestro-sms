@@ -33,8 +33,29 @@ import { assertDocumentsReleasable } from "../lms/leaver-documents";
 // and holds document.write; without it here, both student-doc and school-level
 // uploads were blocked (a dead grant). It gains vault access across the school —
 // like accountant/board already have. Mirrors the SIS fix.
-/** Principal, HR and the school administrator — and nobody else. */
-const STAFF_DOCUMENT_READERS = new Set(["principal", "school_admin", "hr_manager", "hr_clerk"]);
+/**
+ * Who may read a member of staff's own document: the principal, HR, the school
+ * administrator — and the HEAD TEACHER, who decides stage one.
+ *
+ * The head teacher was added after the first version shipped without them. The
+ * leave chain is head -> HR manager -> principal, so they are the FIRST person
+ * to decide, and they were approving without being able to open the evidence
+ * the request rests on. An approver who cannot see the sick note is deciding on
+ * less than the person asking believed they had supplied.
+ *
+ * // NOTE, and it is the same situation one role over: `head_admin` holds the
+ * same `workflow.review.head` and decides the same stage. It is deliberately
+ * NOT here — the instruction named the head teacher — so a head admin
+ * approving stage one still cannot open the document. Recorded rather than
+ * widened, because who reads a doctor's report is not a decision to infer.
+ */
+const STAFF_DOCUMENT_READERS = new Set([
+  "principal",
+  "school_admin",
+  "hr_manager",
+  "hr_clerk",
+  "head_teacher",
+]);
 
 const STAFF_WIDE_ROLES = new Set([
   "school_admin",
@@ -91,11 +112,9 @@ export class DocumentsService {
    * this is deliberately NOT `STAFF_WIDE_ROLES`: that set includes accountant
    * and board, who have no part in a leave decision.
    *
-   * // NOTE, and it is a real gap rather than an oversight: the leave chain's
-   * FIRST stage is `workflow.review.head` (head teacher / head admin), and they
-   * are NOT in this set. They will approve stage one without being able to open
-   * the evidence. That was the instruction; widening it is a decision about
-   * medical information, not a tidy-up.
+   * The HEAD TEACHER is included because they decide stage one of the leave
+   * chain — see the note on `STAFF_DOCUMENT_READERS`, which also records why
+   * `head_admin`, who holds the same stage permission, is not.
    */
   private canReadStaffDocument(p: Principal, subjectId: string): boolean {
     if (p.userId === subjectId) return true;

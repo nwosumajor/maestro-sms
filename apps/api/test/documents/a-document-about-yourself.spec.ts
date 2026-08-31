@@ -28,7 +28,6 @@ const SERVICE = readFileSync(
 
 describe("who may create one", () => {
   it("a staff member may, about themselves", () => {
-    expect(SERVICE).toContain('const STAFF_DOCUMENT_READERS = new Set(["principal", "school_admin", "hr_manager", "hr_clerk"])');
     expect(SERVICE).toMatch(/if \(input\.staffUserId !== p\.userId\)/);
   });
 
@@ -48,11 +47,38 @@ describe("who may create one", () => {
 });
 
 describe("who may read one", () => {
-  it("the subject, and the three the owner named", () => {
+  it("the subject, and the roles the owner named", () => {
     expect(SERVICE).toMatch(/if \(p\.userId === subjectId\) return true;/);
+    const readers = SERVICE.slice(
+      SERVICE.indexOf("const STAFF_DOCUMENT_READERS"),
+      SERVICE.indexOf("const STAFF_WIDE_ROLES"),
+    );
     for (const role of ["principal", "school_admin", "hr_manager", "hr_clerk"]) {
-      expect(SERVICE).toContain(`"${role}"`);
+      expect({ role, listed: readers.includes(`"${role}"`) }).toEqual({ role, listed: true });
     }
+  });
+
+  it("the HEAD TEACHER, who decides stage one of the leave chain", () => {
+    // Added after the first version shipped without them: the chain is
+    // head -> HR manager -> principal, so they are the FIRST to decide and were
+    // approving without being able to open the evidence.
+    const readers = SERVICE.slice(
+      SERVICE.indexOf("const STAFF_DOCUMENT_READERS"),
+      SERVICE.indexOf("const STAFF_WIDE_ROLES"),
+    );
+    expect(readers).toContain('"head_teacher"');
+    expect((ROLE_PERMISSIONS.head_teacher as readonly string[])).toContain("document.read");
+  });
+
+  it("but NOT head_admin, who holds the same stage permission", () => {
+    // The same situation one role over, left as a decision rather than
+    // inferred: who reads a doctor's report is not something to widen by
+    // analogy. Recorded here so it is visible rather than forgotten.
+    const readers = SERVICE.slice(
+      SERVICE.indexOf("const STAFF_DOCUMENT_READERS"),
+      SERVICE.indexOf("const STAFF_WIDE_ROLES"),
+    );
+    expect(readers).not.toContain('"head_admin"');
   });
 
   it("NOT everyone who is staff-wide — accountant and board are not readers", () => {

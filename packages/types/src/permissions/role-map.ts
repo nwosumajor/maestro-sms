@@ -251,8 +251,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "class.read", "enrollment.read", "attendance.read", "grade.read", "subject.selection.approve",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "notification.read", "notification.send", "security.elevation.request",
-    "message.read", "message.send", "event.read", "announcement.read",
-  ],
+    "message.read", "message.send", "event.read", "announcement.read", "document.read",],
   // Head of administration: stage-1 approver for non-teaching staff requests.
   head_admin: ["directory.people.read", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",

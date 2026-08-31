@@ -3683,6 +3683,15 @@ have created it.
 // NOT `STAFF_WIDE_ROLES`, which includes accountant and board — a doctor's
 report is medical information about an adult and they have no part in a leave
 decision. `STAFF_DOCUMENT_READERS` is its own named set.
+// **THE HEAD TEACHER WAS ADDED AFTERWARDS**, on the owner's instruction, once
+the gap was flagged: the leave chain is head -> HR manager -> principal, so they
+are the FIRST to decide and were approving without being able to open the
+evidence the request rests on. Live: the head teacher reads the bytes and still
+cannot REPLACE them — reading is not writing, for them as for the principal.
+// `head_admin` HOLDS THE SAME `workflow.review.head` AND IS DELIBERATELY NOT A
+READER. The instruction named the head teacher; who reads a doctor's report is
+not a thing to widen by analogy. A test asserts their ABSENCE, so it stays a
+recorded decision rather than an oversight, and the mutation adding them fails.
 // THE SERVICE RULE WAS NOT ENOUGH ON ITS OWN. `GET /documents/:id` requires
 `document.read`, and hr_manager/hr_clerk held it for NEITHER — measured, HR got
 403 at the guard and never reached the rule. Granting it is narrow: they are not

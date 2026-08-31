@@ -179,8 +179,9 @@ export function LeaveSelfService({
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <p className="text-xs text-muted-foreground">
-              A sick note, a doctor&apos;s report or a certificate. Only you, the principal, HR and the
-              school administrator can open it.
+              A sick note, a doctor&apos;s report or a certificate. Only you and the people who decide
+              your request — your head teacher, HR, the school administrator and the principal — can
+              open it.
             </p>
           </div>
 
