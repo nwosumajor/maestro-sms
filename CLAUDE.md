@@ -898,6 +898,49 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Every appraisal named HR as the reviewer
+`createAppraisal` (`hr/reviews.service.ts`), `ReviewsPanel`. Third item off the
+`AWAITING_A_SCREEN` backlog, and unlike the last one its reason was TRUE — but
+it undersold the consequence.
+`reviewerId` has been accepted since the module shipped, defaulting to the
+CREATOR, and no screen ever sent one. So every appraisal in the product recorded
+whoever created it — HR — as the reviewer, whatever colleague actually did the
+review.
+**THAT IS NOT COSMETIC, BECAUSE ONE THING READS THE FIELD and it is a report a
+school acts on.** `StaffHandoverService` lists "appraisals they are REVIEWING"
+with `where: { reviewerId: userId }`. With the reviewer always the creator, a
+head of department leaving took their in-flight reviews with them INVISIBLY,
+while the HR clerk leaving appeared to owe the school every appraisal in it —
+on the report this file already calls the thing that stops a leaver's duties
+being silently dropped.
+// **AND THE VALUE WAS TAKEN ON TRUST**: not staff, not still here, not even
+checked to exist. Latent only because no screen sent one — and giving it a
+screen is exactly when that stops being latent, so the check landed first. Same
+two questions as `assertMayHost`, `assertMayTeach` and the exam seating.
+// THE CALLER IS DELIBERATELY UNCHECKED and a test pins it: they are signed in,
+still here, and hold the permission that reached the route, so making the
+ordinary act depend on a lookup that could refuse them is the fix causing the
+outage — the line `assertMayHost` already draws.
+Live: a named reviewer is stored and is NOT the creator; omitting one still
+defaults to the creator; a PUPIL is refused **400**.
+// **THE REFUSAL POINTED AT THE WRONG REMEDY, and that is its own finding.**
+`assertStaff`'s message ends with a fixed sentence — "A pupil's record belongs
+in the student discipline area" — which is right when a pupil is the SUBJECT of
+an appraisal or a disciplinary case, and wrong when one is named as a REVIEWER:
+it sends the reader somewhere unrelated to what they were doing. The way out is
+a parameter now, defaulting to the existing sentence, so the subject cases are
+unchanged. Live: **"Choose a colleague, or leave the reviewer blank to review it
+yourself."**
+// THE FIELD IS OMITTED WHEN BLANK, never sent empty: the server reads an absent
+reviewer as "the creator", and `""` is not a uuid — the picker would turn the
+default into a 400.
+// The appraisee is not offered as their own reviewer.
+// PROBE: four appraisals were created and removed; the table is empty again, as
+found.
+Mutation-validated four ways: take the reviewer on trust again, check the CALLER
+too, send an empty string instead of omitting, and restore the fixed way-out
+sentence.
+
 ### An exam paper that could only be added to
 `GET /scholarships/programs/:id/questions` + `ScholarshipExamQuestionDto`,
 `ScholarshipAdmin`. Worked off the `AWAITING_A_SCREEN` backlog, and the entry's

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import type { AppraisalDto, DisciplinaryCaseDto, Serialized } from "@sms/types";
+import type { AppraisalDto, DisciplinaryCaseDto, EmployeeDto, Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Appraisal = Serialized<AppraisalDto>;
+type Reviewer = Serialized<EmployeeDto>;
 type Case = Serialized<DisciplinaryCaseDto>;
 
 const SEVERITY = ["LOW", "MEDIUM", "HIGH"] as const;
@@ -17,12 +18,16 @@ const SEVERITY = ["LOW", "MEDIUM", "HIGH"] as const;
 export function ReviewsPanel({
   userId,
   appraisals,
+  reviewers,
   cases,
   canAppraise,
   canDiscipline,
 }: {
   userId: string;
   appraisals: Appraisal[];
+  /** Colleagues who could review. Empty is fine — the creator reviews by
+   *  default, which is what happened for every appraisal until now. */
+  reviewers: Reviewer[];
   cases: Case[];
   canAppraise: boolean;
   canDiscipline: boolean;
@@ -39,20 +44,34 @@ export function ReviewsPanel({
 
   return (
     <>
-      {canAppraise && <Appraisals userId={userId} appraisals={appraisals} post={post} busy={busy} />}
+      {canAppraise && <Appraisals userId={userId} appraisals={appraisals} reviewers={reviewers} post={post} busy={busy} />}
       {canDiscipline && <Disciplinary userId={userId} cases={cases} post={post} busy={busy} />}
     </>
   );
 }
 
-function Appraisals({ userId, appraisals, post, busy }: { userId: string; appraisals: Appraisal[]; post: (p: string, b: unknown, k: string) => Promise<boolean>; busy: string | null }) {
+function Appraisals({ userId, appraisals, reviewers, post, busy }: { userId: string; appraisals: Appraisal[]; reviewers: Reviewer[]; post: (p: string, b: unknown, k: string) => Promise<boolean>; busy: string | null }) {
   const [period, setPeriod] = React.useState("");
+  // WHO IS REVIEWING. Blank means the person creating it, which is what every
+  // appraisal recorded before there was any way to say otherwise.
+  const [reviewerId, setReviewerId] = React.useState("");
   const [rating, setRating] = React.useState("");
   const [summary, setSummary] = React.useState("");
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!period) return;
-    const ok = await post(`hr/staff/${userId}/appraisals`, { period, overallRating: rating ? parseInt(rating, 10) : null, summary: summary || null }, "app");
+    const ok = await post(
+      `hr/staff/${userId}/appraisals`,
+      {
+        period,
+        overallRating: rating ? parseInt(rating, 10) : null,
+        summary: summary || null,
+        // OMITTED when blank, never sent empty: the server reads an absent
+        // reviewer as "the creator", and an empty string is not a uuid.
+        ...(reviewerId ? { reviewerId } : {}),
+      },
+      "app",
+    );
     if (ok) { setPeriod(""); setRating(""); setSummary(""); }
   };
   return (
@@ -61,6 +80,22 @@ function Appraisals({ userId, appraisals, post, busy }: { userId: string; apprai
       <CardContent className="space-y-4">
         <form onSubmit={add} className="flex flex-wrap items-end gap-2">
           <div className="space-y-1.5"><Label htmlFor="ap-period">Period</Label><Input id="ap-period" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="2026-H1" className="w-28" /></div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ap-reviewer">Reviewer</Label>
+            <select
+              id="ap-reviewer"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              value={reviewerId}
+              onChange={(e) => setReviewerId(e.target.value)}
+            >
+              <option value="">Me</option>
+              {reviewers
+                .filter((r) => r.user?.name && r.userId !== userId)
+                .map((r) => (
+                  <option key={r.userId} value={r.userId}>{r.user?.name}</option>
+                ))}
+            </select>
+          </div>
           <div className="space-y-1.5"><Label htmlFor="ap-rating">Rating 1–5</Label><Input id="ap-rating" type="number" min={1} max={5} value={rating} onChange={(e) => setRating(e.target.value)} className="w-24" /></div>
           <div className="space-y-1.5 flex-1 min-w-40"><Label htmlFor="ap-sum">Summary</Label><Input id="ap-sum" value={summary} onChange={(e) => setSummary(e.target.value)} /></div>
           <Button type="submit" disabled={busy === "app"}>Add</Button>

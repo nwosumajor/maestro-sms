@@ -26,11 +26,16 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
   const canDiscipline = hasPermission(user.permissions, "hr.disciplinary.manage");
   const canWrite = hasPermission(user.permissions, "hr.write");
   const canApprove = hasPermission(user.permissions, "hr.salary.approve");
-  const [checklists, documents, training, appraisals, cases, components, employee, changes, exits, docChecklist, handover] = await Promise.all([
+  const [checklists, documents, training, appraisals, reviewers, cases, components, employee, changes, exits, docChecklist, handover] = await Promise.all([
     apiGet<Serialized<StaffChecklistDto>[]>(`/hr/staff/checklists?userId=${userId}`),
     apiGet<Serialized<StaffDocumentDto>[]>(`/hr/staff/documents?userId=${userId}`),
     apiGet<Serialized<TrainingRecordDto>[]>(`/hr/staff/training?userId=${userId}`),
     canAppraise ? apiGet<Serialized<AppraisalDto>[]>(`/hr/appraisals?userId=${userId}`) : Promise.resolve(null),
+    // WHO COULD REVIEW. `reviewerId` has always been accepted and no screen sent
+    // one, so every appraisal named its CREATOR — which is HR, not the person
+    // who actually reviews. `staff-handover` reads `reviewerId` to tell a school
+    // what a leaver still owes it, so the mis-attribution reached a real report.
+    canAppraise ? apiGet<Serialized<EmployeeDto>[]>("/hr/employees") : Promise.resolve(null),
     canDiscipline ? apiGet<Serialized<DisciplinaryCaseDto>[]>(`/hr/disciplinary?userId=${userId}`) : Promise.resolve(null),
     apiGet<Serialized<PayComponentDto>[]>(`/hr/employees/${userId}/components`),
     apiGet<Serialized<EmployeeDto>>(`/hr/employees/${userId}`),
@@ -88,7 +93,7 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
             Treat the panel below as incomplete — an open case may exist that is not listed.
           </LoadFailure>
         )}
-        <ReviewsPanel userId={userId} appraisals={appraisals ?? []} cases={cases ?? []} canAppraise={canAppraise} canDiscipline={canDiscipline} />
+        <ReviewsPanel userId={userId} appraisals={appraisals ?? []} reviewers={reviewers ?? []} cases={cases ?? []} canAppraise={canAppraise} canDiscipline={canDiscipline} />
       </div>
     </AppShell>
   );

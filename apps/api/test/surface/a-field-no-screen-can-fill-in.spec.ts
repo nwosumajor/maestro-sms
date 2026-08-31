@@ -59,7 +59,6 @@ const AWAITING_A_SCREEN: Record<string, string> = {
   documentId: "a checklist item cannot be linked to the document that satisfies it",
   feeItemId: "an invoice line cannot be linked to its fee-catalogue item",
   lessonsPerSubject: "the timetable generator's per-subject quota cannot be overridden from the console",
-  reviewerId: "an appraisal cannot be assigned to a reviewer other than the caller",
 };
 
 function walkWeb(dir: string, out: string[] = []): string[] {

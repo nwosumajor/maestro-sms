@@ -11,6 +11,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { isStaffRoles } from "@sms/types";
 import type { AppraisalDto, DisciplinaryCaseDto, DisciplinaryEntryDto } from "@sms/types";
+import { assertStillHere } from "../common/still-here";
 import { NotificationService } from "../notifications/notification.service";
 import {
   AUDIT_LOG_SERVICE,
@@ -63,7 +64,17 @@ export class HrReviewsService {
    * Found by asserting the property in that gate ("staff-only: a pupil can hold
    * no row here") and then checking whether anything made it true.
    */
-  private async assertStaff(tx: TenantTx, userId: string, what: string): Promise<{ name: string }> {
+  private async assertStaff(
+    tx: TenantTx,
+    userId: string,
+    what: string,
+    // THE WAY OUT DEPENDS ON WHICH PERSON IS WRONG. The trailing sentence was
+    // fixed text about the student discipline area — right when a pupil is the
+    // SUBJECT of a record, and wrong when one is named as a REVIEWER, where it
+    // sends the reader somewhere that has nothing to do with what they were
+    // doing. A refusal must not point at the wrong remedy.
+    wayOut = "A pupil's record belongs in the student discipline area.",
+  ): Promise<{ name: string }> {
     const user = (await tx.user.findFirst({
       where: { id: userId },
       select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } },
@@ -71,7 +82,7 @@ export class HrReviewsService {
     if (!user) throw new NotFoundException("User not found");
     if (!isStaffRoles(user.roles.map((r) => r.role.name))) {
       throw new BadRequestException(
-        `${user.name} is not a member of staff, so no ${what} can be opened here. A pupil's record belongs in the student discipline area.`,
+        `${user.name} is not a member of staff, so no ${what} can be opened here. ${wayOut}`,
       );
     }
     return { name: user.name };
@@ -80,11 +91,30 @@ export class HrReviewsService {
   async createAppraisal(p: Principal, userId: string, input: AppraisalInput): Promise<AppraisalDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const user = await this.assertStaff(tx, userId, "appraisal");
+      // WHO IS REVIEWING. It defaulted to the creator and the supplied value was
+      // taken on trust — not staff, not still here, not even checked to exist.
+      // Latent only because no screen sent one; the API has always accepted it,
+      // and a screen is being given to it now.
+      //
+      // The same two questions every other duty in this product asks, and for
+      // the same reason: an appraisal names somebody accountable for a
+      // colleague's review, and `staff-handover` reads `reviewerId` to tell a
+      // school what a LEAVER still owes it.
+      const reviewerId = input.reviewerId ?? p.userId;
+      if (reviewerId !== p.userId) {
+        await this.assertStaff(
+          tx,
+          reviewerId,
+          "appraisal reviewer",
+          "Choose a colleague, or leave the reviewer blank to review it yourself.",
+        );
+        await assertStillHere(tx, reviewerId, "appraisal reviewer");
+      }
       const a = await tx.appraisal.create({
         data: {
           schoolId: p.schoolId,
           userId,
-          reviewerId: input.reviewerId ?? p.userId,
+          reviewerId,
           period: input.period,
           status: "DRAFT",
           overallRating: input.overallRating ?? null,
