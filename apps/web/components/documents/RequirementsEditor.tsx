@@ -36,6 +36,15 @@ export function RequirementsEditor({
   const [adding, setAdding] = React.useState(false);
   const [label, setLabel] = React.useState("");
   const [mandatory, setMandatory] = React.useState(false);
+  // DOES THIS DOCUMENT RUN OUT?
+  //
+  // `needsExpiry` is what makes a verifier record an expiry date, and
+  // `outstandingRequirements` then stops counting the document as held once
+  // that date passes. Both API paths have always accepted it and this screen
+  // sent it on neither — so the SEEDED requirements (teaching licence, identity
+  // document) tracked expiry and a school's OWN never could. A safeguarding
+  // certificate a school added itself stayed ticked off for ever.
+  const [needsExpiry, setNeedsExpiry] = React.useState(false);
 
   async function seed() {
     setBusy(true);
@@ -56,17 +65,18 @@ export function RequirementsEditor({
     }
     setBusy(true);
     setError(null);
-    const res = await postSms("documents/requirements", { appliesTo: scope, key, label: label.trim(), mandatory });
+    const res = await postSms("documents/requirements", { appliesTo: scope, key, label: label.trim(), mandatory, needsExpiry });
     setBusy(false);
     if (res.ok) {
       setAdding(false);
       setLabel("");
       setMandatory(false);
+      setNeedsExpiry(false);
       router.refresh();
     } else setError(res.error);
   }
 
-  async function toggle(r: Requirement, patch: { active?: boolean; mandatory?: boolean }) {
+  async function toggle(r: Requirement, patch: { active?: boolean; mandatory?: boolean; needsExpiry?: boolean }) {
     setBusy(true);
     setError(null);
     const res = await sendSms("PUT", `documents/requirements/${r.id}`, patch);
@@ -103,6 +113,24 @@ export function RequirementsEditor({
               >
                 {r.mandatory ? "Required" : "Optional"}
               </button>
+              {/* The repair path. Without it a requirement created before
+                  anybody thought about expiry could never start tracking it,
+                  and the only fix was to stop asking for it and add it again
+                  under a new key — losing every document already supplied
+                  against the old one. */}
+              <button
+                type="button"
+                disabled={busy}
+                title={
+                  r.needsExpiry
+                    ? "This document runs out — the office records an expiry date and it stops counting as held once it passes."
+                    : "This document does not run out — once supplied it counts as held for good."
+                }
+                onClick={() => toggle(r, { needsExpiry: !r.needsExpiry })}
+                className={`rounded px-1.5 py-0.5 text-[11px] ${r.needsExpiry ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+              >
+                {r.needsExpiry ? "Expires" : "No expiry"}
+              </button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => toggle(r, { active: !r.active })}>
                 {r.active ? "Stop asking" : "Ask again"}
               </Button>
@@ -131,6 +159,14 @@ export function RequirementsEditor({
               <label className="flex items-center gap-1 text-sm">
                 <input type="checkbox" checked={mandatory} onChange={(e) => setMandatory(e.target.checked)} />
                 Required
+              </label>
+              <label className="flex items-center gap-1 text-sm" title="A licence, a DBS check, a medical clearance — anything with a date on it.">
+                <input
+                  type="checkbox"
+                  checked={needsExpiry}
+                  onChange={(e) => setNeedsExpiry(e.target.checked)}
+                />
+                Expires
               </label>
               <Button size="sm" disabled={busy || !label.trim()} onClick={add}>Add</Button>
               <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>

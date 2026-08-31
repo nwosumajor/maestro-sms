@@ -3663,6 +3663,38 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### Only the SEEDED document requirements could ever expire
+`needsExpiry` — third off the `AWAITING_A_SCREEN` backlog, and the one that
+quietly undid a fix this file already records. That fix
+("a teaching licence that lapsed, still ticked off as held") made
+`outstandingRequirements` stop counting a document once its expiry passed. It
+works — for `teaching_licence` and `identity_document`, which are SEEDED with
+`needsExpiry: true`.
+**BOTH API PATHS HAVE ALWAYS ACCEPTED THE FLAG AND `RequirementsEditor` SENT IT
+ON NEITHER.** So a requirement a school added ITSELF — a safeguarding
+certificate, a medical clearance, a work permit — silently never expired, and
+could not be corrected afterwards either. The earlier fix was reachable only for
+the two requirements the seed happens to create.
+Live, all three states:
+```
+created the old way (no flag sent)   needsExpiry false
+switched on afterwards               true    <- the repair path
+created the new way                  true
+```
+// THE REPAIR PATH IS THE HALF THAT MATTERS, same as the syllabus link one entry
+up. Without it a requirement created before anybody thought about expiry could
+never start tracking it, and the only fix was to stop asking for it and add it
+again under a new key — losing every document already supplied against the old
+one.
+// THE CONTROL SAYS WHAT THE CHOICE MEANS, not just its name: "Expires" is a
+label, "stops counting as held once it passes" is the consequence, and that is
+the reason to set it.
+// THE CHECKBOX RESETS after each addition, or the next requirement inherits the
+last one's answer — which is how a school ends up with a birth certificate that
+expires. Mutation-validated, along with the create and the repair.
+// PURELY A SCREEN FIX, and the test says so, so nobody later reads it as an API
+change: the server had the field on both paths from the day it shipped.
+
 ### A lesson that could be filed against its plan once, and never put back
 `syllabusItemId` — second item off the `AWAITING_A_SCREEN` backlog, and the one
 this file had already recorded as unrecoverable: "the FK is ON DELETE SET NULL

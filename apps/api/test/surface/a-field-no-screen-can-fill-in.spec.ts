@@ -56,7 +56,6 @@ const AWAITING_A_SCREEN: Record<string, string> = {
   examQuestions: "a scholarship exam's questions cannot be authored from the operator console",
   feeItemId: "an invoice line cannot be linked to its fee-catalogue item",
   lessonsPerSubject: "the timetable generator's per-subject quota cannot be overridden from the console",
-  needsExpiry: "a custom document requirement cannot be marked as expiring, so only the seeded ones track expiry",
   probationMonths: "a probation period cannot be set when the employment record is created",
   reviewerId: "an appraisal cannot be assigned to a reviewer other than the caller",
 };
