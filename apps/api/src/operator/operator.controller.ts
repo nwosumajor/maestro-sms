@@ -2,8 +2,13 @@ import {
   Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile, BadRequestException} from "@nestjs/common";
 import type { Response } from "express";
 import type { AttentionQueueDto, MessageCreditBalancePageDto, MessageCreditLedgerEntryDto, ModuleAddonPriceDto, OnboardingRequestDto, OperatorAdminAppointmentDto, OperatorBillingAlertDto, OperatorPaymentPageDto, OperatorStudentDto, OperatorUserDto, PlanPriceDto, PlatformAnalyticsDto, PlatformAuditPageDto, PlatformDelegationDto, PlatformStaffInviteDto, SubscriptionDto, TenantNameDto, TenantPageDto } from "@sms/types";
-import { CURRENCIES,
+import {
+  CURRENCIES,
+  type Currency,
+  DEFAULT_PLAN,
+  MODULE_ADDON_PRICING,
   PAYSTACK_CURRENCIES,
+  planCurrencies,
 } from "@sms/types";
 import { z } from "zod";
 import {
@@ -49,7 +54,7 @@ import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
 import { SettlementReleaseService, CurrencyCoverageService } from "./settlement-release.service";
 import { IndexBloatService, type IndexBloatResult } from "../maintenance/index-bloat.service";
-import type { SettlementHoldingDto, CurrencyCoverageDto, Currency } from "@sms/types";
+import type { SettlementHoldingDto, CurrencyCoverageDto } from "@sms/types";
 import { OperatorPaymentsService, type PaymentFilters } from "./operator-payments.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { PaymentHealthService } from "../payments/payment-health.service";
@@ -221,17 +226,27 @@ const subSchema = z.object({
 });
 /** Add-on prices. Zero is allowed on purpose — an operator making one module
  *  free for a promotion should not have to delete a row to do it. */
+// WHAT THE PLATFORM SELLS IN, asked rather than restated. Both pricing schemas
+// hand-listed `["NGN","USD"]` and hand-computed their row caps for two
+// currencies, so the day a third opened the operator console offered a section
+// it could not save — and the TIER cap was the sharper half: the console reads
+// every shipped row and posts them all back, so 12 rows against a cap of 7
+// refused every save, in every currency, not just the new one.
+const SELLING_CURRENCIES = planCurrencies(DEFAULT_PLAN) as [Currency, ...Currency[]];
+
 const addonPricingSchema = z.object({
   prices: z
     .array(
       z.object({
         module: z.string().min(1).max(40),
         perSeatMonthlyMinor: z.number().int().min(0),
-        currency: z.enum([CURRENCIES.NGN, CURRENCIES.USD]).default(CURRENCIES.NGN),
+        currency: z.enum(SELLING_CURRENCIES).default(CURRENCIES.NGN),
       }),
     )
     .min(1)
-    .max(60),
+    // A DoS bound, not a business rule — so it is derived to stay generous.
+    // Too large costs nothing; too small breaks the console silently.
+    .max(Object.keys(MODULE_ADDON_PRICING).length * SELLING_CURRENCIES.length),
 });
 
 const pricingSchema = z.object({
@@ -240,13 +255,15 @@ const pricingSchema = z.object({
       z.object({
         plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
         perSeatMonthlyMinor: z.number().int().positive(),
-        // NGN default (back-compat). ENTERPRISE accepts USD only (service-enforced).
-        currency: z.enum(["NGN", "USD"]).optional(),
+        // Omitted means NGN (back-compat with the single-currency callers).
+        // It said "ENTERPRISE accepts USD only (service-enforced)" — no such
+        // rule exists in the service, and ENTERPRISE ships prices in all three.
+        currency: z.enum(SELLING_CURRENCIES).optional(),
       }),
     )
     .min(1)
-    // One row per sellable (tier, currency): 3 NGN + 4 USD.
-    .max(7),
+    // One row per sellable (tier, currency), derived — see SELLING_CURRENCIES.
+    .max(Object.keys(PLANS).length * SELLING_CURRENCIES.length),
 });
 
 @Controller("operator")

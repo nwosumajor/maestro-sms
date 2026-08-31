@@ -323,7 +323,7 @@ export function isSubscriptionStatus(value: string): value is SubscriptionStatus
 // bills in more than two, and the CFA franc has no subdivision at all, which the
 // old `/ 100` everywhere got wrong by a factor of a hundred.
 export { CURRENCIES, isCurrency, type Currency } from "./currency";
-import { CURRENCIES, type Currency } from "./currency";
+import { CURRENCIES, isCurrency, type Currency } from "./currency";
 /** Symbols for the currencies the platform bills in. Kept for the few places that
  *  want a bare glyph; anywhere formatting a real AMOUNT should use `formatMoney`,
  *  which gets the symbol AND the right number of decimals from the currency. */
@@ -360,7 +360,13 @@ export function planCurrencies(plan: Plan): Currency[] {
   // GHS joined NGN and USD once a price list existed for it. A Ghanaian school
   // whose fees are in cedis was being offered naira or dollars and paying FX on
   // every renewal; Paystack settles GHS, so the rail was never the obstacle.
-  return [CURRENCIES.NGN, CURRENCIES.USD, CURRENCIES.GHS];
+  //
+  // DERIVED FROM THE PRICE LISTS, never listed again beside them. This function's
+  // own comment says "only what the platform ships PRICES for" and then repeated
+  // the answer as a literal — so a fourth price list would have been added and
+  // sold to nobody, silently, which is exactly how the naira/dollar pair
+  // outlived the third market.
+  return Object.keys(PLAN_PRICING_BY_CURRENCY).filter(isCurrency);
 }
 /**
  * The currency a tier is DISPLAYED in by default.

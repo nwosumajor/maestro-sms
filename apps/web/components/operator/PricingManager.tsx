@@ -2,11 +2,13 @@
 
 // super_admin: set the platform's per-(tier, currency) per-seat pricing. What is
 // saved here is EXACTLY what checkout charges and what the public landing page
-// displays (one effective-pricing source). NGN sells via Paystack, USD via
-// Stripe; ENTERPRISE is USD-ONLY (the API refuses an NGN row for it, so it
+// displays (one effective-pricing source). EVERY tier sells in every currency
+// the platform ships a price list for — this said ENTERPRISE was USD-ONLY and
+// that "the API refuses an NGN row for it", and neither was true: no such rule
+// exists in the service and ENTERPRISE ships NGN, USD and GHS prices. It also
 // simply has no ₦ input). PUT is step-up gated + audited server-side.
 
-import { CURRENCY_SYMBOL, PLANS, planCurrencies, type Currency, type PlanPriceDto } from "@sms/types";
+import { CURRENCY_SYMBOL, PLANS, currencyLabel, planCurrencies, type Currency, type PlanPriceDto } from "@sms/types";
 import { majorFrom, minorFrom } from "@/lib/format";
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -66,9 +68,10 @@ export function PricingManager({ initial }: { initial: PlanPriceDto[] }) {
       <CardHeader>
         <CardTitle className="text-base">Plan pricing</CardTitle>
         <CardDescription>
-          Per active student, per month. Naira prices charge via Paystack, dollar prices via Stripe —
-          Enterprise is sold in dollars only (international schools). Applies platform-wide: billing
-          quotes, checkout charges and the public pricing page all read these values. Step-up required.
+          Per active student, per month, in every currency the platform sells in. Which card rail
+          takes a payment is decided at checkout from the currency AND which rails are switched on —
+          it is not fixed per currency. Applies platform-wide: billing quotes, checkout charges and
+          the public pricing page all read these values. Step-up required.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -78,7 +81,7 @@ export function PricingManager({ initial }: { initial: PlanPriceDto[] }) {
           return (
             <div key={currency}>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {currency === "NGN" ? "Naira (Paystack)" : "US Dollar (Stripe)"}
+                {currencyLabel(currency)}
               </p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {rows.map((r) => (

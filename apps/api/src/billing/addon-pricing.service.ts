@@ -15,6 +15,7 @@
 import { Inject, Injectable, OnModuleInit, Optional, BadRequestException, ServiceUnavailableException } from "@nestjs/common";
 import {
   CURRENCIES,
+  DEFAULT_PLAN,
   MODULES,
   MODULE_ADDON_PRICING,
   MODULE_ADDON_PRICING_BY_CURRENCY,
@@ -22,6 +23,7 @@ import {
   PLANS,
   PLAN_MODULES,
   isModuleKey,
+  planCurrencies,
   type Currency,
   type ModuleAddonPriceDto,
   type ModuleKey,
@@ -131,8 +133,14 @@ export class AddonPricingService implements OnModuleInit {
       if (r.perSeatMonthlyMinor > MAX_PER_SEAT_MINOR) {
         throw new BadRequestException("That price is beyond the sanity ceiling — check for an extra zero");
       }
-      if (r.currency !== CURRENCIES.NGN && r.currency !== CURRENCIES.USD) {
-        throw new BadRequestException("Add-ons are priced in NGN or USD");
+      // WHAT THE PLATFORM SELLS IN, asked rather than named. This was
+      // `!== NGN && !== USD`, so the operator console could not price an
+      // add-on in a third currency it was already offering a section for —
+      // and the refusal named the two currencies as if they were the rule.
+      if (!planCurrencies(DEFAULT_PLAN).includes(r.currency as Currency)) {
+        throw new BadRequestException(
+          `Add-ons are priced in ${planCurrencies(DEFAULT_PLAN).join(", ")}`,
+        );
       }
     }
     for (const r of rows) {
