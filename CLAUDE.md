@@ -3713,6 +3713,35 @@ and a veto there would pre-empt the initiator's own resubmission.
 asserted `["APPROVED"]` and went red — which is exactly why it exists: it forced
 /help and the onboarding manual to move with the behaviour.
 
+**AND THE SCREENS, checked after — where one of the four had gone nowhere.**
+Asked whether the web caught up with the four. Three had; the veto had not.
+`WorkflowInbox` gated the button on `"VETO" in legal && canVeto && w.state ===
+"APPROVED"` — a SECOND COPY of the transition rule, in the UI, on top of the
+`legal` lookup that already asks the engine. Redundant and correct while
+APPROVED was the only state a veto was legal from; the moment the board could
+stop a request under review, that clause made the new power UNREACHABLE FROM ANY
+SCREEN. The server accepted a veto no button could send, nothing failed, and the
+feature simply did not appear — the mirror of "gating a route whose UI still
+calls it", and the cheaper half to miss, because a missing button reports
+nothing. The button now reads "Veto (stop it)" on a pending row and its notice
+says nothing has taken effect.
+// The other three: the ALUMNI card said "Sends to alumni who have a linked
+account" (the old audience) and the register showed a missing email as a muted
+"—" — it now names the count that cannot be reached, on the screen where an
+address is added. The SCHOLARSHIP portal showed "awarded ₦X" and never whether
+it reached the fees, though the DTO now carries `disbursementKind`; the family
+portal and the school's own list both say which. The FAMILY page was already
+done in its own commit.
+Gate: `the-ui-does-not-restate-the-transition-rule.test.ts`.
+// GOTCHA in my own gate, twice: its first version demanded `"X" in legal` for
+every action and was WRONG about the component — approve/reject/revise ask
+`w.awaitingMe`, the SERVER's answer, which is stronger than a transition table
+because it also knows the granular stage permission and whether you already
+acted. And `const stopping = false` left both branches and both strings in place
+and passed everything, so the gate now asserts the value is COMPUTED from the
+row — the same mutation that got past the DTO capability flag earlier the same
+day.
+
 **4. A CHILD WHO HAS LEFT, ON THEIR FAMILY'S PAGE.** A student exit closes the
 account, every enrolment, the bed and the bus seat, and DELIBERATELY keeps the
 guardian link — a leaver keeps their guardians, and the family still needs the

@@ -87,6 +87,15 @@ export function SchoolApplications({ applications, region }: { applications: App
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {a.awardMinor != null ? money(a.awardMinor) : "—"}
+                    {/* The bursar's question is not "how much" but "will it be
+                        on an invoice". A held credit comes off the NEXT bill,
+                        so an office chasing this term's balance needs to know
+                        which of the two it is. */}
+                    {a.disbursed && (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        {a.disbursementKind === "CREDIT" ? "held as credit" : "on an invoice"}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{dateTime(a.createdAt, region)}</td>
                 </tr>

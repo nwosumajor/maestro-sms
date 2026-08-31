@@ -1,7 +1,7 @@
 "use client";
 
 // Alumni Management UI. Staff record former students, filter by year, and
-// broadcast a message to alumni with linked accounts.
+// broadcast a message to the email addresses on the alumni register.
 
 import type { AlumnusDto, Serialized } from "@sms/types";
 import * as React from "react";
@@ -31,6 +31,10 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
 
   /**
    * Reports what the broadcast ACTUALLY reached.
+   *
+   * The audience is the REGISTER'S OWN EMAIL, not a user account: a broadcast
+   * used to be a notification, and the funnel drops external channels for a
+   * non-ACTIVE recipient — which an alumnus is by definition.
    *
    * This used to say "it goes out to the alumni body", which contradicted the
    * card above it: a broadcast is a notification addressed to a user account,
@@ -92,7 +96,7 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Broadcast to alumni</CardTitle>
-          <CardDescription>Sends to alumni who have a linked account.</CardDescription>
+          <CardDescription>Emails every alumnus with an address on the register. It does not go to their old school login — that account is closed once they leave.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-2">
           <div className="space-y-1.5"><Label>Title</Label><Input value={bTitle} onChange={(e) => setBTitle(e.target.value)} /></div>
@@ -108,7 +112,15 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Alumni ({alumni.length})</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">Alumni ({alumni.length})</CardTitle>
+          {alumni.some((a) => !a.email) && (
+            <CardDescription>
+              {alumni.filter((a) => !a.email).length} of {alumni.length} have no email address and will not
+              receive a broadcast.
+            </CardDescription>
+          )}
+        </CardHeader>
         <CardContent>
           {alumni.length === 0 ? <p className="text-sm text-muted-foreground">No alumni yet.</p> : (
             <table className="w-full text-sm">
@@ -120,7 +132,20 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
                 {alumni.map((a) => (
                   <tr key={a.id} className="border-b border-border/50">
                     <td className="py-1 pr-3">{a.name}</td><td className="py-1 pr-3">{a.graduationYear ?? "—"}</td>
-                    <td className="py-1 pr-3">{a.occupation ?? "—"}</td><td className="py-1 text-muted-foreground">{a.email ?? "—"}</td>
+                    <td className="py-1 pr-3">{a.occupation ?? "—"}</td>
+                    {/* AN EMPTY EMAIL IS THE ONE THING TO ACT ON.
+                        A broadcast goes to this column, so a blank here is an
+                        alumnus the school cannot reach — the same count the
+                        send reports afterwards, said where it can be fixed
+                        rather than only after a send. "—" in muted grey read
+                        as an optional detail. */}
+                    <td className="py-1">
+                      {a.email ?? (
+                        <span className="text-xs text-amber-600 dark:text-amber-400">
+                          No email — cannot be reached
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

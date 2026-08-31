@@ -415,6 +415,25 @@ function ApplicationRow({
               {money(app.awardMinorOffered)} award · applied {shortDate(app.createdAt)}
               {app.status === "AWARDED" && app.awardMinor != null && ` · awarded ${money(app.awardMinor)}`}
             </p>
+            {/* WHERE THE MONEY WENT, on the screen the family actually opens.
+                An award is credited against an open invoice, or — when the term's
+                fees have not been raised yet, which is the ordinary case — held
+                on the pupil's account until they are. The family is told by
+                notification at the moment it happens; this is where they come
+                back to check, and "awarded" alone does not say whether their
+                balance has moved. */}
+            {app.status === "AWARDED" && app.disbursed && (
+              <p className="text-xs text-primary">
+                {app.disbursementKind === "CREDIT"
+                  ? "Held as credit on the student's account — it comes off the next school bill."
+                  : "Credited against the student's school fees."}
+              </p>
+            )}
+            {app.status === "AWARDED" && app.disbursed === false && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Not yet credited — the school office will apply it.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Badge variant={(STATUS_TONE[app.status] ?? "outline") as never}>{STATUS_LABEL[app.status] ?? app.status.replace(/_/g, " ")}</Badge>

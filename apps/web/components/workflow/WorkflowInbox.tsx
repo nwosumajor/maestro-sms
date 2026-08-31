@@ -82,13 +82,16 @@ export function WorkflowInbox({
   const [details, setDetails] = React.useState("");
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  // A VETO NEEDS A WORD BACK. It is the only action here whose effect is not
-  // what the button implies: it is reachable only from APPROVED, so the
-  // approval has already run — the role was granted, the charges are on
-  // invoices, the marks are published — and the engine's REJECTED fan-out is a
-  // no-op in every module. Proven live: a vetoed junior-admin appointment left
-  // the role on the account. The board member pressing this is the person who
-  // most needs to know it records a decision rather than reversing one.
+  // A VETO NEEDS A WORD BACK, and WHICH word depends on when it was cast.
+  //
+  // A veto on a PENDING_REVIEW request STOPS it: no reactor has run and nothing
+  // has taken effect. A veto on an APPROVED one cannot — the approval already
+  // ran, so the role was granted, the charges are on invoices, the marks are
+  // published, and the engine's REJECTED fan-out is a no-op in every module.
+  // Proven live: a vetoed junior-admin appointment left the role on the account.
+  //
+  // The board member pressing this is the person who most needs to know which
+  // of the two they just did, so the notice differs and the button does too.
   const [notice, setNotice] = React.useState<string | null>(null);
   // THE NOTE THAT TRAVELS WITH A DECISION.
   //
@@ -237,17 +240,31 @@ export function WorkflowInbox({
           ),
       });
     }
-    if ("VETO" in legal && canVeto && w.state === "APPROVED") {
+    if ("VETO" in legal && canVeto) {
+      // WHEREVER THE ENGINE ALLOWS IT, which is now two states rather than one.
+      //
+      // This carried `&& w.state === "APPROVED"` on top of `"VETO" in legal` —
+      // a second copy of the transition rule, in the UI, that outlived the rule
+      // itself. Once the board could stop a request while it was still under
+      // review, that redundant clause made the new power unreachable from any
+      // screen: the server accepted a veto no button could send. `legal` is
+      // derived from WORKFLOW_TRANSITIONS, so asking it alone cannot drift
+      // again.
+      const stopping = w.state === "PENDING_REVIEW";
       out.push({
         action: "VETO",
-        label: "Veto",
+        // The two are different acts and the button says which. "Veto" on a
+        // pending row reads as recording an objection; it STOPS the request.
+        label: stopping ? "Veto (stop it)" : "Veto",
         variant: "destructive",
         run: () =>
           call(
             `workflows/${w.id}/veto`,
             { comments: noteOf(w.id) || undefined },
             `${w.id}:veto`,
-            "Veto recorded. It does NOT undo what the approval already did — reverse that in the module it belongs to. Everyone who approved it has been told.",
+            stopping
+              ? "Vetoed. The request will not go ahead — nothing has taken effect, and everyone who would have decided it has been told."
+              : "Veto recorded. It does NOT undo what the approval already did — reverse that in the module it belongs to. Everyone who approved it has been told.",
           ),
       });
     }
