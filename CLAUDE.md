@@ -3663,6 +3663,59 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### Selling a school its subscription in its own currency (GHS)
+Owner's decision after the entry below: add the GHS price list and prefer the
+school's own currency. **FIVE PLACES HAD TO AGREE, and four were hand-kept lists
+that had already fallen behind.**
+```
+PLAN_PRICING_BY_CURRENCY      the tier list           added GHS (350/500/650/850)
+MODULE_ADDON_PRICING_*        the add-on list         added GHS
+planCurrencies()              what may be SOLD        added GHS
+PlanPricingService.resolve()  hard-coded {NGN, USD}   now reads every shipped list
+billing checkout schema       z.enum(["NGN","USD"])   now derived
+```
+**THE RESOLVER WAS THE MONEY BUG.** It named NGN and USD literally, so adding a
+list changed nothing — and its "an operator row can OPEN a currency" branch
+seeded the new table as a COPY OF NAIRA. Measured live: GHS quoted **GHS 525 a
+seat instead of GHS 3.50, about 150x**. The same branch meant an operator who
+priced ONE tier in a new currency silently sold the other three at naira
+figures — "silently at the naira price", which this service's own refusal exists
+to prevent, reached through the other door. A currency opened by operator rows
+now starts EMPTY and is refused until every tier is priced.
+**AND THE CHECKOUT REFUSED WHAT THE GRID OFFERED.** With prices in place, GHS
+was quoted at the right figure and `checkout/init` answered
+`400 Expected 'NGN' | 'USD'` — offered and then refused, the mirror of the defect
+this file keeps recording. The enum is derived now; `XOF` is still refused, by
+name.
+// THE RATIOS MIRROR NGN (1 : 1.43 : 1.86 : 2.43): the gap between tiers is a
+product decision that should not change per market, so only the base moves. The
+add-on ladder is checked by `add-ons-never-undercut-the-upgrade`, which runs for
+EVERY shipped currency and passed all four GHS invariants unaided — the gate
+picked the new market up on its own.
+// A PAID SUBSCRIPTION IS NEVER RE-DENOMINATED. `preferred` only chooses the
+default for a school that has not paid yet; what a school was charged in is a
+fact, and moving it from a region setting would change what renewal costs
+without anybody deciding to. The quote grid LEADS with the school's own currency
+(not the subscription's), because a school already billed in naira has to be
+able to SEE cedis in order to switch.
+// **THE OPERATOR CONSOLE COULD NOT PRICE THE NEW MARKET**, which is the half a
+price list alone would have missed. `PricingManager` had `["NGN","USD"]` typed
+out AND `perSeatMonthlyMinor / 100` reading and `Math.round(n * 100)` writing —
+a hard-coded hundred that is 100x wrong in a zero-decimal currency, while the
+sibling `AddonPricingManager` beside it already used `majorFrom`/`minorFrom`.
+Correct next door, wrong here. Both now derive the list from `planCurrencies`
+and scale by the currency.
+// `GET /operator/addon-pricing` narrowed with `currency === "USD" ? USD : NGN`,
+which answered GHS with the NAIRA table — an operator would have edited naira
+prices under a cedi heading. It uses `narrowCurrency` now, and the console has a
+currency selector that RE-READS on switch: keeping the old figures on screen
+under a new symbol invites saving naira numbers as cedis.
+// WHERE IT STOPS, stated plainly: a GHS checkout now returns **503 naming the
+reason** — "the PAYSTACK account is not enabled for GHS". That is correct and
+actionable; enabling a currency is a dashboard action nobody can take from the
+console, and `CurrencyCoverage` already lists GHS as uncovered with the school
+that needs it.
+
 ### GHS on the dashboard, naira on the billing page — and both were right
 Reported by a school owner as a contradiction. It is not one, and that is
 exactly why it was worth fixing.

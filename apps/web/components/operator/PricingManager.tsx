@@ -6,7 +6,8 @@
 // Stripe; ENTERPRISE is USD-ONLY (the API refuses an NGN row for it, so it
 // simply has no ₦ input). PUT is step-up gated + audited server-side.
 
-import { CURRENCY_SYMBOL, type Currency, type PlanPriceDto } from "@sms/types";
+import { CURRENCY_SYMBOL, PLANS, planCurrencies, type Currency, type PlanPriceDto } from "@sms/types";
+import { majorFrom, minorFrom } from "@/lib/format";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { sendWithStepUp } from "@/lib/stepup";
@@ -22,12 +23,21 @@ export function PricingManager({ initial }: { initial: PlanPriceDto[] }) {
   const router = useRouter();
   // Edit in MAJOR units (naira / dollars) for humans; the API stores minor units.
   const [major, setMajor] = React.useState<Record<string, string>>(
-    Object.fromEntries(initial.map((r) => [key(r), String(r.perSeatMonthlyMinor / 100)])),
+    // SCALED BY THE CURRENCY, never by 100. A hard-coded hundred is right for
+    // NGN/USD/GHS and 100x wrong for a zero-decimal currency — the rule this
+    // repo already gates for, and the sibling AddonPricingManager beside this
+    // one already used `majorFrom`/`minorFrom`. Correct next door, wrong here.
+    Object.fromEntries(initial.map((r) => [key(r), String(majorFrom(r.perSeatMonthlyMinor, r.currency))])),
   );
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
-  const currencies: Currency[] = ["NGN", "USD"];
+  // DERIVED, not typed out. This literal said ["NGN","USD"], so adding GHS to
+  // the platform's price lists left the operator unable to see or set a single
+  // cedi price — the console that owns pricing could not price the currency the
+  // platform had started selling in. A list kept by hand is a list that falls
+  // behind; `planCurrencies` is the same source the quotes and checkout read.
+  const currencies: Currency[] = planCurrencies(PLANS.STANDARD);
 
   const save = async () => {
     const prices: { plan: string; perSeatMonthlyMinor: number; currency: string }[] = [];
@@ -37,7 +47,7 @@ export function PricingManager({ initial }: { initial: PlanPriceDto[] }) {
         setMsg(`${r.plan} (${r.currency}): enter a positive price.`);
         return;
       }
-      prices.push({ plan: r.plan, currency: r.currency, perSeatMonthlyMinor: Math.round(n * 100) });
+      prices.push({ plan: r.plan, currency: r.currency, perSeatMonthlyMinor: minorFrom(n, r.currency) });
     }
     setBusy(true);
     setMsg(null);

@@ -15,7 +15,11 @@
 import { Body, Controller, Get, Headers, Param, Post, Put, Req, Res } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, MAX_BILLING_PERIODS, PLANS } from "@sms/types";
+import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, MAX_BILLING_PERIODS, PLANS,
+  DEFAULT_PLAN,
+  planCurrencies,
+  type Currency,
+} from "@sms/types";
 import type { AddonOfferDto, BillingOverviewDto, CheckoutInitResultDto, ReferralInfoDto, SubscriptionDto } from "@sms/types";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
@@ -41,7 +45,14 @@ const checkoutSchema = z.object({
   plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
   billingCycle: z.enum([BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR]),
   // NGN → Paystack, USD → Stripe. Omitted → the tier's default (₦; $ for ENTERPRISE).
-  currency: z.enum([CURRENCIES.NGN, CURRENCIES.USD]).optional(),
+  // DERIVED FROM WHAT THE PLATFORM SELLS, not typed out. This enum listed NGN
+  // and USD, so a currency the quote grid offered and the pricing console
+  // priced was REFUSED at the last step — offered and then refused, which is
+  // the defect this codebase keeps finding in the other direction. Measured:
+  // GHS quoted at GHS 3.50/seat, checkout 400 "Expected 'NGN' | 'USD'".
+  currency: z
+    .enum(planCurrencies(DEFAULT_PLAN) as [Currency, ...Currency[]])
+    .optional(),
   // Operator-issued discount — first paid charge only, validated server-side.
   promoCode: z.string().max(30).optional(),
   /** How many CYCLES to buy in this one charge (1..MAX_BILLING_PERIODS).

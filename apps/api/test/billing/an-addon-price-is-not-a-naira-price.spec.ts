@@ -67,8 +67,12 @@ describe("an add-on price is not a naira price", () => {
     // The rule PlanPricingService already follows. A market with no price list
     // is a market not open yet — saying so names the fix; quoting another
     // currency's figures does not.
-    await expect(serviceWithNoOperatorRows().effective("GHS" as "USD")).rejects.toThrow(
-      /No add-on pricing for GHS/,
+    // GHS is now a SHIPPED currency, so it is no longer the example of one
+    // without prices — KES is. The rule is unchanged and this test moved with
+    // the data rather than being deleted: a market with no price list is a
+    // market not open yet.
+    await expect(serviceWithNoOperatorRows().effective("KES" as "USD")).rejects.toThrow(
+      /No add-on pricing for KES/,
     );
   });
 });

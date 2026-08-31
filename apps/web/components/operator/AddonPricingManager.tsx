@@ -13,6 +13,7 @@
 // deliberate loss-leader is a legitimate thing to want.
 
 import {
+  planCurrencies,
   CURRENCY_SYMBOL,
   MODULE_CATALOG,
   PLANS,
@@ -51,18 +52,44 @@ function tierBenchmark(module: string): { plan: string; perModuleMinor: number }
 
 export function AddonPricingManager({ initial }: { initial: ModuleAddonPriceDto[] }) {
   const router = useRouter();
-  const currency = (initial[0]?.currency ?? "NGN") as Currency;
+  // ONE CURRENCY AT A TIME, and the operator chooses which.
+  //
+  // `AddonPricingService.list()` answers for a single currency and the page
+  // asked for none, so this console could only ever edit NAIRA. The moment the
+  // platform started selling in cedis, add-on prices for that market were
+  // unreachable — and `effective()` REFUSES an unpriced currency, so a Ghanaian
+  // school could subscribe and buy no add-on at all.
+  const [currency, setCurrency] = React.useState<Currency>((initial[0]?.currency ?? "NGN") as Currency);
+  const [rows, setRows] = React.useState<ModuleAddonPriceDto[]>(initial);
   const symbol = CURRENCY_SYMBOL[currency] ?? "";
   // Edited in MAJOR units for humans; the API stores minor units.
   const [major, setMajor] = React.useState<Record<string, string>>(
     Object.fromEntries(initial.map((r) => [r.module, String(majorFrom(r.perSeatMonthlyMinor, currency))])),
   );
+
+  // Switching currency re-reads that market's prices. Keeping the old figures
+  // on screen under a new symbol would invite somebody to save naira numbers as
+  // cedis, which is the defect this whole change exists to remove.
+  const switchTo = async (next: Currency) => {
+    setCurrency(next);
+    setMsg(null);
+    const res = await fetch(`/api/sms/operator/addon-pricing?currency=${next}`, { cache: "no-store" });
+    if (!res.ok) {
+      setRows([]);
+      setMajor({});
+      setMsg(await readApiError(res));
+      return;
+    }
+    const fresh = (await res.json()) as ModuleAddonPriceDto[];
+    setRows(fresh);
+    setMajor(Object.fromEntries(fresh.map((r) => [r.module, String(majorFrom(r.perSeatMonthlyMinor, next))])));
+  };
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
   const save = async () => {
     const prices: { module: string; currency: string; perSeatMonthlyMinor: number }[] = [];
-    for (const r of initial) {
+    for (const r of rows) {
       const n = Number(major[r.module]);
       if (!Number.isFinite(n) || n < 0) {
         setMsg(`${LABEL.get(r.module) ?? r.module}: enter a price of zero or more.`);
@@ -92,6 +119,28 @@ export function AddonPricingManager({ initial }: { initial: ModuleAddonPriceDto[
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* WHICH MARKET. Add-on prices are per currency and this console could
+            only ever edit naira, so a currency the platform had begun selling
+            in had no reachable add-on prices at all. */}
+        <div className="flex items-center gap-2">
+          <label htmlFor="ap-cur" className="text-sm text-muted-foreground">Currency</label>
+          <select
+            id="ap-cur"
+            value={currency}
+            onChange={(e) => void switchTo(e.target.value as Currency)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {planCurrencies(PLANS.STANDARD).map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          {rows.length === 0 && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">
+              No add-on prices for {currency} yet — a school billed in it cannot buy a single add-on
+              until these are set.
+            </span>
+          )}
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -103,7 +152,7 @@ export function AddonPricingManager({ initial }: { initial: ModuleAddonPriceDto[
               </tr>
             </thead>
             <tbody>
-              {initial.map((r) => {
+              {rows.map((r) => {
                 const bench = tierBenchmark(r.module);
                 const typed = Number(major[r.module]);
                 const undercuts =

@@ -49,7 +49,7 @@ import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
 import { SettlementReleaseService, CurrencyCoverageService } from "./settlement-release.service";
 import { IndexBloatService, type IndexBloatResult } from "../maintenance/index-bloat.service";
-import type { SettlementHoldingDto, CurrencyCoverageDto } from "@sms/types";
+import type { SettlementHoldingDto, CurrencyCoverageDto, Currency } from "@sms/types";
 import { OperatorPaymentsService, type PaymentFilters } from "./operator-payments.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { PaymentHealthService } from "../payments/payment-health.service";
@@ -664,7 +664,13 @@ export class OperatorController {
   @Get("addon-pricing")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   getAddonPricing(@Query("currency") currency?: string): Promise<ModuleAddonPriceDto[]> {
-    return this.addonPricing.list(currency === CURRENCIES.USD ? CURRENCIES.USD : CURRENCIES.NGN);
+    // NARROWED, not guessed. This was `currency === "USD" ? USD : NGN`, a
+    // hand-rolled two-value check that silently answered every other currency —
+    // GHS included — with the NAIRA table. Once the platform sold in cedis the
+    // operator console would have edited naira prices under a cedi heading.
+    // `narrowCurrency` refuses an unrecognised one by name, which is the same
+    // rule the platform-fee console beside it already follows.
+    return this.addonPricing.list(narrowCurrency(currency) as Currency);
   }
 
   /** Set add-on prices. Step-up and audited for the same reason as tier prices:

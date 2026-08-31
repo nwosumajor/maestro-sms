@@ -149,11 +149,15 @@ describe("currency rules", () => {
     // account not enabled for USD, so that made the top tier unbuyable: a
     // Nigerian group had no way to pay for it, and the NGN price already
     // existed. A display preference must never gate a sale.
+    // Asserted as EVERY tier sells EVERY sellable currency, rather than against a
+    // typed-out pair — adding GHS made that literal wrong while the property it
+    // guards (a display preference must never gate a sale) was untouched.
+    const sellable = planCurrencies(PLANS.STANDARD);
+    expect(sellable).toContain(CURRENCIES.NGN);
+    expect(sellable).toContain(CURRENCIES.USD);
+    expect(sellable).toContain(CURRENCIES.GHS);
     for (const plan of [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]) {
-      expect({ plan, sells: planCurrencies(plan) }).toEqual({
-        plan,
-        sells: [CURRENCIES.NGN, CURRENCIES.USD],
-      });
+      expect({ plan, sells: planCurrencies(plan) }).toEqual({ plan, sells: sellable });
     }
   });
 
@@ -179,10 +183,14 @@ describe("currency rules", () => {
     expect(isCurrency("XOF")).toBe(false); // a FEE currency, not a billing one
     expect(isCurrency(undefined)).toBe(false);
 
-    // Still only two are SOLD in, because only two have prices. Opening a market
-    // is a price list, not a code change.
-    expect(planCurrencies(PLANS.STANDARD).sort()).toEqual(["NGN", "USD"]);
-    expect(planCurrencies(PLANS.ENTERPRISE).sort()).toEqual(["NGN", "USD"]);
+    // SOLD IN is still the narrower set, and it is exactly the currencies that
+    // have a price list — GHS joined by GAINING one, which is the point: opening
+    // a market is a price list, not a code change.
+    expect(planCurrencies(PLANS.STANDARD).sort()).toEqual(["GHS", "NGN", "USD"]);
+    expect(planCurrencies(PLANS.ENTERPRISE).sort()).toEqual(["GHS", "NGN", "USD"]);
+    // …and the two sets are still different, which is the whole distinction.
+    expect(isCurrency("KES")).toBe(true);
+    expect(planCurrencies(PLANS.STANDARD)).not.toContain("KES");
   });
 
   it("USD pricing computes in cents with the USD table", () => {

@@ -177,19 +177,45 @@ export class PlanPricingService implements OnModuleInit {
     if (this.cache && now - this.cache.at < CACHE_TTL_MS) return this.cache;
     // Global read, no tenant context (RLS SELECT policy is USING(true) — rls/46).
     const rows = await prisma.planPrice.findMany();
-    const pricing: MultiCurrencyPlanPricing = {
-      NGN: { ...PLAN_PRICING_BY_CURRENCY.NGN },
-      USD: { ...PLAN_PRICING_BY_CURRENCY.USD },
-    };
+    // EVERY SHIPPED CURRENCY, not a hand-kept pair.
+    //
+    // This listed NGN and USD literally, so adding GHS to
+    // `PLAN_PRICING_BY_CURRENCY` changed nothing here and cedi quotes came out
+    // at NAIRA numbers — GHS 525 a seat instead of GHS 3.50, about 150x.
+    // Measured on the live Ghanaian tenant before the fix. A shipped list that
+    // the resolver does not read is not a price list.
+    const pricing: MultiCurrencyPlanPricing = {};
+    for (const [currency, table] of Object.entries(PLAN_PRICING_BY_CURRENCY)) {
+      if (isCurrency(currency)) pricing[currency] = { ...table };
+    }
     const overridden = new Set<string>();
+    // A currency the platform ships NO list for, opened by operator rows alone.
+    // Its tiers start ABSENT rather than copied from naira — see below.
+    const openedByOperator = new Set<string>();
     for (const r of rows) {
       if (isPlan(r.plan) && isCurrency(r.currency)) {
         // An operator row can OPEN a currency the defaults do not cover — pricing
-        // Ghana is a price list, not a deploy. The table is created on first row.
-        const table = (pricing[r.currency] ??= { ...PLAN_PRICING_BY_CURRENCY.NGN });
+        // a new market is a price list, not a deploy.
+        //
+        // IT NO LONGER INHERITS NAIRA. The table used to be created as a COPY of
+        // the NGN list, so an operator who priced STANDARD in a new currency
+        // silently sold the other three tiers at naira figures — the exact
+        // "silently at the naira price" this file's own refusal exists to
+        // prevent, reached through the other door. Unpriced tiers stay at zero
+        // and `effective()` refuses the currency until every tier has a price.
+        if (!PLAN_PRICING_BY_CURRENCY[r.currency]) openedByOperator.add(r.currency);
+        const table = (pricing[r.currency] ??= {} as PlanPricing);
         table[r.plan] = { perSeatMonthlyMinor: r.perSeatMonthlyMinor };
         overridden.add(`${r.plan}:${r.currency}`);
       }
+    }
+    // A half-priced market is not open. Refusing names the tiers still missing,
+    // which is what an operator needs to finish the job.
+    for (const currency of openedByOperator) {
+      if (!isCurrency(currency)) continue;
+      const table = pricing[currency];
+      const missing = (Object.values(PLANS) as Plan[]).filter((plan) => !table?.[plan]);
+      if (missing.length > 0) delete pricing[currency];
     }
     this.cache = { at: now, pricing, overridden };
     return this.cache;

@@ -323,7 +323,23 @@ export class BillingService {
       subRow && subRow.status === SUBSCRIPTION_STATUS.ACTIVE
         ? prorationCreditMinor(toMinor(subRow.priceMinor), subCycle, subRow.currentPeriodEnd, now)
         : 0;
-    const subCurrency: Currency = subRow && isCurrency(subRow.currency ?? "") ? (subRow.currency as Currency) : CURRENCIES.NGN;
+    // THE SCHOOL'S OWN CURRENCY, WHERE THE PLATFORM CAN SELL IN IT.
+    //
+    // This fell back to NGN — the platform's home — for any school that had not
+    // paid yet, whatever its region. So a Ghanaian school was quoted and
+    // defaulted to naira, paid FX on every renewal, and then read GHS on its
+    // dashboard and a naira figure on its billing page.
+    //
+    // A subscription that has ALREADY been paid keeps its own currency: that is
+    // what the school was charged in, and re-denominating a live subscription
+    // from a region setting would change what renewal costs without anybody
+    // deciding to. This only chooses the DEFAULT for a school that has not
+    // chosen yet.
+    const schoolCurrency = (await this.region.forSchool(p.schoolId)).currency;
+    const preferred: Currency = planCurrencies(DEFAULT_PLAN).includes(schoolCurrency as Currency)
+      ? (schoolCurrency as Currency)
+      : CURRENCIES.NGN;
+    const subCurrency: Currency = subRow && isCurrency(subRow.currency ?? "") ? (subRow.currency as Currency) : preferred;
     const trueUp =
       subRow && isPlan(subRow.plan) && subRow.status === SUBSCRIPTION_STATUS.ACTIVE
         ? computeTrueUpMinor(
@@ -363,6 +379,14 @@ export class BillingService {
     // Can each quoted currency actually be charged right now? Asked ONCE per
     // distinct currency, not per quote — the quote list is tiers x currencies x
     // cycles, and this reads the channel config behind a cache.
+    // THE PREFERRED CURRENCY LEADS. The grid is tiers x currencies x cycles and
+    // a school picks from the top; leaving naira first meant a Ghanaian school
+    // had to notice cedis were an option before it could choose them.
+    // Ordered by the SCHOOL'S OWN currency, not by what they last paid in.
+    // A school already billed in naira that now wants cedis has to be able to
+    // SEE cedis; leading with the existing subscription's currency would hide
+    // the switch behind the thing being switched away from.
+    quotes.sort((a, b) => Number(b.currency === preferred) - Number(a.currency === preferred));
     const quoteCurrencies = [...new Set(quotes.map((q) => q.currency))];
     const currencyAvailability = await Promise.all(
       quoteCurrencies.map(async (currency) => ({

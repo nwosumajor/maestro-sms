@@ -357,7 +357,10 @@ export function planCurrencies(plan: Plan): Currency[] {
   // market is a price list rather than a code change; offering a currency with
   // no price would produce a checkout that cannot complete.
   void plan;
-  return [CURRENCIES.NGN, CURRENCIES.USD];
+  // GHS joined NGN and USD once a price list existed for it. A Ghanaian school
+  // whose fees are in cedis was being offered naira or dollars and paying FX on
+  // every renewal; Paystack settles GHS, so the rail was never the obstacle.
+  return [CURRENCIES.NGN, CURRENCIES.USD, CURRENCIES.GHS];
 }
 /**
  * The currency a tier is DISPLAYED in by default.
@@ -405,6 +408,29 @@ export const PLAN_PRICING: PlanPricing = {
   ENTERPRISE: { perSeatMonthlyMinor: 125_000 }, // ₦1,250 / student / month
 };
 
+/**
+ * GHANAIAN CEDI defaults, in pesewas.
+ *
+ * Added because a Ghanaian school could not be BILLED in its own currency: the
+ * platform shipped prices for NGN and USD only, so a school whose fees are in
+ * GHS was offered naira or dollars at checkout and paid FX on every renewal for
+ * no reason. Paystack settles GHS, so the rail was never the obstacle — the
+ * price list was.
+ *
+ * The RATIOS mirror NGN exactly (1 : 1.43 : 1.86 : 2.43), because that is the
+ * closest analogue market and the ladder between tiers is a product decision
+ * that should not change per currency. Only the base moves.
+ *
+ * // These are the FALLBACK, like every list here: an operator `plan_price` row
+ * for GHS overrides them, and `PlanPricingService.effective()` merges the two.
+ */
+export const PLAN_PRICING_GHS: PlanPricing = {
+  STANDARD: { perSeatMonthlyMinor: 350 }, // GHS 3.50 / student / month
+  PREMIUM: { perSeatMonthlyMinor: 500 }, // GHS 5.00
+  ULTIMATE: { perSeatMonthlyMinor: 650 }, // GHS 6.50
+  ENTERPRISE: { perSeatMonthlyMinor: 850 }, // GHS 8.50
+};
+
 /** USD defaults, in cents. */
 export const PLAN_PRICING_USD: PlanPricing = {
   STANDARD: { perSeatMonthlyMinor: 25 }, // $0.25 / student / month
@@ -422,6 +448,7 @@ export const PLAN_PRICING_BY_CURRENCY: MultiCurrencyPlanPricing & {
 } = {
   NGN: PLAN_PRICING,
   USD: PLAN_PRICING_USD,
+  GHS: PLAN_PRICING_GHS,
 };
 
 /** Days a school keeps its paid plan after period end before the dunning downgrade. */
@@ -586,6 +613,38 @@ export const MODULE_ADDON_PRICING_USD: Partial<Record<ModuleKey, number>> = {
   [MODULES.GROUP]: 30,
 };
 
+/**
+ * Add-on prices in PESEWAS, on the same ladder the other currencies keep.
+ *
+ * A currency with tier prices and NO add-on prices is worse than one with
+ * neither: `AddonPricingService.effective()` REFUSES an unpriced currency, so a
+ * GHS school would have been able to subscribe and unable to buy a single
+ * add-on. The two lists move together.
+ *
+ * Every figure is checked by `add-ons-never-undercut-the-upgrade`, which runs
+ * for EVERY shipped currency — an add-on must cost more per module than the
+ * tier containing it, three of them must cost more than the upgrade, and none
+ * may exceed the whole tier.
+ */
+export const MODULE_ADDON_PRICING_GHS: Partial<Record<ModuleKey, number>> = {
+  // PREMIUM adds five sellable modules for GHS 1.50/seat (30p each).
+  [MODULES.WORKFLOW]: 55,
+  [MODULES.ANALYTICS]: 55,
+  [MODULES.INTEGRITY]: 55,
+  [MODULES.GAMES]: 55,
+  [MODULES.CBT]: 85,
+  // ULTIMATE adds six for GHS 1.50/seat (25p each).
+  [MODULES.ADMISSIONS]: 85,
+  [MODULES.CERTIFICATE]: 70,
+  [MODULES.HOSTEL]: 85,
+  [MODULES.TRANSPORT]: 85,
+  [MODULES.DISCIPLINE]: 70,
+  [MODULES.ALUMNI]: 70,
+  // ENTERPRISE adds two for GHS 2.00/seat (100p each).
+  [MODULES.HR]: 150,
+  [MODULES.GROUP]: 150,
+};
+
 /** Add-on prices per currency, mirroring {@link PLAN_PRICING_BY_CURRENCY}. NGN
  *  and USD are guaranteed present; a new market is another key AND a row. */
 export const MODULE_ADDON_PRICING_BY_CURRENCY: Record<string, Partial<Record<ModuleKey, number>>> & {
@@ -594,6 +653,7 @@ export const MODULE_ADDON_PRICING_BY_CURRENCY: Record<string, Partial<Record<Mod
 } = {
   NGN: MODULE_ADDON_PRICING,
   USD: MODULE_ADDON_PRICING_USD,
+  GHS: MODULE_ADDON_PRICING_GHS,
 };
 
 /**
