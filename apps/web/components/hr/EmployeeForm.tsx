@@ -26,6 +26,19 @@ export function EmployeeForm({ users, managers = [] }: { users: User[]; managers
   const [tin, setTin] = React.useState("");
   const [rsaPin, setRsaPin] = React.useState("");
   const [managerId, setManagerId] = React.useState("");
+  // HOW LONG THEY ARE ON PROBATION, if they are.
+  //
+  // `employee.confirmationStatus` DEFAULTS TO "CONFIRMED", and `probationMonths`
+  // — the only thing that sets it to PROBATION — was accepted by the API and
+  // sent by no screen. So every member of staff created through the product was
+  // recorded as a confirmed employee, which nobody chose; and because
+  // `requestEmploymentChange` refuses a CONFIRMATION for anyone not on
+  // PROBATION, the confirmation half of the employment lifecycle was
+  // unreachable for every employee a school actually creates.
+  //
+  // Blank = already confirmed, which is the right default for the common case
+  // of recording existing staff when a school comes onto the platform.
+  const [probationMonths, setProbationMonths] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -41,10 +54,15 @@ export function EmployeeForm({ users, managers = [] }: { users: User[]; managers
         tin: tin.trim() || null,
         rsaPin: rsaPin.trim() || null,
         managerId: managerId || null,
+        // Omitted, not zero: the API treats a number > 0 as "start a probation"
+        // and anything else as "leave the status alone", and this field is only
+        // honoured when the record is CREATED — changing it afterwards is what
+        // the confirmation flow is for.
+        ...(probationMonths ? { probationMonths: Number(probationMonths) } : {}),
       }),
     });
     setBusy(false);
-    if (res.ok) { setJobTitle(""); setDepartment(""); setSalaryMajor(""); setMsg("Saved."); router.refresh(); }
+    if (res.ok) { setJobTitle(""); setDepartment(""); setSalaryMajor(""); setProbationMonths(""); setMsg("Saved."); router.refresh(); }
     else setMsg(await readApiError(res));
   };
 
@@ -68,6 +86,26 @@ export function EmployeeForm({ users, managers = [] }: { users: User[]; managers
             </select>
           </div>
           <div className="space-y-1.5"><Label htmlFor="hr-start">Start date</Label><Input id="hr-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
+          <div className="space-y-1.5">
+            <Label htmlFor="hr-probation">Probation <span className="font-normal text-muted-foreground">(optional)</span></Label>
+            <select
+              id="hr-probation"
+              value={probationMonths}
+              onChange={(e) => setProbationMonths(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">No probation — already confirmed</option>
+              {[3, 6, 9, 12, 18, 24].map((m) => (
+                <option key={m} value={m}>
+                  {m} months
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Only applies when the record is first created. Confirming them later is a separate,
+              two-person step on their staff page.
+            </p>
+          </div>
           <div className="space-y-1.5"><Label htmlFor="hr-salary">Salary (₦)</Label><Input id="hr-salary" inputMode="decimal" value={salaryMajor} onChange={(e) => setSalaryMajor(e.target.value)} className="w-28" /></div>
           <div className="space-y-1.5"><Label htmlFor="hr-tin">TIN</Label><Input id="hr-tin" value={tin} onChange={(e) => setTin(e.target.value)} className="w-32" placeholder="tax id" /></div>
           <div className="space-y-1.5"><Label htmlFor="hr-rsa">RSA PIN</Label><Input id="hr-rsa" value={rsaPin} onChange={(e) => setRsaPin(e.target.value)} className="w-32" placeholder="pension" /></div>

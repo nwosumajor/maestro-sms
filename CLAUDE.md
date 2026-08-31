@@ -3663,6 +3663,42 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### Every new hire was recorded as already confirmed
+`probationMonths` — fifth off the `AWAITING_A_SCREEN` backlog, and the one that
+made a whole maker-checker lifecycle unreachable.
+`employee.confirmationStatus` **DEFAULTS TO "CONFIRMED"**, and the only thing
+that sets it to PROBATION is `probationMonths` on the create — accepted by the
+API since the module shipped, sent by no screen. Two consequences:
+- the system asserted, of every member of staff a school created, that they were
+  a CONFIRMED employee. Nobody chose that; a column default said it.
+- `requestEmploymentChange` refuses a CONFIRMATION for anyone not on PROBATION,
+  so the confirmation half of the employment lifecycle — maker-checker, two
+  people, an append-only record — was unreachable for every employee a school
+  actually creates. A stage nothing could enter and nothing could leave.
+Measured live on two real staff accounts:
+```
+old way  created CONFIRMED   -> confirm: 400 "This employee is not on probation"
+new way  created PROBATION, ends 2027-03-01
+         -> confirmation raised 201 -> approved by a DIFFERENT person 201
+         -> CONFIRMED, probationEndsAt cleared
+```
+// BLANK MEANS ALREADY CONFIRMED, deliberately: most records a school creates on
+day one are EXISTING staff, and forcing a probation choice on them would be a
+worse default than the one being fixed.
+// OMITTED, NEVER ZERO. The service reads `> 0` as "start a probation" and
+anything else as "leave the status alone", so a literal 0 is a value that means
+nothing and a reader could not tell it from a mistake.
+// CREATE ONLY, and a test pins it: spreading `probation` into the UPDATE branch
+would let an ordinary edit silently put a confirmed member of staff back on
+probation. Mutation-validated in that direction too.
+// GOTCHA in my own test: I sliced the service from `const probation =` to
+`indexOf("await this.audit.record")` — which finds the FIRST such call in the
+file, earlier than the slice's start, so the window came out EMPTY and the
+assertion passed against nothing. Bounded FORWARD from the declaration to the
+upsert's own close, with an assertion that the window really contains
+`employee.upsert`. Same fixed-window failure this file records for a decorator
+run and a 3,500-character slice.
+
 ### A sick note nobody could see, and a fix I had to abandon halfway
 `attachmentDocId` — fourth off the `AWAITING_A_SCREEN` backlog, and the first
 where BUILDING IT proved the backlog entry's own reason wrong.
