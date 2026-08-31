@@ -898,6 +898,64 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Twelve rows offered, seven accepted
+`SELLING_CURRENCIES` (`operator.controller.ts`), `planCurrencies`,
+`AddonPricingService.update`, `PricingManager`. Carried the two-currency class
+from the entry below across the codebase rather than stopping at the one that
+hurt — the mistake this file keeps recording — and the sharpest finding was not
+about the new currency at all.
+The operator's pricing console READS what the platform ships and POSTS all of it
+back, so the write side has to accept what the read side produced. Measured live
+as the platform owner:
+```
+GET  /operator/pricing   12 rows across three currencies
+PUT  /operator/pricing   400  "Array must contain at most 7 element(s)"
+                              "Expected 'NGN' | 'USD', received 'GHS'"  (x4)
+```
+**SO TIER PRICING COULD NOT BE SAVED AT ALL — in any currency, not only the new
+one.** The cap was hand-computed for two currencies (`// One row per sellable
+(tier, currency): 3 NGN + 4 USD`), so a third market broke saving for everybody.
+A cap is a DoS BOUND, not a business rule: too large costs nothing, too small
+breaks a console in silence. Both the enum and both caps are derived now.
+// **THE ADD-ON REFUSAL LIVED IN TWO LAYERS, and only DRIVING it found the
+second.** The schema, and a service check reading `!== NGN && !== USD` whose
+message named the two currencies as if they were the rule. Fixing the schema
+alone would have looked right and still refused — the reason the fix is verified
+over HTTP rather than by reading. The TIER service was already correct
+(`planCurrencies(row.plan)`), which is what the add-on one should have copied:
+correct next door, wrong here, for the fourth time in this file.
+// **THE ROOT WAS `planCurrencies` ITSELF.** Its own comment says "only what the
+platform ships PRICES for" and it then repeated the answer as a literal, so a
+fourth price list would have been shipped and sold to nobody, silently. It
+derives from `PLAN_PRICING_BY_CURRENCY` now — the list it claims to describe.
+// AND THE CONSOLE MISLABELLED WHAT IT WAS PRICING, in the file whose currency
+list and `/100` scaling I had fixed an hour earlier and walked past:
+`currency === "NGN" ? "Naira (Paystack)" : "US Dollar (Stripe)"` headed the
+CEDI section **"US Dollar (Stripe)"**, so an operator would edit cedi prices
+under a dollar heading. Live after: `NGN — Nigerian Naira`, `USD — US Dollar`,
+`GHS — Ghanaian Cedi`.
+// IT ALSO NAMED THE RAIL FROM THE CURRENCY — the claim the checkout already
+stopped making, recorded in this file: `pickCardRail` falls back to Paystack for
+USD while Stripe is off. Two more stale claims went with it, "Enterprise is sold
+in dollars only" and the header's "the API refuses an NGN row for it": ENTERPRISE
+ships prices in all three and NO such rule exists in the service. Prose stating a
+commercial fact rots exactly like a role count typed into a paragraph.
+// CLEAN NEGATIVE, recorded so it is not re-chased: `CURRENCY_SYMBOL` already
+covers all seven catalogued currencies, so the symbol beside each price field
+was never wrong.
+// GOTCHA in my own probe: my first save APPENDED a 13th row rather than editing
+one of the 12, so the cap error persisted after the fix and looked like the fix
+had failed. A console posts exactly the rows it rendered — a probe that does not
+model the caller reports a fault in itself.
+// PROBE ARTEFACT, restored: the PUT upserted all 12 tier rows as operator
+overrides and wrote a GHS add-on row. Rows equal to a shipped default were
+deleted and the edited one put back, so effective pricing is byte-for-byte what
+the first read showed — three genuine pre-existing USD overrides (35/50/65) and
+nothing else.
+Mutation-validated four ways: restore the hand-listed enum and the cap of 7,
+restore the service-level refusal, return `planCurrencies` to a literal, and
+restore the rail-naming label.
+
 ### The cedi option was labelled "$ US Dollar"
 `currencyLabel` (`@sms/types/currency.ts`), `BillingOverviewDto.preferredCurrency`,
 `BillingCheckout`. Asked why MeastroTest reads GHS on its dashboard and naira in
