@@ -20,7 +20,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { csvCell } from "../common/csv";
 import { Prisma } from "@sms/db";
-import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
+import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryBorrowerDto, LibraryReportDto } from "@sms/types";
 import { formatMoney, effectiveLibraryFinePerDayMinor, FEE_SOURCES } from "@sms/types";
 import type { PaymentMethodValue } from "@sms/types";
 import {
@@ -42,6 +42,9 @@ type Json = Record<string, string>;
  *  fit in memory and in one response — and when it bites, the file says so. */
 const CATALOGUE_EXPORT_MAX = 20_000;
 
+// A lending desk picks from a SEARCHED list, never scrolls a whole school —
+// the same bound every other picker here carries.
+const BORROWER_PAGE = 50;
 const LOAN_DAYS = 14;
 const RENEW_DAYS = 7;
 const MAX_RENEWALS = 2;
@@ -685,6 +688,57 @@ export class LibraryService {
     if (status !== invoice.status) {
       await tx.invoice.update({ where: { id: invoiceId }, data: { status } });
     }
+  }
+
+  /**
+   * Who a librarian may issue a book to.
+   *
+   * `issue` has always supported "librarians to ANYONE, students to themselves"
+   * — and the only control on the page was "Issue to me", so a librarian could
+   * not lend a book to a pupil through the product at all. The gap was not the
+   * button alone: the existing people picker (`GET /users`) is gated on
+   * `class.write`, which creates classes and enrols pupils, and `GET /students`
+   * is relationship-scoped so it returns NOTHING to a librarian, who teaches
+   * nobody. There was no data source they could use.
+   *
+   * So this is the desk's own lookup rather than a widening of somebody else's:
+   * id, name, admission number and whether they are a pupil or staff. No email,
+   * no roles, no contact details — strictly less than the picker it replaces.
+   *
+   * STAFF ARE INCLUDED because teachers borrow books, and `issue` has never
+   * required the borrower to be a pupil.
+   */
+  async listBorrowers(p: Principal, q?: string): Promise<LibraryBorrowerDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const term = (q ?? "").trim();
+      const users = await tx.user.findMany({
+        where: {
+          // A leaver is not somebody to lend a book to — the rule this platform
+          // already applies to every surface that hands out future work.
+          status: "ACTIVE",
+          ...(term ? { name: { contains: term, mode: "insensitive" as const } } : {}),
+        },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+        take: BORROWER_PAGE,
+      });
+      if (users.length === 0) return [];
+      const ids = users.map((u) => u.id);
+      // ONE query each, never a lookup per row.
+      const profiles = await tx.studentProfile.findMany({
+        where: { studentId: { in: ids } },
+        select: { studentId: true, admissionNumber: true },
+      });
+      const admissionByStudent = new Map(profiles.map((r) => [r.studentId, r.admissionNumber]));
+      return users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        admissionNo: admissionByStudent.get(u.id) ?? null,
+        // A pupil is somebody with a student profile — the same question the
+        // rest of this codebase asks, rather than a second reading of roles.
+        kind: (admissionByStudent.has(u.id) ? "STUDENT" : "STAFF") as "STUDENT" | "STAFF",
+      }));
+    });
   }
 
   /** A borrower's loans (self), or all loans (librarian). */

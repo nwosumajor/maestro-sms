@@ -67,3 +67,26 @@ export interface FineReceiptDto {
   paidAt: Date | null;
   reference: string;
 }
+
+/**
+ * Somebody a librarian can issue a book to.
+ *
+ * The lending desk's OWN lookup, deliberately narrow. `issue` has always
+ * supported "librarians to anyone, students to themselves" and the only control
+ * was "Issue to me", so a librarian could not lend a book to a pupil through the
+ * product at all — the module's central act. The existing people picker needs
+ * `class.write` (create classes, enrol pupils, assign teachers), which is not a
+ * permission a librarian should hold to look up a borrower, so this exposes
+ * strictly less than that route rather than widening it: no email, no roles, no
+ * contact details.
+ *
+ * `admissionNo` is here because two pupils sharing a name is ordinary, and
+ * picking the wrong one puts a book on the wrong child's record.
+ */
+export interface LibraryBorrowerDto {
+  id: string;
+  name: string;
+  admissionNo: string | null;
+  /** "Student" or "Staff" — enough to tell a pupil from a teacher, no more. */
+  kind: "STUDENT" | "STAFF";
+}

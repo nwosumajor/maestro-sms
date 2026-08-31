@@ -65,7 +65,12 @@ const AWAITING_A_SCREEN: Record<string, string> = {
 
 function walkWeb(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
-    if (e === "node_modules" || e === ".next") continue;
+    // A SCREEN, not the tooling beside it. `scripts/` holds the hand-run probes
+    // and the build helpers; a probe that NAMES a field — `probe:no-secrets`
+    // lists `targetSecret` among the markers that must never reach a client —
+    // is the opposite of a screen offering it, and reading one as the other
+    // makes an API_ONLY reason look contradicted by the test that enforces it.
+    if (e === "node_modules" || e === ".next" || e === "scripts") continue;
     const p = join(dir, e);
     if (statSync(p).isDirectory()) walkWeb(p, out);
     else if (/\.(tsx?|mjs)$/.test(e)) out.push(p);

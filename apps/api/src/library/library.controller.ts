@@ -3,7 +3,7 @@ import { BadRequestException, Delete, Body, Controller, Get, Param, Post, Put, Q
 import type { Response } from "express";
 import { BOOK_LOAN_STATUSES, LIBRARY_PERMISSIONS, MODULES, PAYMENT_METHODS } from "@sms/types";
 import { narrowStatus } from "../common/status-filter";
-import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
+import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryBorrowerDto, LibraryReportDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -82,6 +82,16 @@ export class LibraryController {
     // Live: `?status=OUT` — a plausible guess — turned 26 loans into 0, with a
     // 200, so the page reported that the school has no books on loan.
     return this.library.listLoans(p, { borrowerId, status: narrowStatus(status, BOOK_LOAN_STATUSES) });
+  }
+
+  /**
+   * Who this librarian may issue to. `library.manage`, so a pupil holding
+   * `library.borrow` cannot enumerate the school through the lending desk.
+   */
+  @Get("borrowers")
+  @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)
+  borrowers(@CurrentPrincipal() p: Principal, @Query("q") q?: string): Promise<LibraryBorrowerDto[]> {
+    return this.library.listBorrowers(p, q);
   }
 
   /** Issue: librarians (library.manage) to anyone; students (library.borrow) self only. */

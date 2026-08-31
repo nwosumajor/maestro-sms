@@ -4,7 +4,7 @@
 // issue/return for anyone, view fines, and export CSV. Students search and self-
 // issue/renew/return their own loans from the same screen.
 
-import type { LibraryBookDto, BookLoanDto, Serialized } from "@sms/types";
+import type { LibraryBookDto, BookLoanDto, LibraryBorrowerDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms, sendSms } from "@/components/game/play-ui";
@@ -18,6 +18,7 @@ import { useFormat } from "@/components/shell/RegionProvider";
 
 type Book = Serialized<LibraryBookDto>;
 type Loan = Serialized<BookLoanDto>;
+type Borrower = Serialized<LibraryBorrowerDto>;
 
 export function LibraryManager({
   books, loans, apiBaseUrl, canManage,
@@ -33,6 +34,15 @@ export function LibraryManager({
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [q, setQ] = React.useState("");
+  // WHO THE BOOK IS FOR. `issue` has always accepted a borrower — "librarians to
+  // anyone, students to themselves" — and the only control here was "Issue to
+  // me", so a librarian could not lend a book to a pupil through the product at
+  // all. Nothing about the server needed changing; the desk had no way to name
+  // the person.
+  const [borrowerQ, setBorrowerQ] = React.useState("");
+  const [borrowers, setBorrowers] = React.useState<Borrower[]>([]);
+  const [borrower, setBorrower] = React.useState<Borrower | null>(null);
+  const [lookingUp, setLookingUp] = React.useState(false);
   // new book
   const [bTitle, setBTitle] = React.useState("");
   const [bBarcode, setBBarcode] = React.useState("");
@@ -45,6 +55,28 @@ export function LibraryManager({
     if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? "Request failed.");
   };
 
+  // Searched, never a whole-school scroll. The server caps it too — a picker
+  // that lists nine hundred pupils is one nobody can use.
+  const findBorrowers = async () => {
+    setLookingUp(true);
+    const res = await fetch(`/api/sms/library/borrowers?q=${encodeURIComponent(borrowerQ.trim())}`);
+    setLookingUp(false);
+    if (!res.ok) {
+      // A failed lookup must not read as "nobody by that name" — that would send
+      // a librarian looking for a pupil who is right there.
+      setBorrowers([]);
+      setMsg("The borrower list could not be loaded. Nobody has been ruled out — try again.");
+      return;
+    }
+    setBorrowers((await res.json()) as Borrower[]);
+  };
+
+  const issueTo = (bookId: string) =>
+    run(
+      () => postSms("library/loans/issue", borrower ? { bookId, borrowerId: borrower.id } : { bookId }),
+      borrower ? `Issued to ${borrower.name}.` : "Issued to you.",
+    );
+
   const shown = q.trim()
     ? books.filter((b) => [b.title, b.author, b.isbn, b.barcode].some((f) => (f ?? "").toLowerCase().includes(q.trim().toLowerCase())))
     : books;
@@ -52,6 +84,78 @@ export function LibraryManager({
   return (
     <div className="space-y-6">
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+
+      {/* WHO THE BOOK IS FOR. Only a librarian may lend to somebody else, and
+          only a librarian can reach the lookup behind this — `library.manage`
+          on both halves, so the control and the route agree. Without it the
+          desk could only ever lend to the person signed in. */}
+      {canManage && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Who is borrowing?</CardTitle>
+            <CardDescription>
+              Find the pupil or member of staff first, then issue from the catalogue below. Leave this
+              empty to borrow a book yourself.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {borrower ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary">
+                  {borrower.name}
+                  {borrower.admissionNo ? ` · ${borrower.admissionNo}` : ""}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setBorrower(null); setBorrowers([]); setBorrowerQ(""); }}
+                >
+                  Clear — borrow for myself
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lib-borrower">Name</Label>
+                    <Input
+                      id="lib-borrower"
+                      value={borrowerQ}
+                      onChange={(e) => setBorrowerQ(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void findBorrowers(); } }}
+                      placeholder="Start typing a name…"
+                    />
+                  </div>
+                  <Button variant="outline" size="sm" disabled={lookingUp} onClick={() => void findBorrowers()}>
+                    {lookingUp ? "Looking…" : "Find"}
+                  </Button>
+                </div>
+                {borrowers.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {borrowers.map((b) => (
+                      <Button
+                        key={b.id}
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Issue to ${b.name}`}
+                        onClick={() => setBorrower(b)}
+                      >
+                        {b.name}
+                        <span className="ml-1.5 text-xs text-muted-foreground">
+                          {/* The admission number, because two pupils sharing a
+                              name is ordinary and the wrong pick puts a book on
+                              the wrong child's record. */}
+                          {b.admissionNo ?? (b.kind === "STAFF" ? "staff" : "—")}
+                        </span>
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -74,7 +178,9 @@ export function LibraryManager({
                   <td className="py-1 pr-3"><Badge variant={b.availableCopies > 0 ? "secondary" : "outline"}>{b.availableCopies}/{b.totalCopies}</Badge></td>
                   <td className="py-1">
                     <div className="flex gap-1.5">
-                      <Button variant="outline" size="sm" disabled={busy || b.availableCopies < 1} onClick={() => run(() => postSms("library/loans/issue", { bookId: b.id }), "Issued to you.")}>Issue to me</Button>
+                      <Button variant="outline" size="sm" disabled={busy || b.availableCopies < 1} onClick={() => void issueTo(b.id)}>
+                        {borrower ? `Issue to ${borrower.name.split(" ")[0]}` : "Issue to me"}
+                      </Button>
                       {canManage && (
                         <>
                           <Button variant="ghost" size="sm" disabled={busy} onClick={() => {

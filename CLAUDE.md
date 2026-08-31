@@ -898,6 +898,56 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A librarian who could only lend books to themselves
+`LibraryService.listBorrowers`, `GET /library/borrowers`, `LibraryManager`.
+Found by CORRECTING A GATE rather than by reading code, which is worth recording
+on its own: `a-field-no-screen-can-fill-in` walks `apps/web` to ask whether a
+screen sends a field, and it was reading `apps/web/scripts/` — the hand-run
+probes and build tooling — as screens. Excluding them (a probe NAMING a field is
+the opposite of a screen offering it) immediately surfaced `borrowerId` as
+undeclared, which the gate had been masking because `seed-modules.mjs` happens
+to post one.
+**`issue` HAS ALWAYS SUPPORTED TWO AUDIENCES and its route says so** —
+"librarians (`library.manage`) to anyone; students (`library.borrow`) self
+only", enforced in the service. The only control on the page was **"Issue to
+me"**, posting `{ bookId }`. So a librarian could not lend a book to a pupil
+through the product at all: the central act of running a library.
+// **THE BUTTON WAS NOT THE WHOLE GAP**, which is why this is a route and not a
+dropdown. There was no data source a librarian could use:
+```
+GET /users      gated on class.write — create classes, enrol pupils, assign
+                teachers. Measured live: the librarian gets 403.
+GET /students   relationship-scoped, and a librarian teaches nobody -> empty
+the scan desk   gated on CERTIFICATE, a PREMIUM add-on, while LIBRARY is in the
+                STANDARD floor
+```
+So all three alternatives were worse than a narrow route of its own: two are
+authorization widenings, and the third makes a PAID module a prerequisite for
+issuing a book on the entry tier.
+// IT RETURNS STRICTLY LESS THAN THE PICKER IT REPLACES — id, name, admission
+number, pupil-or-staff. No email, no roles, no contact details. The FIELD-level
+question the driver/fare entry already records, asked while building rather than
+afterwards.
+// THE ADMISSION NUMBER IS THERE ON PURPOSE: two pupils sharing a name is
+ordinary in this product (the admissions funnel has an `autoSuffix` for exactly
+that), and the wrong pick puts a book on the wrong child's record.
+// STAFF ARE INCLUDED because teachers borrow books and `issue` has never
+required a pupil; a LEAVER is not offered, the rule every other
+work-assigning surface here already applies.
+// A FAILED LOOKUP IS NOT "NOBODY BY THAT NAME" — that would send a librarian
+looking for a pupil who is standing in front of them. Same rule as the /family
+page's `?? { children: [] }`.
+Live, end to end: librarian searches "Volume" -> 50 people with admission
+numbers, issues *SEED Reader 1* to Volume Pupil 1 -> **201**, the loan records
+that borrower; a PUPIL asking for the same list -> **403**.
+// Registered in the API surface registry, which the gate requires.
+// PROBE: the loan the probe raised was returned and its row removed; the book
+is back at 2/2 copies and the loan counts are what they were.
+Mutation-validated four ways: stop sending the borrower (which also re-fires the
+`a-field-no-screen` gate, so gate and fix agree), gate the lookup on
+`library.borrow` so a pupil could enumerate the school, return the email too,
+and offer people who have left.
+
 ### A fifth probe: no response carries ciphertext or a credential
 `apps/web/scripts/no-response-carries-a-secret.mjs`, `probe:no-secrets`. The
 FIELD-level question, which is the half that goes unexamined once row scoping is

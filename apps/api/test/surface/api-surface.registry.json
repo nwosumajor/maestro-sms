@@ -957,6 +957,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /library/borrowers": {
+      "kind": "ui",
+      "note": "reviewed: components/library/LibraryManager.tsx fetches it from the \"Who is borrowing?\" card so a librarian can name the pupil or member of staff a book is issued to"
+    },
     "GET /library/books": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
