@@ -5,7 +5,14 @@
 // step-up gated (money); review moves are not. Self-contained client island —
 // loads its own data via the BFF.
 
-import type { ScholarshipProgramDto, ScholarshipApplicationDto, Serialized } from "@sms/types";
+import type {
+  ScholarshipExamQuestionDto,
+  ScholarshipProgramDto,
+  ScholarshipApplicationDto,
+  Serialized,
+} from "@sms/types";
+
+type Question = Serialized<ScholarshipExamQuestionDto>;
 import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { sendWithStepUp } from "@/lib/stepup";
@@ -125,6 +132,39 @@ export function ScholarshipAdmin() {
     else setMsg({ ok: false, text: await readApiError(res) });
   };
 
+  /** The paper as written. `null` means the READ failed — not an empty paper. */
+  const loadPaper = async (id: string): Promise<Question[] | null> => {
+    const res = await fetch(`/api/sms/scholarships/programs/${id}/questions`);
+    if (!res.ok) return null;
+    return (await res.json()) as Question[];
+  };
+
+  /**
+   * Remove one question by POSITION.
+   *
+   * The API's `examQuestions` REPLACES the set, which is what makes a removal
+   * (or a correction) possible at all — `appendQuestion` alone could only ever
+   * grow the paper. Re-reads first so a stale page cannot drop a question added
+   * since it was opened.
+   */
+  const removeQuestion = async (id: string, index: number): Promise<boolean> => {
+    setBusy(`q-${id}`); setMsg(null);
+    const current = await loadPaper(id);
+    if (current === null) {
+      setBusy(null);
+      setMsg({ ok: false, text: "The paper could not be read, so nothing was removed." });
+      return false;
+    }
+    const kept = current
+      .filter((question) => question.index !== index)
+      .map(({ text, options, answerIndex }) => ({ text, options, answerIndex }));
+    const res = await sendWithStepUp("PUT", `scholarships/programs/${id}`, { examQuestions: kept });
+    setBusy(null);
+    if (res.ok) { setMsg({ ok: true, text: "Question removed." }); void loadPrograms(); return true; }
+    setMsg({ ok: false, text: await readApiError(res) });
+    return false;
+  };
+
   const announceExam = async (id: string) => {
     setBusy(`announce-${id}`); setMsg(null);
     const res = await sendSms<{ notified: number; cbtExams: number; arena: boolean }>("POST", `scholarships/programs/${id}/announce-exam`);
@@ -236,6 +276,8 @@ export function ScholarshipAdmin() {
                 busy={busy}
                 onSaveExam={(v) => saveExam(pr.id, v)}
                 onAddQuestion={(q) => addQuestion(pr.id, q)}
+                onLoadPaper={() => loadPaper(pr.id)}
+                onRemoveQuestion={(index) => removeQuestion(pr.id, index)}
                 onAnnounce={() => announceExam(pr.id)}
                 onCollect={() => collectResults(pr.id)}
                 onStatus={(st) => setProgramStatus(pr.id, st)}
@@ -396,6 +438,8 @@ function ProgramRow({
   busy,
   onSaveExam,
   onAddQuestion,
+  onLoadPaper,
+  onRemoveQuestion,
   onAnnounce,
   onCollect,
   onStatus,
@@ -404,6 +448,9 @@ function ProgramRow({
   busy: string | null;
   onSaveExam: (v: { mode: string; at: string; venue: string; duration: string }) => void;
   onAddQuestion: (q: { text: string; options: string[]; answerIndex: number }) => void;
+  /** Read the paper back — admin-only, and its own route. */
+  onLoadPaper: () => Promise<Question[] | null>;
+  onRemoveQuestion: (index: number) => Promise<boolean>;
   onAnnounce: () => void;
   onCollect: () => void;
   onStatus: (status: string) => void;
@@ -415,6 +462,24 @@ function ProgramRow({
   const [venue, setVenue] = React.useState(pr.examVenue ?? "");
   const [duration, setDuration] = React.useState(String(pr.examDurationMin));
   const [showQ, setShowQ] = React.useState(false);
+  // THE PAPER AS WRITTEN. Questions could only ever be APPENDED — no read, no
+  // remove — so a typo, or a wrong correct-option, was permanent, on the paper
+  // that decides who is awarded money. Read back only for `scholarship.admin`,
+  // from its own route; the candidate portal gets the COUNT and nothing else.
+  const [paper, setPaper] = React.useState<Question[] | null>(null);
+  const [paperFailed, setPaperFailed] = React.useState(false);
+
+  const loadPaper = async () => {
+    setPaper(null);
+    setPaperFailed(false);
+    const rows = await onLoadPaper();
+    if (rows === null) setPaperFailed(true);
+    else setPaper(rows);
+  };
+  const removeQuestion = async (index: number) => {
+    if (!confirm("Remove this question from the paper?")) return;
+    if (await onRemoveQuestion(index)) await loadPaper();
+  };
   const [q, setQ] = React.useState({ text: "", a: "", b: "", c: "", d: "", answer: 0 });
 
   const addQ = () => {
@@ -486,8 +551,16 @@ function ProgramRow({
           Save exam
         </Button>
         {pr.examMode === "ONLINE_CBT" && (
-          <Button size="sm" variant="ghost" onClick={() => setShowQ((v) => !v)}>
-            {showQ ? "Hide" : "Add"} questions ({pr.examQuestionCount})
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              const next = !showQ;
+              setShowQ(next);
+              if (next) void loadPaper();
+            }}
+          >
+            {showQ ? "Hide" : "Review"} questions ({pr.examQuestionCount})
           </Button>
         )}
         <Button
@@ -508,6 +581,44 @@ function ProgramRow({
       {/* CBT question composer */}
       {showQ && pr.examMode === "ONLINE_CBT" && (
         <div className="space-y-2 rounded-md border border-dashed border-border p-2">
+          {paperFailed ? (
+            // A failed read must not read as "this paper is empty" — that would
+            // invite the operator to type the whole thing again.
+            <p className="text-xs text-destructive">
+              The questions could not be loaded. Nothing has been removed — try opening this again
+              before adding any, or you may duplicate what is already there.
+            </p>
+          ) : paper === null ? (
+            <p className="text-xs text-muted-foreground">Loading the paper…</p>
+          ) : paper.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No questions yet.</p>
+          ) : (
+            <ol className="space-y-1.5">
+              {paper.map((question) => (
+                <li key={question.index} className="flex items-start gap-2 text-xs">
+                  <span className="mt-0.5 tabular-nums text-muted-foreground">{question.index + 1}.</span>
+                  <span className="flex-1">
+                    {question.text}
+                    <span className="ml-1.5 text-muted-foreground">
+                      {/* The KEY, marked. Reading it back is the whole point:
+                          a wrong correct-option marks every right answer wrong,
+                          and there was no way to see it, let alone fix it. */}
+                      answer: {question.options[question.answerIndex] ?? "(none)"}
+                    </span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Remove question ${question.index + 1}`}
+                    disabled={busy === `q-${pr.id}`}
+                    onClick={() => void removeQuestion(question.index)}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ol>
+          )}
           <Input placeholder="Question text" value={q.text} onChange={(e) => setQ({ ...q, text: e.target.value })} />
           <div className="grid grid-cols-2 gap-2">
             {(["a", "b", "c", "d"] as const).map((k, i) => (

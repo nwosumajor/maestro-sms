@@ -57,7 +57,6 @@ const API_ONLY: Record<string, string> = {
 const AWAITING_A_SCREEN: Record<string, string> = {
   completedAt: "a checklist item cannot be back-dated to when it was actually done",
   documentId: "a checklist item cannot be linked to the document that satisfies it",
-  examQuestions: "a scholarship exam's questions cannot be authored from the operator console",
   feeItemId: "an invoice line cannot be linked to its fee-catalogue item",
   lessonsPerSubject: "the timetable generator's per-subject quota cannot be overridden from the console",
   reviewerId: "an appraisal cannot be assigned to a reviewer other than the caller",

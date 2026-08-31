@@ -259,3 +259,26 @@ export interface ScholarshipPortalDto {
    *  PENDING_PRINCIPAL items. Empty for students. */
   pendingDecisions: ScholarshipApplicationDto[];
 }
+
+/**
+ * One question on a scholarship exam paper, WITH its answer.
+ *
+ * A SEPARATE type on a SEPARATE admin-only route, deliberately — never a field
+ * on `ScholarshipProgramDto`. That DTO is returned by two mappers: the operator
+ * console's and the candidate PORTAL's, whose mapper carries a `// SECURITY:`
+ * note that the question set "never leaves the platform-owned row toward
+ * applicants". Adding the questions there would make the compiler ask the portal
+ * for them too, and the obvious way to satisfy it hands every applicant the
+ * answer key.
+ *
+ * The audience here is `scholarship.admin`, which is super_admin only and
+ * NON-ELEVATABLE: the person who WROTE the paper, who must be able to read it
+ * back to correct it.
+ */
+export interface ScholarshipExamQuestionDto {
+  /** Position in the paper, which is also how a question is removed. */
+  index: number;
+  text: string;
+  options: string[];
+  answerIndex: number;
+}

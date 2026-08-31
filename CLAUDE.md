@@ -898,6 +898,55 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### An exam paper that could only be added to
+`GET /scholarships/programs/:id/questions` + `ScholarshipExamQuestionDto`,
+`ScholarshipAdmin`. Worked off the `AWAITING_A_SCREEN` backlog, and the entry's
+own REASON was wrong — which is the first finding.
+It read *"a scholarship exam's questions cannot be authored from the operator
+console"*. They can: the console posts `appendQuestion`, one at a time, and has
+since the module shipped. The gate could not see that because it keys on the
+FIELD NAME `examQuestions` and the screen sends a differently-named one. **A
+backlog entry whose reason is untrue is worse than no entry**, by that list's own
+rule that the reason is what a reader trusts.
+**THE REAL GAP IS NARROWER AND SHARPER: the paper could only ever GROW.** No
+read, no edit, no remove — the component says so in a comment, *"Fetch current
+questions is not exposed"*. So a typo in the text, or a wrong `answerIndex`, was
+**PERMANENT** on the paper that decides who is awarded money, and a wrong key
+marks every correct answer wrong for every candidate. The only feedback was
+`examQuestionCount`, a number.
+// NOTHING ABOUT THE SERVER NEEDED CHANGING except a way to read it back: the
+PUT has always accepted `examQuestions`, the full set, which REPLACES — so
+removal and correction were already expressible and simply unreachable.
+// **THE TRAP THIS FIX HAD TO AVOID, and it is a real one.**
+`ScholarshipProgramDto` is returned by TWO mappers — the operator console's and
+the candidate PORTAL's — and the portal's carries a `// SECURITY:` note that the
+question set "never leaves the platform-owned row toward applicants". Adding the
+questions as a FIELD there would make the compiler ask the portal for them too,
+and the obvious way to satisfy it hands every applicant the answer key. So it is
+a SEPARATE type on a SEPARATE route, and a test asserts the shared DTO never
+grows the field.
+Live, one throwaway programme, driven end to end:
+```
+paper as written   0: "2 + 2 = ?"          key=4
+                   1: "Capitol of France?" key=Rome   <- a typo AND a wrong key
+                   2: "5 x 3 = ?"          key=15
+remove question 2  200
+paper after        0: "2 + 2 = ?"   1: "5 x 3 = ?"
+student reading the paper      403
+portal carries answerIndex     false        examQuestions  false
+```
+// IT RE-READS BEFORE REPLACING, so a stale page cannot drop a question added
+since it was opened — the `examQuestions` PUT replaces the whole set, which is
+what makes a removal possible and also what makes a blind one destructive.
+// A FAILED READ IS NOT AN EMPTY PAPER, and here that distinction has teeth
+beyond the usual: an operator who believes the paper is empty retypes it, and
+`appendQuestion` DUPLICATES every question already there.
+// GOTCHA: there is no DELETE route for a programme, so the probe's row was
+removed directly after checking it had no applications.
+Mutation-validated four ways: gate the paper on `scholarship.apply` so a
+candidate could read the key, put the questions on the shared program DTO,
+remove without re-reading, and let a failed read read as an empty paper.
+
 ### A librarian who could only lend books to themselves
 `LibraryService.listBorrowers`, `GET /library/borrowers`, `LibraryManager`.
 Found by CORRECTING A GATE rather than by reading code, which is worth recording

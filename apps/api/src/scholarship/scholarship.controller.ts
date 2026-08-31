@@ -11,7 +11,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
-import type { ScholarshipApplicationDto } from "@sms/types";
+import type { ScholarshipApplicationDto, ScholarshipExamQuestionDto } from "@sms/types";
 import { narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -135,6 +135,18 @@ export class ScholarshipController {
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   listPrograms() {
     return this.admin.listPrograms();
+  }
+
+  /**
+   * The exam paper as written, WITH answers — `scholarship.admin` only, so the
+   * person who wrote it can read it back and correct it. Deliberately its own
+   * route rather than a field on the program: that DTO also serves the
+   * candidate portal.
+   */
+  @Get("programs/:id/questions")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  programQuestions(@Param("id") id: string): Promise<ScholarshipExamQuestionDto[]> {
+    return this.admin.listExamQuestions(id);
   }
 
   @Post("programs")

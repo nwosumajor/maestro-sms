@@ -1,3 +1,4 @@
+import type { ScholarshipExamQuestionDto } from "@sms/types";
 // =============================================================================
 // ScholarshipAdminService — platform owner (super_admin), CROSS-TENANT
 // =============================================================================
@@ -1140,6 +1141,35 @@ export class ScholarshipAdminService {
       awardMinor: r.awardMinor, reviewNote: r.reviewNote,
       createdAt: r.createdAt, updatedAt: r.updatedAt,
     }];
+  }
+
+  /**
+   * The exam paper as written, for the operator who wrote it.
+   *
+   * Questions could only ever be APPENDED from the console — no read, no edit,
+   * no remove — so a typo in the text, or a wrong `answerIndex`, was PERMANENT.
+   * On a scholarship exam the answer key decides who is awarded money, and a
+   * wrong key marks correct answers wrong for every candidate.
+   *
+   * `scholarship.admin` only. The count alone reaches everybody else, including
+   * the candidate portal.
+   */
+  async listExamQuestions(programId: string): Promise<ScholarshipExamQuestionDto[]> {
+    const db = this.client();
+    const program = await db.scholarshipProgram.findFirst({
+      where: { id: programId },
+      select: { examQuestions: true },
+    });
+    if (!program) throw new NotFoundException("Program not found");
+    const raw = Array.isArray(program.examQuestions)
+      ? (program.examQuestions as unknown as Array<{ text: string; options: string[]; answerIndex: number }>)
+      : [];
+    return raw.map((q, index) => ({
+      index,
+      text: q.text,
+      options: q.options,
+      answerIndex: q.answerIndex,
+    }));
   }
 
   private programDto(r: {
