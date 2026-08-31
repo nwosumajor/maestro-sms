@@ -120,6 +120,23 @@ export default async function BillingPage({
                   {data.subscription.priceMinor != null &&
                     ` · Last charged ${money(data.subscription.priceMinor, data.subscription.currency ?? "NGN")}`}
                 </CardDescription>
+                {/* TWO CURRENCIES, AND THEY ARE NOT THE SAME QUESTION.
+                    What a school pays the PLATFORM and what it charges FAMILIES
+                    are separate: the subscription is sold in the currencies the
+                    platform ships prices for (`planCurrencies`), and the school
+                    bills its own families in `school.currency`.
+                    Reported as confusing by a school seeing GHS on its
+                    dashboard and naira here — measured, both figures were
+                    correct and NOTHING said they were different things. A
+                    number a reader cannot account for is one they distrust,
+                    including the ones that are right. */}
+                {data.subscription.currency &&
+                  data.subscription.currency !== region.currency && (
+                    <CardDescription className="mt-1 text-xs">
+                      Your subscription is billed in {data.subscription.currency}. That is separate from
+                      the {region.currency} you charge families — school fees are unaffected by this.
+                    </CardDescription>
+                  )}
               </CardHeader>
               {data.subscription.status === "PAST_DUE" && (
                 <CardContent>

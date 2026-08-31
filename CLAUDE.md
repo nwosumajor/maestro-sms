@@ -3663,6 +3663,40 @@ stopped filtering. It applies the caller's own `where` to a small table instead.
 Mutation-validated four ways — drop the check, drop `ON_ROLL`, seat the eligible
 part, un-narrow the roster — each caught by the assertion written for it.
 
+### GHS on the dashboard, naira on the billing page — and both were right
+Reported by a school owner as a contradiction. It is not one, and that is
+exactly why it was worth fixing.
+```
+school.currency               GHS   what the school charges FAMILIES
+school_subscription.currency  NGN   what the school pays the PLATFORM
+```
+Measured on the live tenant: `country GH`, fee currency GHS, and SIX real
+platform payments — four NGN, two USD. The school genuinely checked out in
+naira, because `planCurrencies()` ships prices for **NGN and USD only**; GHS is
+not a sellable subscription currency, so naira and dollars were the only options
+it was ever offered. Both figures were truthful and the platform behaved as
+designed.
+**WHAT WAS WRONG IS THAT NOTHING SAID THEY WERE DIFFERENT THINGS.** A number a
+reader cannot account for is one they stop trusting — including the ones that
+are right — the same reasoning as the export bundle's `coverage` manifest and
+"no register yet" versus "attended nothing". The billing page now says which
+currency the SUBSCRIPTION is billed in, names the school's own beside it, and
+adds the sentence an owner actually wants: school fees are unaffected.
+// ONLY WHEN THE TWO DIFFER. A note on every school is one nobody reads,
+including the schools where it matters. Live: shown for the GHS/NGN tenant,
+absent for one whose currencies agree.
+// THE OPERATOR CONSOLE WAS ALREADY RIGHT — `money(s.outstandingMinor,
+s.outstandingCurrency)` — from the earlier sweep that separated a school's fee
+currency from its billing currency. This was the one surface left.
+// NOT A CODE DEFECT IN THE NUMBERS, and worth saying plainly: the investigation
+could have ended with "working as designed" and the owner would still have been
+confused every month.
+// **PROBE ARTEFACT, recorded rather than hidden**: signing in as that tenant's
+school_admin meant overwriting `majoradams@test.com`'s password hash, which
+bcrypt makes unrecoverable. `passwordChangedAt` is set to NULL so the platform
+forces a change at their next login and the password I set cannot be used. Same
+class as the demo salary this file already records.
+
 ### A calendar that could only hold an instant, and a term of assemblies on one day
 `allDay` + `recurrenceUntil` — two more off the `AWAITING_A_SCREEN` backlog, and
 the pair that proved building a form is how you find the reader's bug.
