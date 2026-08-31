@@ -102,8 +102,24 @@ export interface PlatformAnalyticsDto {
   recentPayments: PlatformRevenueEntryDto[];
 
   // --- decision-grade SaaS metrics (super_admin) ---
-  /** Monthly recurring revenue: normalised per-seat run-rate of ACTIVE subscriptions. */
-  mrr: { totalMinor: number; byPlan: Record<string, number>; arpaMinor: number; payingSchools: number };
+  /**
+   * Monthly recurring revenue: normalised per-seat run-rate of ACTIVE subscriptions.
+   *
+   * `totalMinor`, `byPlan` and `arpaMinor` are the platform's HOME currency, and
+   * `byCurrency` carries every other market — money is never summed across
+   * currencies, the rule the payments block twenty lines down already states at
+   * length ("kobo added to cents, which is not money in any currency"). This
+   * roll-up did exactly that, from a hard-coded naira table, thirty lines ABOVE
+   * the fix that says so.
+   */
+  mrr: {
+    totalMinor: number;
+    byPlan: Record<string, number>;
+    arpaMinor: number;
+    payingSchools: number;
+    /** Every currency with an active subscription, home currency included. */
+    byCurrency: { currency: string; totalMinor: number; payingSchools: number }[];
+  };
   /**
    * Monthly trend (chronological, last ~6 months) for growth + revenue charts.
    *
@@ -115,12 +131,20 @@ export interface PlatformAnalyticsDto {
   growth: { month: string; schools: number; students: number; revenueMinor: number }[];
   /** Acquisition funnel: public requests → approved → provisioned schools → paying. */
   funnel: { requests: number; approved: number; provisioned: number; paying: number };
-  /** Churn / delinquency signals for retention decisions. */
-  risk: { pastDue: number; canceled: number; atRiskMrrMinor: number };
+  /** Churn / delinquency signals for retention decisions. `atRiskMrrMinor` is
+   *  the HOME currency; `atRiskByCurrency` carries the rest. */
+  risk: {
+    pastDue: number;
+    canceled: number;
+    atRiskMrrMinor: number;
+    atRiskByCurrency: { currency: string; totalMinor: number }[];
+  };
   /** How widely each product module is switched on (informs product investment). */
   moduleAdoption: { key: string; label: string; schools: number }[];
-  /** Largest customer schools by enrolment (with their plan + MRR contribution). */
-  topSchools: { name: string; students: number; plan: string; mrrMinor: number }[];
+  /** Largest customer schools by enrolment (with their plan + MRR contribution).
+   *  `mrrCurrency` is the school's OWN subscription currency — the figure was
+   *  computed from the naira table for every school whatever it is billed in. */
+  topSchools: { name: string; students: number; plan: string; mrrMinor: number; mrrCurrency: string }[];
   /** Portfolio averages. */
   averages: { studentsPerSchool: number; modulesPerSchool: number };
   /** Platform-wide student demographics from profiles (every customer school). */
@@ -402,8 +426,13 @@ export interface AttentionRowDto {
   subscriptionStatus: string;
   students: number;
   staff: number;
-  /** Monthly run-rate at stake if this school lapses (kobo/cents). */
+  /** Monthly run-rate at stake if this school lapses, in the school's OWN
+   *  subscription currency. It was computed from the naira price list for every
+   *  school and rendered with a hard-coded naira sign, so a school billed in
+   *  dollars or cedis had somebody else's money in the column the console
+   *  exists to answer "what does this cost me" with. */
   mrrMinor: number;
+  mrrCurrency: string;
   /** Highest severity among the signals — what the sort is on. */
   severity: 1 | 2 | 3;
   signals: AttentionSignalDto[];

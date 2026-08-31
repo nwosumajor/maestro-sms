@@ -1,3 +1,4 @@
+import { PLAN_PRICING_BY_CURRENCY } from "@sms/types";
 // =============================================================================
 // OperatorAttentionService — the queue that decides what the owner looks at
 // =============================================================================
@@ -63,6 +64,9 @@ function makeService(opts: { probesThrow?: boolean } = {}) {
     {} as never,
     { record: jest.fn() } as never,
     { client } as never,
+    // The SHIPPED price lists, so MRR is asserted against real figures
+    // in each school's own currency rather than an invented table.
+    { effectiveAll: async () => PLAN_PRICING_BY_CURRENCY } as never,
   );
   return { svc, client };
 }
@@ -159,7 +163,7 @@ describe("OperatorAttentionService.queue", () => {
   });
 
   it("503s rather than guessing when the privileged client is absent", async () => {
-    const svc = new OperatorAttentionService({} as never, { record: jest.fn() } as never, { client: null } as never);
+    const svc = new OperatorAttentionService({} as never, { record: jest.fn() } as never, { client: null } as never, { effectiveAll: async () => PLAN_PRICING_BY_CURRENCY } as never);
     await expect(svc.queue(owner)).rejects.toThrow(/not configured/i);
   });
 });

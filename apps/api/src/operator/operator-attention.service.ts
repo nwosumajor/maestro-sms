@@ -23,6 +23,8 @@ import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common"
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import {
+  isCurrency,
+  monthlyRunRateMinor,
   DEFAULT_PLAN,
   PLAN_PRICING,
   PLATFORM_HOME_CURRENCY,
@@ -39,6 +41,7 @@ import {
   type SubscriptionStatus,
 } from "@sms/types";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { PlanPricingService } from "../billing/plan-pricing.service";
 import { headcountBySchool } from "./operator-people";
 import { toMinor } from "../common/money";
 import {
@@ -65,6 +68,7 @@ export class OperatorAttentionService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly planPricing: PlanPricingService,
   ) {}
 
   async queue(p: Principal): Promise<AttentionQueueDto> {
@@ -72,6 +76,9 @@ export class OperatorAttentionService {
     if (!client) throw new ServiceUnavailableException("The attention queue is not configured");
 
     const now = new Date();
+    // ONE resolve for the whole fleet sweep — the lesson the dunning and HR
+    // reminder sweeps already record about per-school lookups.
+    const pricing = await this.planPricing.effectiveAll();
     const schools = await client.school.findMany({
       where: { isPlatform: false, status: "ACTIVE" },
       select: { id: true, name: true },
@@ -137,7 +144,13 @@ export class OperatorAttentionService {
         ? effectivePlan(purchased, status, sub.currentPeriodEnd, sub.graceDays ?? undefined)
         : DEFAULT_PLAN;
       const seats = sub?.seats && sub.seats > 0 ? sub.seats : head.students;
-      const mrrMinor = (PLAN_PRICING[effective]?.perSeatMonthlyMinor ?? 0) * seats;
+      // THE MONEY THIS SCHOOL IS BILLED IN, at the price the operator actually
+      // set. This read the naira fallback table for every school whatever its
+      // currency, and the column was then rendered behind a hard-coded naira
+      // sign — on the one figure this console exists to answer "what does this
+      // cost me" with.
+      const mrrCurrency = isCurrency(sub?.currency ?? "") ? (sub!.currency as string) : PLATFORM_HOME_CURRENCY;
+      const mrrMinor = monthlyRunRateMinor(pricing, effective, mrrCurrency, seats);
 
       const signals: AttentionSignalDto[] = [];
       const add = (kind: AttentionKind, detail: string, severity: 1 | 2 | 3) => {
@@ -214,6 +227,7 @@ export class OperatorAttentionService {
         students: head.students,
         staff: head.staff,
         mrrMinor,
+        mrrCurrency,
         severity: Math.max(...signals.map((x) => x.severity)) as 1 | 2 | 3,
         signals,
       });

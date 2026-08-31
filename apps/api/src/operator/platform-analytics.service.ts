@@ -23,21 +23,25 @@ import {
   CURRENCIES,
   DEFAULT_PLAN,
   MODULE_CATALOG,
-  PLAN_PRICING,
+  PLATFORM_HOME_CURRENCY,
   SUBSCRIPTION_STATUS,
   ageBand,
   effectivePlan,
+  isCurrency,
   isPlan,
+  monthlyRunRateMinor,
   normalizeGender,
   resolveModules,
 } from "@sms/types";
 /** The platform bills its own MRR headline in one currency. Anything sold in
  *  another currency is real revenue but belongs on the per-currency ledger, not
  *  added into this figure. */
-const HOME_CURRENCY = CURRENCIES.NGN;
+// One definition, shared with the attention queue beside it.
+const HOME_CURRENCY = PLATFORM_HOME_CURRENCY;
 
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
+import { PlanPricingService } from "../billing/plan-pricing.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { headcountBySchool } from "./operator-people";
 import {
@@ -59,6 +63,7 @@ export class PlatformAnalyticsService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly planPricing: PlanPricingService,
   ) {}
 
   async overview(p: Principal): Promise<PlatformAnalyticsDto> {
@@ -81,7 +86,7 @@ export class PlatformAnalyticsService {
     // --- subscriptions (drives plan mix, MRR, module adoption, risk) ---
     const subs = await client.schoolSubscription.findMany({
       where: { schoolId: { in: customerIds } },
-      select: { schoolId: true, plan: true, status: true, currentPeriodEnd: true, graceDays: true, seats: true, overrides: true },
+      select: { schoolId: true, plan: true, status: true, currency: true, currentPeriodEnd: true, graceDays: true, seats: true, overrides: true },
     });
     const subBySchool = new Map(subs.map((s) => [s.schoolId, s]));
 
@@ -115,7 +120,15 @@ export class PlatformAnalyticsService {
     `);
 
     // --- per-school roll-up: effective plan, seats, MRR, effective modules ---
-    const perSeatMonthly = (plan: Plan): number => PLAN_PRICING[plan]?.perSeatMonthlyMinor ?? 0;
+    // THE PRICE THE OPERATOR ACTUALLY SET, in the money each school is billed
+    // in. This read `PLAN_PRICING` — the NAIRA fallback table — for every
+    // school, so a school paying in dollars or cedis contributed a naira figure
+    // to a total that then added them together. That is the "kobo added to
+    // cents, which is not money in any currency" defect the payments block
+    // below was fixed for; this roll-up sits thirty lines ABOVE it.
+    const pricing = await this.planPricing.effectiveAll();
+    const mrrByCurrency = new Map<string, { totalMinor: number; payingSchools: number }>();
+    const atRiskByCurrency = new Map<string, number>();
     const schoolsByPlan: Record<string, number> = {};
     const schoolsByStatus: Record<string, number> = {};
     const mrrByPlan: Record<string, number> = {};
@@ -135,7 +148,8 @@ export class PlatformAnalyticsService {
         ? effectivePlan(purchased, status, sub.currentPeriodEnd, sub.graceDays ?? undefined)
         : DEFAULT_PLAN;
       const seats = sub?.seats && sub.seats > 0 ? sub.seats : students;
-      const monthly = perSeatMonthly(effective) * seats;
+      const mrrCurrency = isCurrency(sub?.currency ?? "") ? (sub!.currency as string) : HOME_CURRENCY;
+      const monthly = monthlyRunRateMinor(pricing, effective, mrrCurrency, seats);
       const modules = resolveModules(effective, (sub?.overrides as unknown as ModuleOverrides) ?? null);
 
       schoolsByPlan[effective] = (schoolsByPlan[effective] ?? 0) + 1;
@@ -144,16 +158,25 @@ export class PlatformAnalyticsService {
       for (const m of modules) moduleCount.set(m, (moduleCount.get(m) ?? 0) + 1);
 
       if (status === SUBSCRIPTION_STATUS.ACTIVE && sub) {
-        mrrTotalMinor += monthly;
-        mrrByPlan[effective] = (mrrByPlan[effective] ?? 0) + monthly;
+        const row = mrrByCurrency.get(mrrCurrency) ?? { totalMinor: 0, payingSchools: 0 };
+        row.totalMinor += monthly;
+        row.payingSchools += 1;
+        mrrByCurrency.set(mrrCurrency, row);
         payingSchools += 1;
+        // The HEADLINE figures stay the home currency alone, exactly as the
+        // payments block below already does. `byCurrency` carries the rest.
+        if (mrrCurrency === HOME_CURRENCY) {
+          mrrTotalMinor += monthly;
+          mrrByPlan[effective] = (mrrByPlan[effective] ?? 0) + monthly;
+        }
       } else if (status === SUBSCRIPTION_STATUS.PAST_DUE) {
         pastDue += 1;
-        atRiskMrrMinor += monthly;
+        atRiskByCurrency.set(mrrCurrency, (atRiskByCurrency.get(mrrCurrency) ?? 0) + monthly);
+        if (mrrCurrency === HOME_CURRENCY) atRiskMrrMinor += monthly;
       } else if (status === SUBSCRIPTION_STATUS.CANCELED) {
         canceled += 1;
       }
-      return { name: s.name, students, plan: effective, mrrMinor: monthly };
+      return { name: s.name, students, plan: effective, mrrMinor: monthly, mrrCurrency };
     });
 
     // --- revenue from PAID platform-subscription payments ---
@@ -270,8 +293,16 @@ export class PlatformAnalyticsService {
       mrr: {
         totalMinor: mrrTotalMinor,
         byPlan: mrrByPlan,
-        arpaMinor: payingSchools ? Math.round(mrrTotalMinor / payingSchools) : 0,
+        // ARPA over the HOME-currency schools only — dividing a naira total by a
+        // count that includes dollar-billed schools is an average of nothing.
+        arpaMinor: (() => {
+          const home = mrrByCurrency.get(HOME_CURRENCY);
+          return home && home.payingSchools > 0 ? Math.round(home.totalMinor / home.payingSchools) : 0;
+        })(),
         payingSchools,
+        byCurrency: [...mrrByCurrency.entries()]
+          .map(([currency, v]) => ({ currency, ...v }))
+          .sort((a, b) => Number(b.currency === HOME_CURRENCY) - Number(a.currency === HOME_CURRENCY) || b.totalMinor - a.totalMinor),
       },
       growth: buckets.map(({ month, schools: sc, students: st, revenueMinor }) => ({ month, schools: sc, students: st, revenueMinor })),
       funnel: {
@@ -280,7 +311,14 @@ export class PlatformAnalyticsService {
         provisioned: schools.length,
         paying: payingSchools,
       },
-      risk: { pastDue, canceled, atRiskMrrMinor },
+      risk: {
+        pastDue,
+        canceled,
+        atRiskMrrMinor,
+        atRiskByCurrency: [...atRiskByCurrency.entries()]
+          .map(([currency, totalMinor]) => ({ currency, totalMinor }))
+          .sort((a, b) => Number(b.currency === HOME_CURRENCY) - Number(a.currency === HOME_CURRENCY) || b.totalMinor - a.totalMinor),
+      },
       moduleAdoption,
       topSchools,
       averages: {

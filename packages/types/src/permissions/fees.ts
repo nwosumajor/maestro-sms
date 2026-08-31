@@ -79,6 +79,18 @@ export function effectivePaymentApprovalThresholdMinor(input: {
 }
 
 /** The currency every hard-coded money constant in this platform is written in. */
+/**
+ * The currency the PLATFORM itself keeps its books in.
+ *
+ * Distinct from a school's FEE currency and from what any one school is BILLED
+ * in. Headline platform figures are reported in this, with every other market
+ * broken out beside them — money is never summed across currencies.
+ *
+ * It lives here for historical reasons and is the ONE definition:
+ * `platform-analytics.service.ts` had grown a private `HOME_CURRENCY` and the
+ * attention queue beside it a hard-coded naira sign, which is how two surfaces
+ * stating one fact drift apart.
+ */
 export const PLATFORM_HOME_CURRENCY = "NGN";
 
 /**

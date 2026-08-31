@@ -6,7 +6,7 @@
 // and 503s when the privileged client is unconfigured.
 
 import { ServiceUnavailableException } from "@nestjs/common";
-import { PLAN_PRICING } from "@sms/types";
+import { PLAN_PRICING, PLAN_PRICING_BY_CURRENCY } from "@sms/types";
 import { PlatformAnalyticsService } from "../../src/operator/platform-analytics.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
@@ -66,7 +66,13 @@ function makeService(client: ReturnType<typeof makeClient> | null) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = { runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn({}) };
   const privileged = { client };
-  return { service: new PlatformAnalyticsService(db as never, audit as never, privileged as never), audit };
+  // The SHIPPED price lists, so MRR is asserted against real figures in each
+  // school's own currency rather than an invented table.
+  const planPricing = { effectiveAll: async () => PLAN_PRICING_BY_CURRENCY };
+  return {
+    service: new PlatformAnalyticsService(db as never, audit as never, privileged as never, planPricing as never),
+    audit,
+  };
 }
 
 describe("PlatformAnalyticsService", () => {
@@ -98,7 +104,7 @@ describe("PlatformAnalyticsService", () => {
     expect(out.mrr.arpaMinor).toBe(10 * PLAN_PRICING.STANDARD.perSeatMonthlyMinor);
     // funnel: 3 requests total, 1 approved, 2 provisioned schools, 1 paying.
     expect(out.funnel).toEqual({ requests: 3, approved: 1, provisioned: 2, paying: 1 });
-    expect(out.risk).toEqual({ pastDue: 0, canceled: 0, atRiskMrrMinor: 0 });
+    expect(out.risk).toEqual({ pastDue: 0, canceled: 0, atRiskMrrMinor: 0, atRiskByCurrency: [] });
     expect(out.growth).toHaveLength(6); // last 6 months
     expect(out.topSchools[0].name).toBe("Alpha"); // 2 students > 0
     expect(out.moduleAdoption.length).toBeGreaterThan(0);

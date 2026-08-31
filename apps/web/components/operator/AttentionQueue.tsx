@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { formatMoney } from "@sms/types";
 import type { AttentionQueueDto, AttentionRowDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,8 +20,12 @@ const LABEL: Record<string, string> = {
   NO_ADMIN: "No administrator",
 };
 
-const naira = (minor: number) =>
-  `₦${(minor / 100).toLocaleString("en-NG", { maximumFractionDigits: 0 })}`;
+// THE SCHOOL'S OWN BILLING CURRENCY. This was a hard-coded naira sign over a
+// bare `/100`, on the column this console exists to answer "what does this cost
+// me" with — so a school billed in dollars or cedis had somebody else's money
+// in it, and a zero-decimal currency would have been a hundred times out.
+const runRate = (minor: number, currency: string) =>
+  formatMoney(minor, currency, "en").replace(/\.00$/, "");
 
 /**
  * The schools that need a DECISION.
@@ -116,7 +121,7 @@ export function AttentionQueue({ queue: data, initialKind = "" }: { queue: Queue
                     </td>
                     <td className="py-2.5 pr-4 text-right tabular-nums">{r.students.toLocaleString()}</td>
                     <td className="py-2.5 pr-4 text-right tabular-nums">{r.staff.toLocaleString()}</td>
-                    <td className="py-2.5 pr-4 text-right tabular-nums">{naira(r.mrrMinor)}</td>
+                    <td className="py-2.5 pr-4 text-right tabular-nums">{runRate(r.mrrMinor, r.mrrCurrency)}</td>
                     <td className="py-2.5 text-right">
                       <Link href={`/operator/schools/${r.schoolId}`} className="text-primary hover:underline">
                         Open

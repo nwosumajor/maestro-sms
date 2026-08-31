@@ -369,6 +369,39 @@ export function planCurrencies(plan: Plan): Currency[] {
   return Object.keys(PLAN_PRICING_BY_CURRENCY).filter(isCurrency);
 }
 /**
+ * A school's monthly run-rate, IN THE MONEY IT IS BILLED IN.
+ *
+ * Two services computed this independently and both did it the same wrong way:
+ * `PLAN_PRICING[plan].perSeatMonthlyMinor * seats`, where `PLAN_PRICING` is the
+ * NAIRA fallback table. So every school's MRR was a naira figure whatever it
+ * pays in, the operator's attention queue printed it behind a hard-coded naira
+ * sign, and the analytics roll-up SUMMED them — the "kobo added to cents, which
+ * is not money in any currency" defect that the payments block in that very
+ * file was fixed for, thirty lines below.
+ *
+ * It also read the CODE DEFAULTS rather than the operator's own `plan_price`
+ * rows, so a price the platform owner had set was not the price their revenue
+ * figures used.
+ *
+ * ONE function, because two spellings of one rule is how these two diverged in
+ * the first place. `pricing` is `PlanPricingService.effectiveAll()`.
+ *
+ * A currency with no price list yields ZERO rather than a naira figure: a school
+ * billed in money the platform does not price is an anomaly an operator should
+ * see, not one to paper over with somebody else's number.
+ */
+export function monthlyRunRateMinor(
+  pricing: MultiCurrencyPlanPricing,
+  plan: Plan,
+  currency: string,
+  seats: number,
+): number {
+  if (!isCurrency(currency)) return 0;
+  const perSeat = pricing[currency]?.[plan]?.perSeatMonthlyMinor ?? 0;
+  return perSeat * Math.max(0, seats);
+}
+
+/**
  * The currency a tier is DISPLAYED in by default.
  *
  * ENTERPRISE still PRESENTS in dollars — that is its market, and the marketing

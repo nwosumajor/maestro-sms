@@ -1,3 +1,4 @@
+import { PLATFORM_HOME_CURRENCY, toMajor } from "@sms/types";
 // Platform-owner business dashboard (super_admin home). Decision-grade cross-tenant
 // metrics from GET /operator/analytics — MRR, growth, acquisition funnel, churn risk,
 // module adoption, plan mix, revenue. Server component; interactive Recharts panels
@@ -40,7 +41,10 @@ export function PlatformAnalytics({ data }: { data: Serialized<PlatformAnalytics
 
   const planDonut = Object.entries(data.schoolsByPlan).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value, color: planColor[name] ?? RC.muted }));
   const statusDonut = Object.entries(data.schoolsByStatus).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value, color: STATUS_COLOR[name] ?? RC.muted }));
-  const mrrByPlan = Object.entries(data.mrr.byPlan).sort((a, b) => b[1] - a[1]).map(([label, v]) => ({ label, value: v / 100, color: planColor[label] ?? RC.primary }));
+  // HOME CURRENCY, and the chart says so — `byPlan` is the home-currency slice
+  // by design, with every other market on `mrr.byCurrency`. `toMajor` rather
+  // than `/100`: the divisor is the currency's, not a constant.
+  const mrrByPlan = Object.entries(data.mrr.byPlan).sort((a, b) => b[1] - a[1]).map(([label, v]) => ({ label, value: toMajor(v, PLATFORM_HOME_CURRENCY), color: planColor[label] ?? RC.primary }));
   const trend = data.growth.map((g) => ({ month: g.month, schools: g.schools, students: g.students, revenue: g.revenueMinor / 100 }));
   const funnel = [
     { label: "Requests", value: data.funnel.requests, color: RC.primaryFaint },
@@ -195,7 +199,14 @@ export function PlatformAnalytics({ data }: { data: Serialized<PlatformAnalytics
             </div>
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
               <p className="eyebrow text-amber-700">MRR at risk</p>
-              <p className="tnum mt-1 text-lg font-semibold">{money(data.risk.atRiskMrrMinor)}</p>
+              <p className="tnum mt-1 text-lg font-semibold">{money(data.risk.atRiskMrrMinor, PLATFORM_HOME_CURRENCY)}</p>
+              {data.risk.atRiskByCurrency
+                .filter((c) => c.currency !== PLATFORM_HOME_CURRENCY && c.totalMinor > 0)
+                .map((c) => (
+                  <p key={c.currency} className="tnum text-sm text-muted-foreground">
+                    + {money(c.totalMinor, c.currency)}
+                  </p>
+                ))}
               <p className="mt-0.5 text-xs text-muted-foreground">Recurring revenue from past-due schools — recover before it churns.</p>
             </div>
             {pipeline.length > 0 && <RCBars data={pipeline} height={140} color={RC.muted} />}
