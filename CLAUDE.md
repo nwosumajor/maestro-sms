@@ -898,6 +898,68 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A British school offered the National Housing Fund
+`PayrollPack.remittances` / `remittanceSchedulesFor` (`@sms/types/payroll.ts`),
+`PayrollService.remittanceExport`. `payroll.ts` opens with the rule that a
+country either has a PACK or payroll REFUSES to run, because "a payslip that is
+confidently wrong about tax is worse than no payslip — it is a filing a school
+hands to an employee and to a revenue authority."
+**THAT REASONING WAS APPLIED TO THE PAYSLIP AND NEVER TO THE FILING**, which is
+the thing actually handed to the revenue authority and the pension
+administrator. Every country got Nigeria's three:
+```
+paye     column headed "TIN"                      a Nigerian instrument
+pension  keyed on an "RSA PIN", employer at 10%   Nigeria's statutory rate
+nhf      the National Housing Fund                Nigeria only
+```
+So a British school was offered all three — and had **NO WAY AT ALL to file the
+National Insurance its own payslips compute**. `niMinor` is on every UK
+breakdown, carried since the UK pack shipped, and no schedule ever read it.
+// THE PENSION ONE IS THE SHARPEST: 10% is Nigeria's employer rate, against a UK
+auto-enrolment minimum of 3%, on a document filed with a pension administrator.
+// **WHERE A COUNTRY FIXES NO EMPLOYER RATE IN LAW, NONE IS STATED.** UK
+auto-enrolment sets a MINIMUM a school's own scheme may exceed, so the figure is
+a scheme setting this platform does not hold and the schedule reports the
+employee share and stops. Reporting what we know beats stating a number we do
+not — the argument of the file it sits in. The employer COLUMNS disappear
+entirely rather than being blanked: a column headed "Employer 10%" with nothing
+under it makes the same wrong claim.
+// A SCHEDULE THE COUNTRY DOES NOT FILE IS REFUSED, naming the ones it does,
+never emitted under the wrong heading. The check is input-and-own-school only
+and never consults the run, so it cannot become an existence oracle — the same
+line this file already draws for the meeting DECLINE validation.
+// TWO LAYERS, as everywhere else: the boundary enum accepts every key any pack
+can name, the SERVICE refuses the ones this school's country does not file.
+// `employerPensionMinor` NOW TAKES A REQUIRED RATE, and that is what found the
+one caller relying on the hidden 10% — a test asserting "is 10% of gross". The
+same trick as the Paystack currency sites and the payment-approval thresholds.
+// AND THE PAGE OFFERED WHAT THE SERVER WOULD REFUSE: three fixed links, so a
+British school got an NHF download button and no NI one. It renders the school's
+own schedules now, from `GET /hr/payroll/remittance-schedules`.
+Live, one school, driven both ways:
+```
+NG  PAYE "TIN"  ·  Pension "RSA PIN" + Employer 10%  ·  NHF
+    ni  -> 400 "Available: PAYE, Pension, NHF."
+GB  PAYE "National Insurance number"  ·  Pension "Pension scheme reference",
+    employee column only  ·  National Insurance (a schedule that did not exist)
+    nhf -> 400 "Available: PAYE, National Insurance, Pension (auto-enrolment)."
+```
+// NIGERIA IS UNCHANGED, deliberately and test-pinned — it is the only live pack,
+so nothing moves for any school already running payroll. The single edit is the
+pension EMPLOYEE column, headed "Employee 8%" and now "Employee": 8% is Nigeria's
+employee rate and would be wrong at the UK's 5%. The figures are untouched.
+// LATENT, not live: no school here has a country with a pack other than the
+default, so nothing has been mis-filed. It would have gone wrong silently the
+day a British school ran payroll, and the evidence would be a return somebody
+had already filed — the same "worst moment to find out" this file records for
+the zero-decimal payroll currency.
+// GOTCHA: the surface registry gate caught the new route immediately, which is
+what it is for — a route with no declared way of being reached.
+// PROBE: the demo school's `country` was set to GB to drive it and restored to
+null; the 60s region cache means each flip needs a wait before the API agrees.
+Mutation-validated three ways: give GB Nigeria's schedules, stop refusing an
+unfiled one (and restore the hard-coded 10%), and put the three fixed links back.
+
 ### Twelve rows offered, seven accepted
 `SELLING_CURRENCIES` (`operator.controller.ts`), `planCurrencies`,
 `AddonPricingService.update`, `PricingManager`. Carried the two-currency class

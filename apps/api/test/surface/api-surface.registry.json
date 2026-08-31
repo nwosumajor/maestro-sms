@@ -861,6 +861,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /hr/payroll/remittance-schedules": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/hr/payroll/page.tsx fetches it and passes the schedules to components/hr/PayrollManager.tsx, which renders one download link per statutory filing the school's country actually makes"
+    },
     "GET /hr/payroll/runs": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
