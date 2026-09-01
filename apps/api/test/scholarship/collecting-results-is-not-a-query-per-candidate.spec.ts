@@ -62,7 +62,9 @@ function make(opts: { candidates: number; withSittings: boolean }) {
     }),
   };
   const s = Object.create(ScholarshipAdminService.prototype) as ScholarshipAdminService;
-  Object.assign(s, { privileged: { client: db }, notifications: {}, audit: { record: jest.fn() }, logger: { warn: jest.fn() } });
+  Object.assign(s, {
+    // The entitlement cache, dropped when a school prize is granted.
+    modules: { invalidate: jest.fn() }, privileged: { client: db }, notifications: {}, audit: { record: jest.fn() }, logger: { warn: jest.fn() } });
   (s as unknown as { client: unknown }).client = () => db;
   (s as unknown as { auditOwn: unknown }).auditOwn = jest.fn().mockResolvedValue(undefined);
   return { s, db, calls, candidates };

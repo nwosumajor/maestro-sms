@@ -52,6 +52,18 @@ const AUTO_RENEW_LEAD_DAYS = 2;
  *  worse than leaving a dead row visible a little longer. */
 const ABANDON_INTENT_AFTER_HOURS = 48;
 
+/**
+ * How long before a granted tier ends the school is warned.
+ *
+ * Two weeks: long enough to decide and to budget, short enough that the notice
+ * still reads as urgent when it arrives. It matches the renewal banner's own
+ * horizon, so a school sees both kinds of "this is ending" on the same footing.
+ */
+const GRANT_EXPIRY_NOTICE_DAYS = 14;
+
+/** Who is told — the people who can act on it. */
+const GRANT_NOTICE_RECIPIENTS = ["principal", "school_admin"] as const;
+
 export interface DunningResult {
   reminded: number;
   pastDue: number;
@@ -68,6 +80,10 @@ export interface DunningResult {
   /** Of those, the ones whose SEAT METERING threw. They were dunned correctly;
    *  their seat growth simply went unmetered and is picked up next sweep. */
   arrearsFailed: number;
+  /** Schools warned that a GRANTED tier — a scholarship prize — is about to end.
+   *  A school lifted to ENTERPRISE for a session must not simply find the
+   *  modules gone one morning. */
+  grantsExpiring: number;
   /** Lapsed schools reported to the platform owners in the red alert. */
   alerted: number;
   /** Saved-card renewal charges attempted / declined this sweep. */
@@ -101,7 +117,7 @@ export class BillingDunningService {
       this.logger.warn("Dunning sweep requested but no privileged DB — skipping.");
       return {
         reminded: 0, pastDue: 0, scanned: 0, failed: 0, arrearsFailed: 0, alerted: 0,
-        autoRenewCharged: 0, autoRenewFailed: 0, abandoned: 0, skipped: "NO_DB",
+        autoRenewCharged: 0, autoRenewFailed: 0, abandoned: 0, grantsExpiring: 0, skipped: "NO_DB",
       };
     }
     const now = new Date();
@@ -231,6 +247,16 @@ export class BillingDunningService {
     this.logger.log(
       `Dunning sweep (${trigger}): scanned=${subs.length} reminded=${reminded} pastDue=${pastDue} alerted=${alerted} autoRenew=${autoRenewCharged}/${autoRenewCharged + autoRenewFailed} abandoned=${abandoned}`,
     );
+    // A GRANTED TIER IS ABOUT TO END. Its own arm and its own try, because a
+    // failure here must not cost the dunning that already ran — the lesson the
+    // seat-arrears accrual beside it records.
+    let grantsExpiring = 0;
+    try {
+      grantsExpiring = await this.warnExpiringGrants(client, now);
+    } catch (err) {
+      this.logger.error(`grant-expiry warnings failed: ${(err as Error).message}`);
+    }
+
     // `failed` is RETURNED, not merely logged: a sweep that reports "12 scanned,
     // 3 reminded" while four schools threw reads as a quiet night.
     return {
@@ -248,6 +274,7 @@ export class BillingDunningService {
       autoRenewCharged,
       autoRenewFailed,
       abandoned,
+      grantsExpiring,
     };
   }
 
@@ -315,6 +342,72 @@ export class BillingDunningService {
    * and this one is the loop directly ABOVE the per-school guard those fixes
    * added, which is how it was missed.
    */
+  /**
+   * Warn a school before a GRANTED tier runs out.
+   *
+   * A scholarship prize lifts the winner's school to ENTERPRISE for a session,
+   * two terms or one term. It expires by DATE — deliberately, so nothing has to
+   * be swept or repaired — and the cost of that is a school finding every
+   * ENTERPRISE module gone one morning with no warning. This is the warning.
+   *
+   * ONCE, not nightly. `grantExpiryNoticeAt` records that it has been sent, and
+   * granting a fresh window clears it — a notice repeated every night for two
+   * weeks is one people learn to ignore, including on the morning it mattered.
+   *
+   * It says what they KEEP, not only what they lose: the school's own paid plan
+   * is untouched throughout, and a reader whose modules are about to change
+   * needs to know their bill is not.
+   */
+  private async warnExpiringGrants(client: NonNullable<PrivilegedDatabaseService["client"]>, now: Date): Promise<number> {
+    const horizon = new Date(now.getTime() + GRANT_EXPIRY_NOTICE_DAYS * 24 * 60 * 60 * 1000);
+    const rows = await client.schoolSubscription.findMany({
+      where: {
+        grantedUntil: { gt: now, lte: horizon },
+        grantExpiryNoticeAt: null,
+        school: { is: { status: "ACTIVE" } },
+      },
+      select: { id: true, schoolId: true, grantedPlan: true, grantedUntil: true, grantedReason: true },
+    });
+    let warned = 0;
+    for (const row of rows) {
+      // PER SCHOOL, so one failure does not cost the rest their warning.
+      try {
+        const days = Math.max(1, Math.ceil((row.grantedUntil!.getTime() - now.getTime()) / 86_400_000));
+        // The PRIVILEGED client with an explicit schoolId, as every cross-tenant
+        // sweep here does — this service holds no tenant handle.
+        const leaders = await client.user.findMany({
+          where: {
+            schoolId: row.schoolId,
+            status: "ACTIVE",
+            roles: { some: { role: { name: { in: [...GRANT_NOTICE_RECIPIENTS] } } } },
+          },
+          select: { id: true },
+        });
+        for (const l of leaders as Array<{ id: string }>) {
+          await this.notifications
+            .enqueue(
+              { schoolId: row.schoolId, userId: l.id },
+              {
+                recipientId: l.id,
+                type: "BILLING",
+                title: `Your free ${row.grantedPlan} access ends in ${days} day${days === 1 ? "" : "s"}`,
+                body:
+                  `${row.grantedReason ?? "An awarded period"} ends on ${row.grantedUntil!.toISOString().slice(0, 10)}. ` +
+                  `After that your school returns to the plan it pays for — nothing is deleted, and your bill does not change. ` +
+                  `To keep the extra modules, upgrade from Billing before then.`,
+              },
+            )
+            .catch(() => undefined);
+        }
+        await client.schoolSubscription.update({ where: { id: row.id }, data: { grantExpiryNoticeAt: now } });
+        warned += 1;
+      } catch (err) {
+        this.logger.error(`grant-expiry warning failed for school ${row.schoolId}: ${(err as Error).message}`);
+      }
+    }
+    return warned;
+  }
+
   private async accrueSeatArrears(
     client: NonNullable<PrivilegedDatabaseService["client"]>,
     subs: Array<{

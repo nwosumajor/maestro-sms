@@ -1003,13 +1003,54 @@ export function effectivePlan(
   currentPeriodEnd: Date | null,
   graceDays: number = SUBSCRIPTION_GRACE_DAYS,
   now: Date = new Date(),
+  /**
+   * A tier the school was GIVEN for a while, and when it runs out.
+   *
+   * A scholarship prize gives the winner's school free ENTERPRISE for a period.
+   * It is deliberately NOT written over `plan`: that column is what the school
+   * BOUGHT, it is what renewal is priced from, and overwriting it would bill a
+   * STANDARD school at ENTERPRISE seats and leave them on ENTERPRISE for ever.
+   *
+   * A grant is a time-boxed UPLIFT resolved on READ, so it expires by date with
+   * no sweep to run and no state to repair — the same shape delinquency already
+   * uses one line up.
+   */
+  granted: { plan: Plan; until: Date | null } | null = null,
 ): Plan {
-  if (status === SUBSCRIPTION_STATUS.ACTIVE) return plan;
-  if (!currentPeriodEnd) return FALLBACK_PLAN;
-  const grace = status === SUBSCRIPTION_STATUS.PAST_DUE ? graceDays : 0;
-  const cutoff = new Date(currentPeriodEnd.getTime() + grace * 24 * 60 * 60 * 1000);
-  return now > cutoff ? FALLBACK_PLAN : plan;
+  const paid = ((): Plan => {
+    if (status === SUBSCRIPTION_STATUS.ACTIVE) return plan;
+    if (!currentPeriodEnd) return FALLBACK_PLAN;
+    const grace = status === SUBSCRIPTION_STATUS.PAST_DUE ? graceDays : 0;
+    const cutoff = new Date(currentPeriodEnd.getTime() + grace * 24 * 60 * 60 * 1000);
+    return now > cutoff ? FALLBACK_PLAN : plan;
+  })();
+  if (!granted?.until || now > granted.until) return paid;
+  // THE BETTER OF THE TWO, never simply the granted one: a school that pays for
+  // ENTERPRISE and then wins a PREMIUM prize must not be demoted by winning.
+  return planRank(granted.plan) > planRank(paid) ? granted.plan : paid;
 }
+
+/** Where a tier sits in the ladder, for comparing a paid plan with a granted one. */
+export function planRank(plan: Plan): number {
+  const order: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
+  return order.indexOf(plan);
+}
+
+/**
+ * How long each scholarship position earns the winner's SCHOOL.
+ *
+ * Stated in BILLED months, which is what `CYCLE_MONTHS` means here: a session is
+ * three terms and nine billed months, not twelve — holidays are not charged. So
+ * 1st place is a full session, 2nd two terms, 3rd one term.
+ */
+export const SCHOLARSHIP_SCHOOL_PRIZE_MONTHS: Record<1 | 2 | 3, number> = {
+  1: CYCLE_MONTHS.YEAR,
+  2: CYCLE_MONTHS.TERM * 2,
+  3: CYCLE_MONTHS.TERM,
+};
+
+/** The tier a winning school is lifted to. */
+export const SCHOLARSHIP_SCHOOL_PRIZE_PLAN: Plan = PLANS.ENTERPRISE;
 
 // ---------------------------------------------------------------------------
 // What a platform charge was FOR, in a sentence

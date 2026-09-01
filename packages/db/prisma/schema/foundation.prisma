@@ -412,6 +412,22 @@ model SchoolSubscription {
   /// MONTH | TERM | YEAR.
   billingCycle             String    @default("TERM")
   /// End of the currently-paid period; null for never-paid (default/comp).
+  /// A tier the school was GIVEN for a while — today only a scholarship prize:
+  /// the winner's school gets free ENTERPRISE for a session (1st), two terms
+  /// (2nd) or one term (3rd).
+  ///
+  /// DELIBERATELY NOT written over `plan`. That column is what the school
+  /// BOUGHT and what renewal is priced from; overwriting it would bill a
+  /// STANDARD school at ENTERPRISE seats and leave them on ENTERPRISE for ever.
+  /// `effectivePlan` takes the better of paid-vs-granted while the grant is
+  /// live, so it expires by DATE with no sweep and nothing to repair.
+  grantedPlan              String?
+  grantedUntil             DateTime?
+  /// Why, in a sentence a person can read on the operator console.
+  grantedReason            String?
+  /// When the school was last warned that the grant is ending, so the reminder
+  /// is sent once rather than nightly.
+  grantExpiryNoticeAt      DateTime?
   currentPeriodEnd         DateTime?
   /// Seat count (active students) last billed.
   seats                    Int?

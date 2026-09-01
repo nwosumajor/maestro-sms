@@ -55,6 +55,14 @@ function make(invoiceCurrency: string | null) {
         awardKind: "FEES_CREDIT", budgetMinor: 0,
       }),
     },
+    // Every real privileged client has this, and the award now grants the
+    // winner's SCHOOL a prize through it. A stub without one models a database
+    // that cannot exist, and its absence surfaced here as a SECOND error line
+    // in a suite counting them.
+    schoolSubscription: {
+      findFirst: jest.fn().mockResolvedValue({ id: "sub-1", grantedUntil: null }),
+      update: jest.fn().mockResolvedValue({}),
+    },
     invoice: {
       findFirst: jest.fn().mockResolvedValue(
         invoiceCurrency === null
@@ -77,6 +85,8 @@ function make(invoiceCurrency: string | null) {
   const s = Object.create(ScholarshipAdminService.prototype) as ScholarshipAdminService;
   const errors: string[] = [];
   Object.assign(s, {
+    // The entitlement cache, dropped when a school prize is granted.
+    modules: { invalidate: jest.fn() },
     privileged: { client: db },
     notifications: {},
     audit: { record: jest.fn() },

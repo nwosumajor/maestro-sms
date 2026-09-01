@@ -60,7 +60,11 @@ function make(opts: { existingPayments?: Array<Record<string, unknown>>; claimCo
     },
   };
   const s = Object.create(ScholarshipAdminService.prototype) as ScholarshipAdminService;
-  Object.assign(s, { privileged: { client: db }, notifications: {}, audit: { record: jest.fn() } });
+  Object.assign(s, {
+    // The entitlement cache, dropped when a school prize is granted.
+    modules: { invalidate: jest.fn() },
+    // Every real instance has one — Nest constructs it as a field.
+    logger: { error: jest.fn(), warn: jest.fn(), log: jest.fn() }, privileged: { client: db }, notifications: {}, audit: { record: jest.fn() } });
   const disburse = (s as unknown as {
     disburseFeesCredit: (d: unknown, sc: string, st: string, a: number, id: string, by: string) => Promise<unknown>;
   }).disburseFeesCredit.bind(s);

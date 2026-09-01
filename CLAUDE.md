@@ -898,6 +898,61 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A prize for the school, held beside what it bought
+`SCHOLARSHIP_SCHOOL_PRIZE_MONTHS`, `effectivePlan(..., granted)`,
+`grantSchoolPrize`, `warnExpiringGrants` (migration `20270122000000`). Owner's
+decision: a scholarship rewards the pupil with fees AND the school that taught
+them with free ENTERPRISE — a session for 1st, two terms for 2nd, one term for
+3rd.
+Stated in BILLED months, which is what `CYCLE_MONTHS` means here: a session is
+three terms and **nine** months, not twelve — holidays are not charged.
+// **THE GRANT IS NEVER WRITTEN OVER `plan`.** That column is what the school
+BOUGHT and what renewal is priced from; setting it to ENTERPRISE would bill a
+STANDARD school at ENTERPRISE seats and leave them there for ever. It is a
+time-boxed uplift resolved on READ, so it expires by DATE — no sweep to run,
+nothing to repair — the shape delinquency already uses one line up.
+// **THE BETTER OF THE TWO, never simply the granted one**: a school paying for
+ENTERPRISE that wins a PREMIUM prize must not be demoted by winning. Hence
+`planRank`.
+// IT STILL LIFTS A DELINQUENT SCHOOL, deliberately: the prize was won, and
+non-payment of their own plan is a separate matter the platform decided to give
+anyway.
+// EXTENDS RATHER THAN REPLACES. A school winning twice keeps both prizes — the
+new window runs from whichever is later, its own start or the grant in hand.
+// BEST-EFFORT, like the fees credit beside it: a failed prize must not unwind
+an award whose money has already moved and whose family has already been told.
+Live, one STANDARD school winning 1st place:
+```
+before   GET /hr/employees (an ENTERPRISE module)   404
+award    grant: ENTERPRISE until 2027-06-01
+         "1st place in “PROBE Prize” — 9 months of ENTERPRISE"
+         purchased plan STILL STANDARD
+after    GET /hr/employees                          200
+         the school is told: "awarded 9 months of ENTERPRISE"
+expired  (grantedUntil in the past)                 404, by date alone
+```
+// **AND THEY ARE WARNED BEFORE IT ENDS**, which the owner asked for: an arm of
+the nightly dunning sweep, 14 days out, in its OWN try so a failure cannot cost
+the dunning that already ran. ONCE, not nightly — `grantExpiryNoticeAt` records
+it and a fresh prize clears it, because a notice repeated for a fortnight is one
+people ignore including on the morning it matters. Live: `grantsExpiring: 1`
+then `0` on a second run. It says **the bill does not change**, which is the
+reader's real question when their modules are about to.
+// GOTCHA, and it cost a wrong conclusion for a minute: setting `grantedUntil`
+into the past by SQL did NOT take effect — the entitlement cache is ten minutes
+and only an application write invalidates it. Restart, or go through the API.
+The rule this file already records, met again.
+// GOTCHA: three fixtures build the service with `Object.create(prototype)` and
+had neither a `logger` nor the entitlement service, so the new code threw inside
+its own catch — and one stub had no `schoolSubscription` model at all, which
+surfaced as a SECOND error line in a suite counting them. Every real instance
+has all three.
+// GOTCHA: the TEST database needed `migrate deploy` of its own. Three e2e
+suites failed on the missing columns, which reads like a code fault and is not.
+Mutation-validated five ways: overwrite the purchased plan, let the granted plan
+always win, ignore the grant where modules are decided, warn nightly instead of
+once, and replace an existing grant instead of extending it.
+
 ### Each school held the answer key to the competition it was entering
 `assertNotAPlatformExam` (`cbt/cbt.service.ts`). Found by the owner asking a
 QUESTION — whether the scholarship exam is properly separate from the paid CBT

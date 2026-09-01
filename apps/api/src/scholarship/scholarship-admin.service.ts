@@ -19,6 +19,8 @@ import {
   DISBURSABLE_AWARD_KINDS,
   MODULES,
   SCHOLARSHIP_MAX_AWARDS,
+  SCHOLARSHIP_SCHOOL_PRIZE_MONTHS,
+  SCHOLARSHIP_SCHOOL_PRIZE_PLAN,
   isDisbursableAwardKind,
   resolveRegion,
   scholarshipSubjectConcept,
@@ -91,6 +93,14 @@ interface ProgramInput {
   examQuestions?: Array<{ text: string; options: string[]; answerIndex: number }> | null;
   /** Append a single CBT question (the console adds them one at a time). */
   appendQuestion?: { text: string; options: string[]; answerIndex: number };
+}
+
+/** Who is told about a prize the SCHOOL won — the people who run it. */
+const SCHOOL_PRIZE_RECIPIENTS = ["principal", "school_admin"] as const;
+
+/** "1st" / "2nd" / "3rd", for a sentence a person reads. */
+function ordinalPosition(position: number): string {
+  return position === 1 ? "1st" : position === 2 ? "2nd" : position === 3 ? "3rd" : `${position}th`;
 }
 
 @Injectable()
@@ -418,6 +428,10 @@ export class ScholarshipAdminService {
       if ((program?.awardKind ?? "FEES_CREDIT") === "FEES_CREDIT") {
         disbursement = await this.disburseFeesCredit(db, app.schoolId, app.studentId, awardMinor, app.id, p.userId);
       }
+      // AND THE WINNER'S SCHOOL IS AWARDED TOO. A scholarship rewards the pupil
+      // with fees and the school that taught them with free ENTERPRISE: a
+      // session for 1st, two terms for 2nd, one term for 3rd.
+      await this.grantSchoolPrize(db, app.schoolId, position, program?.title ?? "a scholarship", p.userId);
       if (disbursement?.ok) {
         // Exactly one link is set, so a reader can always tell an award that
         // moved a bill from one waiting on the credit ledger.
@@ -989,6 +1003,32 @@ export class ScholarshipAdminService {
   /** Notify the student AND their guardians inside THEIR OWN school's tenant
    *  (the operator writes the notification rows under that school's GUC — RLS
    *  intact; recipients read them via their normal self-scoped inbox). */
+  /**
+   * Tell the school's leadership something about their own subscription.
+   *
+   * The prize is theirs, not the family's, so it goes to whoever runs the
+   * school rather than through `notifyFamily`. Best-effort: the grant is the
+   * durable fact and a failed notice must not undo it.
+   */
+  private async notifySchool(schoolId: string, title: string, body: string, actorId: string): Promise<void> {
+    const ctx = { schoolId, userId: actorId };
+    try {
+      const leaders = await this.db.runAsTenant(ctx, (tx) =>
+        tx.user.findMany({
+          where: { status: "ACTIVE", roles: { some: { role: { name: { in: [...SCHOOL_PRIZE_RECIPIENTS] } } } } },
+          select: { id: true },
+        }),
+      );
+      for (const l of leaders as Array<{ id: string }>) {
+        await this.notifications
+          .enqueue(ctx, { recipientId: l.id, type: "SCHOLARSHIP", title, body })
+          .catch(() => undefined);
+      }
+    } catch (err) {
+      this.logger.warn(`school prize notify failed (non-fatal): ${String(err)}`);
+    }
+  }
+
   private async notifyFamily(p: Principal, schoolId: string, studentId: string, title: string, body: string): Promise<void> {
     const ctx = { schoolId, userId: p.userId };
     try {
@@ -1016,6 +1056,71 @@ export class ScholarshipAdminService {
    * things happened, so the family is told the truth and the operator learns
    * about the one case that needs a person.
    */
+  /**
+   * The winner's SCHOOL gets free ENTERPRISE for a period.
+   *
+   * A TIME-BOXED UPLIFT beside the purchased plan, never written over it.
+   * `plan` is what the school BOUGHT and what renewal is priced from; setting
+   * it to ENTERPRISE would bill a STANDARD school at ENTERPRISE seats and leave
+   * them there for ever. `effectivePlan` takes the better of paid-vs-granted
+   * while `grantedUntil` is in the future, so this expires by DATE — nothing to
+   * sweep, nothing to repair, and paying or lapsing meanwhile still behaves
+   * exactly as it did.
+   *
+   * EXTENDS RATHER THAN REPLACES. A school winning twice keeps both prizes: the
+   * new window runs from whichever is later, its own start or the grant it
+   * already holds. Replacing would silently shorten the first prize.
+   *
+   * BEST-EFFORT, like the fees credit beside it: a prize is a reward, and
+   * failing to grant it must not roll back an award the platform has decided
+   * and told the family about. It logs at ERROR so somebody can put it right.
+   */
+  private async grantSchoolPrize(
+    db: PrismaClient,
+    schoolId: string,
+    position: number,
+    programTitle: string,
+    actorId: string,
+  ): Promise<void> {
+    const months = SCHOLARSHIP_SCHOOL_PRIZE_MONTHS[position as 1 | 2 | 3];
+    if (!months) return;
+    try {
+      const sub = await db.schoolSubscription.findFirst({
+        where: { schoolId },
+        select: { id: true, grantedUntil: true },
+      });
+      if (!sub) {
+        this.logger.error(`school prize for ${schoolId}: no subscription row, nothing granted`);
+        return;
+      }
+      const now = new Date();
+      const from = sub.grantedUntil && sub.grantedUntil > now ? sub.grantedUntil : now;
+      const until = new Date(from);
+      until.setMonth(until.getMonth() + months);
+      await db.schoolSubscription.update({
+        where: { id: sub.id },
+        data: {
+          grantedPlan: SCHOLARSHIP_SCHOOL_PRIZE_PLAN,
+          grantedUntil: until,
+          grantedReason: `${ordinalPosition(position)} place in “${programTitle}” — ${months} months of ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN}`,
+          // A fresh window deserves a fresh warning.
+          grantExpiryNoticeAt: null,
+        },
+      });
+      this.modules.invalidate(schoolId);
+      await this.notifySchool(
+        schoolId,
+        `Your school has been awarded ${months} months of ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN}`,
+        `A pupil of yours took ${ordinalPosition(position)} place in “${programTitle}”. Every ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN} module is open to your school until ${until.toISOString().slice(0, 10)}, at no charge. Your own plan and what you pay for it are unchanged.`,
+        actorId,
+      );
+    } catch (e) {
+      // Never unwind an award over the prize: the pupil's money has already
+      // moved and the family has already been told.
+      this.logger.error(`school prize for ${schoolId} failed: ${(e as Error).message}`);
+    }
+  }
+
   private async disburseFeesCredit(
     db: PrismaClient,
     schoolId: string,

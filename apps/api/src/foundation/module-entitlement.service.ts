@@ -129,6 +129,10 @@ export class ModuleEntitlementService implements OnModuleInit {
           billingCycle: true,
           currentPeriodEnd: true,
           graceDays: true,
+          // The scholarship prize. Selected here or the uplift is invisible to
+          // the one place that decides what a school can open.
+          grantedPlan: true,
+          grantedUntil: true,
           seats: true,
           priceMinor: true,
           currency: true,
@@ -147,7 +151,15 @@ export class ModuleEntitlementService implements OnModuleInit {
     // Per-school grace wins over the platform default — set from the operator
     // console (bounded 0..GRACE_DAYS_MAX at the API).
     const graceDays = row?.graceDays ?? null;
-    const eff = effectivePlan(plan, status, currentPeriodEnd, graceDays ?? SUBSCRIPTION_GRACE_DAYS, new Date());
+    // A GRANTED TIER LIFTS THE SCHOOL WHILE IT LASTS. A scholarship prize gives
+    // the winner's school free ENTERPRISE for a period; it is held beside the
+    // purchased plan rather than written over it, so this is where it takes
+    // effect — and where it stops, by date, with no sweep.
+    const granted =
+      row?.grantedPlan && isPlan(row.grantedPlan) && row.grantedUntil
+        ? { plan: row.grantedPlan as Plan, until: row.grantedUntil }
+        : null;
+    const eff = effectivePlan(plan, status, currentPeriodEnd, graceDays ?? SUBSCRIPTION_GRACE_DAYS, new Date(), granted);
     // DELINQUENCY REACHES THE ADD-ONS TOO.
     //
     // `eff !== plan` means the tier was dropped to the floor for non-payment.
