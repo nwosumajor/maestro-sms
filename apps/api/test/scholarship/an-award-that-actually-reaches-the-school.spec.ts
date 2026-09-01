@@ -90,16 +90,28 @@ describe("every qualified candidate can sit, whatever their school pays for", ()
   });
 
   it("notifies every qualified candidate, with nobody skipped", () => {
-    // THE LOOP THAT COUNTS, found from its own tail. `for (const c of
-    // candidates)` appears three times and `notifyFamily` five, so anchoring on
-    // either alone picked a region in a different method — and the assertion
-    // then passed against nothing, which a mutation caught rather than a
-    // reading.
-    const tail = ADMIN.indexOf("notified += 1");
-    const head = ADMIN.lastIndexOf("for (const c of candidates) {", tail);
+    // THE LOOP THAT COUNTS. This used to anchor on `notified += 1`, which the
+    // batching rewrite removed — the fan-out is now one transaction per SCHOOL
+    // rather than per candidate, because per-candidate took ~45 s for 5,000 and
+    // sat inside a 60 s proxy timeout.
+    //
+    // The property is unchanged and the assertion is now STRONGER: `notified`
+    // is what was actually WRITTEN, not the number of candidates in hand. The
+    // first version of the batched code counted the latter and reported
+    // "notified: 2,500" of 5,000 while a whole school's transaction had failed.
+    const head = ADMIN.indexOf("let notified = 0;");
     expect(head).toBeGreaterThan(0);
+    const tail = ADMIN.indexOf("await this.auditOwn(p, \"scholarship.exam.announce\"", head);
+    expect(tail).toBeGreaterThan(head);
     const body = ADMIN.slice(head, tail);
-    expect(body).toMatch(/await this\.notifyFamily\(/);
+    // Every school, and every candidate in it.
+    expect(body).toMatch(/for \(const \[schoolId, studentIds\] of bySchool\)/);
+    expect(body).toMatch(/enqueueMany\(ctx, studentIds,/);
+    // Counted from the write, never from the list.
+    expect(body).toMatch(/notified \+= pupils\.created/);
+    expect(body).not.toMatch(/notified \+= studentIds\.length/);
+    // A shortfall is reported rather than swallowed.
+    expect(body).toMatch(/notifyFailed \+=/);
     expect(body).not.toMatch(/continue;/);
   });
 

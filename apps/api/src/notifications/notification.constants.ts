@@ -99,3 +99,14 @@ export const NOTIFICATION_PAGE_SIZE = 50;
  * page, so the owner can walk past the cap to anything in the inbox.
  */
 export const NOTIFICATION_COUNT_CAP = 1000;
+
+/**
+ * Recipients per transaction in `enqueueMany`.
+ *
+ * An interactive transaction is capped at 5 seconds. Measured: 2,500 recipients
+ * in one transaction throws "Transaction already closed", and at ~500 rows a
+ * second a chunk of this size finishes in well under a second with room for a
+ * slow moment. Chunking costs nothing — it is still one transaction per chunk
+ * rather than one per recipient, which is the whole point of the batch.
+ */
+export const NOTIFY_CHUNK = 200;

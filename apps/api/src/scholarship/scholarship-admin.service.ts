@@ -1,6 +1,7 @@
 import { SCHOLARSHIP_COUNT_CAP, SCHOLARSHIP_UNDECIDED_STATUSES } from "@sms/types";
 import type {
   PublishedScholarshipResultsDto,
+  ScholarshipSchoolSpreadDto,
   ScholarshipApplicationPageDto,
   ScholarshipExamQuestionDto,
 } from "@sms/types";
@@ -90,6 +91,7 @@ interface ProgramInput {
   examMode?: string | null;
   examAt?: string | null;
   examVenue?: string | null;
+  maxCandidatesPerSchool?: number | null;
   /** Per-position prizes (kobo) — 2nd/3rd fall back to awardMinor when null. */
   award2Minor?: number | null;
   award3Minor?: number | null;
@@ -217,6 +219,7 @@ export class ScholarshipAdminService {
         examMode: (input.examMode ?? null) as never,
         examAt: input.examAt ? new Date(input.examAt) : null,
         examVenue: input.examVenue ?? null,
+        maxCandidatesPerSchool: input.maxCandidatesPerSchool ?? null,
         award2Minor: input.award2Minor ?? null,
         award3Minor: input.award3Minor ?? null,
         examDurationMin: input.examDurationMin ?? 30,
@@ -246,6 +249,7 @@ export class ScholarshipAdminService {
     if (input.examMode !== undefined) data.examMode = (input.examMode ?? null) as never;
     if (input.examAt !== undefined) data.examAt = input.examAt ? new Date(input.examAt) : null;
     if (input.examVenue !== undefined) data.examVenue = input.examVenue ?? null;
+    if (input.maxCandidatesPerSchool !== undefined) data.maxCandidatesPerSchool = input.maxCandidatesPerSchool ?? null;
     if (input.award2Minor !== undefined) data.award2Minor = input.award2Minor ?? null;
     if (input.award3Minor !== undefined) data.award3Minor = input.award3Minor ?? null;
     if (input.examDurationMin !== undefined) data.examDurationMin = input.examDurationMin;
@@ -427,6 +431,108 @@ export class ScholarshipAdminService {
    *  AWARD disburses a FEES_CREDIT via the Fees ledger and is CAPPED at the
    *  Best Three per program. Student + guardians are notified of every outcome. */
   /**
+   * How a programme is spread across schools.
+   *
+   * A cap stops one school crowding the field; it does NOT tell an operator
+   * that a school has nobody in it, and on the 5,000-applicant exercise one
+   * tenant ended with no exam created at all because none of its candidates was
+   * qualified. Nobody would have known without going to look. This is the other
+   * half of "duly represented": the numbers, per school, on the screen where
+   * the decisions are made.
+   *
+   * TWO grouped queries and one name lookup, never one per school.
+   */
+  async schoolSpread(p: Principal, programId: string): Promise<ScholarshipSchoolSpreadDto[]> {
+    const db = this.client();
+    const program = await db.scholarshipProgram.findFirst({
+      where: { id: programId },
+      select: { id: true, maxCandidatesPerSchool: true },
+    });
+    if (!program) throw new NotFoundException("Program not found");
+    const rows = (await db.scholarshipApplication.groupBy({
+      by: ["schoolId", "status"],
+      where: { programId, status: { not: "DRAFT" } },
+      _count: { _all: true },
+    })) as unknown as Array<{ schoolId: string; status: string; _count: { _all: number } }>;
+    const names = await this.schoolNames(db, [...new Set(rows.map((r) => r.schoolId))]);
+    const bySchool = new Map<string, ScholarshipSchoolSpreadDto>();
+    for (const r of rows) {
+      const cur =
+        bySchool.get(r.schoolId) ??
+        {
+          schoolId: r.schoolId,
+          schoolName: names.get(r.schoolId) ?? null,
+          applied: 0,
+          qualified: 0,
+          awarded: 0,
+          seatsLeft: null as number | null,
+        };
+      cur.applied += r._count._all;
+      if (r.status === "QUALIFIED") cur.qualified += r._count._all;
+      if (r.status === "AWARDED") cur.awarded += r._count._all;
+      bySchool.set(r.schoolId, cur);
+    }
+    const cap = program.maxCandidatesPerSchool;
+    const out = [...bySchool.values()].map((r) => ({
+      ...r,
+      // Null means no cap — NOT zero, which would read as "full".
+      seatsLeft: cap == null ? null : Math.max(0, cap - (r.qualified + r.awarded)),
+    }));
+    // Most applicants first: the school most likely to crowd the field is the
+    // one an operator wants at the top.
+    out.sort((a, b) => b.applied - a.applied);
+    await this.auditOwn(p, "scholarship.school-spread.read", programId, { schools: out.length });
+    return out;
+  }
+
+  /** School names for a refusal, so it says WHICH school is full rather than
+   *  handing an operator a uuid to go and look up. */
+  private async schoolNames(db: PrismaClient, ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = (await db.school.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })) as Array<{
+      id: string;
+      name: string;
+    }>;
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
+
+  /**
+   * How many more candidates a school may still have QUALIFIED on a programme.
+   *
+   * A platform-funded scholarship is a growth lever across every tenant, and
+   * without a cap the biggest school simply wins it: measured on a
+   * 5,000-applicant exercise, the school holding half the pupils took ALL SIX
+   * podium places across both categories, and the smallest ended with no exam
+   * created at all because none of its candidates was qualified.
+   *
+   * `Infinity` when the programme sets no cap — which is every programme
+   * authored before the column existed, so nothing moves for them.
+   */
+  private async remainingSeats(
+    db: PrismaClient,
+    programId: string,
+    cap: number | null,
+    schoolIds: string[],
+  ): Promise<Map<string, number>> {
+    const room = new Map<string, number>();
+    if (cap == null || cap <= 0 || schoolIds.length === 0) {
+      for (const id of schoolIds) room.set(id, Number.POSITIVE_INFINITY);
+      return room;
+    }
+    // AWARDED COUNTS AGAINST THE CAP. An awarded candidate qualified first and
+    // their seat is taken; excluding them would let a school quietly exceed the
+    // cap as its earlier candidates are promoted out of QUALIFIED.
+    const taken = (await db.scholarshipApplication.groupBy({
+      by: ["schoolId"],
+      where: { programId, schoolId: { in: schoolIds }, status: { in: ["QUALIFIED", "AWARDED"] as never } },
+      _count: { _all: true },
+    })) as unknown as Array<{ schoolId: string; _count: { _all: number } }>;
+    const used = new Map(taken.map((t) => [t.schoolId, t._count._all]));
+    for (const id of schoolIds) room.set(id, Math.max(0, cap - (used.get(id) ?? 0)));
+    return room;
+  }
+
+  /**
    * Move MANY applications through the queue in one request.
    *
    * A scholarship qualifies a cohort, not an individual: the exercise this was
@@ -478,6 +584,53 @@ export class ScholarshipAdminService {
       }
     }
 
+    // THE PER-SCHOOL CAP, applied here as well as in `decide` — a guard on one
+    // write path and not the other is not a guard. Over-cap rows are SKIPPED
+    // with the reason rather than failing the batch: the operator selected a
+    // cohort and the ones that fit should go through.
+    if (action === "QUALIFY" && eligible.length > 0) {
+      const withSchool = (await db.scholarshipApplication.findMany({
+        where: { id: { in: eligible } },
+        select: { id: true, schoolId: true, programId: true },
+      })) as Array<{ id: string; schoolId: string; programId: string }>;
+      const programIds = [...new Set(withSchool.map((r) => r.programId))];
+      const programs = (await db.scholarshipProgram.findMany({
+        where: { id: { in: programIds } },
+        select: { id: true, maxCandidatesPerSchool: true },
+      })) as Array<{ id: string; maxCandidatesPerSchool: number | null }>;
+      const capOf = new Map(programs.map((pr) => [pr.id, pr.maxCandidatesPerSchool]));
+      const names = await this.schoolNames(db, [...new Set(withSchool.map((r) => r.schoolId))]);
+      const fits: string[] = [];
+      for (const programId of programIds) {
+        const forProgram = withSchool.filter((r) => r.programId === programId);
+        const room = await this.remainingSeats(
+          db,
+          programId,
+          capOf.get(programId) ?? null,
+          [...new Set(forProgram.map((r) => r.schoolId))],
+        );
+        // IN THE ORDER THE OPERATOR SUPPLIED, which is the order they were
+        // looking at — oldest first by default, or by score if they sorted to
+        // rank. Choosing for them would be inventing a rule they did not set.
+        for (const id of eligible) {
+          const row = forProgram.find((r) => r.id === id);
+          if (!row) continue;
+          const left = room.get(row.schoolId) ?? 0;
+          if (left > 0) {
+            room.set(row.schoolId, left - 1);
+            fits.push(id);
+          } else {
+            skipped.push({
+              id,
+              reason: `${names.get(row.schoolId) ?? "that school"} has reached this programme's limit of ${capOf.get(programId)} candidate(s)`,
+            });
+          }
+        }
+      }
+      eligible.length = 0;
+      eligible.push(...fits);
+    }
+
     // ONE statement, not one per application — the same reason `writeScores`
     // does a single UPDATE rather than a loop of round trips.
     const res =
@@ -518,7 +671,23 @@ export class ScholarshipAdminService {
     let nextStatus: string = app.status;
     if (body.action === "REVIEW") nextStatus = "UNDER_REVIEW";
     else if (body.action === "SHORTLIST") nextStatus = "SHORTLISTED";
-    else if (body.action === "QUALIFY") nextStatus = "QUALIFIED";
+    else if (body.action === "QUALIFY") {
+      // THE SAME CAP AS THE BULK PATH. Refused rather than skipped here,
+      // because a single QUALIFY is one deliberate click on one pupil and
+      // silently doing nothing would be the silent-success shape.
+      const program = await db.scholarshipProgram.findFirst({
+        where: { id: app.programId },
+        select: { maxCandidatesPerSchool: true },
+      });
+      const room = await this.remainingSeats(db, app.programId, program?.maxCandidatesPerSchool ?? null, [app.schoolId]);
+      if ((room.get(app.schoolId) ?? 0) <= 0) {
+        const names = await this.schoolNames(db, [app.schoolId]);
+        throw new BadRequestException(
+          `${names.get(app.schoolId) ?? "That school"} already has ${program?.maxCandidatesPerSchool} candidate(s) qualified for this programme, which is the limit set for it. Raise the limit, or qualify a candidate from a school with room.`,
+        );
+      }
+      nextStatus = "QUALIFIED";
+    }
     else if (body.action === "REJECT") nextStatus = "REJECTED";
     else if (body.action === "AWARD") {
       const program = await db.scholarshipProgram.findFirst({
@@ -881,7 +1050,7 @@ export class ScholarshipAdminService {
   async announceExam(
     p: Principal,
     programId: string,
-  ): Promise<{ notified: number; cbtExams: number; arena: boolean }> {
+  ): Promise<{ notified: number; notifyFailed: number; cbtExams: number; arena: boolean }> {
     const db = this.client();
     const program = await db.scholarshipProgram.findFirst({ where: { id: programId } });
     if (!program) throw new NotFoundException("Program not found");
@@ -1093,24 +1262,66 @@ export class ScholarshipAdminService {
       : "Attend at the venue below.";
     const modeLabel =
       program.examMode === "ONLINE_CBT" ? "an online CBT mock exam" : program.examMode === "GAMES" ? "the games arena" : "a physical scheduled exam";
+    // ONE TRANSACTION PER SCHOOL, NOT PER CANDIDATE.
+    //
+    // This called `notifyFamily` in a loop, and that opens a tenant transaction
+    // for the pupil, ANOTHER to look up their guardians, and one more per
+    // guardian — three or four round trips each. Measured on the 5,000-applicant
+    // exercise: 8.5 s to announce to 1,000 candidates, so about 45 s for 5,000,
+    // which is a synchronous HTTP request sitting inside a 60 s proxy timeout
+    // and an operator with no idea whether it half-finished.
+    //
+    // `enqueueMany` already existed for exactly this shape, and its own comment
+    // says why it was written — "a whole class plus their guardians is ~100" for
+    // an exam release. A scholarship announce is that at ten times the size and
+    // never reached for it. Sibling asymmetry, with the careful one written
+    // first, again.
+    const title = `Scholarship exam scheduled — “${program.title}”`;
+    const body = `Category: ${String(program.category).replaceAll("_", " ").toLowerCase()}. The exam holds via ${modeLabel} on ${when} (UTC)${program.examVenue ? ` — ${program.examVenue}` : ""}. ${howTo} Good luck!`;
     let notified = 0;
-    for (const c of candidates) {
-      await this.notifyFamily(
-        p,
-        c.schoolId,
-        c.studentId,
-        `Scholarship exam scheduled — “${program.title}”`,
-        `Category: ${String(program.category).replaceAll("_", " ").toLowerCase()}. The exam holds via ${modeLabel} on ${when} (UTC)${program.examVenue ? ` — ${program.examVenue}` : ""}. ${howTo} Good luck!`,
-      );
-      notified += 1;
+    let notifyFailed = 0;
+    for (const [schoolId, studentIds] of bySchool) {
+      const ctx = { schoolId, userId: p.userId };
+      try {
+        // ONE guardian read for the whole school, not one per pupil.
+        const links = (await this.db.runAsTenant(ctx, (tx) =>
+          tx.parentChild.findMany({ where: { studentId: { in: studentIds } }, select: { parentId: true } }),
+        )) as Array<{ parentId: string }>;
+        // TWO CALLS, so `notified` counts PUPILS and is a number that was
+        // actually written rather than one that was attempted. Counting the
+        // candidates in hand would report 5,000 whatever happened — which is
+        // exactly how the first version of this reported 2,500 of 5,000 as a
+        // success while a whole school's transaction had failed.
+        const pupils = await this.notifications.enqueueMany(ctx, studentIds, { type: "SCHOLARSHIP", title, body });
+        notified += pupils.created;
+        notifyFailed += pupils.failed;
+        // Guardians ride along separately; `enqueueMany` de-duplicates, so a
+        // guardian of two candidates in one school gets one notice, not two.
+        const guardians = [...new Set(links.map((l) => l.parentId))];
+        if (guardians.length > 0) {
+          await this.notifications.enqueueMany(ctx, guardians, { type: "SCHOLARSHIP", title, body });
+        }
+      } catch (err) {
+        // Per SCHOOL, so one tenant's failure cannot cost every other school
+        // its announcement — the rule the fleet sweeps already follow. The
+        // count then reports what actually went out rather than what was
+        // attempted.
+        this.logger.warn(`scholarship announce notify failed for school ${schoolId} (non-fatal): ${String(err)}`);
+        notifyFailed += studentIds.length;
+      }
     }
     await this.auditOwn(p, "scholarship.exam.announce", programId, {
       candidates: candidates.length,
       examMode: program.examMode,
       cbtExams,
       arena,
+      notified,
+      notifyFailed,
     });
-    return { notified, cbtExams, arena };
+    // REPORT WHAT DID NOT GO OUT. A candidate who was never told is a candidate
+    // who will not turn up, and "notified: 2,500" out of 5,000 reads as a
+    // success unless the shortfall is named.
+    return { notified, notifyFailed, cbtExams, arena };
   }
 
   /** Harvest exam results back onto the QUALIFIED applications as a score SIGNAL
@@ -1828,6 +2039,7 @@ export class ScholarshipAdminService {
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
+    maxCandidatesPerSchool: number | null;
     examDurationMin: number; examQuestions: unknown; examSchedule: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }, committedMinor = 0): ScholarshipProgramDto {
     return {
@@ -1837,6 +2049,7 @@ export class ScholarshipAdminService {
       awardKind: r.awardKind, selectionBasis: r.selectionBasis, eligibility: r.eligibility ?? null,
       opensAt: r.opensAt, closesAt: r.closesAt, status: r.status,
       category: r.category, examMode: r.examMode, examAt: r.examAt, examVenue: r.examVenue,
+      maxCandidatesPerSchool: r.maxCandidatesPerSchool,
       examDurationMin: r.examDurationMin,
       examQuestionCount: Array.isArray(r.examQuestions) ? r.examQuestions.length : 0,
       resultsPublishedAt: r.resultsPublishedAt ?? null,

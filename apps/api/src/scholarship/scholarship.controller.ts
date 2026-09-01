@@ -11,7 +11,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
-import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto } from "@sms/types";
+import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto, ScholarshipSchoolSpreadDto } from "@sms/types";
 import { narrowStatus, pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -44,6 +44,9 @@ const programSchema = z.object({
   examMode: z.enum(["ONLINE_CBT", "GAMES", "PHYSICAL"]).nullish(),
   examAt: z.string().datetime().nullish(),
   examVenue: z.string().max(300).nullish(),
+  // A cap of zero would qualify nobody and read as a mistake, so the floor is 1
+  // and "no cap" is expressed by null rather than by 0.
+  maxCandidatesPerSchool: z.number().int().min(1).max(10_000).nullish(),
   examDurationMin: z.number().int().min(1).max(600).optional(),
 });
 const examQuestion = z.object({
@@ -423,6 +426,14 @@ export class ScholarshipController {
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   announceExam(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.admin.announceExam(p, id);
+  }
+
+  /** How the programme is spread across schools — applied / qualified / awarded
+   *  and the seats each has left under the per-school cap. */
+  @Get("programs/:id/school-spread")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  schoolSpread(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ScholarshipSchoolSpreadDto[]> {
+    return this.admin.schoolSpread(p, id);
   }
 
   /** Record a PHYSICAL exam's marks by hand — the only mode with no sitting to

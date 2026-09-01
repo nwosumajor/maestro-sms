@@ -254,12 +254,18 @@ describe("a cohort can be decided in one call", () => {
     const db = {
       scholarshipApplication: {
         findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
-          rows.filter((r) => where.id.in.includes(r.id)),
+          rows.filter((r) => where.id.in.includes(r.id)).map((r) => ({ ...r, schoolId: "sch", programId: "prog" })),
         updateMany: async (args: { where: unknown; data: Record<string, unknown> }) => {
           updates.push(args);
           return { count: (args.where as { id: { in: string[] } }).id.in.length };
         },
+        // The per-school cap counts seats already taken. Every real client has
+        // groupBy; this suite is about the BULK decision, so the programme
+        // below sets no cap and the count is never consulted.
+        groupBy: async () => [],
       },
+      scholarshipProgram: { findMany: async () => [{ id: "prog", maxCandidatesPerSchool: null }] },
+      school: { findMany: async () => [{ id: "sch", name: "A School" }] },
     };
     const s = Object.create(ScholarshipAdminService.prototype) as ScholarshipAdminService;
     Object.assign(s, {

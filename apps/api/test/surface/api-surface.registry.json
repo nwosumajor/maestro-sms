@@ -2949,6 +2949,10 @@
       "kind": "ui",
       "note": "bulk funnel actions on the selected rows in ScholarshipAdmin.tsx"
     },
+    "GET /scholarships/programs/:p/school-spread": {
+      "kind": "ui",
+      "note": "the \"Spread by school\" panel on ScholarshipAdmin.tsx"
+    },
     "POST /scholarships/programs/:p/scores": {
       "kind": "ui",
       "note": "the physical mark sheet on ScholarshipAdmin.tsx"

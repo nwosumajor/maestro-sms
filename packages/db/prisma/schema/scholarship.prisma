@@ -116,6 +116,12 @@ model ScholarshipProgram {
   examAt          DateTime?
   /// Venue (PHYSICAL) or platform pointer (ONLINE_CBT / GAMES) — display text.
   examVenue       String?
+  /// How many candidates ONE school may have QUALIFIED for this programme.
+  /// Null = no cap, which is every programme authored before the column
+  /// existed. Enforced when an application is QUALIFIED — the point at which
+  /// the operator decides who actually sits — not when it is applied for, so a
+  /// family is never turned away from applying by another school's numbers.
+  maxCandidatesPerSchool Int?
   /// ONLINE_CBT sitting length (minutes).
   examDurationMin Int                       @default(30)
   /// ONLINE_CBT question set, owner-authored: [{text, options[], answerIndex}].

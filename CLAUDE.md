@@ -898,6 +898,103 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### An announce that could not reach 5,000, and a prize the biggest school always won
+Two things asked for after the 5,000-applicant exercise: fix the announce
+timeout, and let the platform owner cap how many candidates one school may put
+forward.
+**THE ANNOUNCE WAS ONE TRANSACTION PER CANDIDATE.** It called `notifyFamily` in
+a loop, which opens a tenant transaction for the pupil, ANOTHER to look up their
+guardians, and one more per guardian — three or four round trips each, 8.5 s for
+1,000, so about 45 s for 5,000 inside a 60 s proxy timeout with an operator
+unable to tell whether it half-finished.
+// **`enqueueMany` ALREADY EXISTED FOR EXACTLY THIS**, and its own comment says
+why it was written — "a whole class plus their guardians is ~100" for an exam
+release. A scholarship announce is that at fifty times the size and never
+reached for it. Sibling asymmetry, careful one written first, again.
+// **AND BATCHING NAIVELY MADE IT WORSE IN A WAY THE OLD CODE WAS NOT.** One
+`enqueueMany` per school put 2,500 recipients in ONE interactive transaction,
+which is capped at 5 SECONDS: it threw "Transaction already closed", the
+caller's own catch swallowed it, and the operator was told **`notified: 2500`
+of 5,000**. A silent partial success, introduced by the fix for the slowness.
+The same 5-second cap the timetable solver hit, met from the other side.
+```
+per candidate (before)        ~45 s projected for 5,000
+batched, one tx per school    12.3 s   notified 2,500 of 5,000  <- worse
+chunked at NOTIFY_CHUNK=200   12.3 s   notified 5,000, failed 0
++ bulk insert                  1.31 s  notified 5,000, failed 0
+```
+// THE CHUNKING LIVES IN `enqueueMany`, not at the call site — the same argument
+as fixing a translation in the filter rather than at eight call sites. Every
+caller is safe from the cap now, including the exam release it was written for.
+// **THE BULK INSERT IS CHOSEN ONLY WHEN NOTHING VARIES PER RECIPIENT** — no
+`key` to localise and no external channel to decide, which is the shape of an
+announcement. Everything else still goes through `persist`, and the bulk path
+reproduces its insert EXACTLY rather than approximating it: a second spelling of
+what a notification row is would be how the two drift.
+// `notified` IS COUNTED FROM WHAT WAS WRITTEN (`pupils.created`), never from the
+candidates in hand, and `notifyFailed` is returned beside it. A candidate who
+was never told is one who will not turn up, and "notified: 2,500" reads as a
+success unless the shortfall is named. Two `enqueueMany` calls — pupils, then
+guardians — precisely so the pupil count is exact; guardians are de-duplicated,
+so a guardian of two candidates in one school gets one notice.
+**THE SECOND HALF: ONE SCHOOL WON EVERYTHING, AND THE EXERCISE PROVED IT.** With
+2,500 of the 5,000 pupils, the largest school took **ALL SIX podium places**
+across both categories, and the smallest ended with **no exam created at all**
+because none of its candidates was ever qualified. Nothing in the product said
+so. `scholarship_program.maxCandidatesPerSchool` (migration `20270126000000`,
+NULLABLE — null is no cap, so every programme authored before it is unchanged).
+Live, cap of 5, on the same three schools:
+```
+bulk-qualify 60 from the largest    updated=5  skipped=55
+  "St. Andrews Academy has reached this programme's limit of 5 candidate(s)"
+single QUALIFY into a full school   400, naming the school and the way out
+the other two schools               5 each — equally represented, whatever their size
+cap removed, 40 more from the big   updated=40 skipped=0
+```
+// ENFORCED ON BOTH WRITE PATHS, because a guard on one is not a guard. The
+single QUALIFY REFUSES (one deliberate click on one pupil; doing nothing
+silently would be the silent-success shape) and the bulk one SKIPS with the
+reason, which is the call that path already makes.
+// AWARDED COUNTS AGAINST THE CAP. An awarded candidate qualified first and
+their seat is taken; counting only QUALIFIED would let a school exceed the cap
+as its earlier candidates are promoted out of that status.
+// IN THE ORDER THE OPERATOR SUPPLIED when a selection exceeds the room —
+oldest-first by default, or by score if they sorted to rank. Choosing for them
+would be inventing a rule they did not set.
+// ONLY QUALIFY CONSUMES A SEAT: shortlisting and rejecting are untouched, since
+the cap is about who may SIT.
+// **A CAP CANNOT SAY THAT A SCHOOL HAS NOBODY IN IT**, which is the other half
+of "duly represented" and the half nobody would notice. `GET /scholarships/
+programs/:id/school-spread` reports applied / qualified / awarded and the seats
+left, per school, most applicants first — two grouped queries and one name
+lookup, never one per school. `seatsLeft` is NULL when there is no cap, which is
+a different statement from 0, and a school with nobody qualified is called out
+by name.
+// THE APPLICANT PORTAL SHOWS THE CAP, deliberately: how many candidates a
+school may put forward is a RULE of the programme, not a secret, and a family
+reading "your school may put forward 5" understands a refusal they would
+otherwise experience as arbitrary. Unlike the question set two fields up, which
+never leaves the platform-owned row.
+// GOTCHA, twice: two mutations reported `Tests: 0 total`, which is not a pass —
+`if (false)` left a variable unused and dropping a null check broke the
+arithmetic's type. Re-run as compiling removals, both failed the tests written
+for them.
+// GOTCHA: `an-award-that-actually-reaches-the-school` anchored on
+`notified += 1` and `for (const c of candidates)`, both of which the batching
+removed — a gate going red on a change that STRENGTHENS the property it guards,
+for the sixth time in this file. Re-anchored, and given the stronger assertion
+the rewrite makes possible: that `notified` comes from the write and not from
+the list.
+// GOTCHA: three fixtures lacked `createMany`, `update`, `scholarshipProgram`,
+`school` or `groupBy` — all methods and models every real client has.
+// PROBE: 5,000 users, 5,000 applications, one programme and 5,000 notifications
+removed; `scholarship_application` REINDEXed and VACUUM FULLed back to its
+original size, and no school holds a granted prize.
+Mutation-validated seven ways: one transaction for the whole batch, a dropped
+failed chunk, bulk-inserting when a channel is requested, the cap on the bulk
+path only, awards freeing up seats, no-cap meaning zero seats, and seatsLeft
+reported as 0 rather than null when there is no cap.
+
 ### 5,000 applicants, driven — and the queue could see 500 of them
 A full scholarship exercise at the scale asked for: 5,000 applicants across
 three tenants, 2,000 qualified, 1,000 sitting a two-subject CBT paper and 1,000

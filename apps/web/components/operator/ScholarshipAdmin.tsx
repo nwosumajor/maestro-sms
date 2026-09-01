@@ -10,6 +10,7 @@ import type {
   ScholarshipProgramDto,
   ScholarshipApplicationDto,
   ScholarshipApplicationPageDto,
+  ScholarshipSchoolSpreadDto,
   Serialized,
 } from "@sms/types";
 
@@ -142,7 +143,10 @@ export function ScholarshipAdmin() {
     } else setMsg({ ok: false, text: res.error ?? "Failed." });
   };
 
-  const saveExam = async (id: string, v: { mode: string; at: string; venue: string; duration: string }) => {
+  const saveExam = async (
+    id: string,
+    v: { mode: string; at: string; venue: string; duration: string; cap: string },
+  ) => {
     if (!v.mode || !v.at) { setMsg({ ok: false, text: "Pick an exam mode and date first." }); return; }
     setBusy(`exam-${id}`); setMsg(null);
     const res = await sendWithStepUp("PUT", `scholarships/programs/${id}`, {
@@ -150,6 +154,9 @@ export function ScholarshipAdmin() {
       examAt: new Date(v.at).toISOString(),
       examVenue: v.venue || null,
       examDurationMin: v.duration ? Math.max(1, parseInt(v.duration, 10)) : undefined,
+      // Blank means NO CAP, and null is how that is expressed — sending 0 would
+      // be a cap that qualifies nobody.
+      maxCandidatesPerSchool: v.cap.trim() === "" ? null : Math.max(1, parseInt(v.cap, 10)),
     });
     setBusy(null);
     if (res.ok) { setMsg({ ok: true, text: "Exam details saved — add questions (CBT) then announce." }); void loadPrograms(); }
@@ -790,7 +797,7 @@ function ProgramRow({
 }: {
   pr: Program;
   busy: string | null;
-  onSaveExam: (v: { mode: string; at: string; venue: string; duration: string }) => void;
+  onSaveExam: (v: { mode: string; at: string; venue: string; duration: string; cap: string }) => void;
   onAddQuestion: (q: { text: string; options: string[]; answerIndex: number; subject?: string | null }) => void;
   /** Read the paper back — admin-only, and its own route. */
   onLoadPaper: () => Promise<Question[] | null>;
@@ -817,6 +824,9 @@ function ProgramRow({
   const [mode, setMode] = React.useState(pr.examMode ?? "");
   const [at, setAt] = React.useState("");
   const [venue, setVenue] = React.useState(pr.examVenue ?? "");
+  const [cap, setCap] = React.useState(pr.maxCandidatesPerSchool != null ? String(pr.maxCandidatesPerSchool) : "");
+  const [spread, setSpread] = React.useState<Array<Serialized<ScholarshipSchoolSpreadDto>> | null>(null);
+  const [spreadFailed, setSpreadFailed] = React.useState(false);
   const [duration, setDuration] = React.useState(String(pr.examDurationMin));
   const [showQ, setShowQ] = React.useState(false);
   // THE PAPER AS WRITTEN. Questions could only ever be APPENDED — no read, no
@@ -936,7 +946,22 @@ function ProgramRow({
           <Label className="text-xs">Venue / link</Label>
           <Input className="w-44" placeholder="Hall / platform note" value={venue} onChange={(e) => setVenue(e.target.value)} />
         </div>
-        <Button size="sm" variant="outline" disabled={busy === `exam-${pr.id}`} onClick={() => onSaveExam({ mode, at, venue, duration })}>
+        <div className="flex items-center gap-1">
+          {/* Without this the biggest school simply wins: on a 5,000-applicant
+              run the school holding half the pupils took all six podium places
+              and the smallest got no exam at all. */}
+          <Label className="text-xs">Max per school</Label>
+          <Input
+            className="w-24"
+            type="number"
+            min={1}
+            aria-label="Maximum candidates one school may qualify"
+            placeholder="no limit"
+            value={cap}
+            onChange={(e) => setCap(e.target.value)}
+          />
+        </div>
+        <Button size="sm" variant="outline" disabled={busy === `exam-${pr.id}`} onClick={() => onSaveExam({ mode, at, venue, duration, cap })}>
           Save exam
         </Button>
         {pr.examMode === "ONLINE_CBT" && (
@@ -965,6 +990,19 @@ function ProgramRow({
             Collect results
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={async () => {
+            if (spread) { setSpread(null); return; }
+            const res = await fetch(`/api/sms/scholarships/programs/${pr.id}/school-spread`);
+            if (!res.ok) { setSpreadFailed(true); return; }
+            setSpreadFailed(false);
+            setSpread((await res.json()) as Array<Serialized<ScholarshipSchoolSpreadDto>>);
+          }}
+        >
+          {spread ? "Hide spread" : "Spread by school"}
+        </Button>
         {/* THE PHYSICAL EQUIVALENT OF "Collect results". A paper exam has no
             sitting to harvest, so the marks are typed in — and without this the
             mode dead-ended at the announcement. */}
@@ -999,6 +1037,46 @@ function ProgramRow({
           </span>
         )}
       </div>
+
+      {/* A CAP STOPS ONE SCHOOL CROWDING THE FIELD; it does not say that a
+          school has NOBODY in it, which is the other half of the question and
+          the one nobody would notice. */}
+      {spreadFailed && (
+        <p className="text-xs text-destructive">
+          The spread could not be loaded — do not read that as every school being represented.
+        </p>
+      )}
+      {spread && (
+        <div className="space-y-1 rounded-md border border-dashed border-border p-2 text-xs">
+          {spread.length === 0 ? (
+            <p className="text-muted-foreground">No applications yet, so no school is represented.</p>
+          ) : (
+            <>
+              <p className="text-muted-foreground">
+                {spread.length} school(s) represented
+                {pr.maxCandidatesPerSchool != null ? ` · limit ${pr.maxCandidatesPerSchool} qualified per school` : " · no per-school limit set"}
+              </p>
+              {spread.map((r) => (
+                <div key={r.schoolId} className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-[14rem] font-medium">{r.schoolName ?? "(unnamed school)"}</span>
+                  <span>{r.applied} applied</span>
+                  <span>· {r.qualified} qualified</span>
+                  <span>· {r.awarded} awarded</span>
+                  {/* Null is NO CAP, which is not the same statement as "full". */}
+                  {r.seatsLeft !== null && (
+                    <span className={r.seatsLeft === 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}>
+                      · {r.seatsLeft === 0 ? "at the limit" : `${r.seatsLeft} seat(s) left`}
+                    </span>
+                  )}
+                  {r.qualified + r.awarded === 0 && (
+                    <span className="text-amber-600 dark:text-amber-400">· nobody qualified yet</span>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
 
       {/* PHYSICAL mark sheet */}
       {showMarks && pr.examMode === "PHYSICAL" && (

@@ -714,6 +714,7 @@ export class ScholarshipService {
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
+    maxCandidatesPerSchool: number | null;
     examDurationMin: number; examQuestions: unknown; examSchedule: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }) {
     return {
@@ -725,6 +726,12 @@ export class ScholarshipService {
       awardKind: pr.awardKind, selectionBasis: pr.selectionBasis, eligibility: pr.eligibility ?? null,
       opensAt: pr.opensAt, closesAt: pr.closesAt, status: pr.status,
       category: pr.category, examMode: pr.examMode, examAt: pr.examAt, examVenue: pr.examVenue,
+      // Shown to applicants deliberately: how many candidates a school may
+      // qualify is a RULE of the programme, not a secret, and a family reading
+      // "your school may put forward 5" understands a refusal they would
+      // otherwise experience as arbitrary. Unlike the question set two fields
+      // up, which never leaves the platform-owned row.
+      maxCandidatesPerSchool: pr.maxCandidatesPerSchool,
       examDurationMin: pr.examDurationMin,
       // SECURITY: the count only — the question set (with answers) never leaves
       // the platform-owned row toward applicants.

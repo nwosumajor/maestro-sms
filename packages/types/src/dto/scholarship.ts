@@ -160,6 +160,14 @@ export interface ScholarshipProgramDto {
   examMode: string | null;
   examAt: Date | null;
   examVenue: string | null;
+  /**
+   * How many candidates ONE school may have qualified for this programme.
+   * Null = no cap. It exists because a platform-funded scholarship that only
+   * ever reaches the biggest school is not a growth lever across tenants: on a
+   * 5,000-applicant exercise the school holding half the pupils took all six
+   * podium places and the smallest got no exam at all.
+   */
+  maxCandidatesPerSchool: number | null;
   examDurationMin: number;
   /** How many CBT questions the owner has authored (never the questions). */
   examQuestionCount: number;
@@ -225,6 +233,18 @@ export interface ApplicationSignalsDto {
  * FIRST was reachable by nothing, with no filter that could get to them and
  * nothing saying the other 4,500 existed.
  */
+/** How a programme's candidates are spread across schools — the half a cap
+ *  cannot answer, which is whether a school has anybody in it at all. */
+export interface ScholarshipSchoolSpreadDto {
+  schoolId: string;
+  schoolName: string | null;
+  applied: number;
+  qualified: number;
+  awarded: number;
+  /** Null when the programme sets no cap; 0 means the school is full. */
+  seatsLeft: number | null;
+}
+
 export interface ScholarshipApplicationPageDto {
   items: ScholarshipApplicationDto[];
   /**
