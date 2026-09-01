@@ -10,7 +10,7 @@
 //              apply-on-behalf flow for parents/teachers.
 // Every action is server-scoped + audited; everyone is notified at each stage.
 
-import type { ScholarshipPortalDto, ScholarshipApplicationDto, ScholarshipRequestForm, Serialized } from "@sms/types";
+import type { ScholarshipExamPaperDto, ScholarshipPortalDto, ScholarshipApplicationDto, ScholarshipRequestForm, Serialized } from "@sms/types";
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -80,33 +80,80 @@ function StartScholarshipExam({ programId }: { programId: string }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [papers, setPapers] = React.useState<Paper[] | null>(null);
+  const { dateTime } = useFormat();
+
+  // WHICH PAPERS THEY HAVE. A scholarship may be examined in several subjects,
+  // so "the exam" is a list — and a candidate must be able to see which is
+  // which, and when each opens, WITHOUT opening one, because opening starts a
+  // clock they cannot stop.
+  React.useEffect(() => {
+    let live = true;
+    void (async () => {
+      const res = await fetch(`/api/sms/scholarships/exams/${programId}/papers`);
+      if (!live) return;
+      // A failed read is not "no papers" — that would tell a candidate there is
+      // nothing to sit on the morning of their exam.
+      setPapers(res.ok ? ((await res.json()) as Paper[]) : null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [programId]);
+
+  const open = async (examId?: string) => {
+    setBusy(true);
+    setErr(null);
+    const res = await postSms(`scholarships/exams/${programId}/start`, examId ? { examId } : {});
+    setBusy(false);
+    if (res.ok) {
+      const sitting = res.data as { sittingId?: string } | null;
+      if (sitting?.sittingId) {
+        router.push(`/scholarships/sitting/${sitting.sittingId}`);
+        return;
+      }
+    }
+    setErr(res.error ?? "The exam could not be opened.");
+  };
+
   return (
     <span className="inline-flex flex-col gap-1">
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          setErr(null);
-          const res = await postSms(`scholarships/exams/${programId}/start`, {});
-          setBusy(false);
-          if (res.ok) {
-            const sitting = res.data as { sittingId?: string } | null;
-            if (sitting?.sittingId) {
-              router.push(`/scholarships/sitting/${sitting.sittingId}`);
-              return;
-            }
-          }
-          setErr(res.error ?? "The exam could not be opened.");
-        }}
-      >
-        {busy ? "Opening…" : "Start the exam →"}
-      </Button>
+      {papers === null || papers.length <= 1 ? (
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void open(papers?.[0]?.examId)}>
+          {busy ? "Opening…" : "Start the exam →"}
+        </Button>
+      ) : (
+        <span className="flex flex-wrap gap-1.5">
+          {papers.map((paper) => (
+            <Button
+              key={paper.examId}
+              size="sm"
+              variant="outline"
+              // A paper that has not opened, or is finished, is not startable —
+              // and the reason is on the button rather than in a refusal after
+              // the click.
+              disabled={busy || !paper.open || paper.sittingStatus === "SUBMITTED"}
+              title={
+                paper.sittingStatus === "SUBMITTED"
+                  ? "You have already sat this paper"
+                  : paper.open
+                    ? `${paper.questionCount} questions · ${paper.durationMinutes} minutes`
+                    : `Opens ${dateTime(paper.startAt)}`
+              }
+              onClick={() => void open(paper.examId)}
+            >
+              {paper.title.replace(/^Scholarship exam — /, "")}
+              {paper.sittingStatus === "SUBMITTED" ? " ✓" : paper.open ? " →" : ""}
+            </Button>
+          ))}
+        </span>
+      )}
       {err && <span className="text-xs text-destructive">{err}</span>}
     </span>
   );
 }
+
+type Paper = Serialized<ScholarshipExamPaperDto>;
 
 export function ScholarshipPortal({ portal, roles }: { portal: Portal; roles: string[] }) {
   // Dates follow the SCHOOL's timezone, not the platform's.

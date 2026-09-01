@@ -11,7 +11,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
-import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamQuestionDto } from "@sms/types";
+import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto } from "@sms/types";
 import { narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -50,16 +50,29 @@ const examQuestion = z.object({
   text: z.string().min(1).max(2000),
   options: z.array(z.string().min(1).max(500)).min(2).max(6),
   answerIndex: z.number().int().min(0).max(5),
+  // WHICH PAPER this question belongs to. Omitted means the programme's own
+  // category — exactly the single-subject behaviour this generalises, so every
+  // question authored before now keeps its paper.
+  subject: z.string().min(1).max(80).nullish(),
 });
+/** When each subject's paper opens. Absent subjects use the programme window. */
+const examScheduleSchema = z.record(
+  z.string().min(1).max(80),
+  z.object({ examAt: z.string().datetime(), durationMin: z.number().int().min(1).max(600).optional() }),
+);
 const programUpdateSchema = programSchema.partial().extend({
   // Full replace of the CBT question set, OR append one at a time (the console
   // uses append since answers are never read back to the client).
   examQuestions: z.array(examQuestion).max(200).nullish(),
   appendQuestion: examQuestion.optional(),
+  examSchedule: examScheduleSchema.nullish(),
 });
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
 const revokeSchema = z.object({ reason: z.string().min(1).max(2000) });
+/** Which paper to open. Omitted is only unambiguous for a single-paper
+ *  programme, which is what every one authored before subjects existed is. */
+const startExamSchema = z.object({ examId: z.string().uuid().optional() });
 /** One multiple-choice answer. Bounded at the boundary like every other body. */
 const theoryAnswerSchema = z.object({ questionId: z.string().uuid(), text: z.string().max(20000) });
 const integritySchema = z.object({
@@ -174,10 +187,22 @@ export class ScholarshipController {
   // of the scholarship — `scholarship.apply`, which students hold — and the
   // SERVICE refuses anything that is not a scholarship exam, so the paid
   // module's gate is untouched rather than made conditional.
+  /** The papers this candidate has, and where each stands. A scholarship may be
+   *  examined in several subjects, so "the exam" is a list. */
+  @Get("exams/:programId/papers")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  examPapers(@CurrentPrincipal() p: Principal, @Param("programId") programId: string): Promise<ScholarshipExamPaperDto[]> {
+    return this.scholarships.examPapers(p, programId);
+  }
+
   @Post("exams/:programId/start")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
-  startExam(@CurrentPrincipal() p: Principal, @Param("programId") programId: string): Promise<CbtSittingViewDto> {
-    return this.scholarships.startExam(p, programId);
+  startExam(
+    @CurrentPrincipal() p: Principal,
+    @Param("programId") programId: string,
+    @Body(new ZodValidationPipe(startExamSchema)) body: z.infer<typeof startExamSchema>,
+  ): Promise<CbtSittingViewDto> {
+    return this.scholarships.startExam(p, programId, body.examId);
   }
 
   @Get("sittings/:id")

@@ -39,6 +39,11 @@ const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
  */
 const awardToMinor = (major: string) => toMinor(parseFloat(major) || 0, CURRENCIES.NGN);
 
+/** The papers a programme has, derived from its questions — never a second list. */
+function subjectsOf(paper: Question[]): string[] {
+  return [...new Set(paper.map((q) => q.subject).filter((x): x is string => !!x))];
+}
+
 export function ScholarshipAdmin() {
   const [programs, setPrograms] = React.useState<Program[]>([]);
   const [apps, setApps] = React.useState<Application[]>([]);
@@ -122,7 +127,10 @@ export function ScholarshipAdmin() {
 
   // Append one CBT question. The API stores the FULL set on the program; we send
   // the existing count + the new one by re-reading the program's current set.
-  const addQuestion = async (id: string, q: { text: string; options: string[]; answerIndex: number }) => {
+  const addQuestion = async (
+    id: string,
+    q: { text: string; options: string[]; answerIndex: number; subject?: string | null },
+  ) => {
     setBusy(`q-${id}`); setMsg(null);
     // Fetch current questions is not exposed (answers are server-only); instead
     // the API PUT MERGES when given `appendQuestion`. Send the single question.
@@ -157,7 +165,11 @@ export function ScholarshipAdmin() {
     }
     const kept = current
       .filter((question) => question.index !== index)
-      .map(({ text, options, answerIndex }) => ({ text, options, answerIndex }));
+      // THE SUBJECT COMES BACK TOO. This replaces the whole set, so a field
+      // dropped here is dropped from every question that survives — removing
+      // ONE question would have collapsed a three-paper exam into one, silently
+      // and on the operator's next click.
+      .map(({ text, options, answerIndex, subject }) => ({ text, options, answerIndex, subject }));
     const res = await sendWithStepUp("PUT", `scholarships/programs/${id}`, { examQuestions: kept });
     setBusy(null);
     if (res.ok) { setMsg({ ok: true, text: "Question removed." }); void loadPrograms(); return true; }
@@ -198,6 +210,38 @@ export function ScholarshipAdmin() {
       // reading of the status — `readApiError` takes a raw Response, which this
       // is not. The compiler caught it, as it did the last time.
     } else setMsg({ ok: false, text: res.error ?? "Could not change the publication." });
+  };
+
+  /**
+   * When one SUBJECT's paper opens.
+   *
+   * Sent as a MERGE of the existing schedule, not a replacement: setting the
+   * English date must not clear the Maths one, and the PUT replaces the whole
+   * map. Same shape as the question removal one panel up, and the same trap.
+   */
+  const saveWindow = async (
+    id: string,
+    current: Record<string, { examAt: string; durationMin?: number }>,
+    subject: string,
+    examAt: string,
+    durationMin: number | null,
+  ) => {
+    setBusy(`sched-${id}`);
+    setMsg(null);
+    const next = { ...current };
+    if (!examAt) delete next[subject];
+    else next[subject] = { examAt: new Date(examAt).toISOString(), ...(durationMin ? { durationMin } : {}) };
+    const res = await sendWithStepUp("PUT", `scholarships/programs/${id}`, { examSchedule: next });
+    setBusy(null);
+    if (res.ok) {
+      setMsg({
+        ok: true,
+        text: examAt
+          ? `${subject} opens ${new Date(examAt).toLocaleString()}. Announce again to move a paper already published.`
+          : `${subject} follows the programme's own exam time again.`,
+      });
+      void loadPrograms();
+    } else setMsg({ ok: false, text: await readApiError(res) });
   };
 
   const announceExam = async (id: string) => {
@@ -341,6 +385,7 @@ export function ScholarshipAdmin() {
                 onAddQuestion={(q) => addQuestion(pr.id, q)}
                 onLoadPaper={() => loadPaper(pr.id)}
                 onPublish={(publish) => publishResults(pr.id, publish)}
+                onSaveWindow={(current, subject, at, mins) => saveWindow(pr.id, current, subject, at, mins)}
                 onRemoveQuestion={(index) => removeQuestion(pr.id, index)}
                 onAnnounce={() => announceExam(pr.id)}
                 onCollect={() => collectResults(pr.id)}
@@ -505,6 +550,7 @@ function ProgramRow({
   onLoadPaper,
   onRemoveQuestion,
   onPublish,
+  onSaveWindow,
   onAnnounce,
   onCollect,
   onStatus,
@@ -512,11 +558,17 @@ function ProgramRow({
   pr: Program;
   busy: string | null;
   onSaveExam: (v: { mode: string; at: string; venue: string; duration: string }) => void;
-  onAddQuestion: (q: { text: string; options: string[]; answerIndex: number }) => void;
+  onAddQuestion: (q: { text: string; options: string[]; answerIndex: number; subject?: string | null }) => void;
   /** Read the paper back — admin-only, and its own route. */
   onLoadPaper: () => Promise<Question[] | null>;
   onRemoveQuestion: (index: number) => Promise<boolean>;
   onPublish: (publish: boolean) => void;
+  onSaveWindow: (
+    current: Record<string, { examAt: string; durationMin?: number }>,
+    subject: string,
+    examAt: string,
+    durationMin: number | null,
+  ) => void;
   onAnnounce: () => void;
   onCollect: () => void;
   onStatus: (status: string) => void;
@@ -547,11 +599,26 @@ function ProgramRow({
     if (await onRemoveQuestion(index)) await loadPaper();
   };
   const [q, setQ] = React.useState({ text: "", a: "", b: "", c: "", d: "", answer: 0 });
+  // WHICH PAPER this question goes on. A scholarship may be examined in several
+  // subjects, and the subjects ARE whichever ones the questions carry — there
+  // is no separate list of papers to fall out of step with. Blank means the
+  // programme's own category, which is the single-paper behaviour unchanged.
+  //
+  // It DELIBERATELY persists between questions: a paper is authored a question
+  // at a time, and re-typing the subject for each one is how half of them end
+  // up on the wrong paper.
+  const [subject, setSubject] = React.useState("");
+  const [windows, setWindows] = React.useState<Record<string, { at?: string; mins?: string }>>({});
 
   const addQ = () => {
     const options = [q.a, q.b, q.c, q.d].map((o) => o.trim()).filter(Boolean);
     if (!q.text.trim() || options.length < 2) return;
-    onAddQuestion({ text: q.text.trim(), options, answerIndex: Math.min(q.answer, options.length - 1) });
+    onAddQuestion({
+      text: q.text.trim(),
+      options,
+      answerIndex: Math.min(q.answer, options.length - 1),
+      subject: subject.trim() || null,
+    });
     setQ({ text: "", a: "", b: "", c: "", d: "", answer: 0 });
   };
 
@@ -689,6 +756,11 @@ function ProgramRow({
                 <li key={question.index} className="flex items-start gap-2 text-xs">
                   <span className="mt-0.5 tabular-nums text-muted-foreground">{question.index + 1}.</span>
                   <span className="flex-1">
+                    {question.subject && (
+                      <span className="mr-1.5 rounded bg-muted px-1 py-0.5 text-[0.65rem] uppercase tracking-wide">
+                        {question.subject}
+                      </span>
+                    )}
                     {question.text}
                     <span className="ml-1.5 text-muted-foreground">
                       {/* The KEY, marked. Reading it back is the whole point:
@@ -710,6 +782,56 @@ function ProgramRow({
               ))}
             </ol>
           )}
+          {/* WHEN EACH PAPER OPENS. The subjects are whichever ones the
+              questions carry, so this list cannot name a paper that does not
+              exist — and a subject with no row here simply uses the
+              programme's own exam time, which is the single-paper behaviour. */}
+          {paper && paper.length > 0 && subjectsOf(paper).length > 1 && (
+            <div className="space-y-1.5 rounded-md border border-border p-2">
+              <p className="text-xs font-medium">When each paper opens</p>
+              {subjectsOf(paper).map((subj) => {
+                const current = (pr.examSchedule ?? {}) as Record<string, { examAt: string; durationMin?: number }>;
+                const own = current[subj];
+                return (
+                  <div key={subj} className="flex flex-wrap items-end gap-2">
+                    <span className="w-32 text-xs">{subj}</span>
+                    <Input
+                      aria-label={`${subj} paper opens`}
+                      type="datetime-local"
+                      className="w-52"
+                      defaultValue={own?.examAt ? own.examAt.slice(0, 16) : ""}
+                      onChange={(e) => setWindows((w) => ({ ...w, [subj]: { ...w[subj], at: e.target.value } }))}
+                    />
+                    <Input
+                      aria-label={`${subj} paper minutes`}
+                      type="number"
+                      min={1}
+                      className="w-24"
+                      placeholder="mins"
+                      defaultValue={own?.durationMin ?? ""}
+                      onChange={(e) => setWindows((w) => ({ ...w, [subj]: { ...w[subj], mins: e.target.value } }))}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy === `sched-${pr.id}`}
+                      onClick={() =>
+                        onSaveWindow(
+                          current,
+                          subj,
+                          windows[subj]?.at ?? (own?.examAt ? own.examAt.slice(0, 16) : ""),
+                          Number(windows[subj]?.mins ?? own?.durationMin ?? 0) || null,
+                        )
+                      }
+                    >
+                      Save
+                    </Button>
+                    {!own && <span className="text-xs text-muted-foreground">uses the programme&apos;s time</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <Input placeholder="Question text" value={q.text} onChange={(e) => setQ({ ...q, text: e.target.value })} />
           <div className="grid grid-cols-2 gap-2">
             {(["a", "b", "c", "d"] as const).map((k, i) => (
@@ -719,9 +841,24 @@ function ProgramRow({
               </label>
             ))}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor={`subj-${pr.id}`} className="text-xs">
+                Subject <span className="font-normal text-muted-foreground">(blank = one paper)</span>
+              </Label>
+              <Input
+                id={`subj-${pr.id}`}
+                className="w-44"
+                placeholder="e.g. Mathematics"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+              />
+            </div>
             <Button size="sm" disabled={busy === `q-${pr.id}`} onClick={addQ}>Add question</Button>
-            <span className="text-xs text-muted-foreground">Select the radio next to the correct option. Answers stay server-side.</span>
+            <span className="text-xs text-muted-foreground">
+              Select the radio next to the correct option. Answers stay server-side. Questions sharing a
+              subject become one paper.
+            </span>
           </div>
         </div>
       )}

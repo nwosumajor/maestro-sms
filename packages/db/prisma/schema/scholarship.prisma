@@ -76,6 +76,16 @@ enum ScholarshipApplicationStatus {
 model ScholarshipProgram {
   id              String                    @id @default(uuid()) @db.Uuid
   title           String
+  /// When each SUBJECT's paper opens, for a scholarship examined in more than
+  /// one subject: `{ "Mathematics": { "examAt": "...", "durationMin": 45 } }`.
+  ///
+  /// The subjects themselves are NOT stored here — they are whichever subjects
+  /// the questions carry, so a paper can never exist with nothing on it and a
+  /// subject can never be silently dropped. This map only STAGGERS them; a
+  /// subject with no entry uses the programme's own `examAt` / `examDurationMin`,
+  /// which is exactly the single-paper behaviour this replaces.
+  examSchedule       Json?
+
   /// When the platform owner PUBLISHED the results to every school.
   ///
   /// NULL means nobody outside the operator console sees them: a score is a

@@ -148,6 +148,9 @@ export interface ScholarshipProgramDto {
   /** When the owner published this programme's results to every school; null
    *  until they have reviewed the marking and decided. */
   resultsPublishedAt: Date | null;
+  /** When each SUBJECT's paper opens, for a multi-subject scholarship. A
+   *  subject with no entry uses the programme's own exam time. */
+  examSchedule: Record<string, { examAt: string; durationMin?: number }> | null;
   createdAt: Date;
 }
 
@@ -310,6 +313,8 @@ export interface ScholarshipPortalDto {
 export interface ScholarshipExamQuestionDto {
   /** Position in the paper, which is also how a question is removed. */
   index: number;
+  /** Which paper it is on; null means the programme's own category. */
+  subject: string | null;
   text: string;
   options: string[];
   answerIndex: number;
@@ -345,4 +350,25 @@ export interface PublishedScholarshipResultsDto {
   publishedAt: Date;
   /** Ranked: awarded positions first, then by score. */
   rows: ScholarshipResultRowDto[];
+}
+
+/**
+ * One paper of a scholarship exam, as the candidate sees it.
+ *
+ * A scholarship may be examined in several subjects, so "the exam" is a list.
+ * Each row carries enough for a candidate to tell which is which and whether
+ * they can sit it NOW — without opening any of them, which would start a clock.
+ */
+export interface ScholarshipExamPaperDto {
+  examId: string;
+  title: string;
+  startAt: Date;
+  endAt: Date;
+  durationMinutes: number;
+  questionCount: number;
+  /** Whether the window is open right now. */
+  open: boolean;
+  /** Their sitting, if they have started it. */
+  sittingId: string | null;
+  sittingStatus: string | null;
 }

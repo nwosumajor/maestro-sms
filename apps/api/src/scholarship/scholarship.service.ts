@@ -13,7 +13,7 @@
 import { scholarshipSupervisorStage, WORKFLOW_PERMISSIONS } from "@sms/types";
 import { classIdsTaughtBy, teacherIdsOfClasses, teachesAnyOf } from "../common/teaches";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto, type CbtSittingViewDto } from "@sms/types";
+import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto, type CbtSittingViewDto, type ScholarshipExamPaperDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -76,19 +76,78 @@ export class ScholarshipService {
   // module-gate bypass this design exists to avoid.
 
   /** The scholarship exam waiting for this candidate in their own school. */
-  async startExam(p: Principal, programId: string): Promise<CbtSittingViewDto> {
-    const examId = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+  /**
+   * The papers this candidate has for a programme, and where each one stands.
+   *
+   * A scholarship may be examined in SEVERAL subjects, so "the exam" is a list.
+   * Each row says when it opens, whether it is open now, and whether they have
+   * already sat it — a candidate with three papers on three days needs to see
+   * which is which WITHOUT opening any of them, because opening one starts a
+   * clock they cannot stop.
+   */
+  async examPapers(p: Principal, programId: string): Promise<ScholarshipExamPaperDto[]> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       // RLS scopes this to the caller's school, and `scholarshipProgramId`
-      // being set is what makes it a scholarship exam — so an ordinary exam
-      // cannot be reached through this route by construction.
-      const exam = await tx.cbtExam.findFirst({
+      // being set is what makes it a scholarship exam.
+      const exams = await tx.cbtExam.findMany({
+        where: { scholarshipProgramId: programId },
+        orderBy: { startAt: "asc" },
+        select: { id: true, title: true, startAt: true, endAt: true, durationMinutes: true, questionCount: true },
+      });
+      if (exams.length === 0) return [];
+      // ONE query for the sittings, never one per paper.
+      const sittings = await tx.cbtSitting.findMany({
+        where: { examId: { in: exams.map((e) => e.id) }, studentId: p.userId },
+        select: { id: true, examId: true, status: true },
+      });
+      const byExam = new Map(sittings.map((x) => [x.examId, x]));
+      const now = new Date();
+      return exams.map((e) => {
+        const sitting = byExam.get(e.id);
+        return {
+          examId: e.id,
+          title: e.title,
+          startAt: e.startAt,
+          endAt: e.endAt,
+          durationMinutes: e.durationMinutes,
+          questionCount: e.questionCount,
+          open: now >= e.startAt && now <= e.endAt,
+          sittingId: sitting?.id ?? null,
+          sittingStatus: sitting?.status ?? null,
+        };
+      });
+    });
+  }
+
+  /**
+   * Open one paper.
+   *
+   * `examId` is OPTIONAL and defaults to the only paper, so a single-subject
+   * programme is started exactly as it always was. Where there are several the
+   * caller names one — and it is checked to belong to THIS programme in THIS
+   * school, or a candidate could pass any exam id and reach a paper that is
+   * not theirs.
+   */
+  async startExam(p: Principal, programId: string, examId?: string): Promise<CbtSittingViewDto> {
+    const chosen = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const exams = await tx.cbtExam.findMany({
         where: { scholarshipProgramId: programId },
         select: { id: true },
       });
-      if (!exam) throw new NotFoundException("Exam not found");
-      return exam.id;
+      if (exams.length === 0) throw new NotFoundException("Exam not found");
+      if (!examId) {
+        // Naming no paper is unambiguous only when there is one. Refusing beats
+        // starting whichever the database happened to return first.
+        if (exams.length > 1) {
+          throw new BadRequestException("This scholarship has several papers — choose which one to sit.");
+        }
+        return exams[0].id;
+      }
+      const match = exams.find((e) => e.id === examId);
+      if (!match) throw new NotFoundException("Exam not found");
+      return match.id;
     });
-    return this.cbt.startSitting(p, examId);
+    return this.cbt.startSitting(p, chosen);
   }
 
   /** Read a scholarship sitting. Auto-expiry on read is the CBT service's. */
@@ -655,7 +714,7 @@ export class ScholarshipService {
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
-    examDurationMin: number; examQuestions: unknown; resultsPublishedAt: Date | null; createdAt: Date;
+    examDurationMin: number; examQuestions: unknown; examSchedule: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }) {
     return {
       id: pr.id, title: pr.title, description: pr.description, budgetMinor: toMinor(pr.budgetMinor),
@@ -671,6 +730,7 @@ export class ScholarshipService {
       // the platform-owned row toward applicants.
       examQuestionCount: Array.isArray(pr.examQuestions) ? pr.examQuestions.length : 0,
       resultsPublishedAt: pr.resultsPublishedAt ?? null,
+      examSchedule: (pr.examSchedule ?? null) as Record<string, { examAt: string; durationMin?: number }> | null,
       createdAt: pr.createdAt,
     };
   }

@@ -1349,6 +1349,10 @@
       "kind": "ui",
       "note": "reviewed: app/(app)/scholarships/sitting/[id]/page.tsx renders the shared CbtExamRoom with basePath=scholarships, so a candidate sits their paper without the PREMIUM CBT module"
     },
+    "GET /scholarships/exams/:p/papers": {
+      "kind": "ui",
+      "note": "reviewed: the Start-the-exam control in components/scholarship/ScholarshipPortal.tsx lists one button per paper when a scholarship is examined in several subjects"
+    },
     "GET /scholarships/results": {
       "kind": "ui",
       "note": "reviewed: app/(app)/scholarships/page.tsx renders components/scholarship/PublishedResults.tsx — the cross-school table of school, position and score that every tenant may read"

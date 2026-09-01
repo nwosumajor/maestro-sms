@@ -90,7 +90,8 @@ interface ProgramInput {
   award3Minor?: number | null;
   examDurationMin?: number;
   /** Owner-authored CBT question set. */
-  examQuestions?: Array<{ text: string; options: string[]; answerIndex: number }> | null;
+  examQuestions?: Array<{ text: string; options: string[]; answerIndex: number; subject?: string | null }> | null;
+  examSchedule?: Record<string, { examAt: string; durationMin?: number }> | null;
   /** Append a single CBT question (the console adds them one at a time). */
   appendQuestion?: { text: string; options: string[]; answerIndex: number };
 }
@@ -105,6 +106,45 @@ interface ProgramInput {
  */
 const PUBLISHED_RESULTS_PROGRAMS = 10;
 const PUBLISHED_RESULTS_ROWS = 50;
+
+/**
+ * The papers a programme examines, derived from its questions.
+ *
+ * A question naming no subject belongs to the programme's own CATEGORY, so a
+ * programme written before subjects existed produces exactly the one paper it
+ * always did — the generalisation costs nothing to anything already authored.
+ *
+ * Returns a stable order (first appearance), because the candidate's list of
+ * papers and the operator's should not reshuffle between reads.
+ */
+/**
+ * What one paper is called.
+ *
+ * A single-subject programme keeps EXACTLY the title it always had, so nothing
+ * already announced is renamed and the idempotent lookup below still finds it.
+ * A multi-subject one names the paper, because a candidate with three of them
+ * needs to tell which is which.
+ */
+export function examTitleFor(programTitle: string, subject: string, paperCount: number): string {
+  return paperCount <= 1 ? `Scholarship exam — ${programTitle}` : `Scholarship exam — ${programTitle} (${subject})`;
+}
+
+export function groupQuestionsBySubject<T extends { subject?: string | null }>(
+  questions: T[],
+  fallbackSubject: string,
+): Array<{ subject: string; questions: T[] }> {
+  const order: string[] = [];
+  const bySubject = new Map<string, T[]>();
+  for (const q of questions) {
+    const subject = (q.subject ?? "").trim() || fallbackSubject;
+    if (!bySubject.has(subject)) {
+      bySubject.set(subject, []);
+      order.push(subject);
+    }
+    bySubject.get(subject)!.push(q);
+  }
+  return order.map((subject) => ({ subject, questions: bySubject.get(subject)! }));
+}
 
 /** Who is told about a prize the SCHOOL won — the people who run it. */
 const SCHOOL_PRIZE_RECIPIENTS = ["principal", "school_admin"] as const;
@@ -205,6 +245,7 @@ export class ScholarshipAdminService {
     if (input.award3Minor !== undefined) data.award3Minor = input.award3Minor ?? null;
     if (input.examDurationMin !== undefined) data.examDurationMin = input.examDurationMin;
     if (input.examQuestions !== undefined) data.examQuestions = (input.examQuestions ?? null) as Prisma.InputJsonValue;
+    if (input.examSchedule !== undefined) data.examSchedule = (input.examSchedule ?? null) as Prisma.InputJsonValue;
     // Append one question to the existing set (the console adds them one by one;
     // answers are server-only so the client can't resend the whole array).
     if (input.appendQuestion) {
@@ -700,8 +741,26 @@ export class ScholarshipAdminService {
     if (candidates.length === 0) throw new BadRequestException("No qualified candidates to announce to yet");
 
     const questions = Array.isArray(program.examQuestions)
-      ? (program.examQuestions as unknown as Array<{ text: string; options: string[]; answerIndex: number }>)
+      ? (program.examQuestions as unknown as Array<{ text: string; options: string[]; answerIndex: number; subject?: string | null }>)
       : [];
+    // ONE PAPER PER SUBJECT, and the subjects are DERIVED from the questions
+    // rather than kept in a second list. A paper therefore cannot exist with
+    // nothing on it, and a subject cannot be silently dropped — there is no
+    // other list for it to fall out of step with.
+    //
+    // A question with no subject belongs to the programme's own category, which
+    // is exactly the single-paper behaviour this generalises: every programme
+    // authored before now produces the same one paper it always did.
+    const papers = groupQuestionsBySubject(questions, String(program.category));
+    const schedule = (program.examSchedule ?? {}) as Record<string, { examAt?: string; durationMin?: number }>;
+    /** When a subject's paper opens, and for how long. Falls back to the
+     *  programme's own window for any subject with no entry. */
+    const windowFor = (subject: string) => {
+      const own = schedule[subject];
+      const startAt = own?.examAt ? new Date(own.examAt) : program.examAt!;
+      const minutes = own?.durationMin ?? program.examDurationMin ?? 30;
+      return { startAt, minutes, endAt: new Date(startAt.getTime() + minutes * 60 * 1000) };
+    };
     const examEnd = new Date(program.examAt.getTime() + (program.examDurationMin ?? 30) * 60 * 1000);
     const bySchool = new Map<string, string[]>();
     for (const c of candidates) {
@@ -731,15 +790,23 @@ export class ScholarshipAdminService {
         throw new BadRequestException("Add CBT questions to the program before announcing an online CBT exam");
       }
       for (const [schoolId] of bySchool) {
-        // Idempotent per (program, school): reuse an existing materialized exam.
-        const existing = await db.cbtExam.findFirst({ where: { schoolId, scholarshipProgramId: programId } });
+       for (const paper of papers) {
+        const { startAt, minutes, endAt } = windowFor(paper.subject);
+        const title = examTitleFor(program.title, paper.subject, papers.length);
+        // Idempotent per (program, school, PAPER). It used to key on
+        // (program, school) alone, which was right while a programme had one
+        // paper and would have made every subject after the first collide with
+        // the one before it.
+        const existing = await db.cbtExam.findFirst({
+          where: { schoolId, scholarshipProgramId: programId, title },
+        });
         if (existing) {
           await db.cbtExam.update({
             where: { id: existing.id },
             data: {
-              startAt: program.examAt,
-              endAt: examEnd,
-              durationMinutes: program.examDurationMin ?? 30,
+              startAt,
+              endAt,
+              durationMinutes: minutes,
               status: "PUBLISHED",
               // THE ANNOUNCE IS THE RELEASE for a PLATFORM exam. A school's own
               // scheduled exam waits for a day-of release by its principal or
@@ -758,7 +825,7 @@ export class ScholarshipAdminService {
         // so a subject-less bank is un-fillable by every teacher in the school.
         // The program's category is the subject; find-or-create it in each school
         // (privileged client, so this crosses into the tenant deliberately).
-        const subjectName = String(program.category).replaceAll("_", " ");
+        const subjectName = paper.subject.replaceAll("_", " ");
         // Resolve by CONCEPT first, then by name case-insensitively, and only
         // then create.
         //
@@ -768,7 +835,7 @@ export class ScholarshipAdminService {
         // "Mathematics" row, and a school holding "MATHEMATICS" got another
         // still — after which grades for one subject land under two ids and the
         // report card silently shows half of them.
-        const concept = scholarshipSubjectConcept(String(program.category));
+        const concept = scholarshipSubjectConcept(paper.subject);
         const rows = (await db.subject.findMany({
           where: { schoolId },
           select: { id: true, name: true, code: true, catalogueCode: true },
@@ -791,14 +858,14 @@ export class ScholarshipAdminService {
         const bank = await db.cbtQuestionBank.create({
           data: {
             schoolId,
-            name: `Scholarship: ${program.title}`,
+            name: `Scholarship: ${title}`,
             subject: subject.name,
             subjectId: subject.id,
             createdById: p.userId,
           },
         });
         await db.cbtQuestion.createMany({
-          data: questions.map((q) => ({
+          data: paper.questions.map((q) => ({
             schoolId,
             bankId: bank.id,
             prompt: q.text,
@@ -810,11 +877,11 @@ export class ScholarshipAdminService {
           data: {
             schoolId,
             bankId: bank.id,
-            title: `Scholarship exam — ${program.title}`,
-            questionCount: questions.length,
-            durationMinutes: program.examDurationMin ?? 30,
-            startAt: program.examAt,
-            endAt: examEnd,
+            title,
+            questionCount: paper.questions.length,
+            durationMinutes: minutes,
+            startAt,
+            endAt,
             status: "PUBLISHED",
             // See the reuse branch above: the announce IS the release here.
             releasedAt: new Date(),
@@ -824,6 +891,7 @@ export class ScholarshipAdminService {
           },
         });
         cbtExams += 1;
+       }
       }
     }
 
@@ -1034,7 +1102,11 @@ export class ScholarshipAdminService {
         where: { scholarshipProgramId: programId, schoolId: { in: [...new Set(candidates.map((c) => c.schoolId))] } },
         select: { id: true, schoolId: true },
       })) as Array<{ id: string; schoolId: string }>;
-      const examOfSchool = new Map(exams.map((e) => [e.schoolId, e.id]));
+      // A SCHOOL NOW HAS ONE EXAM PER PAPER, not one exam. This was a
+      // `Map<schoolId, examId>`, which silently kept whichever paper came last
+      // and scored every candidate on that one alone.
+      const examsOfSchool = new Map<string, string[]>();
+      for (const e of exams) examsOfSchool.set(e.schoolId, [...(examsOfSchool.get(e.schoolId) ?? []), e.id]);
       const sittings = exams.length
         ? ((await db.cbtSitting.findMany({
             where: {
@@ -1048,11 +1120,25 @@ export class ScholarshipAdminService {
       const sittingOf = new Map(sittings.map((s2) => [`${s2.examId}:${s2.studentId}`, s2]));
       const scored: Array<{ id: string; pct: number }> = [];
       for (const c of candidates) {
-        const examId = examOfSchool.get(c.schoolId);
-        if (!examId) continue;
-        const sitting = sittingOf.get(`${examId}:${c.studentId}`);
-        if (!sitting || sitting.total == null || sitting.total === 0 || sitting.score == null) continue;
-        scored.push({ id: c.id, pct: Math.round((sitting.score / sitting.total) * 10000) / 100 });
+        const examIds = examsOfSchool.get(c.schoolId) ?? [];
+        if (examIds.length === 0) continue;
+        // THE AVERAGE ACROSS THE PAPERS THEY SAT, weighted by nothing: each
+        // paper is a percentage in its own right and they count equally, which
+        // is what a candidate would assume of "Maths and English".
+        //
+        // ONLY the papers they actually sat. Counting an unsat paper as zero
+        // would mark a candidate down for a paper that may not have opened yet,
+        // and this runs whenever the operator presses collect — including
+        // between two sittings on different days.
+        const pcts: number[] = [];
+        for (const examId of examIds) {
+          const sitting = sittingOf.get(`${examId}:${c.studentId}`);
+          if (!sitting || sitting.total == null || sitting.total === 0 || sitting.score == null) continue;
+          pcts.push((sitting.score / sitting.total) * 100);
+        }
+        if (pcts.length === 0) continue;
+        const mean = pcts.reduce((a, b) => a + b, 0) / pcts.length;
+        scored.push({ id: c.id, pct: Math.round(mean * 100) / 100 });
       }
       updated = await this.writeScores(db, scored);
     } else if (program.examMode === "GAMES") {
@@ -1451,10 +1537,11 @@ export class ScholarshipAdminService {
     });
     if (!program) throw new NotFoundException("Program not found");
     const raw = Array.isArray(program.examQuestions)
-      ? (program.examQuestions as unknown as Array<{ text: string; options: string[]; answerIndex: number }>)
+      ? (program.examQuestions as unknown as Array<{ text: string; options: string[]; answerIndex: number; subject?: string | null }>)
       : [];
     return raw.map((q, index) => ({
       index,
+      subject: q.subject ?? null,
       text: q.text,
       options: q.options,
       answerIndex: q.answerIndex,
@@ -1466,7 +1553,7 @@ export class ScholarshipAdminService {
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
-    examDurationMin: number; examQuestions: unknown; resultsPublishedAt: Date | null; createdAt: Date;
+    examDurationMin: number; examQuestions: unknown; examSchedule: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }, committedMinor = 0): ScholarshipProgramDto {
     return {
       id: r.id, title: r.title, description: r.description, budgetMinor: toMinor(r.budgetMinor),
@@ -1478,6 +1565,7 @@ export class ScholarshipAdminService {
       examDurationMin: r.examDurationMin,
       examQuestionCount: Array.isArray(r.examQuestions) ? r.examQuestions.length : 0,
       resultsPublishedAt: r.resultsPublishedAt ?? null,
+      examSchedule: (r.examSchedule ?? null) as Record<string, { examAt: string; durationMin?: number }> | null,
       createdAt: r.createdAt,
     };
   }

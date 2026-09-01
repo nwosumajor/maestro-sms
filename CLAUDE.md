@@ -898,6 +898,61 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### One paper per subject, derived from the questions
+`groupQuestionsBySubject` / `examTitleFor` (`scholarship-admin.service.ts`),
+`examPapers`, `examSchedule` (migration `20270124000000`). §3, and the last of
+the scholarship programme.
+**THE SUBJECTS ARE DERIVED FROM THE QUESTIONS, never kept in a second list.**
+Each question may name one; the papers are whichever subjects appear. So a paper
+cannot exist with nothing on it, a subject cannot be silently dropped, and there
+is no other list for either to fall out of step with — the failure this repo
+keeps finding wherever two structures describe one thing.
+// A QUESTION NAMING NO SUBJECT belongs to the programme's CATEGORY, so every
+programme authored before now produces exactly the one paper it always did. And
+`examTitleFor` leaves a single-paper exam titled EXACTLY as before, which
+matters because the idempotent lookup keys on the title — renaming would orphan
+every exam already announced.
+// IDEMPOTENCY MOVED TO THE PAPER. It keyed on `(programme, school)`, right
+while a programme had one paper and fatal the moment it had two: every subject
+after the first would have collided with the one before it.
+// SCORING AVERAGES THE PAPERS THEY SAT, and only those. `examsOfSchool` was a
+`Map<schoolId, examId>` — it would have kept whichever paper came last and
+scored every candidate on that alone. Counting an UNSAT paper as zero would mark
+a candidate down for one that has not opened yet, and collect runs whenever the
+operator presses it, including between two sittings on different days.
+// A CANDIDATE SEES THE PAPERS WITHOUT OPENING ONE, because opening starts a
+clock they cannot stop: title, question count, duration, whether it is open now,
+and whether they have already sat it. Starting without naming a paper is REFUSED
+where there are several — starting whichever the database returned first is a
+child sitting the wrong exam — and a named paper is checked to belong to that
+programme.
+Live, two papers staggered three days apart, on a STANDARD school:
+```
+announced                       {"cbtExams":2}   one exam PER PAPER
+(Mathematics)  2q 120min  open=true   opens 2026-09-01
+(English)      1q  45min  open=false  opens 2026-09-04
+start with no paper named       400 "choose which one to sit"
+open MATHS                      201, 2 questions
+open ENGLISH before its date    409 "The exam has not opened yet"
+submit maths 1/2 -> collect     50%   averaged over the papers SAT
+```
+// **GOTCHA, MINE, AND THE SHARPEST OF THE ROUND:** the question-removal path
+maps `({text, options, answerIndex})` and REPLACES the whole set — so removing
+ONE question would have stripped the subject from every question that survived,
+collapsing a three-paper exam into one, silently, on the operator's next click.
+§3 broke a feature §-earlier had built. Found by reading the removal path
+rather than by a test.
+// GOTCHA: the surface gate caught `durationMin` as a field no screen sends —
+I had driven the per-subject schedule over HTTP and built no editor for it.
+Staggering IS the "at the right time" half of the ask, so the editor was built
+rather than the field declared API-only.
+// THE SUBJECT PERSISTS BETWEEN QUESTIONS while authoring, deliberately: a paper
+is written a question at a time, and re-typing the subject for each one is how
+half of them end up on the wrong paper.
+Mutation-validated five ways: key idempotency on the programme alone, keep only
+the last exam per school when scoring, count an unsat paper as zero, start
+whichever paper comes first, and drop the subject on a removal.
+
 ### Results every school can read, and no child is named in
 `resultsPublishedAt` (migration `20270123000000`), `publishResults` /
 `publishedResults`, `PublishedResults`. §4 of the scholarship programme, on the
