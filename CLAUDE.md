@@ -898,6 +898,59 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### One fix cancelling another, found only by exercising the flow
+`announceExam`. Asked to drive the scholarship end to end "to ensure it is
+perfect now". It was not, and what was wrong was the interaction between two
+changes that each passed their own tests.
+The EXCLUSION added when a candidate could only sit via the paid CBT module —
+skip a school without it, report it, and refuse if nobody can sit — became, the
+moment the always-on scholarship surface began serving the paper, **the thing
+standing between a qualified pupil and their exam.** It skipped creating that
+school's exam row, and with no row there is nothing to open. Live, the whole
+chain stopped dead:
+```
+announce -> 400 "No qualified candidate can sit an online CBT exam:
+                 St. Andrews Academy does not have the CBT module."
+```
+for a candidate who could by then sit perfectly well. **Neither change's tests
+could see it**: each was right about its own file. Only running the flow found
+it, which is the argument for exercising a path rather than reasoning about it.
+The exclusion, the `cannotSit` reporting and the notify skip are all gone.
+**THE WHOLE CHAIN, DRIVEN, with the candidate's school on STANDARD throughout:**
+```
+owner creates + OPENS the programme            201
+authors 3 questions, reads the key back        4, Rome, 15
+removes the wrong-keyed one                    2 left
+pupil applies -> states a reason -> guardian consents -> submits
+                                               DRAFT -> PENDING_SUPERVISOR
+supervisor -> guardian -> principal            -> SUBMITTED
+owner REVIEW -> SHORTLIST -> QUALIFY           -> QUALIFIED
+GET /cbt/exams (the paid surface)              404
+announce                                       {"notified":1,"cbtExams":1}
+candidate opens the paper                      2 questions, answerIndex null
+answers, submits                               score 1/2
+collect-results                                {"updated":1} -> 50% on the row
+award 1st place                                disbursed=true kind=CREDIT
+the family's inbox                             7 notices, every stage named
+```
+// A PROGRAMME IS CREATED **DRAFT** and must be OPENED before anyone can apply —
+correct, and worth knowing: the first probe read "This scholarship is not open
+for applications" and that was the product being right.
+// A STUDENT'S OWN REQUEST REQUIRES A STATED REASON before submission, and
+guardian consent before that. Both fired.
+// THE AWARD LANDED AS A **CREDIT**, not against an invoice, because the pupil
+had no open bill — the arm added earlier this session, working on a real award.
+// GOTCHA, MINE, TWICE IN ONE FILE: I wrote `` `/cbt/*` `` into a comment again,
+in the very method I was fixing — the glob that unbalances comment-stripping.
+Caught by checking the delimiters rather than by a test.
+// GOTCHA, and a mutation caught it rather than a reading: my new assertion
+anchored on the FIRST `notifyFamily` in a file with five, and on
+`for (const c of candidates)` in a file with three, so it checked a region in a
+different method entirely and passed against nothing. It is anchored from the
+loop's own tail (`notified += 1`) now.
+Mutation-validated three ways: reinstate the entitlement exclusion, skip
+notifying somebody again, and put the sitting routes back behind the paid module.
+
 ### A path glob in a comment, and sixty-three blind gates
 `apps/api/test/support/strip-comments.ts`. Found BY WRITING ONE: a test could
 not see six route decorators that grep found instantly, in a file I had just

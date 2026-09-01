@@ -68,34 +68,40 @@ describe("an award kind that cannot pay out is not offered", () => {
   });
 });
 
-describe("a candidate who cannot sit is not told to sit", () => {
-  it("asks each school whether it actually has the CBT module", () => {
-    expect(ADMIN).toMatch(/this\.modules\.isEnabled\(schoolId, MODULES\.CBT\)/);
+describe("every qualified candidate can sit, whatever their school pays for", () => {
+  it("no longer excludes a school for want of the PREMIUM CBT module", () => {
+    // This DID exclude them, and rightly so at the time: the only way to sit
+    // was `/cbt`, which is module-gated, so a candidate there was notified and
+    // then met a 404.
+    //
+    // The scholarship surface now serves the paper itself and is always-on, so
+    // the exclusion became the thing standing between a qualified pupil and
+    // their exam — it skipped creating their school's exam row, and with no row
+    // there is nothing to open. ONE FIX CANCELLING ANOTHER is invisible in
+    // either one's tests; it took exercising the whole flow end to end.
+    expect(ADMIN).not.toMatch(/cannotSit/);
+    expect(ADMIN).not.toMatch(/isEnabled\(schoolId, MODULES\.CBT\)/);
   });
 
-  it("does not create an exam for a school that cannot open it", () => {
-    expect(ADMIN).toMatch(/for \(const id of blocked\) bySchool\.delete\(id\)/);
+  it("notifies every qualified candidate, with nobody skipped", () => {
+    // THE LOOP THAT COUNTS, found from its own tail. `for (const c of
+    // candidates)` appears three times and `notifyFamily` five, so anchoring on
+    // either alone picked a region in a different method — and the assertion
+    // then passed against nothing, which a mutation caught rather than a
+    // reading.
+    const tail = ADMIN.indexOf("notified += 1");
+    const head = ADMIN.lastIndexOf("for (const c of candidates) {", tail);
+    expect(head).toBeGreaterThan(0);
+    const body = ADMIN.slice(head, tail);
+    expect(body).toMatch(/await this\.notifyFamily\(/);
+    expect(body).not.toMatch(/continue;/);
   });
 
-  it("does not notify somebody whose link would 404", () => {
-    // A notice with a dead link is worse than none: it tells a family to go and
-    // do something the product will refuse them.
-    expect(ADMIN).toMatch(/if \(!bySchool\.has\(c\.schoolId\)\) continue;/);
-  });
-
-  it("refuses outright when NOBODY can sit, rather than reporting zero", () => {
-    // "notified: 0" with a 201 is the silent-partial-success shape.
-    expect(ADMIN).toMatch(/if \(bySchool\.size === 0\)[\s\S]{0,200}?BadRequestException/);
-  });
-
-  it("reports the schools it left out, by name", () => {
-    expect(ADMIN).toMatch(/return \{ notified, cbtExams, arena, cannotSit \}/);
-    expect(ADMIN).toMatch(/cannotSit,\s*\n\s*\}\);/); // audited too
-  });
-
-  it("says so on the console, and not as a success", () => {
-    expect(UI).toMatch(/d\?\.cannotSit\?\.length/);
-    expect(UI).toMatch(/ok: !missed/);
-    expect(UI).toMatch(/cannot sit/);
+  it("and the surface that serves them is still the always-on one", () => {
+    // The guarantee this rests on. If the sitting routes ever move back behind
+    // the paid module, removing the exclusion above becomes wrong again.
+    const CONTROLLER = src("apps", "api", "src", "scholarship", "scholarship.controller.ts");
+    expect(CONTROLLER).toMatch(/@Post\("exams\/:programId\/start"\)/);
+    expect(CONTROLLER).not.toMatch(/@RequireModule/);
   });
 });

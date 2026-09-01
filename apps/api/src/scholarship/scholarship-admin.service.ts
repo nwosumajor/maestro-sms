@@ -661,7 +661,7 @@ export class ScholarshipAdminService {
   async announceExam(
     p: Principal,
     programId: string,
-  ): Promise<{ notified: number; cbtExams: number; arena: boolean; cannotSit: string[] }> {
+  ): Promise<{ notified: number; cbtExams: number; arena: boolean }> {
     const db = this.client();
     const program = await db.scholarshipProgram.findFirst({ where: { id: programId } });
     if (!program) throw new NotFoundException("Program not found");
@@ -687,39 +687,23 @@ export class ScholarshipAdminService {
 
     let cbtExams = 0;
     let arena = false;
-    // SCHOOLS WHOSE CANDIDATES CANNOT SIT. CBT is a PREMIUM module and NOTHING
-    // on this path asked: this method runs on the privileged client, so it
-    // created an exam in a STANDARD school perfectly happily, notified the
-    // family "sit it under CBT Exams", and handed them a link that answers 404
-    // — measured live, `GET /cbt/exams` -> 404 on STANDARD, 200 on ENTERPRISE.
-    // `collectExamResults` then finds no sitting and skips them, so the pupil
-    // could never be scored and therefore never awarded, with nothing anywhere
-    // saying why.
-    const cannotSit: string[] = [];
+    // EVERY QUALIFIED CANDIDATE CAN SIT, whatever their school pays for.
+    //
+    // This used to resolve each school's CBT entitlement and EXCLUDE the ones
+    // without it, because the only way to sit was the `cbt` routes, a PREMIUM
+    // module — a candidate there was notified and then met a 404. The scholarship
+    // surface now serves the paper itself and is always-on, so that exclusion
+    // became the thing standing between a qualified pupil and their exam: it
+    // skipped creating their school's exam row, and with no row there is
+    // nothing for them to open.
+    //
+    // Found by exercising the whole flow end to end after both changes landed —
+    // one fix quietly cancelling the other is invisible in either one's tests.
 
     // --- ONLINE_CBT: a per-school exam seeded from the program's questions -----
     if (program.examMode === "ONLINE_CBT") {
       if (questions.length === 0) {
         throw new BadRequestException("Add CBT questions to the program before announcing an online CBT exam");
-      }
-      const entitled = new Map<string, boolean>();
-      for (const [schoolId] of bySchool) {
-        entitled.set(schoolId, await this.modules.isEnabled(schoolId, MODULES.CBT));
-      }
-      const blocked = [...bySchool.keys()].filter((id) => !entitled.get(id));
-      if (blocked.length > 0) {
-        const names = await db.school.findMany({ where: { id: { in: blocked } }, select: { id: true, name: true } });
-        cannotSit.push(...names.map((n) => n.name));
-        for (const id of blocked) bySchool.delete(id);
-      }
-      // NOTHING TO ANNOUNCE IS A REFUSAL, not a success reporting zero — the
-      // silent-partial-success shape this codebase keeps finding.
-      if (bySchool.size === 0) {
-        throw new BadRequestException(
-          `No qualified candidate can sit an online CBT exam: ${cannotSit.join(", ")} ` +
-            `${cannotSit.length === 1 ? "does" : "do"} not have the CBT module. ` +
-            `Switch it on for them, or set the exam mode to PHYSICAL.`,
-        );
       }
       for (const [schoolId] of bySchool) {
         // Idempotent per (program, school): reuse an existing materialized exam.
@@ -864,11 +848,6 @@ export class ScholarshipAdminService {
       program.examMode === "ONLINE_CBT" ? "an online CBT mock exam" : program.examMode === "GAMES" ? "the games arena" : "a physical scheduled exam";
     let notified = 0;
     for (const c of candidates) {
-      // A NOTICE WITH A DEAD LINK IS WORSE THAN NONE. `bySchool` has had the
-      // schools that cannot sit removed, so their candidates are not told to go
-      // and open something that will refuse them. The OPERATOR is told instead,
-      // which is who can act — switch the module on and announce again.
-      if (!bySchool.has(c.schoolId)) continue;
       await this.notifyFamily(
         p,
         c.schoolId,
@@ -883,12 +862,8 @@ export class ScholarshipAdminService {
       examMode: program.examMode,
       cbtExams,
       arena,
-      cannotSit,
     });
-    // REPORT WHAT WAS NOT DONE, the rule the roll call, the exeat sweep and the
-    // alumni broadcast all follow. A count of who was reached, with the ones
-    // who were not left out of it, is how a partial run reads as a whole one.
-    return { notified, cbtExams, arena, cannotSit };
+    return { notified, cbtExams, arena };
   }
 
   /** Harvest exam results back onto the QUALIFIED applications as a score SIGNAL
