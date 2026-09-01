@@ -898,6 +898,45 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The prize that no screen mentioned
+`SubscriptionDto.granted`, the /billing plan block, `SubscriptionManager`,
+`ScholarshipAdmin`. Asked to exercise the flow AND check the web is captured.
+The flow was green; the WEB was the gap, and §2 had shipped with none at all.
+**A STANDARD school lifted to ENTERPRISE by a scholarship read
+`plan: STANDARD` beside TWENTY-SEVEN OPEN MODULES**, with nothing saying why,
+until when, or what it costs. Measured live before the fix — the DTO carried no
+mention of a grant and neither did the operator's tenant row. A figure a reader
+cannot account for is one they stop trusting, including the ones that are right:
+the same argument as the GHS/NGN billing note and the export bundle's coverage
+manifest.
+THREE SURFACES, because three different people meet it:
+```
+the school       "ENTERPRISE until 11 Sep" + the reason, and that their own
+                 plan is still STANDARD and the bill does not change, and that
+                 the extra modules close on that date
+the operator     editing that tenant: "On a granted ENTERPRISE until …
+                 Changing the plan below does not remove it"
+the operator     ABOUT to award: the confirm now says the school also receives
+                 9 months of ENTERPRISE at no charge
+```
+// **THE AWARD IS TWO AWARDS AND THE BUTTON SAID ONE.** An operator committing
+the platform to nine months of a paid tier learned it afterwards from a row, if
+at all. The confirmation says it before the click and the success line says it
+after.
+// THE OPERATOR CASE IS NOT COSMETIC: without it they read "STANDARD", set
+STANDARD, and cannot explain why every module is still open — the same
+contradiction as the school's page, one console over.
+// `granted` IS NULL ONCE EXPIRED, and a test pins it: the gate already resolves
+by date, so a screen still rendering a lapsed prize would be the contradiction
+inverted.
+// AND THE WHOLE CHAIN WAS RE-DRIVEN after the change — application through
+school approval chain, triage, announce on a STANDARD school, sitting, collect,
+award — all green, with the school prize now firing inside it
+(`grantedUntil 2027-06-01`).
+Mutation-validated four ways: drop `granted` from the DTO, show an expired
+grant, stop saying the bill is unchanged, and stop telling the operator what the
+school gets.
+
 ### A prize for the school, held beside what it bought
 `SCHOLARSHIP_SCHOOL_PRIZE_MONTHS`, `effectivePlan(..., granted)`,
 `grantSchoolPrize`, `warnExpiringGrants` (migration `20270122000000`). Owner's

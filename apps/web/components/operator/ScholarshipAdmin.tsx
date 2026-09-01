@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
-import { CURRENCIES, toMinor } from "@sms/types";
+import { CURRENCIES, SCHOLARSHIP_SCHOOL_PRIZE_MONTHS, SCHOLARSHIP_SCHOOL_PRIZE_PLAN, toMinor } from "@sms/types";
 
 type Program = Serialized<ScholarshipProgramDto>;
 type Application = Serialized<ScholarshipApplicationDto>;
@@ -196,11 +196,32 @@ export function ScholarshipAdmin() {
     const posLabel = pos === 1 ? "1st" : pos === 2 ? "2nd" : "3rd";
     const prog = programs.find((pr) => pr.id === a.programId);
     const amount = pos === 3 ? (prog?.award3Minor ?? a.awardMinorOffered) : pos === 2 ? (prog?.award2Minor ?? a.awardMinorOffered) : a.awardMinorOffered;
-    if (!confirm(`Award ${posLabel} position (${money(amount)}) to ${a.studentName} (${a.schoolName})? It is credited against an open invoice, or held on their account until one is raised.`)) return;
+    // TWO AWARDS, NOT ONE. The pupil gets fees; their SCHOOL gets free
+    // ENTERPRISE for a session, two terms or one term. An operator committing
+    // the platform to months of a paid tier should be told before they click,
+    // not discover it afterwards on the tenant row.
+    const schoolMonths = SCHOLARSHIP_SCHOOL_PRIZE_MONTHS[pos as 1 | 2 | 3];
+    if (
+      !confirm(
+        `Award ${posLabel} position (${money(amount)}) to ${a.studentName} (${a.schoolName})?\n\n` +
+          `The pupil's award is credited against an open invoice, or held on their account until one is raised.\n\n` +
+          `${a.schoolName} also receives ${schoolMonths} months of ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN} at no charge. ` +
+          `Their own plan and bill are unchanged.`,
+      )
+    )
+      return;
     setBusy(`award-${a.id}`); setMsg(null);
     const res = await sendWithStepUp("POST", `scholarships/applications/${a.id}/award`, { position: pos });
     setBusy(null);
-    if (res.ok) { setMsg({ ok: true, text: `Awarded ${posLabel} position to ${a.studentName} — the row below says whether it landed on an invoice or is held as credit.` }); void loadApps(); }
+    if (res.ok) {
+      setMsg({
+        ok: true,
+        text:
+          `Awarded ${posLabel} position to ${a.studentName} — the row below says whether it landed on an invoice or is held as credit. ` +
+          `${a.schoolName} now has ${schoolMonths} months of ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN}.`,
+      });
+      void loadApps();
+    }
     else setMsg({ ok: false, text: await readApiError(res) });
   };
 

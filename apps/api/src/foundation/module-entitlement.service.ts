@@ -74,6 +74,9 @@ interface Resolved {
   plan: Plan;
   /** The tier ENFORCED right now (the STANDARD floor when past-due beyond grace). */
   effectivePlan: Plan;
+  /** A tier the school was GIVEN for a while — a scholarship prize. Beside the
+   *  purchased plan, never over it. */
+  granted: { plan: Plan; until: Date; reason: string | null } | null;
   overrides: ModuleOverrides;
   /** Effective enabled modules, resolved against `effectivePlan`. */
   modules: ModuleKey[];
@@ -133,6 +136,7 @@ export class ModuleEntitlementService implements OnModuleInit {
           // the one place that decides what a school can open.
           grantedPlan: true,
           grantedUntil: true,
+          grantedReason: true,
           seats: true,
           priceMinor: true,
           currency: true,
@@ -156,8 +160,8 @@ export class ModuleEntitlementService implements OnModuleInit {
     // purchased plan rather than written over it, so this is where it takes
     // effect — and where it stops, by date, with no sweep.
     const granted =
-      row?.grantedPlan && isPlan(row.grantedPlan) && row.grantedUntil
-        ? { plan: row.grantedPlan as Plan, until: row.grantedUntil }
+      row?.grantedPlan && isPlan(row.grantedPlan) && row.grantedUntil && row.grantedUntil > new Date()
+        ? { plan: row.grantedPlan as Plan, until: row.grantedUntil, reason: row.grantedReason ?? null }
         : null;
     const eff = effectivePlan(plan, status, currentPeriodEnd, graceDays ?? SUBSCRIPTION_GRACE_DAYS, new Date(), granted);
     // DELINQUENCY REACHES THE ADD-ONS TOO.
@@ -176,6 +180,7 @@ export class ModuleEntitlementService implements OnModuleInit {
     const value: Resolved = {
       plan,
       effectivePlan: eff,
+      granted,
       overrides,
       modules: resolveModules(eff, effectiveOverrides),
       status,
@@ -203,6 +208,9 @@ export class ModuleEntitlementService implements OnModuleInit {
       plan: r.plan,
       overrides: r.overrides,
       modules: r.modules,
+      // The prize, so a lifted school is not left reading "STANDARD" beside
+      // twenty-seven open modules.
+      granted: r.granted,
       status: r.status,
       billingCycle: r.billingCycle,
       currentPeriodEnd: r.currentPeriodEnd,

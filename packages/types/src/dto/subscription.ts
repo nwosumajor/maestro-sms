@@ -12,6 +12,18 @@ export interface SubscriptionDto {
   overrides: ModuleOverrides;
   /** The effective enabled modules (effective tier + overrides), catalog order. */
   modules: ModuleKey[];
+  /**
+   * A tier the school was GIVEN for a while — today a scholarship prize.
+   *
+   * WITHOUT THIS THE PAGE CONTRADICTS ITSELF: a STANDARD school lifted to
+   * ENTERPRISE read "plan: STANDARD" beside twenty-seven open modules, with
+   * nothing saying why or until when. A figure a reader cannot account for is
+   * one they stop trusting, including the ones that are right.
+   *
+   * `plan` above stays what they BOUGHT and what renewal is priced from — the
+   * grant is beside it, never over it.
+   */
+  granted: { plan: Plan; until: Date; reason: string | null } | null;
   // --- billing posture (platform revenue layer) ----------------------------
   /** ACTIVE | PAST_DUE | CANCELED. */
   status: SubscriptionStatus;

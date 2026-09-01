@@ -110,10 +110,31 @@ export default async function BillingPage({
                   {data.subscription.effectivePlan !== data.subscription.plan && (
                     <Badge variant="destructive">Limited to {data.subscription.effectivePlan}</Badge>
                   )}
+                  {/* A PRIZE IS NOT A PURCHASE, and the page must not read as
+                      though it were. A STANDARD school lifted to ENTERPRISE by
+                      a scholarship showed "Current plan: STANDARD" beside
+                      twenty-seven open modules, with nothing saying why or
+                      until when — a figure a reader cannot account for is one
+                      they stop trusting, including the ones that are right. */}
+                  {data.subscription.granted && (
+                    <Badge variant="secondary">
+                      {data.subscription.granted.plan} until{" "}
+                      {shortDate(data.subscription.granted.until, region)}
+                    </Badge>
+                  )}
                 </CardTitle>
                 <CardDescription>
                   {data.activeStudents} active student{data.activeStudents === 1 ? "" : "s"}
                   {" · "}
+                  {data.subscription.granted && (
+                    <span className="block text-sm">
+                      {data.subscription.granted.reason ?? "An awarded period"} — every{" "}
+                      {data.subscription.granted.plan} module is open to you until{" "}
+                      {shortDate(data.subscription.granted.until, region)} at no charge. Your own plan is
+                      still {data.subscription.plan} and your bill does not change; after that date the
+                      extra modules close.
+                    </span>
+                  )}
                   {data.subscription.currentPeriodEnd
                     ? `Renews ${shortDate(data.subscription.currentPeriodEnd, region)}`
                     : "No active paid period"}

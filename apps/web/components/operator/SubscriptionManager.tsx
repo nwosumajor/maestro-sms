@@ -29,6 +29,7 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [plan, setPlan] = React.useState<Plan>((initialPlan as Plan) ?? PLANS.ENTERPRISE);
+  const [granted, setGranted] = React.useState<Serialized<SubscriptionDto>["granted"]>(null);
   const [selected, setSelected] = React.useState<Set<ModuleKey>>(new Set());
   // Billing override controls (comp/extend/restore): the operator can force a
   // status and/or set the paid-period end — e.g. restore a PAST_DUE school after
@@ -50,6 +51,10 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
       setSelected(new Set(sub.modules as ModuleKey[]));
       if ((STATUS_LIST as readonly string[]).includes(sub.status)) setStatus(sub.status as (typeof STATUS_LIST)[number]);
       setPeriodEnd(sub.currentPeriodEnd ? sub.currentPeriodEnd.slice(0, 10) : "");
+      // A PRIZE THIS SCHOOL HOLDS. Editing a tenant's plan without seeing that
+      // they are on a granted tier is how an operator reads "STANDARD", sets
+      // STANDARD, and cannot understand why every module is still open.
+      setGranted(sub.granted ?? null);
     }
   };
 
@@ -107,6 +112,18 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (
         <div className="space-y-4">
+          {/* A GRANTED TIER THIS SCHOOL HOLDS. Without it an operator reads
+              "Plan: STANDARD", sets STANDARD, and cannot understand why every
+              module is still open — the same contradiction the school's own
+              billing page used to show. The grant is beside the purchased plan,
+              so editing the plan here does not touch it. */}
+          {granted && (
+            <p className="rounded-md border border-border bg-muted/40 p-2 text-sm">
+              <span className="font-medium">On a granted {granted.plan}</span> until{" "}
+              {granted.until.slice(0, 10)} — {granted.reason ?? "an awarded period"}. Changing the plan
+              below does not remove it; it expires on its own date.
+            </p>
+          )}
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium">Plan</label>
             <select aria-label="Plan"
