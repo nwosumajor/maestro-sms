@@ -898,6 +898,103 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A paper exam that could be set, sat, and never marked
+`recordPhysicalScores` + `POST /scholarships/programs/:id/scores`, options A–E,
+in-place question editing, and `revokeSchoolPrize`. Found by ANSWERING TWO
+QUESTIONS — whether the owner can author multi-subject banks with options a to e,
+and whether they can choose a physical exam instead of CBT — and checking the
+code rather than answering from the design. Three gaps, and the third is the one
+that made a whole mode unusable.
+**1. OPTION E COULD NOT BE TYPED.** The API has accepted `.min(2).max(6)`
+options since the module shipped; the composer rendered `["a","b","c","d"]`. So
+a five-option question — what the owner actually asked for — was expressible
+over HTTP and unreachable from the only screen that writes one. The familiar
+shape: a field the server takes and no screen sends.
+**2. A QUESTION COULD BE ADDED AND REMOVED, NEVER CORRECTED.** Fixing a typo, or
+a wrong `answerIndex`, meant deleting the question and typing it again — which
+moves it to the END of the paper. On the paper that decides who is awarded
+money, and where a wrong key marks every correct answer wrong for every
+candidate. `editQuestion` re-reads, replaces ONE entry and carries every other
+back untouched — SUBJECT INCLUDED, because `examQuestions` replaces the whole
+set and a field dropped here is dropped from every question that survives, which
+is the exact defect the removal path already recorded about itself.
+// A FAILED RE-READ SENDS NOTHING. Replacing the set with what little was read
+would DELETE every question it could not see — worse than the typo.
+**3. A PHYSICAL EXAM COULD BE ANNOUNCED AND NEVER SCORED.** `PHYSICAL` is
+selectable, candidates are told the venue and the time — and `writeScores` was
+PRIVATE with two callers (CBT sittings, the arena) and NO route accepted a mark.
+`collect-results` correctly refuses PHYSICAL, so the flow ran to the end of its
+process and dead-ended: nobody could be scored, so nobody could be ranked, so no
+school could win its prize on merit. Measured live, the whole chain:
+```
+create PHYSICAL, open, apply, consent, submit, qualify   all 201
+announce                        {"notified":1,"cbtExams":0,"arena":false}
+collect-results                 400 "applies to online CBT and games exams only"
+                                <- correct, and there was nothing else
+after: POST .../scores          201 {"updated":1}   examScorePct 78.5
+award on that mark              1st, fees credit + 9 months of ENTERPRISE
+publish                         every school reads  1 · St. Andrews · 78.5%
+```
+// PHYSICAL ONLY, and that is load-bearing. A CBT programme's scores are derived
+from the sittings, so a hand-typed mark there is either overwritten by the next
+collect or silently overwrites a real script — two writers of one column
+disagreeing. Live: **400** naming Collect results as the way.
+// THE WHOLE SHEET IS REFUSED when one id is not a qualified candidate of this
+programme, never the recognised part: a mark sheet silently one name short is
+the silent-partial-success shape, and the operator would believe every candidate
+in front of them was recorded. Live: a stranger mixed in gave **400 "1 of 2
+entries are not qualified candidates"**, the good mark stayed at its OLD value
+(78.5, not the 55 in the refused sheet) and the stranger was untouched.
+// STEP-UP GATED, and the gate is what asked the question:
+`step-up-is-consistent-within-a-permission` flagged it against AWARD. It is not
+exempted like `collect-results` — collecting GATHERS marks candidates earned,
+this CREATES the number the award turns on, with no script behind it and a free
+session of ENTERPRISE riding on it. Golden Rule #7.
+**AND THE CLEANUP FOUND A FOURTH: THE AWARD IS TWO AWARDS AND ONLY ONE COULD BE
+TAKEN BACK.** This file already records that the CONFIRMATION was fixed to say
+both halves; the REVERSAL still undid one. `revokeAward` reverses the fees
+credit, frees the position — and never touched the school prize, so a mistaken
+or fraudulent award was taken back from the family while the school kept up to
+NINE MONTHS of a paid tier, on no screen, with no way back, and the operator was
+told the award had been reversed.
+// **SUBTRACT THE MONTHS, NEVER CLEAR THE WINDOW.** `grantSchoolPrize` EXTENDS
+rather than replaces — a school winning twice keeps both — so nulling the
+columns would destroy a second, legitimate prize. Extending adds N months and
+this removes N, which composes exactly however many are stacked. Live, on a
+school that already held a 9-month prize: award took `2027-06-01 -> 2028-03-01`,
+revoke took it back to **2027-06-01 exactly**, the earlier prize surviving
+byte-for-byte. If the subtraction lands in the past the grant is over and the
+columns are cleared.
+// THE REASON STAYS when the window merely shrinks: what remains was won by the
+OTHER award, and blanking it leaves a school with an unexplained tier — the
+contradiction the /billing block exists to remove.
+// BEST-EFFORT, exactly like the grant: the pupil's money is already returned
+and the application is already QUALIFIED, and losing that to a notification
+failure would be worse.
+// **MUTATION TESTING FOUND THAT EIGHT TESTS COVERED THE HELPER AND NONE THE
+CALL SITE** — `revokeAward` never calling it at all left the suite green. The
+seam that hid the CBT score and the report-card promotion line, met again;
+`revokeAward` is now driven for real.
+// GOTCHA: `one-paper-per-subject` asserted the LITERAL four-option reset and
+went red on the composer gaining option E — a fixed-text assertion firing on an
+improvement, for the fifth time in this file. Re-anchored to the property: the
+question is cleared and the subject is not.
+// GOTCHA, and this file already names it: `cp /tmp/x.bak apps/...` run from
+INSIDE `apps/api` silently fails and leaves the mutation in place. Check
+`git status` after undoing one, not just the test result.
+// GOTCHA, twice: two mutations reported `Tests: 0 total`, which is not a pass —
+a narrowed enum literal and an unused variable. Re-run as compiling removals,
+both failed the tests written for them.
+// PROBE: one PHYSICAL programme, its question, one application, two credit
+entries and 20 notifications removed; the school prize the OLD revoke had left
+standing was cleared by reason (it names the probe programme), so all three
+schools hold no grant, as found.
+Mutation-validated eight ways: options back to four, an edit dropping the
+subject, an edit sending a truncated paper, the mark sheet offered for every
+mode, clearing the sheet on failure, dropping the PHYSICAL-only guard, recording
+the recognised part of a bad sheet, and clearing a stacked grant instead of
+shortening it.
+
 ### One paper per subject, derived from the questions
 `groupQuestionsBySubject` / `examTitleFor` (`scholarship-admin.service.ts`),
 `examPapers`, `examSchedule` (migration `20270124000000`). §3, and the last of

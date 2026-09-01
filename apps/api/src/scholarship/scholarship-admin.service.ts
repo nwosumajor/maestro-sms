@@ -708,7 +708,18 @@ export class ScholarshipAdminService {
       }
     }
 
+    // THE SCHOOL'S HALF, taken back with the pupil's. `awardPosition` is nulled
+    // by the claim above, so the position is read off the row as it stood.
+    if (app.awardPosition) {
+      const program = await db.scholarshipProgram.findFirst({
+        where: { id: app.programId },
+        select: { title: true },
+      });
+      await this.revokeSchoolPrize(db, app.schoolId, app.awardPosition, program?.title ?? "a scholarship", p.userId);
+    }
+
     await this.auditOwn(p, "scholarship.award.revoke", id, {
+      schoolPrizePositionReversed: app.awardPosition ?? null,
       targetSchoolId: app.schoolId, studentId: app.studentId, refunded, reason,
     });
     // The family was told they had won. They are told this too — silence after
@@ -1179,6 +1190,64 @@ export class ScholarshipAdminService {
   }
 
   /**
+   * Record marks for a PHYSICAL exam, by hand.
+   *
+   * A physical exam could be chosen, and its candidates were told the venue and
+   * the time — and there was NO WAY to enter what they scored. `writeScores`
+   * was private with two callers, CBT and the arena, and no route accepted a
+   * mark. So a paper exam ran to the end of its process and dead-ended: nobody
+   * could be scored, so nobody could be ranked, so no school could win its
+   * prize on merit. The mode was offered and could not be finished.
+   *
+   * PHYSICAL ONLY, and that is the load-bearing part. A CBT programme's scores
+   * are derived from the sittings, so a hand-typed mark there is either
+   * overwritten by the next `collect-results` or silently overwrites a real
+   * script — two writers of one column disagreeing, which is the defect this
+   * codebase keeps finding. An operator who genuinely wants to override a CBT
+   * mark is asking for a different feature.
+   */
+  async recordPhysicalScores(
+    p: Principal,
+    programId: string,
+    marks: Array<{ applicationId: string; scorePct: number }>,
+  ): Promise<{ updated: number }> {
+    const db = this.client();
+    const program = await db.scholarshipProgram.findFirst({
+      where: { id: programId },
+      select: { id: true, examMode: true },
+    });
+    if (!program) throw new NotFoundException("Program not found");
+    if (program.examMode !== "PHYSICAL") {
+      throw new BadRequestException(
+        "Marks are entered by hand only for a physical exam. An online CBT or games exam is scored from what the candidates actually sat — use Collect results.",
+      );
+    }
+    // EVERY id must be a QUALIFIED candidate OF THIS PROGRAMME. Without this an
+    // operator marking programme A could write onto programme B's candidate,
+    // and RLS cannot help — this is the privileged cross-tenant client.
+    const eligible = (await db.scholarshipApplication.findMany({
+      where: { programId, status: "QUALIFIED", id: { in: marks.map((m) => m.applicationId) } },
+      select: { id: true },
+    })) as Array<{ id: string }>;
+    const known = new Set(eligible.map((e) => e.id));
+    const strangers = marks.filter((m) => !known.has(m.applicationId));
+    if (strangers.length > 0) {
+      // THE WHOLE LIST IS REFUSED, never the recognised part: a mark sheet
+      // silently one name short is the silent-partial-success shape, and the
+      // operator would believe every candidate in front of them was recorded.
+      throw new BadRequestException(
+        `${strangers.length} of ${marks.length} entries are not qualified candidates of this programme, so nothing was recorded.`,
+      );
+    }
+    const updated = await this.writeScores(
+      db,
+      marks.map((m) => ({ id: m.applicationId, pct: Math.round(m.scorePct * 100) / 100 })),
+    );
+    await this.auditOwn(p, "scholarship.exam.score", programId, { examMode: "PHYSICAL", updated });
+    return { updated };
+  }
+
+  /**
    * Write every candidate's exam percentage in ONE statement.
    *
    * Prisma has no bulk update with a different value per row, and a loop of
@@ -1326,6 +1395,69 @@ export class ScholarshipAdminService {
       // Never unwind an award over the prize: the pupil's money has already
       // moved and the family has already been told.
       this.logger.error(`school prize for ${schoolId} failed: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Take the SCHOOL's half of an award back.
+   *
+   * An award is TWO awards — a fees credit to the pupil and a free window of
+   * ENTERPRISE to their school — and only one of them could be reversed. So a
+   * mistaken or fraudulent award was taken back from the family while the
+   * school kept up to nine months of a paid tier, on no screen, with no way
+   * back, and the operator was told the award had been reversed.
+   *
+   * SUBTRACT THE MONTHS, never clear the window. `grantSchoolPrize` EXTENDS
+   * rather than replaces — a school winning twice keeps both — so nulling the
+   * columns would destroy a second, legitimate prize. Extending added N months
+   * and this removes N, which composes exactly however many prizes are stacked.
+   * If that lands in the past the grant is over and the columns are cleared.
+   */
+  private async revokeSchoolPrize(
+    db: PrismaClient,
+    schoolId: string,
+    position: number,
+    programTitle: string,
+    actorId: string,
+  ): Promise<void> {
+    const months = SCHOLARSHIP_SCHOOL_PRIZE_MONTHS[position as 1 | 2 | 3];
+    if (!months) return;
+    try {
+      const sub = await db.schoolSubscription.findFirst({
+        where: { schoolId },
+        select: { id: true, grantedUntil: true },
+      });
+      if (!sub?.grantedUntil) return;
+      const until = new Date(sub.grantedUntil);
+      until.setMonth(until.getMonth() - months);
+      const now = new Date();
+      const over = until <= now;
+      await db.schoolSubscription.update({
+        where: { id: sub.id },
+        data: over
+          ? { grantedPlan: null, grantedUntil: null, grantedReason: null, grantExpiryNoticeAt: null }
+          : // The window shrinks and the REASON stays: what remains was won by
+            // the other award, and blanking it would leave a school with an
+            // unexplained tier — the contradiction the /billing block exists to
+            // remove.
+            { grantedUntil: until, grantExpiryNoticeAt: null },
+      });
+      this.modules.invalidate(schoolId);
+      await this.notifySchool(
+        schoolId,
+        over
+          ? `Your school's free ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN} access has ended`
+          : `Your school's free ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN} access has been shortened`,
+        over
+          ? `The award for “${programTitle}” has been taken back, so the ${months} months of ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN} that came with it have ended. Your own plan and what you pay for it are unchanged.`
+          : `The award for “${programTitle}” has been taken back, so ${months} months have come off the free ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN} access. It now runs until ${until.toISOString().slice(0, 10)}. Your own plan and what you pay for it are unchanged.`,
+        actorId,
+      );
+    } catch (e) {
+      // Best-effort, exactly like the grant: the pupil's money has already been
+      // returned and the application is already back to QUALIFIED, and losing
+      // that to a notification failure would be worse.
+      this.logger.error(`school prize reversal for ${schoolId} failed: ${(e as Error).message}`);
     }
   }
 

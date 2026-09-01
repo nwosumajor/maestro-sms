@@ -69,6 +69,20 @@ const programUpdateSchema = programSchema.partial().extend({
 });
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
+const physicalScoresSchema = z.object({
+  marks: z
+    .array(
+      z.object({
+        applicationId: z.string().uuid(),
+        // A PERCENTAGE, like every other score on this record, so the ranking
+        // and the published table compare like with like whatever the mode.
+        scorePct: z.number().min(0).max(100),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
 const revokeSchema = z.object({ reason: z.string().min(1).max(2000) });
 /** Which paper to open. Omitted is only unambiguous for a single-paper
  *  programme, which is what every one authored before subjects existed is. */
@@ -380,6 +394,23 @@ export class ScholarshipController {
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   announceExam(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.admin.announceExam(p, id);
+  }
+
+  /** Record a PHYSICAL exam's marks by hand — the only mode with no sitting to
+   *  harvest, and the one that could be announced and never scored. */
+  @Post("programs/:id/scores")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  // STEP-UP, like AWARD and unlike `collect-results`. Collecting gathers marks
+  // candidates actually earned; this CREATES the number the award turns on,
+  // with no script behind it, and a school prize of a free session rides on it.
+  // The more restrictive option, per Golden Rule #7.
+  @RequireStepUp()
+  recordScores(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(physicalScoresSchema)) body: z.infer<typeof physicalScoresSchema>,
+  ) {
+    return this.admin.recordPhysicalScores(p, id, body.marks);
   }
 
   /** Harvest CBT/arena results back onto the candidates' applications as an

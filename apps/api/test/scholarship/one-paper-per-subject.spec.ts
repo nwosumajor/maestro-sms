@@ -135,7 +135,12 @@ describe("editing a paper does not scatter it", () => {
   it("keeps the subject between questions while authoring", () => {
     // A paper is authored a question at a time; re-typing the subject for each
     // is how half of them end up on the wrong paper.
-    expect(OPERATOR).toMatch(/setQ\(\{ text: "", a: "", b: "", c: "", d: "", answer: 0 \}\);/);
+    // Anchored on the PROPERTY, not on the option list: this asserted the
+    // literal four-option reset and went red when the composer gained option E
+    // — a fixed-text assertion firing on an improvement, which this repo keeps
+    // recording. What matters is that the QUESTION is cleared and the SUBJECT
+    // is not.
+    expect(OPERATOR).toMatch(/setQ\(\{ text: "",(?: [a-e]: "",)+ answer: 0 \}\)/);
     const add = OPERATOR.slice(OPERATOR.indexOf("const addQ = () =>"));
     expect(add.slice(0, 600)).not.toMatch(/setSubject\(""\)/);
   });

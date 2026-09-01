@@ -178,6 +178,77 @@ export function ScholarshipAdmin() {
   };
 
   /**
+   * Record a physical exam's marks.
+   *
+   * The one mode with no sitting to harvest, and until now the one that could
+   * be announced and never scored — so its candidates could never be ranked and
+   * their schools could never win a prize on merit.
+   */
+  const recordScores = async (
+    programId: string,
+    marks: Array<{ applicationId: string; scorePct: number }>,
+  ): Promise<boolean> => {
+    // Checked HERE as well as at the boundary: a typo should be a sentence on
+    // the sheet rather than a 400 after the round trip.
+    if (marks.some((m) => !Number.isFinite(m.scorePct) || m.scorePct < 0 || m.scorePct > 100)) {
+      setMsg({ ok: false, text: "A mark must be a number between 0 and 100. Nothing was recorded." });
+      return false;
+    }
+    setBusy(`scores-${programId}`);
+    setMsg(null);
+    const res = await sendWithStepUp("POST", `scholarships/programs/${programId}/scores`, { marks });
+    setBusy(null);
+    if (res.ok) {
+      const d = (await res.json().catch(() => null)) as { updated?: number } | null;
+      setMsg({ ok: true, text: `Recorded ${d?.updated ?? marks.length} mark(s). Rank the candidates to award.` });
+      void loadApps();
+      return true;
+    }
+    setMsg({ ok: false, text: await readApiError(res) });
+    return false;
+  };
+
+  /**
+   * Correct ONE question in place.
+   *
+   * The paper could be added to and removed from, and not EDITED — so fixing a
+   * typo, or a wrong correct-option, meant deleting the question and typing it
+   * again, which moves it to the end of the paper and loses its position.
+   *
+   * Re-reads first and carries every OTHER question back untouched, subject
+   * included: `examQuestions` replaces the whole set, so a field dropped here
+   * is dropped from every question that survives.
+   */
+  const editQuestion = async (
+    id: string,
+    index: number,
+    next: { text: string; options: string[]; answerIndex: number; subject: string | null },
+  ): Promise<boolean> => {
+    setBusy(`q-${id}`);
+    setMsg(null);
+    const current = await loadPaper(id);
+    if (current === null) {
+      setBusy(null);
+      setMsg({ ok: false, text: "The paper could not be read, so nothing was changed." });
+      return false;
+    }
+    const examQuestions = current.map((question) =>
+      question.index === index
+        ? next
+        : { text: question.text, options: question.options, answerIndex: question.answerIndex, subject: question.subject },
+    );
+    const res = await sendWithStepUp("PUT", `scholarships/programs/${id}`, { examQuestions });
+    setBusy(null);
+    if (res.ok) {
+      setMsg({ ok: true, text: "Question corrected." });
+      void loadPrograms();
+      return true;
+    }
+    setMsg({ ok: false, text: await readApiError(res) });
+    return false;
+  };
+
+  /**
    * Publish (or withdraw) a programme's results to every school.
    *
    * The confirm names WHAT is published, because "publish results" alone does
@@ -387,6 +458,9 @@ export function ScholarshipAdmin() {
                 onPublish={(publish) => publishResults(pr.id, publish)}
                 onSaveWindow={(current, subject, at, mins) => saveWindow(pr.id, current, subject, at, mins)}
                 onRemoveQuestion={(index) => removeQuestion(pr.id, index)}
+                onEditQuestion={(index, next) => editQuestion(pr.id, index, next)}
+                candidates={apps.filter((a) => a.programId === pr.id && a.status === "QUALIFIED")}
+                onRecordScores={(marks) => recordScores(pr.id, marks)}
                 onAnnounce={() => announceExam(pr.id)}
                 onCollect={() => collectResults(pr.id)}
                 onStatus={(st) => setProgramStatus(pr.id, st)}
@@ -549,6 +623,9 @@ function ProgramRow({
   onAddQuestion,
   onLoadPaper,
   onRemoveQuestion,
+  onEditQuestion,
+  candidates,
+  onRecordScores,
   onPublish,
   onSaveWindow,
   onAnnounce,
@@ -562,6 +639,12 @@ function ProgramRow({
   /** Read the paper back — admin-only, and its own route. */
   onLoadPaper: () => Promise<Question[] | null>;
   onRemoveQuestion: (index: number) => Promise<boolean>;
+  onEditQuestion: (
+    index: number,
+    next: { text: string; options: string[]; answerIndex: number; subject: string | null },
+  ) => Promise<boolean>;
+  candidates: Array<Serialized<ScholarshipApplicationDto>>;
+  onRecordScores: (marks: Array<{ applicationId: string; scorePct: number }>) => Promise<boolean>;
   onPublish: (publish: boolean) => void;
   onSaveWindow: (
     current: Record<string, { examAt: string; durationMin?: number }>,
@@ -598,7 +681,10 @@ function ProgramRow({
     if (!confirm("Remove this question from the paper?")) return;
     if (await onRemoveQuestion(index)) await loadPaper();
   };
-  const [q, setQ] = React.useState({ text: "", a: "", b: "", c: "", d: "", answer: 0 });
+  // A TO E. The API has always accepted up to six options and this form offered
+  // FOUR, so an owner writing a five-option question simply could not — the
+  // familiar shape of a control the server would have taken.
+  const [q, setQ] = React.useState({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
   // WHICH PAPER this question goes on. A scholarship may be examined in several
   // subjects, and the subjects ARE whichever ones the questions carry — there
   // is no separate list of papers to fall out of step with. Blank means the
@@ -609,17 +695,31 @@ function ProgramRow({
   // up on the wrong paper.
   const [subject, setSubject] = React.useState("");
   const [windows, setWindows] = React.useState<Record<string, { at?: string; mins?: string }>>({});
+  /** Which question is being corrected, if any. */
+  const [editing, setEditing] = React.useState<number | null>(null);
+  const [showMarks, setShowMarks] = React.useState(false);
+  const [marks, setMarks] = React.useState<Record<string, string>>({});
 
   const addQ = () => {
-    const options = [q.a, q.b, q.c, q.d].map((o) => o.trim()).filter(Boolean);
+    const options = [q.a, q.b, q.c, q.d, q.e].map((o) => o.trim()).filter(Boolean);
     if (!q.text.trim() || options.length < 2) return;
-    onAddQuestion({
+    const next = {
       text: q.text.trim(),
       options,
       answerIndex: Math.min(q.answer, options.length - 1),
       subject: subject.trim() || null,
-    });
-    setQ({ text: "", a: "", b: "", c: "", d: "", answer: 0 });
+    };
+    if (editing !== null) {
+      void onEditQuestion(editing, next).then((okDone) => {
+        if (!okDone) return;
+        setEditing(null);
+        setQ({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
+        void loadPaper();
+      });
+      return;
+    }
+    onAddQuestion(next);
+    setQ({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
   };
 
   return (
@@ -709,12 +809,20 @@ function ProgramRow({
             Collect results
           </Button>
         )}
+        {/* THE PHYSICAL EQUIVALENT OF "Collect results". A paper exam has no
+            sitting to harvest, so the marks are typed in — and without this the
+            mode dead-ended at the announcement. */}
+        {pr.examMode === "PHYSICAL" && (
+          <Button size="sm" variant="outline" onClick={() => setShowMarks((v) => !v)}>
+            {showMarks ? "Hide mark sheet" : `Enter marks (${candidates.length})`}
+          </Button>
+        )}
         {/* PUBLISHING IS A DECISION, AND IT COMES AFTER REVIEW. A score is a
             fact about a child's exam; it reaches every school on the platform
             only once the owner has looked at the marking. The button says what
             the table will contain, because "publish results" alone does not
             tell an operator whether they are about to name a pupil. */}
-        {(pr.examMode === "ONLINE_CBT" || pr.examMode === "GAMES") && (
+        {(pr.examMode === "ONLINE_CBT" || pr.examMode === "GAMES" || pr.examMode === "PHYSICAL") && (
           <Button
             size="sm"
             variant={pr.resultsPublishedAt ? "ghost" : "outline"}
@@ -735,6 +843,65 @@ function ProgramRow({
           </span>
         )}
       </div>
+
+      {/* PHYSICAL mark sheet */}
+      {showMarks && pr.examMode === "PHYSICAL" && (
+        <div className="space-y-2 rounded-md border border-dashed border-border p-2">
+          <p className="text-xs text-muted-foreground">
+            Enter each candidate&apos;s mark as a percentage. Leave a box blank for anyone whose script is not
+            marked yet — only what you fill in is recorded, and you can come back.
+          </p>
+          {candidates.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No qualified candidates yet. Qualify candidates from the Applications list first.
+            </p>
+          ) : (
+            <>
+              {candidates.map((c) => (
+                <div key={c.id} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="min-w-[16rem]">
+                    {c.studentName} <span className="text-muted-foreground">· {c.schoolName}</span>
+                  </span>
+                  <Input
+                    aria-label={`Mark for ${c.studentName} (percent)`}
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    className="h-8 w-24"
+                    placeholder={c.examScorePct != null ? String(c.examScorePct) : "%"}
+                    value={marks[c.id] ?? ""}
+                    onChange={(e) => setMarks((m) => ({ ...m, [c.id]: e.target.value }))}
+                  />
+                  {/* What is ALREADY recorded, so re-opening the sheet does not
+                      read as though nothing was entered. */}
+                  {c.examScorePct != null && (
+                    <span className="text-xs text-muted-foreground">recorded: {c.examScorePct}%</span>
+                  )}
+                </div>
+              ))}
+              <Button
+                size="sm"
+                disabled={busy === `scores-${pr.id}`}
+                onClick={() => {
+                  const entered = candidates
+                    .map((c) => ({ applicationId: c.id, raw: (marks[c.id] ?? "").trim() }))
+                    .filter((m) => m.raw !== "")
+                    .map((m) => ({ applicationId: m.applicationId, scorePct: Number(m.raw) }));
+                  if (entered.length === 0) return;
+                  void onRecordScores(entered).then((ok) => {
+                    // Only clear what was accepted — a rejected sheet must keep
+                    // what the operator typed, or they retype every mark.
+                    if (ok) setMarks({});
+                  });
+                }}
+              >
+                Record marks
+              </Button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* CBT question composer */}
       {showQ && pr.examMode === "ONLINE_CBT" && (
@@ -769,6 +936,22 @@ function ProgramRow({
                       answer: {question.options[question.answerIndex] ?? "(none)"}
                     </span>
                   </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Edit question ${question.index + 1}`}
+                    disabled={busy === `q-${pr.id}`}
+                    onClick={() => {
+                      // Load it into the composer so a correction is made in
+                      // the same form that wrote it, rather than a second one.
+                      const [a = "", b = "", c = "", d = "", e = ""] = question.options;
+                      setQ({ text: question.text, a, b, c, d, e, answer: question.answerIndex });
+                      setSubject(question.subject ?? "");
+                      setEditing(question.index);
+                    }}
+                  >
+                    Edit
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -834,10 +1017,10 @@ function ProgramRow({
           )}
           <Input placeholder="Question text" value={q.text} onChange={(e) => setQ({ ...q, text: e.target.value })} />
           <div className="grid grid-cols-2 gap-2">
-            {(["a", "b", "c", "d"] as const).map((k, i) => (
+            {(["a", "b", "c", "d", "e"] as const).map((k, i) => (
               <label key={k} className="flex items-center gap-1.5">
                 <input type="radio" name={`ans-${pr.id}`} checked={q.answer === i} onChange={() => setQ({ ...q, answer: i })} />
-                <Input placeholder={`Option ${i + 1}${i < 2 ? " *" : ""}`} value={q[k]} onChange={(e) => setQ({ ...q, [k]: e.target.value })} />
+                <Input placeholder={`${String.fromCharCode(65 + i)}${i < 2 ? " *" : ""}`} value={q[k]} onChange={(e) => setQ({ ...q, [k]: e.target.value })} />
               </label>
             ))}
           </div>
@@ -854,7 +1037,21 @@ function ProgramRow({
                 onChange={(e) => setSubject(e.target.value)}
               />
             </div>
-            <Button size="sm" disabled={busy === `q-${pr.id}`} onClick={addQ}>Add question</Button>
+            <Button size="sm" disabled={busy === `q-${pr.id}`} onClick={addQ}>
+              {editing !== null ? `Save question ${editing + 1}` : "Add question"}
+            </Button>
+            {editing !== null && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setEditing(null);
+                  setQ({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
+                }}
+              >
+                Cancel
+              </Button>
+            )}
             <span className="text-xs text-muted-foreground">
               Select the radio next to the correct option. Answers stay server-side. Questions sharing a
               subject become one paper.

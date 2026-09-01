@@ -2945,6 +2945,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /scholarships/programs/:p/scores": {
+      "kind": "ui",
+      "note": "the physical mark sheet on ScholarshipAdmin.tsx"
+    },
     "POST /schools/branding/logo": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
