@@ -831,6 +831,7 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
+      this.assertNotAPlatformExam(exam);
       if (!this.isSchoolWide(p) && exam.createdById !== p.userId) {
         throw new NotFoundException("Exam not found"); // 404-not-403
       }
@@ -854,6 +855,7 @@ export class CbtService {
     const claimed = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
+      this.assertNotAPlatformExam(exam);
       if (!this.isSchoolWide(p) && exam.createdById !== p.userId) {
         throw new NotFoundException("Exam not found"); // 404-not-403
       }
@@ -899,6 +901,7 @@ export class CbtService {
     const claimed = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
+      this.assertNotAPlatformExam(exam);
       if (!this.isSchoolWide(p) && exam.createdById !== p.userId) {
         throw new NotFoundException("Exam not found"); // 404-not-403
       }
@@ -945,7 +948,11 @@ export class CbtService {
         // for attaching to a sitting (they publish via schedule approval), and it
         // used to fetch all 100 and discard most of them in the browser.
         exams = await tx.cbtExam.findMany({
-          where: status ? { status } : {},
+          // A SCHOLARSHIP exam is not one of the school's own. It is
+          // materialised in their tenant so sittings stay RLS-scoped, and it
+          // appeared in their console alongside exams they actually set —
+          // which is how its answer key came to be one click away.
+          where: { ...(status ? { status } : {}), scholarshipProgramId: null },
           orderBy: { startAt: "desc" },
           take: 100,
         });
@@ -976,6 +983,37 @@ export class CbtService {
   }
 
   // --- sittings (students) ------------------------------------------------------
+
+  /**
+   * A SCHOLARSHIP exam is the PLATFORM's paper, not the school's.
+   *
+   * `announceExam` materialises it INSIDE each candidate's tenant, which is
+   * right — it keeps every sitting RLS-scoped to the pupil's own school. What
+   * was wrong is that it then looked like one of that school's own exams:
+   * measured live, the PRINCIPAL and the SCHOOL ADMIN of a candidate's school
+   * could download `answer-key.pdf` for it and get 200, BEFORE their pupil sat
+   * it. Every school with a candidate holds its own copy of the row, so every
+   * one of them could — which defeats a cross-school competition entirely.
+   *
+   * A teacher happened to be refused, and only by luck: bank access is decided
+   * by SUBJECT, and the demo teacher does not teach the one the programme
+   * named. That is not a control.
+   *
+   * So the school administers nothing about it: no paper, no key, no status
+   * change, no publish or answer-release request, no re-marking. What a school
+   * legitimately keeps is its own pupils' RESULTS, which are theirs to see and
+   * which the platform publishes anyway.
+   *
+   * The platform owner reads the paper through the scholarship's own route
+   * (`GET /scholarships/programs/:id/questions`), which is `scholarship.admin`.
+   */
+  private assertNotAPlatformExam(exam: { scholarshipProgramId: string | null }): void {
+    // 404, not 403: the school can SEE that a scholarship exam exists for its
+    // pupils, so the refusal says only that this is not theirs to administer.
+    if (exam.scholarshipProgramId) {
+      throw new NotFoundException("Exam not found");
+    }
+  }
 
   /** A scholarship-bound exam requires a QUALIFIED application for that program;
    *  keeps ordinary exams untouched. Returns only the exams the student may see. */
@@ -1229,6 +1267,9 @@ export class CbtService {
     const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
+      // NOT THE SCHOOL'S PAPER. A scholarship exam is the platform's, and its
+      // key must not be printable by the leadership of a competing school.
+      this.assertNotAPlatformExam(exam);
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
       if (!bank) throw new NotFoundException("Exam not found");
 
@@ -1643,6 +1684,11 @@ export class CbtService {
     const plan = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
+      // NOT A SCHOOL ASSESSMENT. Recording a platform scholarship exam into the
+      // school's own gradebook would put a competition mark on a pupil's report
+      // card as though the school had set it. The scholarship reads those
+      // sittings itself, through `collectExamResults`.
+      this.assertNotAPlatformExam(exam);
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
       if (!bank || !p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) || !(await this.canTouchBank(tx, p, bank))) {
         throw new NotFoundException("Exam not found");

@@ -898,6 +898,50 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Each school held the answer key to the competition it was entering
+`assertNotAPlatformExam` (`cbt/cbt.service.ts`). Found by the owner asking a
+QUESTION — whether the scholarship exam is properly separate from the paid CBT
+module — and checking it rather than answering from the design.
+The separation of AUDIENCE is right and was verified: a school's own exams need
+the module, a scholarship exam does not. What is NOT separate is ADMINISTRATION.
+`announceExam` materialises the scholarship exam INSIDE each candidate's tenant
+— correct, and the reason every sitting stays RLS-scoped — and the row then
+looked like one of that school's own exams. Measured live on a real programme:
+```
+principal@demo.school   GET cbt/exams/:id/answer-key.pdf -> 200
+admin@demo.school       GET cbt/exams/:id/answer-key.pdf -> 200
+teacher@demo.school                                      -> 404
+```
+**The leadership of a candidate's own school could print the ANSWER KEY to a
+cross-school competition before their pupil sat it** — and every school with a
+candidate holds its own copy of that row, so every one of them could. That is
+not a leak at the edges; it defeats the competition.
+// **THE TEACHER'S 404 WAS LUCK, NOT A CONTROL**, which is the part worth
+keeping: bank access is decided by SUBJECT (`canTouchBank`), and the demo
+teacher does not teach the one the programme named. A teacher who did would have
+been an editor. A refusal that depends on the fixture is not a refusal.
+// ONE GUARD, ON EVERY DOOR: the paper and key, closing the exam, requesting a
+publish, requesting the ANSWER RELEASE, and `recordExamGrades` — which would
+otherwise write a platform competition's mark into the school's own gradebook,
+onto a pupil's report card, as though the school had set it. A guard on the one
+door I happened to test is not a guard.
+// **404, NOT 403**, and deliberately: the school can see that its pupils have a
+scholarship exam, so the refusal says only that this is not theirs to
+administer.
+// IT IS ALSO OUT OF THE SCHOOL'S EXAM CONSOLE — not as the control, since the
+direct URL is refused, but because a platform paper listed beside a school's own
+is how its key came to be one click away.
+// WHAT THE SCHOOL KEEPS IS RESULTS. Its own pupils' scores are theirs to see,
+and the platform publishes them anyway; a test pins that `examResults` is NOT
+guarded, so the fix cannot quietly grow into hiding a school's own data.
+// AND THE CANDIDATE IS UNAFFECTED: the student branch of `listExams` filters by
+QUALIFIED application rather than excluding scholarship exams, so the two
+branches ask opposite questions on purpose. Verified after: ten management
+requests refused by direct URL for both roles, and the candidate still opens
+their paper 201.
+Mutation-validated five ways: drop the guard from each of the four management
+paths in turn, and put the platform exam back in the school's console.
+
 ### One fix cancelling another, found only by exercising the flow
 `announceExam`. Asked to drive the scholarship end to end "to ensure it is
 perfect now". It was not, and what was wrong was the interaction between two
