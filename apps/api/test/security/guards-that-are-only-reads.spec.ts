@@ -36,6 +36,7 @@
 // =============================================================================
 
 import { BadRequestException } from "@nestjs/common";
+import { stripComments } from "../support/strip-comments";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -43,7 +44,7 @@ const SRC = (p: string) => readFileSync(join(__dirname, "../../src", p), "utf8")
 
 /** Comments stripped: an assertion that matches the explanation of a fix
  *  instead of the fix passes when the fix is deleted. */
-const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const code = (s: string) => stripComments(s);
 
 function bodyOf(src: string, name: string): string {
   const decl = new RegExp(`^\\s*(private |public |protected )?(async )?${name}\\s*\\(`, "m");

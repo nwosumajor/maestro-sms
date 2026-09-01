@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { PLANS, PLAN_PRICING, PLAN_PRICING_BY_CURRENCY, monthlyRunRateMinor } from "@sms/types";
 
@@ -15,9 +16,9 @@ import { PLANS, PLAN_PRICING, PLAN_PRICING_BY_CURRENCY, monthlyRunRateMinor } fr
  */
 
 const src = (...p: string[]) =>
-  readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  stripComments(readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8"))
+    
+    ;
 
 const ANALYTICS = src("apps", "api", "src", "operator", "platform-analytics.service.ts");
 const ATTENTION = src("apps", "api", "src", "operator", "operator-attention.service.ts");

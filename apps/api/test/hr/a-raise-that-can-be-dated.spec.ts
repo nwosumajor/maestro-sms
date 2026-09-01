@@ -18,14 +18,15 @@
  * screen cannot tell that from a raise already in somebody's pay.
  */
 import { readFileSync } from "fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "path";
 
-const FORM = readFileSync(join(__dirname, "../../../../apps/web/components/hr/SalaryChanges.tsx"), "utf8");
-const SERVICE = readFileSync(join(__dirname, "../../src/hr/salary.service.ts"), "utf8");
-const DTO = readFileSync(join(__dirname, "../../../../packages/types/src/dto/hr.ts"), "utf8");
+const FORM = stripComments(readFileSync(join(__dirname, "../../../../apps/web/components/hr/SalaryChanges.tsx"), "utf8"));
+const SERVICE = stripComments(readFileSync(join(__dirname, "../../src/hr/salary.service.ts"), "utf8"));
+const DTO = stripComments(readFileSync(join(__dirname, "../../../../packages/types/src/dto/hr.ts"), "utf8"));
 
 /** The file with its comments stripped — a gate must not pass on its own prose. */
-const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const code = (s: string) => s;
 
 describe("a raise that can be dated", () => {
   it("the form SENDS an effective date", () => {
@@ -67,7 +68,7 @@ describe("a raise that can be dated", () => {
   it("the sweep still only claims rows that carry a date", () => {
     // The other half of the same feature: without this filter the sweep would
     // re-apply every approved change in the school's history on its first run.
-    const sweep = readFileSync(join(__dirname, "../../src/hr/staff-reminder.service.ts"), "utf8");
+    const sweep = stripComments(readFileSync(join(__dirname, "../../src/hr/staff-reminder.service.ts"), "utf8"));
     expect(code(sweep)).toMatch(/effectiveDate:\s*\{\s*not:\s*null/);
   });
 });

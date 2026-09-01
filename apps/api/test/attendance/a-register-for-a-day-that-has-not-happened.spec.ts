@@ -20,10 +20,11 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
-const src = readFileSync(join(__dirname, "..", "..", "src", "attendance", "attendance.service.ts"), "utf8");
-const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+const src = stripComments(readFileSync(join(__dirname, "..", "..", "src", "attendance", "attendance.service.ts"), "utf8"));
+const strip = (s: string) => s.replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const body = strip(src);
 
 describe("marking a register", () => {

@@ -25,6 +25,7 @@
  * mismatches, and the aggregates identical either way.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = join(__dirname, "../../src");
@@ -43,7 +44,7 @@ function sources(): string[] {
 
 /** Comments stripped: this repo has twice had a gate fire on prose about SQL. */
 const strip = (s: string) =>
-  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "").replace(/^\s*--.*$/gm, "");
+  s.replace(/^[ \t]*\/\/.*$/gm, "").replace(/^\s*--.*$/gm, "");
 
 describe("a window that prunes partitions", () => {
   const files = sources();
@@ -55,7 +56,7 @@ describe("a window that prunes partitions", () => {
   it("no Prisma read of the register filters through session.date", () => {
     const bad: string[] = [];
     for (const f of files) {
-      const src = strip(readFileSync(f, "utf8"));
+      const src = strip(stripComments(readFileSync(f, "utf8")));
       if (!/attendanceRecord\./.test(src)) continue;
       // `session: { date: ... }` inside a where — the shape that cannot prune.
       for (const m of src.matchAll(/session:\s*\{\s*date:/g)) {
@@ -69,7 +70,7 @@ describe("a window that prunes partitions", () => {
   it("no raw query windows attendance_record on the session's date", () => {
     const bad: string[] = [];
     for (const f of files) {
-      const src = strip(readFileSync(f, "utf8"));
+      const src = strip(stripComments(readFileSync(f, "utf8")));
       if (!/attendance_record/.test(src)) continue;
       // `s.date` used as a bound against attendance_record's window.
       for (const m of src.matchAll(/\bs\.date\s*(?:BETWEEN|>=|<=|>|<)/gi)) {
@@ -83,9 +84,9 @@ describe("a window that prunes partitions", () => {
   it("the readers that were moved still window on something", () => {
     // Magnitude: both rules above pass trivially against code that stopped
     // filtering by date at all, which would be a correctness bug, not a fix.
-    const rollup = readFileSync(join(SRC, "attendance/attendance-rollup.service.ts"), "utf8");
+    const rollup = stripComments(readFileSync(join(SRC, "attendance/attendance-rollup.service.ts"), "utf8"));
     expect(rollup.match(/r\.date BETWEEN/g)?.length).toBe(2);
-    const card = readFileSync(join(SRC, "reportcards/reportcard.service.ts"), "utf8");
+    const card = stripComments(readFileSync(join(SRC, "reportcards/reportcard.service.ts"), "utf8"));
     expect(card).toMatch(/date: \{ gte: term\.startDate, lte: term\.endDate \}/);
   });
 });

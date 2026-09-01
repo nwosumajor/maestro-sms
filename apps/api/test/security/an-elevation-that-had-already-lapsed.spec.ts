@@ -22,13 +22,14 @@
  * hides among them.
  */
 import { readFileSync } from "fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "path";
 import { SecurityService } from "../../src/security/security.service";
 import type { Principal, TenantTx } from "../../src/integrity/integrity.foundation";
 
 const SRC = join(__dirname, "../../src");
 const code = (p: string) =>
-  readFileSync(join(SRC, p), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  stripComments(readFileSync(join(SRC, p), "utf8"));
 
 const P: Principal = { schoolId: "S", userId: "admin-1", roles: ["school_admin"], permissions: [] };
 

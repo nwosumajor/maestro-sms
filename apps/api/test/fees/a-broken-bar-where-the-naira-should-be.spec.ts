@@ -17,11 +17,12 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { formatMoney, formatMoneyPdf, toWinAnsi } from "@sms/types";
 
 const SRC = join(__dirname, "..", "..", "src");
-const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+const strip = (s: string) => s.replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 /** Exactly what a pdfkit standard font can put on a page. */
 const encodable = (s: string) =>
@@ -83,7 +84,7 @@ describe("the documents that carry money out of the building", () => {
     ["hr/payroll.service.ts", "the payslip an employee is given"],
     ["billing/billing.service.ts", "the subscription receipt"],
   ])("%s uses the PDF-safe formatter — %s", (rel) => {
-    const src = strip(readFileSync(join(SRC, rel), "utf8"));
+    const src = strip(stripComments(readFileSync(join(SRC, rel), "utf8")));
     // The PDF builder in each of these must not reach for the symbol form.
     // Anchored to the FACTORY, not to `new PDFDocument(` — that literal was
     // replaced by `createPdfDocument` when the text fold moved to the pdfkit

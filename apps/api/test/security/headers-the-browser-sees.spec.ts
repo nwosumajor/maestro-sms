@@ -30,10 +30,10 @@
 // =============================================================================
 
 import { readFileSync, readdirSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const WEB = (p: string) => readFileSync(join(__dirname, "../../../web", p), "utf8");
-const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 describe("the baseline every response carries", () => {
   const config = stripComments(WEB("next.config.mjs"));

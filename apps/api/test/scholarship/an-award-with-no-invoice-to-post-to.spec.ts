@@ -17,15 +17,16 @@
  * re-award -> still one entry, revoke -> negative entry and a balance of zero.
  */
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
-const SRC = readFileSync(
+const SRC = stripComments(readFileSync(
   join(__dirname, "..", "..", "src", "scholarship", "scholarship-admin.service.ts"),
   "utf8",
-);
+));
 
 function methodBody(signature: string): string {
-  const stripped = SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const stripped = SRC.replace(/(^|[^:])\/\/.*$/gm, "$1");
   const start = stripped.indexOf(signature);
   expect(start).toBeGreaterThan(-1);
   // The BODY's brace: walk the parameter parens to their match first.

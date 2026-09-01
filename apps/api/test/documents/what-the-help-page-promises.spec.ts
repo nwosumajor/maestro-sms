@@ -18,11 +18,12 @@
  * guide fails the build if either behaviour changes under it.
  */
 import { readFileSync } from "fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "path";
 import { ESSENTIAL_NOTIFICATION_TYPES, allowedChannels } from "@sms/types";
 
-const HELP = readFileSync(join(__dirname, "../../../../apps/web/app/(app)/help/page.tsx"), "utf8");
-const help = HELP.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const HELP = stripComments(readFileSync(join(__dirname, "../../../../apps/web/app/(app)/help/page.tsx"), "utf8"));
+const help = HELP;
 const API = join(__dirname, "../../src");
 
 describe("what the help page promises", () => {

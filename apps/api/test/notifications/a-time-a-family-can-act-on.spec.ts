@@ -23,6 +23,7 @@
  * a PERSON is sent.
  */
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { walkSources } from "../support/api-routes";
 
@@ -63,8 +64,8 @@ describe("no notice tells a reader the server's clock", () => {
       if (EXEMPT[rel]) continue;
       // Comments explaining THIS fix mention the old call; a scan that reads
       // prose fails on the explanation of its own fix.
-      const src = readFileSync(file, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
+      const src = stripComments(readFileSync(file, "utf8"))
+        
         .replace(/(^|[^:])\/\/.*$/gm, "$1");
       src.split("\n").forEach((line, i) => {
         if (OFFENDER.test(line)) offenders.push(`${rel}:${i + 1}  ${line.trim().slice(0, 100)}`);
@@ -75,14 +76,14 @@ describe("no notice tells a reader the server's clock", () => {
 
   it("every exemption still names a file that exists", () => {
     for (const rel of Object.keys(EXEMPT)) {
-      expect(() => readFileSync(join(__dirname, "..", "..", "src", rel), "utf8")).not.toThrow();
+      expect(() => stripComments(readFileSync(join(__dirname, "..", "..", "src", rel), "utf8"))).not.toThrow();
     }
   });
 
   it("the handover report resolves the zone it already had in hand", () => {
     // Kept as a named case because this file was briefly EXEMPTED from the rule
     // above on a reason that was not true.
-    const src = readFileSync(join(__dirname, "..", "..", "src", "hr", "staff-handover.service.ts"), "utf8");
+    const src = stripComments(readFileSync(join(__dirname, "..", "..", "src", "hr", "staff-handover.service.ts"), "utf8"));
     expect(src).toContain("schoolTimeString(timezone,");
     // …and its DAY columns deliberately stay on UTC midnight, which is what a
     // `@db.Date` means. Narrowing those would date a cover lesson a day early.
@@ -95,7 +96,7 @@ describe("no notice tells a reader the server's clock", () => {
 
   it("the two modules that carry these notices use the shared helper", () => {
     for (const rel of ["meeting/meeting.service.ts", "hostel/hostel.service.ts", "hostel/exeat-overdue.service.ts"]) {
-      const src = readFileSync(join(__dirname, "..", "..", "src", rel), "utf8");
+      const src = stripComments(readFileSync(join(__dirname, "..", "..", "src", rel), "utf8"));
       expect(src).toContain("schoolTimeString");
     }
   });

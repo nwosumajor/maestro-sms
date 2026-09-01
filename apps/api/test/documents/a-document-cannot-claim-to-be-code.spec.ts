@@ -30,6 +30,7 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { safeDownloadType, safeFilename, DEFAULT_DOWNLOAD_TYPE } from "../../src/documents/safe-content-type";
 import { DocumentsController } from "../../src/documents/documents.controller";
@@ -116,9 +117,9 @@ describe("the proxy that stands between the browser and the API", () => {
   // COMMENTS STRIPPED FIRST. Asserting over raw source matches the prose
   // explaining the fix, which is how a source test comes to pass because of the
   // note describing what it checks.
-  const BFF = readFileSync(join(__dirname, "../../../web/app/api/sms/[...path]/route.ts"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  const BFF = stripComments(readFileSync(join(__dirname, "../../../web/app/api/sms/[...path]/route.ts"), "utf8"))
+    
+    ;
 
   it("forwards Content-Disposition on ONE path, not per branch", () => {
     // The regression was structural: two response constructions, and only one

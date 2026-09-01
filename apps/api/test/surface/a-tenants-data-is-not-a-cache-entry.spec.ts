@@ -19,13 +19,12 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const API_SRC = join(__dirname, "..", "..", "src");
 const WEB = join(__dirname, "..", "..", "..", "web");
 
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 describe("the API's own responses", () => {
   const mw = stripComments(readFileSync(join(API_SRC, "common", "no-store.middleware.ts"), "utf8"));

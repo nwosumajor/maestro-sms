@@ -23,6 +23,7 @@
  * unique key now fails the build beside the raw SQL that depends on it.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SCHEMA_DIR = join(__dirname, "../../../../packages/db/prisma/schema");
@@ -32,7 +33,7 @@ const SRC = join(__dirname, "../../src");
 function declaredUniqueKeys(): Map<string, string[][]> {
   const byTable = new Map<string, string[][]>();
   for (const f of readdirSync(SCHEMA_DIR).filter((n) => n.endsWith(".prisma"))) {
-    const src = readFileSync(join(SCHEMA_DIR, f), "utf8");
+    const src = stripComments(readFileSync(join(SCHEMA_DIR, f), "utf8"));
     for (const m of src.matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\n\}/g)) {
       const body = m[2];
       const table = /@@map\("([^"]+)"\)/.exec(body)?.[1] ?? m[1];
@@ -66,8 +67,8 @@ function rawUpserts(): Array<{ file: string; table: string; target: string[] }> 
   for (const f of files) {
     // Comments stripped first: this repo has twice had a gate fire on the prose
     // EXPLAINING the defect it exists for.
-    const src = readFileSync(f, "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
+    const src = stripComments(readFileSync(f, "utf8"))
+      
       .replace(/^[ \t]*\/\/.*$/gm, "");
     for (const m of src.matchAll(
       /INSERT\s+INTO\s+"(\w+)"[\s\S]*?ON\s+CONFLICT\s*\(([^)]*)\)/gi,

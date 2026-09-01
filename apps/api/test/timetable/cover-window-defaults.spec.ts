@@ -23,6 +23,7 @@
 // =============================================================================
 
 import { BadRequestException } from "@nestjs/common";
+import { stripComments } from "../support/strip-comments";
 import { LessonCoverService } from "../../src/timetable/lesson-cover.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
@@ -157,13 +158,13 @@ describe("the caller that started this", () => {
     // Asserted on the CODE, not the file: the header comment describes the old
     // `new Date().toISOString()` on purpose, and a naive text search matched
     // its own explanation.
-    const code = src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+    const code = stripComments(src);
     expect(code).not.toMatch(/toISOString/);
     expect(code).not.toMatch(/Date\.now/);
   });
 
   it("no longer fetches at all — it is handed its rows", () => {
-    const code = src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+    const code = stripComments(src);
     expect(code).not.toMatch(/fetch\(/);
     expect(code).not.toMatch(/"use client"/);
     expect(code).toMatch(/duties \}: \{ duties: Duty\[\] \| null \}/);

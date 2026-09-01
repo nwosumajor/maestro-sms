@@ -23,13 +23,12 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { apiRoutes } from "../support/api-routes";
 
 const API_SRC = join(__dirname, "..", "..", "src");
 
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 /**
  * A route whose `status` is deliberately unvalidated, with the reason.

@@ -22,6 +22,7 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const WEB = join(__dirname, "../../../web/components/operator/ScholarshipAdmin.tsx");
@@ -30,7 +31,7 @@ const DTO = join(__dirname, "../../../../packages/types/src/dto/scholarship.ts")
 describe("an award that never reached a bill", () => {
   it("is a field the DTO actually carries", () => {
     // Written to the row and absent from every DTO is how this stayed invisible.
-    expect(readFileSync(DTO, "utf8")).toMatch(/disbursed: boolean \| null;/);
+    expect(stripComments(readFileSync(DTO, "utf8"))).toMatch(/disbursed: boolean \| null;/);
   });
 
   it("distinguishes NOT AWARDED from AWARDED-BUT-NOT-CREDITED", () => {
@@ -38,7 +39,7 @@ describe("an award that never reached a bill", () => {
     // one falsy value reproduces the ambiguity the export bundle's coverage
     // manifest exists to remove, one module over.
     for (const f of ["src/scholarship/scholarship.service.ts", "src/scholarship/scholarship-admin.service.ts"]) {
-      const src = readFileSync(join(__dirname, "../..", f), "utf8");
+      const src = stripComments(readFileSync(join(__dirname, "../..", f), "utf8"));
       // ANCHORED TO THE PROPERTY, not to the literal line. This matched the
       // exact source and went red when the award gained a SECOND way to be
       // disbursed (the credit ledger) — a change that preserves the three
@@ -52,17 +53,24 @@ describe("an award that never reached a bill", () => {
   });
 
   it("the funder's console no longer claims a credit was posted when it was not", () => {
-    const src = readFileSync(WEB, "utf8");
+    const src = stripComments(readFileSync(WEB, "utf8"));
     // The claim must be conditional on the fact.
     expect(src).toMatch(/a\.disbursed === false/);
     expect(src).toMatch(/NOT yet credited/);
     // And it must still say the true thing in the true case.
-    expect(src).toMatch(/fees credit posted\./);
+    //
+    // THIS ASSERTION WAS PASSING ON A COMMENT. It read `/fees credit posted\./`
+    // — with the full stop straight after "posted" — which the CODE has not said
+    // since the message gained "against an open invoice". What matched was the
+    // block comment in the component quoting the defect this gate exists for,
+    // because the naive comment-stripper every gate hand-rolled was swallowing
+    // the wrong region of that file. Correct stripping made it visible.
+    expect(src).toMatch(/fees credit posted against an open invoice\./);
   });
 
   it("does not assert the credit unconditionally", () => {
     // The exact shipped line, which stated it as fact on every awarded row.
-    const src = readFileSync(WEB, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const src = stripComments(readFileSync(WEB, "utf8"));
     expect(src).not.toMatch(/Awarded \{money\(a\.awardMinor\)\} · fees credit posted\./);
   });
 });

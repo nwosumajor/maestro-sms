@@ -30,6 +30,7 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = join(__dirname, "../../src");
@@ -53,13 +54,13 @@ describe("who counts as staff has one definition", () => {
   it("every named surface still exists", () => {
     // A gate naming a file that has moved passes while covering nothing.
     for (const rel of AUDIENCE_SURFACES) {
-      expect({ rel, found: readFileSync(join(SRC, rel), "utf8").length > 0 }).toEqual({ rel, found: true });
+      expect({ rel, found: stripComments(readFileSync(join(SRC, rel), "utf8")).length > 0 }).toEqual({ rel, found: true });
     }
   });
 
   it("resolves staffness through the shared helper, never a local role list", () => {
     for (const rel of AUDIENCE_SURFACES) {
-      const src = readFileSync(join(SRC, rel), "utf8").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      const src = stripComments(readFileSync(join(SRC, rel), "utf8")).replace(/\/\/[^\n]*/g, "");
       expect({ rel, uses: src.includes("isStaffRoles(") }).toEqual({ rel, uses: true });
       // The two shapes this replaced, either of which would drift again.
       expect({ rel, local: /new Set\(\[\s*"student",\s*"parent"\s*\]\)/.test(src) }).toEqual({ rel, local: false });

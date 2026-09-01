@@ -28,6 +28,7 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { verifyDeviceSignature, isFreshTimestamp } from "../../src/hr/attendance.util";
 import { createHmac } from "node:crypto";
@@ -82,7 +83,7 @@ describe("a duplicate inside a batch", () => {
   const SRC = readFileSync(join(__dirname, "../../src/hr/attendance.service.ts"), "utf8");
   const at = SRC.indexOf("async ingestDeviceEvents");
   const body_ = SRC.slice(at, SRC.indexOf("\n  }", SRC.indexOf("return { accepted", at)));
-  const code = body_.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+  const code = stripComments(body_);
 
   it("is caught rather than aborting the transaction", () => {
     expect(code).toMatch(/e\.code !== "P2002"/);

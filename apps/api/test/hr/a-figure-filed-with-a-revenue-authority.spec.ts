@@ -24,6 +24,7 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { currencyDecimals, toMajor, formatMoney, PAYROLL_PACKS } from "@sms/types";
 
@@ -47,9 +48,6 @@ function body(method: string): string {
  * that reads prose fails on the explanation of the fix. Made this mistake twice
  * before in this repo; see the assertions-that-match-by-accident gate.
  */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-}
 
 describe("what the exports do to a minor-unit amount", () => {
   it("scales by the currency, in BOTH exports", () => {

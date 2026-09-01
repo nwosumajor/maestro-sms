@@ -1,4 +1,5 @@
 import { Logger } from "@nestjs/common";
+import { stripComments } from "../support/strip-comments";
 // =============================================================================
 // Retention covers EVERY stream of telemetry about children
 // =============================================================================
@@ -29,11 +30,11 @@ const norecord = { record: <T,>(_j: string, _t: string, fn: () => Promise<T>) =>
 
 
 /** Source with comments stripped — the file explains these table names in prose. */
-const SERVICE_SRC = readFileSync(
+const SERVICE_SRC = stripComments(readFileSync(
   join(__dirname, "..", "..", "src", "integrity", "retention", "integrity-retention.service.ts"),
   "utf8",
-)
-  .replace(/\/\*[\s\S]*?\*\//g, "")
+))
+  
   .split("\n")
   .filter((l) => !l.trim().startsWith("//"))
   .join("\n");

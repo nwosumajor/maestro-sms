@@ -16,14 +16,15 @@
  * route to a flat fare. Before, the same route billed nobody in silence.
  */
 import { readFileSync } from "fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "path";
 
-const FORM = readFileSync(
+const FORM = stripComments(readFileSync(
   join(__dirname, "../../../../apps/web/components/transport/TransportManager.tsx"),
   "utf8",
-);
+));
 /** Comments stripped — a gate must not pass on the prose of its own fix. */
-const code = FORM.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const code = FORM;
 
 describe("a stop the form can set", () => {
   it("sends stopId when assigning", () => {

@@ -27,10 +27,11 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SERVICE = readFileSync(join(__dirname, "../../src/hr/payroll.service.ts"), "utf8");
-const CODE = SERVICE.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const CODE = stripComments(SERVICE);
 const DTO = readFileSync(join(__dirname, "../../../../packages/types/src/dto/hr.ts"), "utf8");
 const WEB = readFileSync(
   join(__dirname, "../../../web/components/hr/PayrollManager.tsx"),

@@ -30,10 +30,11 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = readFileSync(join(__dirname, "../../src/notifications/notification.service.ts"), "utf8");
-const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const strip = (s: string) => stripComments(s);
 
 /** The recording block: from the "Record what happened" marker to the return. */
 const RECORDING = strip(

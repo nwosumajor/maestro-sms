@@ -25,17 +25,18 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
-const SVC = readFileSync(join(__dirname, "../../src/lms/syllabus.service.ts"), "utf8");
-const CTRL = readFileSync(join(__dirname, "../../src/lms/lms.controller.ts"), "utf8");
-const PANEL = readFileSync(join(__dirname, "../../../web/components/lms/SyllabusPanel.tsx"), "utf8");
+const SVC = stripComments(readFileSync(join(__dirname, "../../src/lms/syllabus.service.ts"), "utf8"));
+const CTRL = stripComments(readFileSync(join(__dirname, "../../src/lms/lms.controller.ts"), "utf8"));
+const PANEL = stripComments(readFileSync(join(__dirname, "../../../web/components/lms/SyllabusPanel.tsx"), "utf8"));
 
 describe("editing a scheme of work", () => {
   it("does not delete every row and recreate it", () => {
     // The shipped shape. A blanket deleteMany over the plan is what destroyed
     // both the taught marks and the content links.
-    const stripped = SVC.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    const stripped = SVC.replace(/\/\/[^\n]*/g, "");
     expect(stripped).not.toMatch(/subjectSyllabusItem\.deleteMany\(\{\s*where:\s*\{\s*syllabusId\s*\}/);
   });
 

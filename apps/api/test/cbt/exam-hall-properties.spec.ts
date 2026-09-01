@@ -38,10 +38,11 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = (p: string) => readFileSync(join(__dirname, "../../src", p), "utf8");
-const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const code = (s: string) => stripComments(s);
 
 const SERVICE = SRC("cbt/cbt.service.ts");
 const CONTROLLER = SRC("cbt/cbt.controller.ts");

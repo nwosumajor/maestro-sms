@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import {
   DEFAULT_PLAN,
@@ -29,9 +30,9 @@ import {
  */
 
 const src = (...p: string[]) =>
-  readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  stripComments(readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8"))
+    
+    ;
 
 const CONTROLLER = src("apps", "api", "src", "operator", "operator.controller.ts");
 const ADDON_SERVICE = src("apps", "api", "src", "billing", "addon-pricing.service.ts");

@@ -24,6 +24,7 @@
 // =============================================================================
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const WEB = join(__dirname, "..", "..", "..", "web");
@@ -55,8 +56,6 @@ function walk(dir: string): string[] {
   return out;
 }
 
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 /**
  * `x.filter(r => r.status === "PENDING…")` and friends — a set of rows still

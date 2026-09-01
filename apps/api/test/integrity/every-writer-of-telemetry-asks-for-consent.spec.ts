@@ -14,6 +14,7 @@
 // =============================================================================
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const API_SRC = join(__dirname, "../../src");
@@ -48,8 +49,6 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 describe("every file that writes telemetry about a child", () => {
   const writers: string[] = [];

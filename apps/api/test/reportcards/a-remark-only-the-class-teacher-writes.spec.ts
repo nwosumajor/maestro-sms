@@ -20,6 +20,7 @@
  * in almost the same words.
  */
 import { ForbiddenException } from "@nestjs/common";
+import { stripComments } from "../support/strip-comments";
 import { classTeacherOnlyRefusal, supervisesStudent } from "../../src/common/teaches";
 
 type Row = Record<string, unknown>;
@@ -152,8 +153,8 @@ import { join } from "node:path";
 const SRC = join(__dirname, "..", "..", "src", "reportcards");
 
 function methodBody(file: string, signature: string): string {
-  const raw = readFileSync(join(SRC, file), "utf8");
-  const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const raw = stripComments(readFileSync(join(SRC, file), "utf8"));
+  const stripped = raw.replace(/(^|[^:])\/\/.*$/gm, "$1");
   const start = stripped.indexOf(signature);
   expect(start).toBeGreaterThan(-1);
   // The BODY's brace, not the first one after the name: `setTraits(... ratings:

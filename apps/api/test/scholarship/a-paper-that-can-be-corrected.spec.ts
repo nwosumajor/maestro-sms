@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 /**
@@ -17,9 +18,9 @@ import { join } from "node:path";
  */
 
 const src = (...p: string[]) =>
-  readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  stripComments(readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8"))
+    
+    ;
 
 const CONTROLLER = src("apps", "api", "src", "scholarship", "scholarship.controller.ts");
 const ADMIN = src("apps", "api", "src", "scholarship", "scholarship-admin.service.ts");

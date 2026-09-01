@@ -37,6 +37,7 @@
 // =============================================================================
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { envIsSet, envOr, envOrNull } from "../../src/common/env";
 import { join } from "node:path";
 
@@ -75,8 +76,6 @@ function walk(dir: string, out: string[] = []): string[] {
  * that reads prose fails on the explanation of its own fix. This gate did
  * exactly that on its first run.
  */
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 const SOURCES = walk(API_SRC).map((f) => ({
   file: f.slice(API_SRC.length + 1),

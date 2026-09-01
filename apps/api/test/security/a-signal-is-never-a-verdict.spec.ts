@@ -24,6 +24,7 @@
 // =============================================================================
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = join(__dirname, "../../src");
@@ -79,7 +80,7 @@ describe("Golden Rule #8 — a signal is never a verdict", () => {
   it("found the signal readers it exists to check", () => {
     // A gate that matches nothing passes while covering nothing.
     let readers = 0;
-    for (const f of files) readers += [...readFileSync(f, "utf8").matchAll(READS_SIGNAL)].length;
+    for (const f of files) readers += [...stripComments(readFileSync(f, "utf8")).matchAll(READS_SIGNAL)].length;
     expect(readers).toBeGreaterThanOrEqual(4);
   });
 
@@ -87,7 +88,7 @@ describe("Golden Rule #8 — a signal is never a verdict", () => {
     const offenders: string[] = [];
     for (const f of files) {
       const rel = f.split("/src/")[1];
-      const src = readFileSync(f, "utf8").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      const src = stripComments(readFileSync(f, "utf8")).replace(/\/\/[^\n]*/g, "");
       for (const m of src.matchAll(READS_SIGNAL)) {
         const enc = enclosingMethod(src, m.index ?? 0);
         if (!enc) continue;
@@ -107,7 +108,7 @@ describe("Golden Rule #8 — a signal is never a verdict", () => {
     const offenders: string[] = [];
     for (const f of files.filter((x) => x.includes("/src/integrity/"))) {
       const rel = f.split("/src/")[1];
-      const src = readFileSync(f, "utf8").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      const src = stripComments(readFileSync(f, "utf8")).replace(/\/\/[^\n]*/g, "");
       for (const m of src.matchAll(/tx\.([a-zA-Z]+)\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\(/g)) {
         if (!OWN.test(m[1])) offenders.push(`${rel}: writes ${m[1]}`);
       }

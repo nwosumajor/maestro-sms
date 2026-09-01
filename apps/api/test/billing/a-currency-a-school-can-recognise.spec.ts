@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { CURRENCIES, currencyLabel, planCurrencies, DEFAULT_PLAN } from "@sms/types";
 
@@ -20,12 +21,12 @@ import { CURRENCIES, currencyLabel, planCurrencies, DEFAULT_PLAN } from "@sms/ty
 // COMMENTS STRIPPED FIRST. The comment explaining this very fix quotes the
 // ternary it replaced, so a scan of the raw file fails on the explanation of
 // its own fix — the trap `money-is-not-divided-by-a-hundred` already records.
-const CHECKOUT = readFileSync(
+const CHECKOUT = stripComments(readFileSync(
   join(__dirname, "..", "..", "..", "..", "apps", "web", "components", "billing", "BillingCheckout.tsx"),
   "utf8",
-)
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
+))
+  
+  ;
 
 describe("every currency on offer names itself", () => {
   it("names each of the currencies the platform actually sells in", () => {

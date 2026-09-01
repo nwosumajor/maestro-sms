@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { signStorage, signStorageUrl } from "../../src/documents/local-storage-signing";
 
@@ -49,9 +50,9 @@ describe("what the signature covers", () => {
 });
 
 describe("the endpoint that honours it", () => {
-  const src = readFileSync(join(__dirname, "../../src/documents/local-storage.controller.ts"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  const src = stripComments(readFileSync(join(__dirname, "../../src/documents/local-storage.controller.ts"), "utf8"))
+    
+    ;
 
   it("refuses a key that is not one this platform issues", () => {
     // Containment: nothing may climb out of the storage directory.
@@ -87,7 +88,7 @@ describe("the endpoint that honours it", () => {
 });
 
 describe("it is absent in production", () => {
-  const moduleSrc = readFileSync(join(__dirname, "../../src/documents/documents.module.ts"), "utf8");
+  const moduleSrc = stripComments(readFileSync(join(__dirname, "../../src/documents/documents.module.ts"), "utf8"));
 
   it("is not registered when the real bucket is bound", () => {
     // Not "checked and refused" — NOT REGISTERED. A development convenience

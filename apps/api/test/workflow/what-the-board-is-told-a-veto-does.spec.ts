@@ -20,13 +20,14 @@
  * the button undoes the act will not go and ask anyone to undo it.
  */
 import { readFileSync } from "fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "path";
 import { WORKFLOW_TRANSITIONS } from "@sms/types";
 
-const HELP = readFileSync(join(__dirname, "../../../../apps/web/app/(app)/help/page.tsx"), "utf8");
-const MANUAL = readFileSync(join(__dirname, "../../../../docs/ONBOARDING-MANUAL.html"), "utf8");
+const HELP = stripComments(readFileSync(join(__dirname, "../../../../apps/web/app/(app)/help/page.tsx"), "utf8"));
+const MANUAL = stripComments(readFileSync(join(__dirname, "../../../../docs/ONBOARDING-MANUAL.html"), "utf8"));
 /** Comments stripped: a gate must not pass on the prose of its own fix. */
-const help = HELP.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const help = HELP;
 
 describe("what the board is told a veto does", () => {
   it("VETO is reachable from PENDING_REVIEW as well as APPROVED", () => {

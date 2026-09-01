@@ -18,6 +18,7 @@
 // =============================================================================
 
 import { readFileSync } from "fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "path";
 import { walkSources } from "../support/api-routes";
 
@@ -73,8 +74,8 @@ describe("a balance a _sum cannot express", () => {
     const offenders: string[] = [];
     let seen = 0;
     for (const file of files) {
-      const src = readFileSync(file, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
+      const src = stripComments(readFileSync(file, "utf8"))
+        
         .replace(/^[ \t]*\/\/.*$/gm, "");
       // net-paid.ts is where the sign IS expressed.
       if (file.endsWith("net-paid.ts")) continue;
@@ -102,7 +103,7 @@ describe("a balance a _sum cannot express", () => {
     let seen = 0;
     for (const file of files) {
       const rel = file.replace(SRC, "src");
-      const src = readFileSync(file, "utf8");
+      const src = stripComments(readFileSync(file, "utf8"));
       for (const m of src.matchAll(AGGREGATE)) {
         // Only the ones that sum MONEY are in scope; a _count is fine.
         const after = src.slice(m.index ?? 0, (m.index ?? 0) + 400);
@@ -120,7 +121,7 @@ describe("a balance a _sum cannot express", () => {
   it("names only files that still exist", () => {
     // A dangling exemption is a hole waiting for the name to be reused.
     for (const rel of Object.keys(NOT_A_BALANCE)) {
-      const src = readFileSync(join(SRC, rel.replace(/^src\//, "")), "utf8");
+      const src = stripComments(readFileSync(join(SRC, rel.replace(/^src\//, "")), "utf8"));
       expect(src).toContain("payment.");
     }
   });

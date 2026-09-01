@@ -18,12 +18,13 @@
  * — the first draft of this fix said blip and was wrong about the cause.
  */
 import { readFileSync } from "fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "path";
 
-const PAGE = readFileSync(join(__dirname, "../../../../apps/web/app/(app)/family/page.tsx"), "utf8");
-const page = PAGE.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-const API = readFileSync(join(__dirname, "../../../../apps/web/lib/api.ts"), "utf8");
-const SERVICE = readFileSync(join(__dirname, "../../src/parent/parent.service.ts"), "utf8");
+const PAGE = stripComments(readFileSync(join(__dirname, "../../../../apps/web/app/(app)/family/page.tsx"), "utf8"));
+const page = PAGE;
+const API = stripComments(readFileSync(join(__dirname, "../../../../apps/web/lib/api.ts"), "utf8"));
+const SERVICE = stripComments(readFileSync(join(__dirname, "../../src/parent/parent.service.ts"), "utf8"));
 
 describe("no children is not a failed read", () => {
   it("the page no longer turns a refusal into an empty family", () => {

@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { FEE_SOURCES, FEE_SOURCE_LABELS, isFeeSource } from "@sms/types";
 
@@ -29,8 +30,6 @@ function walk(dir: string): string[] {
   return out;
 }
 
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 describe("the taxonomy", () => {
   it("labels every source, so no screen has to invent a name", () => {

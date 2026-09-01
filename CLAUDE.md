@@ -898,6 +898,56 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A path glob in a comment, and sixty-three blind gates
+`apps/api/test/support/strip-comments.ts`. Found BY WRITING ONE: a test could
+not see six route decorators that grep found instantly, in a file I had just
+edited.
+Sixty-three gates read a source file and assert about it, and nearly all strip
+comments first — for a good reason this file records elsewhere: a gate scanning
+raw text FAILS ON THE COMMENT EXPLAINING ITS OWN FIX, because that comment
+quotes the defect it replaced. Every one of them hand-rolled the same regex:
+```
+src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+```
+**It has no idea a `/*` can appear where it does not open a comment.** Write a
+path glob in a line comment — "the `/cbt/*` routes are module-gated" — and its
+`/*` pairs with the NEXT `*/` in the file, which is some later JSDoc's close.
+Every line between them disappears.
+**MEASURED, not theorised: 14 files lose real code that way, up to 44 lines at
+once** — whole import blocks, a `@Controller` decorator, an exported class. And
+the dangerous direction is silent: a `not.toMatch` over a swallowed region
+passes VACUOUSLY, which is exactly what `a-gate-must-not-pass-by-finding-
+nothing` exists to forbid, reached through a door it cannot see.
+// **IT HAD ALREADY HAPPENED.** With stripping corrected,
+`granted-is-not-credited` went red: it asserted `/fees credit posted\./` and the
+CODE has not said that since the message gained "against an open invoice" — what
+it matched was the block comment in the component quoting the very defect the
+gate exists for. A gate passing on the prose of its own fix, hidden by the
+broken stripper.
+// THE FOUR BIG SECURITY GATES ARE UNAFFECTED and that was checked, not assumed:
+`public-routes-are-rate-limited`, `every-controller-declares-its-module`,
+`every-mutation-leaves-a-trail` and `every-body-is-validated-at-the-boundary`
+strip nothing and read the whole file.
+// **MY FIRST FIX WAS WORSE THAN THE BUG, and the suite said so.** A character
+walker that tracked strings treated the apostrophe in JSX text —
+`<p>the school's bill</p>` — as a string opener, swallowed everything to the
+next apostrophe, and left the following comment unstripped. Three gates went red
+on files that were perfectly correct. JSX text is not JavaScript.
+// WHAT IT TRACKS NOW: double quotes and backticks, because that is where URLs
+live (`"http://localhost:3001"` contains a `//`, and stripping from there would
+hide real code); NOT single quotes, for the reason above. Line comments are
+checked BEFORE block comments at every position, which is the actual fix.
+// THE ONE REMAINING BLIND SPOT IS PINNED RATHER THAN TRUSTED: a `//` or `/*`
+inside a SINGLE-quoted string would be stripped as a comment. A spec walks 1,015
+sources and asserts none exists — removing double-quoted spans first, since an
+apostrophe inside one ("School Leader's Manual") is not a single-quoted string.
+It fails the day somebody writes one.
+// ONE DEFINITION, and a gate forbids hand-rolling another, so a fix here
+reaches every gate at once. Two shapes were in use — the block-first chain and a
+better ordered alternation — which is how 63 copies of one idea drift.
+Mutation-validated four ways: restore the naive regex, track single quotes
+again, hand-roll one in a gate, and stop tracking double quotes.
+
 ### A scholarship exam the candidate's school had to have paid for
 `ScholarshipService.startExam` and the four sitting routes on the always-on
 scholarship surface; `CbtExamRoom` gains a `basePath`. Owner's decision, §1 of

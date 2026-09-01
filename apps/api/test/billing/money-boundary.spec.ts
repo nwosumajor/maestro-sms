@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { toMinor, toMinorOrNull } from "../../src/common/money";
 
@@ -104,9 +105,7 @@ describe("no cast may smuggle a bigint past the typechecker", () => {
     // `.amountMinor as number` was reported as writing it. Its sibling
     // `money-is-not-divided-by-a-hundred` already strips them and says why —
     // this one did not, and went red on a comment.
-    const stripComments = (src: string) =>
-      src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-    const offenders: string[] = [];
+        const offenders: string[] = [];
     for (const file of sourceFiles(join(__dirname, "../../src"))) {
       const src = stripComments(readFileSync(file, "utf8"));
       for (const field of BIGINT_FIELDS) {

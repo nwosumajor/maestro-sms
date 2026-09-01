@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import {
   PAYROLL_PACKS,
@@ -22,9 +23,9 @@ import {
  */
 
 const src = (...p: string[]) =>
-  readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  stripComments(readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8"))
+    
+    ;
 
 const SERVICE = src("apps", "api", "src", "hr", "payroll.service.ts");
 const MANAGER = src("apps", "web", "components", "hr", "PayrollManager.tsx");

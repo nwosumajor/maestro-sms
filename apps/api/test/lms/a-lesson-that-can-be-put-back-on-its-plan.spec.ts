@@ -21,23 +21,24 @@
  * detach (200) -> a topic belonging to nobody (400, named).
  */
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
-const SERVICE = readFileSync(
+const SERVICE = stripComments(readFileSync(
   join(__dirname, "..", "..", "src", "lms", "lms-content.service.ts"),
   "utf8",
-);
-const CONTROLLER = readFileSync(
+));
+const CONTROLLER = stripComments(readFileSync(
   join(__dirname, "..", "..", "src", "lms", "lms-content.controller.ts"),
   "utf8",
-);
-const FORM = readFileSync(
+));
+const FORM = stripComments(readFileSync(
   join(__dirname, "..", "..", "..", "web", "components", "lms", "ContentManager.tsx"),
   "utf8",
-);
+));
 
 function methodBody(src: string, signature: string): string {
-  const stripped = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const stripped = src.replace(/(^|[^:])\/\/.*$/gm, "$1");
   const start = stripped.indexOf(signature);
   expect(start).toBeGreaterThan(-1);
   let parens = 0;

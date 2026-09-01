@@ -23,6 +23,7 @@
 // =============================================================================
 
 import { Prisma } from "@sms/db";
+import { stripComments } from "../support/strip-comments";
 import { duplicateMessage } from "../../src/common/malformed-id.filter";
 
 /** A P2002 shaped exactly like the one the running system produced. */
@@ -78,7 +79,7 @@ describe("the filter's shape", () => {
     require("node:path").join(__dirname, "../../src/common/malformed-id.filter.ts"),
     "utf8",
   ) as string;
-  const code = SRC.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+  const code = stripComments(SRC);
 
   it("answers 409, not 404 or 400", () => {
     // A duplicate is not "not found", and it is not the caller sending

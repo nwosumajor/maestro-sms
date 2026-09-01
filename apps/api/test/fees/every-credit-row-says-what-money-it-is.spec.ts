@@ -20,6 +20,7 @@
 // =============================================================================
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const API_SRC = join(__dirname, "../../src");
@@ -41,8 +42,6 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 /** Each `studentCreditEntry.create({...})` call, as its own `data` block. */
 function creditWrites(src: string): string[] {

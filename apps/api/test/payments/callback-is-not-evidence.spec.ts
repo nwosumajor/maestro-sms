@@ -35,10 +35,11 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = readFileSync(join(__dirname, "../../src/payments/mobile-money.service.ts"), "utf8");
-const CODE = SRC.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const CODE = stripComments(SRC);
 
 function bodyOf(name: string): string {
   const m = new RegExp(`async ${name}\\s*\\(`).exec(CODE);

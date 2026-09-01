@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 // Bcrypt at cost factor 10 dominates this suite's runtime — that is the security
@@ -22,7 +23,7 @@ jest.setTimeout(60_000);
 
 
 const SRC = join(__dirname, "..", "..", "src");
-const read = (p: string) => readFileSync(join(SRC, p), "utf8");
+const read = (p: string) => stripComments(readFileSync(join(SRC, p), "utf8"));
 
 /**
  * Source with comments stripped.
@@ -34,7 +35,7 @@ const read = (p: string) => readFileSync(join(SRC, p), "utf8");
  */
 const code = (p: string) =>
   read(p)
-    .replace(/\/\*[\s\S]*?\*\//g, "")
+    
     .split("\n")
     .filter((l) => !l.trim().startsWith("//"))
     .join("\n");

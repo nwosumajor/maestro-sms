@@ -24,10 +24,11 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = (p: string) => readFileSync(join(__dirname, "../../src", p), "utf8");
-const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const strip = (s: string) => stripComments(s);
 const SERVICE = strip(SRC("certificate/member-scan.service.ts"));
 const CONTROLLER = strip(SRC("certificate/member-scan.controller.ts"));
 

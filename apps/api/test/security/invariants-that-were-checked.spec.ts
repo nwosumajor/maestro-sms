@@ -14,13 +14,14 @@
 // =============================================================================
 
 import { isStaffRoles } from "@sms/types";
+import { stripComments } from "../support/strip-comments";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const API = (p: string) => readFileSync(join(__dirname, "../../src", p), "utf8");
 const SCHEMA = (f: string) =>
   readFileSync(join(__dirname, "../../../../packages/db/prisma/schema", f), "utf8");
-const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const strip = (s: string) => stripComments(s);
 const model = (src: string, name: string) => {
   const at = src.indexOf(`model ${name} {`);
   return src.slice(at, src.indexOf("\n}", at));

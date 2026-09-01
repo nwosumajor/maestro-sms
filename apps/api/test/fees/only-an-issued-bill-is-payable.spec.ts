@@ -22,6 +22,7 @@
 // =============================================================================
 
 import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { stripComments } from "../support/strip-comments";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -48,7 +49,7 @@ function bodyOf(src: string, name: string): string {
   for (let i = open; i < src.length; i++) {
     if (src[i] === "{") d++;
     else if (src[i] === "}" && --d === 0) {
-      return src.slice(open, i).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+      return stripComments(src.slice(open, i));
     }
   }
   throw new Error("unterminated");

@@ -30,11 +30,12 @@
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 const SRC = readFileSync(join(__dirname, "../../src/fees/settlement.service.ts"), "utf8");
 /** Comments stripped — an assertion must not match the prose explaining it. */
-const CODE = SRC.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+const CODE = stripComments(SRC);
 
 describe("settling onto an invoice that is not open", () => {
   it("is refused", () => {

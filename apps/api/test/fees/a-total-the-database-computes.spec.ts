@@ -31,6 +31,7 @@
 // =============================================================================
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
@@ -53,7 +54,7 @@ describe("an invoice total is never assigned from an earlier read", () => {
     const offenders: string[] = [];
     for (const file of files) {
       const rel = file.split("/src/")[1];
-      const src = readFileSync(file, "utf8").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      const src = stripComments(readFileSync(file, "utf8")).replace(/\/\/[^\n]*/g, "");
       // `totalMinor:` followed by an expression that reads a totalMinor — i.e.
       // arithmetic done in Node over a value fetched earlier. An atomic
       // `{ increment: x }` never mentions it, and a CREATE assigns a literal or
@@ -80,7 +81,7 @@ describe("an invoice total is never assigned from an earlier read", () => {
       ["transport/transport.service.ts", /totalMinor:\s*\{\s*increment:/],
     ];
     for (const [rel, re] of MUTATORS) {
-      const src = readFileSync(join(__dirname, "../../src", rel), "utf8");
+      const src = stripComments(readFileSync(join(__dirname, "../../src", rel), "utf8"));
       expect({ rel, atomic: re.test(src) }).toEqual({ rel, atomic: true });
     }
   });

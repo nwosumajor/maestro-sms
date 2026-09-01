@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_AWARD_KINDS, isDisbursableAwardKind } from "@sms/types";
 
@@ -21,9 +22,9 @@ import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_AWARD_KINDS, isDisbursableAwardKin
  */
 
 const src = (...p: string[]) =>
-  readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  stripComments(readFileSync(join(__dirname, "..", "..", "..", "..", ...p), "utf8"))
+    
+    ;
 
 const ADMIN = src("apps", "api", "src", "scholarship", "scholarship-admin.service.ts");
 const CONTROLLER = src("apps", "api", "src", "scholarship", "scholarship.controller.ts");

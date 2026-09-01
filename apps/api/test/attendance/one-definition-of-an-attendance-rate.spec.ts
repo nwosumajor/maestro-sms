@@ -20,11 +20,12 @@
 // =============================================================================
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { attendanceRatePct, attendanceTotal } from "@sms/types";
 
 const SRC = join(__dirname, "..", "..", "src");
-const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+const strip = (s: string) => s.replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 function walk(dir: string): string[] {
   let out: string[] = [];
@@ -69,7 +70,7 @@ describe("every surface that prints a rate", () => {
       "analytics/analytics.service.ts",
       "reportcards/reportcard.service.ts",
     ]) {
-      expect(strip(readFileSync(join(SRC, rel), "utf8"))).toContain("attendanceRatePct(");
+      expect(strip(stripComments(readFileSync(join(SRC, rel), "utf8")))).toContain("attendanceRatePct(");
     }
   });
 
@@ -78,7 +79,7 @@ describe("every surface that prints a rate", () => {
     // would give a child a different attendance rate from their own report card.
     const offenders: string[] = [];
     for (const f of walk(SRC)) {
-      const src = strip(readFileSync(f, "utf8"));
+      const src = strip(stripComments(readFileSync(f, "utf8")));
       if (/present\s*\+\s*late\s*\+\s*excused|PRESENT\s*\+\s*[\w.]*LATE\s*\+\s*[\w.]*EXCUSED/i.test(src)) {
         offenders.push(f.split("/src/")[1]);
       }

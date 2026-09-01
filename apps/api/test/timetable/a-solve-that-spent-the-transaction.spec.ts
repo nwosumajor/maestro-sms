@@ -17,9 +17,10 @@
  * 189 ms and hid it.
  */
 import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
-const SRC = readFileSync(join(__dirname, "../../src/timetable/timetable.service.ts"), "utf8");
+const SRC = stripComments(readFileSync(join(__dirname, "../../src/timetable/timetable.service.ts"), "utf8"));
 /**
  * The method, bounded to the NEXT member. My first version sliced to
  * `clearTimetable`, which does not exist — `indexOf` returned -1, the slice ran
@@ -35,7 +36,7 @@ const SRC = readFileSync(join(__dirname, "../../src/timetable/timetable.service.
  * transaction. This repo records gates that FAIL on the explanation of their own
  * fix; this is the same trap the other way round — prose making one PASS.
  */
-const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+const CODE = SRC.replace(/^[ \t]*\/\/.*$/gm, "");
 const START = CODE.indexOf("  async generate(");
 const NEXT = CODE.indexOf("  async listUnavailability(", START);
 const generate = CODE.slice(START, NEXT > START ? NEXT : CODE.length);

@@ -24,6 +24,7 @@
 // =============================================================================
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 import { csvCell, csvRow, csvDocument } from "../../src/common/csv";
 
@@ -129,7 +130,7 @@ describe("one definition, so the tenth cannot go missing again", () => {
       // The CSV convention specifically: DOUBLING a quote. Analytics quotes a
       // SQL identifier with `replace(/"/g, "")` — stripping, not doubling —
       // which is a different job and must not be flagged.
-      return /replace\(\/"\/g,\s*['"`]""/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ""));
+      return /replace\(\/"\/g,\s*['"`]""/.test(stripComments(src));
     });
     expect(offenders).toEqual([]);
   });
