@@ -167,12 +167,28 @@ export function ScholarshipAdmin() {
 
   const announceExam = async (id: string) => {
     setBusy(`announce-${id}`); setMsg(null);
-    const res = await sendSms<{ notified: number; cbtExams: number; arena: boolean }>("POST", `scholarships/programs/${id}/announce-exam`);
+    const res = await sendSms<{ notified: number; cbtExams: number; arena: boolean; cannotSit: string[] }>(
+      "POST",
+      `scholarships/programs/${id}/announce-exam`,
+    );
     setBusy(null);
     if (res.ok) {
       const d = res.data;
       const surface = d?.cbtExams ? ` · ${d.cbtExams} CBT exam(s) published` : d?.arena ? " · games arena opened" : "";
-      setMsg({ ok: true, text: `Exam announced to ${d?.notified ?? 0} qualified candidate(s)${surface}.` });
+      // WHO WAS LEFT OUT, named. CBT is a PREMIUM module: a qualified candidate
+      // whose school does not have it cannot open the exam at all, is therefore
+      // never scored, and can never be awarded. Reporting only the count that
+      // WAS reached is how that goes unnoticed until the results are collected
+      // and somebody is silently missing.
+      const missed = d?.cannotSit?.length
+        ? ` ${d.cannotSit.length} school(s) could NOT be included — ${d.cannotSit.join(", ")} ` +
+          `${d.cannotSit.length === 1 ? "does" : "do"} not have the CBT module, so their candidates cannot sit ` +
+          `and will never be scored. Switch it on and announce again, or use a physical exam.`
+        : "";
+      setMsg({
+        ok: !missed,
+        text: `Exam announced to ${d?.notified ?? 0} qualified candidate(s)${surface}.${missed}`,
+      });
     } else setMsg({ ok: false, text: res.error ?? "Failed." });
   };
 

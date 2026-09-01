@@ -4,7 +4,36 @@ import type { SupervisorStage } from "../grading";
 // =============================================================================
 
 export const SCHOLARSHIP_PROGRAM_STATUSES = ["DRAFT", "OPEN", "CLOSED", "ARCHIVED"] as const;
+/**
+ * Every award kind a stored programme can carry — INCLUDING one the platform
+ * cannot pay out. Read `DISBURSABLE_AWARD_KINDS` before offering a choice.
+ */
 export const SCHOLARSHIP_AWARD_KINDS = ["FEES_CREDIT", "SUBSCRIPTION_CREDIT"] as const;
+
+/**
+ * The award kinds that actually MOVE MONEY.
+ *
+ * `SUBSCRIPTION_CREDIT` has been selectable since the module shipped and is
+ * implemented by nothing: `decide` disburses under
+ * `if (awardKind === "FEES_CREDIT")` and has no other branch, so an award of
+ * the other kind marked the application AWARDED, told the family they had won,
+ * spent the position against the best-three limit — and moved nothing, in
+ * silence. That is the worst shape a money path can take: a success reported
+ * for an outcome that never happened.
+ *
+ * Crediting a school's SUBSCRIPTION is a real feature with real semantics to
+ * decide (does it extend the period, reduce the next charge, or sit as a
+ * balance?), and inventing them would be worse than refusing. So the value
+ * stays in the stored domain — no live programme uses it, and removing it would
+ * make any that did unreadable — and is refused at both ends until somebody
+ * builds it.
+ */
+export const DISBURSABLE_AWARD_KINDS = ["FEES_CREDIT"] as const;
+
+/** Can an award of this kind actually reach the school? */
+export function isDisbursableAwardKind(kind: string | null | undefined): boolean {
+  return (DISBURSABLE_AWARD_KINDS as readonly string[]).includes(kind ?? "");
+}
 export const SCHOLARSHIP_SELECTION_BASES = ["MERIT", "NEED", "BOTH"] as const;
 export const SCHOLARSHIP_APPLICATION_STATUSES = [
   "DRAFT",

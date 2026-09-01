@@ -43,6 +43,9 @@ function makeService(rows: Array<Record<string, unknown>>) {
     audit as never,
     { client } as never,
     { enqueue: jest.fn() } as never,
+    // Entitled by default: this suite is about auditing, not about which
+    // schools hold the CBT module.
+    { isEnabled: jest.fn().mockResolvedValue(true) } as never,
   );
   return { service, audit, client };
 }

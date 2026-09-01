@@ -40,7 +40,7 @@ function make(opts: { budgetMinor: number; awarded: Array<{ awardPosition: numbe
     scholarshipProgram: {
       findFirst: jest.fn().mockResolvedValue({
         title: "Prog", awardMinor: 500_000, award2Minor: 300_000, award3Minor: 200_000,
-        awardKind: "NONE", budgetMinor: opts.budgetMinor,
+        awardKind: "FEES_CREDIT", budgetMinor: opts.budgetMinor,
       }),
     },
     invoice: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -51,6 +51,16 @@ function make(opts: { budgetMinor: number; awarded: Array<{ awardPosition: numbe
   (s as unknown as { client: unknown }).client = () => db;
   (s as unknown as { auditOwn: unknown }).auditOwn = jest.fn().mockResolvedValue(undefined);
   (s as unknown as { notifyFamily: unknown }).notifyFamily = jest.fn().mockResolvedValue(undefined);
+  // These tests are about the BUDGET, not about money reaching a school, so the
+  // disbursement is stubbed like the notifier beside it.
+  //
+  // It used to say `awardKind: "NONE"` to reach the same end — a value the
+  // column cannot hold, so the fixture described a programme the database
+  // could not produce. That went unnoticed until an award kind that cannot pay
+  // out started being REFUSED, at which point the stub was refused too.
+  (s as unknown as { disburseFeesCredit: unknown }).disburseFeesCredit = jest
+    .fn()
+    .mockResolvedValue({ ok: false, reason: "no_open_invoice" });
   (s as unknown as { listApplicationById: unknown }).listApplicationById = jest.fn().mockResolvedValue([{ id: "app-1" }]);
   return { s, db };
 }
@@ -109,7 +119,7 @@ describe("what the operator can see before deciding", () => {
       .fn()
       .mockResolvedValue([
         { id: "p1", title: "A", description: null, budgetMinor: 1_000_000, awardMinor: 1, award2Minor: null, award3Minor: null,
-          awardKind: "NONE", selectionBasis: "BOTH", eligibility: null, opensAt: new Date(), closesAt: new Date(),
+          awardKind: "FEES_CREDIT", selectionBasis: "BOTH", eligibility: null, opensAt: new Date(), closesAt: new Date(),
           status: "OPEN", category: "X", examMode: null, examAt: null, examVenue: null, examDurationMin: 30,
           examQuestions: [], createdAt: new Date() },
       ]);

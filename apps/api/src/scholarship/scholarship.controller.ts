@@ -10,7 +10,7 @@
 
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
-import { SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import type { ScholarshipApplicationDto, ScholarshipExamQuestionDto } from "@sms/types";
 import { narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -29,7 +29,10 @@ const programSchema = z.object({
   description: z.string().max(4000).nullish(),
   budgetMinor: z.number().int().min(0),
   awardMinor: z.number().int().positive(),
-  awardKind: z.enum(["FEES_CREDIT", "SUBSCRIPTION_CREDIT"]).optional(),
+  // ONLY what the platform can actually pay out. `SUBSCRIPTION_CREDIT` is a
+  // stored value nothing disburses, so offering it here lets an operator award
+  // a scholarship that moves no money and says nothing.
+  awardKind: z.enum(DISBURSABLE_AWARD_KINDS).optional(),
   selectionBasis: z.enum(["MERIT", "NEED", "BOTH"]).optional(),
   eligibility: z.unknown().optional(),
   opensAt: z.string().datetime(),

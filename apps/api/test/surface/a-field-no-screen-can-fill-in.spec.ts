@@ -36,6 +36,8 @@ import { API_SRC, apiRoutes } from "../support/api-routes";
  * a form offering them would be the defect.
  */
 const API_ONLY: Record<string, string> = {
+  awardKind:
+    "there is exactly ONE award kind the platform can pay out (DISBURSABLE_AWARD_KINDS), the service defaults to it, and a picker with one option is noise — revisit this the day a second disbursable kind exists",
   speedKph: "vehicle telemetry, posted by a tracker device — no human types it",
   headingDeg: "vehicle telemetry, posted by a tracker device — no human types it",
   odometerKm: "vehicle telemetry, posted by a tracker device — no human types it",

@@ -898,6 +898,64 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Two ways a scholarship reached nobody, both reported as a success
+`DISBURSABLE_AWARD_KINDS` (`@sms/types/dto/scholarship.ts`), `decide`,
+`announceExam`. Found by ANSWERING A QUESTION rather than by hunting: the owner
+asked for the best way to run a scholarship CBT exam end to end, and reading the
+path to answer accurately turned up two silent no-ops.
+**1. AN AWARD KIND THAT PAYS OUT NOTHING.** `SUBSCRIPTION_CREDIT` has been
+selectable since the module shipped and is implemented by NOTHING — `decide`
+disburses under `if (awardKind === "FEES_CREDIT")` and has no other branch. So
+an award of the other kind marked the application AWARDED, told the family they
+had won, spent one of the three best-three positions, and moved no money at all.
+// **REFUSED, NOT IMPLEMENTED, and that is the decision.** Crediting a school's
+SUBSCRIPTION has real semantics to settle — extend the period, reduce the next
+charge, or sit as a balance? — and inventing them is worse than refusing.
+Golden Rule #7. The value stays in the STORED domain (removing it would make any
+row carrying it unreadable) and is refused at BOTH ends: the boundary enum
+derives from `DISBURSABLE_AWARD_KINDS`, and `decide` refuses again for a
+programme stored before that.
+// THE SECOND CHECK RUNS BEFORE THE CLAIM, so nothing is marked and no position
+is consumed — refusing after it would finalise the application and then throw,
+which is the same defect wearing a different hat. Live: **400**, application
+still QUALIFIED; switched back to FEES_CREDIT it awards 201.
+// A GATE KEEPS THE LIST HONEST: every kind on `DISBURSABLE_AWARD_KINDS` must
+have a branch that actually pays it, so a second one cannot be added without one.
+**2. A CANDIDATE WHOSE SCHOOL CANNOT SIT THE EXAM.** CBT is a **PREMIUM** module
+and nothing on this path asked. `announceExam` runs on the PRIVILEGED client, so
+it created an exam in a STANDARD school perfectly happily, notified the family
+"sit it under CBT Exams", and handed them a link that answers **404** — measured
+live, `GET /cbt/exams` 404 on STANDARD and 200 on ENTERPRISE. `collectExamResults`
+then finds no sitting and SKIPS them, so the pupil could never be scored and
+therefore never awarded, with nothing anywhere saying why.
+Live, one programme, two schools:
+```
+one school lacks CBT   201 {"notified":1,"cbtExams":1,"cannotSit":["MeastroTest School"]}
+both entitled          201 {"notified":2,"cbtExams":2,"cannotSit":[]}
+nobody can sit         400 "No qualified candidate can sit an online CBT exam:
+                            St. Andrews Academy does not have the CBT module.
+                            Switch it on for them, or set the exam mode to PHYSICAL."
+```
+// THE UN-ENTITLED CANDIDATE IS NOT NOTIFIED — `notified` went to 1, not 2. A
+notice with a dead link is worse than none: it tells a family to go and do
+something the product will refuse them. The OPERATOR is told instead, which is
+who can act.
+// NOBODY-CAN-SIT IS A REFUSAL, not a 201 reporting zero — the
+silent-partial-success shape this file keeps recording.
+// REPORT WHAT YOU DID NOT DO, by NAME, and the console renders it as NOT a
+success. Same rule as the roll call's `unmarked`, the exeat sweep and the alumni
+broadcast.
+// GOTCHA, and it is the fixture trap this file records repeatedly: the budget
+suite set `awardKind: "NONE"` to skip disbursement — a value the column cannot
+hold. It went unnoticed until an unpayable kind started being REFUSED, at which
+point the stub was refused too. It names a REAL kind now and stubs
+`disburseFeesCredit` the way it already stubbed `notifyFamily`.
+// GOTCHA: narrowing the enum made `a-field-no-screen-can-fill-in` see
+`awardKind` for the FIRST time — its extractor had been unable to parse the
+inline `z.enum([...])`. The console never sent it. Declared API_ONLY, because
+there is exactly one payable kind and a picker with one option is noise — with
+the reason written so it stops being true the day a second one exists.
+
 ### Every appraisal named HR as the reviewer
 `createAppraisal` (`hr/reviews.service.ts`), `ReviewsPanel`. Third item off the
 `AWAITING_A_SCREEN` backlog, and unlike the last one its reason was TRUE — but

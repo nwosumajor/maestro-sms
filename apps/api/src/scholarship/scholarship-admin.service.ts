@@ -15,9 +15,18 @@ import type { ScholarshipExamQuestionDto } from "@sms/types";
 
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, type PrismaClient } from "@sms/db";
-import { SCHOLARSHIP_MAX_AWARDS, type ScholarshipApplicationDto, type ScholarshipProgramDto,
-  scholarshipSubjectConcept, resolveRegion } from "@sms/types";
+import {
+  DISBURSABLE_AWARD_KINDS,
+  MODULES,
+  SCHOLARSHIP_MAX_AWARDS,
+  isDisbursableAwardKind,
+  resolveRegion,
+  scholarshipSubjectConcept,
+  type ScholarshipApplicationDto,
+  type ScholarshipProgramDto,
+} from "@sms/types";
 import { scholarshipSupervisorStage, uniqueEntityCode } from "@sms/types";
+import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import {
@@ -93,6 +102,9 @@ export class ScholarshipAdminService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
+    // Which product modules a school actually has. @Global, 10-minute cache,
+    // invalidated across tasks on any entitlement write.
+    private readonly modules: ModuleEntitlementService,
   ) {}
 
   private client(): PrismaClient {
@@ -317,6 +329,21 @@ export class ScholarshipAdminService {
         : program?.awardMinor ?? 0;
       const awardMinor = body.awardMinor ?? positionAmount;
       if (awardMinor <= 0) throw new BadRequestException("award amount must be positive");
+      // AN AWARD THAT CANNOT BE PAID IS NOT AN AWARD. The disburse call below
+      // is gated `if (awardKind === "FEES_CREDIT")` and has no other branch, so
+      // a programme carrying SUBSCRIPTION_CREDIT marked the application
+      // AWARDED, told the family they had won, spent one of the three
+      // positions — and moved nothing, silently.
+      //
+      // Refused BEFORE the claim below, so nothing is marked and no position is
+      // consumed. The boundary already refuses the kind on create and update;
+      // this is the second layer, for a programme stored before it did.
+      if (!isDisbursableAwardKind(program?.awardKind ?? "FEES_CREDIT")) {
+        throw new BadRequestException(
+          `This programme awards ${program?.awardKind}, which the platform cannot pay out — nothing would reach the school. ` +
+            `Change the programme's award kind to ${DISBURSABLE_AWARD_KINDS.join(" or ")} before awarding.`,
+        );
+      }
       // Best Three: at most SCHOLARSHIP_MAX_AWARDS awards, and each POSITION once.
       const awardedRows = await db.scholarshipApplication.findMany({
         where: { programId: app.programId, status: "AWARDED" },
@@ -631,7 +658,10 @@ export class ScholarshipAdminService {
     return row;
   }
 
-  async announceExam(p: Principal, programId: string): Promise<{ notified: number; cbtExams: number; arena: boolean }> {
+  async announceExam(
+    p: Principal,
+    programId: string,
+  ): Promise<{ notified: number; cbtExams: number; arena: boolean; cannotSit: string[] }> {
     const db = this.client();
     const program = await db.scholarshipProgram.findFirst({ where: { id: programId } });
     if (!program) throw new NotFoundException("Program not found");
@@ -657,11 +687,39 @@ export class ScholarshipAdminService {
 
     let cbtExams = 0;
     let arena = false;
+    // SCHOOLS WHOSE CANDIDATES CANNOT SIT. CBT is a PREMIUM module and NOTHING
+    // on this path asked: this method runs on the privileged client, so it
+    // created an exam in a STANDARD school perfectly happily, notified the
+    // family "sit it under CBT Exams", and handed them a link that answers 404
+    // — measured live, `GET /cbt/exams` -> 404 on STANDARD, 200 on ENTERPRISE.
+    // `collectExamResults` then finds no sitting and skips them, so the pupil
+    // could never be scored and therefore never awarded, with nothing anywhere
+    // saying why.
+    const cannotSit: string[] = [];
 
     // --- ONLINE_CBT: a per-school exam seeded from the program's questions -----
     if (program.examMode === "ONLINE_CBT") {
       if (questions.length === 0) {
         throw new BadRequestException("Add CBT questions to the program before announcing an online CBT exam");
+      }
+      const entitled = new Map<string, boolean>();
+      for (const [schoolId] of bySchool) {
+        entitled.set(schoolId, await this.modules.isEnabled(schoolId, MODULES.CBT));
+      }
+      const blocked = [...bySchool.keys()].filter((id) => !entitled.get(id));
+      if (blocked.length > 0) {
+        const names = await db.school.findMany({ where: { id: { in: blocked } }, select: { id: true, name: true } });
+        cannotSit.push(...names.map((n) => n.name));
+        for (const id of blocked) bySchool.delete(id);
+      }
+      // NOTHING TO ANNOUNCE IS A REFUSAL, not a success reporting zero — the
+      // silent-partial-success shape this codebase keeps finding.
+      if (bySchool.size === 0) {
+        throw new BadRequestException(
+          `No qualified candidate can sit an online CBT exam: ${cannotSit.join(", ")} ` +
+            `${cannotSit.length === 1 ? "does" : "do"} not have the CBT module. ` +
+            `Switch it on for them, or set the exam mode to PHYSICAL.`,
+        );
       }
       for (const [schoolId] of bySchool) {
         // Idempotent per (program, school): reuse an existing materialized exam.
@@ -791,6 +849,11 @@ export class ScholarshipAdminService {
       program.examMode === "ONLINE_CBT" ? "an online CBT mock exam" : program.examMode === "GAMES" ? "the games arena" : "a physical scheduled exam";
     let notified = 0;
     for (const c of candidates) {
+      // A NOTICE WITH A DEAD LINK IS WORSE THAN NONE. `bySchool` has had the
+      // schools that cannot sit removed, so their candidates are not told to go
+      // and open something that will refuse them. The OPERATOR is told instead,
+      // which is who can act — switch the module on and announce again.
+      if (!bySchool.has(c.schoolId)) continue;
       await this.notifyFamily(
         p,
         c.schoolId,
@@ -800,8 +863,17 @@ export class ScholarshipAdminService {
       );
       notified += 1;
     }
-    await this.auditOwn(p, "scholarship.exam.announce", programId, { candidates: candidates.length, examMode: program.examMode, cbtExams, arena });
-    return { notified, cbtExams, arena };
+    await this.auditOwn(p, "scholarship.exam.announce", programId, {
+      candidates: candidates.length,
+      examMode: program.examMode,
+      cbtExams,
+      arena,
+      cannotSit,
+    });
+    // REPORT WHAT WAS NOT DONE, the rule the roll call, the exeat sweep and the
+    // alumni broadcast all follow. A count of who was reached, with the ones
+    // who were not left out of it, is how a partial run reads as a whole one.
+    return { notified, cbtExams, arena, cannotSit };
   }
 
   /** Harvest exam results back onto the QUALIFIED applications as a score SIGNAL
