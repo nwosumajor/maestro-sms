@@ -655,7 +655,7 @@ export class ScholarshipService {
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
-    examDurationMin: number; examQuestions: unknown; createdAt: Date;
+    examDurationMin: number; examQuestions: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }) {
     return {
       id: pr.id, title: pr.title, description: pr.description, budgetMinor: toMinor(pr.budgetMinor),
@@ -670,6 +670,7 @@ export class ScholarshipService {
       // SECURITY: the count only — the question set (with answers) never leaves
       // the platform-owned row toward applicants.
       examQuestionCount: Array.isArray(pr.examQuestions) ? pr.examQuestions.length : 0,
+      resultsPublishedAt: pr.resultsPublishedAt ?? null,
       createdAt: pr.createdAt,
     };
   }

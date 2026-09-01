@@ -1349,6 +1349,10 @@
       "kind": "ui",
       "note": "reviewed: app/(app)/scholarships/sitting/[id]/page.tsx renders the shared CbtExamRoom with basePath=scholarships, so a candidate sits their paper without the PREMIUM CBT module"
     },
+    "GET /scholarships/results": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/scholarships/page.tsx renders components/scholarship/PublishedResults.tsx — the cross-school table of school, position and score that every tenant may read"
+    },
     "GET /scholarships/programs": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2916,6 +2920,14 @@
     "POST /scholarships/sittings/:p/submit": {
       "kind": "ui",
       "note": "reviewed: components/cbt/CbtExamRoom.tsx submits here when basePath is scholarships"
+    },
+    "POST /scholarships/programs/:p/publish-results": {
+      "kind": "ui",
+      "note": "reviewed: the Publish-results button in components/operator/ScholarshipAdmin.tsx"
+    },
+    "POST /scholarships/programs/:p/unpublish-results": {
+      "kind": "ui",
+      "note": "reviewed: the same button, which reads Withdraw results once published"
     },
     "POST /scholarships/programs": {
       "kind": "ui",

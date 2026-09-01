@@ -165,6 +165,41 @@ export function ScholarshipAdmin() {
     return false;
   };
 
+  /**
+   * Publish (or withdraw) a programme's results to every school.
+   *
+   * The confirm names WHAT is published, because "publish results" alone does
+   * not tell an operator whether a child is about to be named on a table every
+   * tenant can read. It is school, position and score.
+   */
+  const publishResults = async (id: string, publish: boolean) => {
+    if (
+      publish &&
+      !confirm(
+        "Publish these results to EVERY school on the platform?\n\n" +
+          "The table shows each candidate's SCHOOL, their position and their score. " +
+          "No pupil is named.\n\nYou can withdraw it again afterwards.",
+      )
+    )
+      return;
+    setBusy(`pub-${id}`);
+    setMsg(null);
+    const res = await sendSms<{ rows: number }>("POST", `scholarships/programs/${id}/${publish ? "publish" : "unpublish"}-results`);
+    setBusy(null);
+    if (res.ok) {
+      setMsg({
+        ok: true,
+        text: publish
+          ? `Published — ${res.data?.rows ?? 0} scored candidate(s) are now visible to every school, by school and position.`
+          : "Withdrawn — the table is no longer visible to any school.",
+      });
+      void loadPrograms();
+      // `sendSms` already carries the server's message plus a plain-language
+      // reading of the status — `readApiError` takes a raw Response, which this
+      // is not. The compiler caught it, as it did the last time.
+    } else setMsg({ ok: false, text: res.error ?? "Could not change the publication." });
+  };
+
   const announceExam = async (id: string) => {
     setBusy(`announce-${id}`); setMsg(null);
     const res = await sendSms<{ notified: number; cbtExams: number; arena: boolean }>(
@@ -305,6 +340,7 @@ export function ScholarshipAdmin() {
                 onSaveExam={(v) => saveExam(pr.id, v)}
                 onAddQuestion={(q) => addQuestion(pr.id, q)}
                 onLoadPaper={() => loadPaper(pr.id)}
+                onPublish={(publish) => publishResults(pr.id, publish)}
                 onRemoveQuestion={(index) => removeQuestion(pr.id, index)}
                 onAnnounce={() => announceExam(pr.id)}
                 onCollect={() => collectResults(pr.id)}
@@ -468,6 +504,7 @@ function ProgramRow({
   onAddQuestion,
   onLoadPaper,
   onRemoveQuestion,
+  onPublish,
   onAnnounce,
   onCollect,
   onStatus,
@@ -479,6 +516,7 @@ function ProgramRow({
   /** Read the paper back — admin-only, and its own route. */
   onLoadPaper: () => Promise<Question[] | null>;
   onRemoveQuestion: (index: number) => Promise<boolean>;
+  onPublish: (publish: boolean) => void;
   onAnnounce: () => void;
   onCollect: () => void;
   onStatus: (status: string) => void;
@@ -603,6 +641,31 @@ function ProgramRow({
           <Button size="sm" variant="outline" disabled={busy === `collect-${pr.id}`} onClick={onCollect}>
             Collect results
           </Button>
+        )}
+        {/* PUBLISHING IS A DECISION, AND IT COMES AFTER REVIEW. A score is a
+            fact about a child's exam; it reaches every school on the platform
+            only once the owner has looked at the marking. The button says what
+            the table will contain, because "publish results" alone does not
+            tell an operator whether they are about to name a pupil. */}
+        {(pr.examMode === "ONLINE_CBT" || pr.examMode === "GAMES") && (
+          <Button
+            size="sm"
+            variant={pr.resultsPublishedAt ? "ghost" : "outline"}
+            disabled={busy === `pub-${pr.id}`}
+            title={
+              pr.resultsPublishedAt
+                ? "Withdraw the table from every school"
+                : "Every school on the platform will see the school, position and score — never a pupil's name"
+            }
+            onClick={() => onPublish(!pr.resultsPublishedAt)}
+          >
+            {pr.resultsPublishedAt ? "Withdraw results" : "Publish results"}
+          </Button>
+        )}
+        {pr.resultsPublishedAt && (
+          <span className="text-xs text-muted-foreground">
+            published {shortDate(pr.resultsPublishedAt)} · visible to every school
+          </span>
         )}
       </div>
 

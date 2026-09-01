@@ -1,4 +1,4 @@
-import type { ScholarshipExamQuestionDto } from "@sms/types";
+import type { PublishedScholarshipResultsDto, ScholarshipExamQuestionDto } from "@sms/types";
 // =============================================================================
 // ScholarshipAdminService — platform owner (super_admin), CROSS-TENANT
 // =============================================================================
@@ -94,6 +94,17 @@ interface ProgramInput {
   /** Append a single CBT question (the console adds them one at a time). */
   appendQuestion?: { text: string; options: string[]; answerIndex: number };
 }
+
+/**
+ * How much of a published result set is public.
+ *
+ * BOUNDED at both levels, because this is read by every school on the platform
+ * and grows with the platform's whole history: the newest programmes, and the
+ * top rows of each. An unbounded cross-tenant read is the O(lifetime) shape
+ * this repo keeps finding.
+ */
+const PUBLISHED_RESULTS_PROGRAMS = 10;
+const PUBLISHED_RESULTS_ROWS = 50;
 
 /** Who is told about a prize the SCHOOL won — the people who run it. */
 const SCHOOL_PRIZE_RECIPIENTS = ["principal", "school_admin"] as const;
@@ -885,6 +896,117 @@ export class ScholarshipAdminService {
    *  student's submitted CbtSitting score %; GAMES ranks arena finishers by
    *  (fewest guesses → fastest own-start elapsed) into a relative %. Returns how
    *  many candidates now carry a score. */
+  /**
+   * The published results, as EVERY SCHOOL on the platform reads them.
+   *
+   * THE SECOND CROSS-TENANT TABLE IN THIS PLATFORM, and it carries no more PII
+   * than the first: the Ultimate arena crosses the boundary with handles and
+   * school names, never real names, and this crosses it with SCHOOL, POSITION
+   * and SCORE. A scholarship result is read by every tenant, and naming a minor
+   * in it is a disclosure their family never asked for — the owner's explicit
+   * decision, and the right one.
+   *
+   * PRIVILEGED BY NECESSITY: the whole point is that a school sees results from
+   * schools that are not theirs, which no tenant-scoped read can do. What makes
+   * that safe is the SHAPE of what is selected, not the scoping — so the select
+   * below is the control, and a test asserts it never grows a name.
+   *
+   * UNPUBLISHED PROGRAMMES ARE INVISIBLE, not empty: `resultsPublishedAt` is
+   * the owner's decision that the marking has been reviewed, and an empty table
+   * would say the exam produced nothing.
+   */
+  async publishedResults(limit = PUBLISHED_RESULTS_PROGRAMS): Promise<PublishedScholarshipResultsDto[]> {
+    const db = this.client();
+    const programs = await db.scholarshipProgram.findMany({
+      where: { resultsPublishedAt: { not: null } },
+      orderBy: { resultsPublishedAt: "desc" },
+      take: limit,
+      select: { id: true, title: true, category: true, resultsPublishedAt: true },
+    });
+    if (programs.length === 0) return [];
+    // ONE query for every programme's rows, not one per programme.
+    const rows = await db.scholarshipApplication.findMany({
+      where: { programId: { in: programs.map((x) => x.id) }, examScorePct: { not: null } },
+      orderBy: [{ examScorePct: "desc" }],
+      take: limit * PUBLISHED_RESULTS_ROWS,
+      // THE CONTROL. No studentId, no name, no application id — a reader of this
+      // table can identify a SCHOOL and never a child.
+      select: { programId: true, schoolId: true, examScorePct: true, awardPosition: true },
+    });
+    // And ONE query for the school names.
+    const schools = await db.school.findMany({
+      where: { id: { in: [...new Set(rows.map((r) => r.schoolId))] } },
+      select: { id: true, name: true },
+    });
+    const nameOf = new Map(schools.map((x) => [x.id, x.name]));
+    return programs.map((prog) => ({
+      programId: prog.id,
+      title: prog.title,
+      category: String(prog.category),
+      publishedAt: prog.resultsPublishedAt!,
+      rows: rows
+        .filter((r) => r.programId === prog.id)
+        // AWARDED POSITIONS FIRST, then by score. A reader looking for "who
+        // won" should not have to scan a table sorted only by percentage.
+        .sort((a, b) => (a.awardPosition ?? 99) - (b.awardPosition ?? 99) || (b.examScorePct ?? 0) - (a.examScorePct ?? 0))
+        .slice(0, PUBLISHED_RESULTS_ROWS)
+        .map((r) => ({
+          position: r.awardPosition ?? null,
+          schoolName: nameOf.get(r.schoolId) ?? "A school",
+          scorePct: r.examScorePct ?? 0,
+        })),
+    }));
+  }
+
+  /**
+   * PUBLISH the results to every school on the platform.
+   *
+   * A score is a fact about a child's exam, so nothing outside the operator
+   * console sees one until the owner has reviewed the marking and decided.
+   * `resultsPublishedAt` is that decision, and it is what the public read keys
+   * on — unpublished programmes are invisible rather than empty.
+   *
+   * Idempotent: publishing twice keeps the FIRST date, because when a result
+   * became public is a fact about the programme and moving it would rewrite it.
+   */
+  async publishResults(p: Principal, programId: string): Promise<{ publishedAt: Date; rows: number }> {
+    const db = this.client();
+    const program = await db.scholarshipProgram.findFirst({
+      where: { id: programId },
+      select: { id: true, title: true, resultsPublishedAt: true },
+    });
+    if (!program) throw new NotFoundException("Program not found");
+    const scored = await db.scholarshipApplication.count({
+      where: { programId, examScorePct: { not: null } },
+    });
+    if (scored === 0) {
+      // Publishing an empty table says the exam produced nothing, which is a
+      // statement about every candidate who sat it.
+      throw new BadRequestException(
+        "No candidate has a score yet — collect the exam results before publishing them.",
+      );
+    }
+    const publishedAt = program.resultsPublishedAt ?? new Date();
+    if (!program.resultsPublishedAt) {
+      await db.scholarshipProgram.update({ where: { id: programId }, data: { resultsPublishedAt: publishedAt } });
+    }
+    await this.auditOwn(p, "scholarship.results.publish", programId, { rows: scored, publishedAt });
+    return { publishedAt, rows: scored };
+  }
+
+  /** Withdraw a publication. The date is CLEARED, so the table disappears from
+   *  every school at once — the only way back once something is public. */
+  async unpublishResults(p: Principal, programId: string): Promise<{ ok: true }> {
+    const db = this.client();
+    const res = await db.scholarshipProgram.updateMany({
+      where: { id: programId },
+      data: { resultsPublishedAt: null },
+    });
+    if (res.count === 0) throw new NotFoundException("Program not found");
+    await this.auditOwn(p, "scholarship.results.unpublish", programId, {});
+    return { ok: true };
+  }
+
   async collectExamResults(p: Principal, programId: string): Promise<{ updated: number }> {
     const db = this.client();
     const program = await db.scholarshipProgram.findFirst({ where: { id: programId } });
@@ -1344,7 +1466,7 @@ export class ScholarshipAdminService {
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
-    examDurationMin: number; examQuestions: unknown; createdAt: Date;
+    examDurationMin: number; examQuestions: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }, committedMinor = 0): ScholarshipProgramDto {
     return {
       id: r.id, title: r.title, description: r.description, budgetMinor: toMinor(r.budgetMinor),
@@ -1355,6 +1477,7 @@ export class ScholarshipAdminService {
       category: r.category, examMode: r.examMode, examAt: r.examAt, examVenue: r.examVenue,
       examDurationMin: r.examDurationMin,
       examQuestionCount: Array.isArray(r.examQuestions) ? r.examQuestions.length : 0,
+      resultsPublishedAt: r.resultsPublishedAt ?? null,
       createdAt: r.createdAt,
     };
   }

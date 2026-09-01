@@ -11,7 +11,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
-import type { CbtSittingViewDto, ScholarshipApplicationDto, ScholarshipExamQuestionDto } from "@sms/types";
+import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamQuestionDto } from "@sms/types";
 import { narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -151,6 +151,21 @@ export class ScholarshipController {
     return this.scholarships.decideStage(p, id, body);
   }
 
+  /**
+   * The published results, readable by EVERY SCHOOL on the platform.
+   *
+   * Same audience as the portal — families and the school's reviewer — because
+   * publishing is the point: a scholarship is a growth lever, and a result
+   * nobody outside the winning school sees does not advertise anything.
+   *
+   * It carries SCHOOL, POSITION and SCORE. Never a pupil's name.
+   */
+  @Get("results")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY, WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL)
+  publishedResults(): Promise<PublishedScholarshipResultsDto[]> {
+    return this.admin.publishedResults();
+  }
+
   // --- sitting the exam (candidates) -----------------------------------------
   //
   // ALWAYS-ON, deliberately. The `cbt` routes are `@RequireModule(MODULES.CBT)`, a
@@ -283,6 +298,24 @@ export class ScholarshipController {
     @Body(new ZodValidationPipe(reviewSchema)) body: z.infer<typeof reviewSchema>,
   ) {
     return this.admin.decide(p, id, body);
+  }
+
+  /**
+   * Publish this programme's results to every school. `scholarship.admin`.
+   *
+   * No step-up: it moves no money and is reversible by the withdraw below —
+   * the direction this repo's step-up list already treats as the lighter one.
+   */
+  @Post("programs/:id/publish-results")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  publish(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.admin.publishResults(p, id);
+  }
+
+  @Post("programs/:id/unpublish-results")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  unpublish(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.admin.unpublishResults(p, id);
   }
 
   /** AWARD — disburses a fees credit; step-up (money moves). */

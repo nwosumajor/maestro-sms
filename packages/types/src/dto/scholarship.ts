@@ -145,6 +145,9 @@ export interface ScholarshipProgramDto {
   examDurationMin: number;
   /** How many CBT questions the owner has authored (never the questions). */
   examQuestionCount: number;
+  /** When the owner published this programme's results to every school; null
+   *  until they have reviewed the marking and decided. */
+  resultsPublishedAt: Date | null;
   createdAt: Date;
 }
 
@@ -310,4 +313,36 @@ export interface ScholarshipExamQuestionDto {
   text: string;
   options: string[];
   answerIndex: number;
+}
+
+/**
+ * One line of a PUBLISHED scholarship result, as every school on the platform
+ * sees it.
+ *
+ * SCHOOL, POSITION and SCORE — and deliberately NOT the pupil's name. That is
+ * the owner's explicit decision and it is the right one: a scholarship result
+ * is a cross-school table read by every tenant, and naming a minor in it is a
+ * disclosure the family never asked for. The school is an institution and is
+ * named; the child is not.
+ *
+ * The Ultimate arena reached the same place by a different route — handles
+ * across schools, never real names — so this is the platform's second
+ * cross-tenant table and it carries no more PII than the first.
+ */
+export interface ScholarshipResultRowDto {
+  /** 1, 2 or 3 where an award was made; null for a scored candidate who placed. */
+  position: number | null;
+  schoolName: string;
+  /** Percentage, as collected from the sitting. */
+  scorePct: number;
+}
+
+/** A programme whose results the owner has published. */
+export interface PublishedScholarshipResultsDto {
+  programId: string;
+  title: string;
+  category: string;
+  publishedAt: Date;
+  /** Ranked: awarded positions first, then by score. */
+  rows: ScholarshipResultRowDto[];
 }

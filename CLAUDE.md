@@ -898,6 +898,54 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Results every school can read, and no child is named in
+`resultsPublishedAt` (migration `20270123000000`), `publishResults` /
+`publishedResults`, `PublishedResults`. §4 of the scholarship programme, on the
+owner's explicit decision: publish the SCHOOL, the POSITION and the SCORE.
+**THE SECOND CROSS-TENANT TABLE IN THIS PLATFORM, and it carries no more PII
+than the first.** The Ultimate arena crosses the boundary with handles and
+school names, never real names; this crosses it with school, position and
+score. A scholarship result is read by every tenant, and naming a minor in it is
+a disclosure the family never asked for — the school is an INSTITUTION and is
+named, the child is not.
+// **THE SELECT IS THE CONTROL, not the scoping.** This read is privileged by
+necessity: the whole point is that a school sees results from schools that are
+not theirs, which no tenant-scoped read can do. So what makes it safe is the
+SHAPE of what is selected, and a test asserts it never grows a name.
+// AND THE PAGE SAYS SO, rather than leaving a reader to notice the absence. A
+table of scores with no names invites "whose?", and the answer belongs on the
+page rather than in a policy nobody reads.
+// NOTHING IS PUBLIC UNTIL THE OWNER DECIDES. `resultsPublishedAt` is that
+decision and it is what the public read KEYS ON, so an unpublished programme is
+INVISIBLE rather than empty — an empty table is a statement about every
+candidate who sat the exam. Publishing with no scores at all is refused for the
+same reason.
+// PUBLISHING TWICE KEEPS THE FIRST DATE: when a result became public is a fact
+about the programme, and moving it would rewrite that fact.
+// WITHDRAWABLE, which is the only way back once something is public — and the
+withdraw is deliberately NOT step-up gated, because making the restrictive
+direction harder is what `step-up-is-consistent-within-a-permission` exists to
+prevent. Both are named there with reasons.
+// BOUNDED AT BOTH LEVELS (10 programmes x 50 rows) because this grows with the
+platform's whole history, and resolved in ONE query for the rows and ONE for the
+school names — never one per programme.
+// THE OPERATOR IS TOLD WHAT THEY ARE PUBLISHING before the click: "Publish
+results" alone does not say whether a child is about to be named on a table
+every tenant can read.
+Live, two candidates in two different schools:
+```
+publish with no scores   400 "collect the exam results before publishing them"
+before publishing        a pupil at one of the schools sees nothing
+published                {"rows":2}
+what every school reads  1  St. Andrews Academy   88%
+                         2  MeastroTest School    71%
+                         carries NO pupil name or id
+withdrawn                gone from every school
+```
+// GOTCHA, the two-senders trap this file already records: `readApiError` takes
+a raw `Response` and `sendSms` returns `{ok,status,data,error}`. The compiler
+caught it, as it did the last time.
+
 ### The prize that no screen mentioned
 `SubscriptionDto.granted`, the /billing plan block, `SubscriptionManager`,
 `ScholarshipAdmin`. Asked to exercise the flow AND check the web is captured.

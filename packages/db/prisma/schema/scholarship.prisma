@@ -76,6 +76,14 @@ enum ScholarshipApplicationStatus {
 model ScholarshipProgram {
   id              String                    @id @default(uuid()) @db.Uuid
   title           String
+  /// When the platform owner PUBLISHED the results to every school.
+  ///
+  /// NULL means nobody outside the operator console sees them: a score is a
+  /// fact about a child's exam, and it becomes public only when the owner has
+  /// reviewed the marking and decided to publish. Once set, every school on the
+  /// platform can read the ranked table — SCHOOL, POSITION and SCORE, never the
+  /// pupil's name.
+  resultsPublishedAt DateTime?
   description     String?
   /// Total budget + per-award amounts, integer minor units (kobo). awardMinor is
   /// the FIRST-position prize; 2nd/3rd fall back to it when null.
@@ -113,6 +121,7 @@ model ScholarshipProgram {
 
   @@index([status])
   @@map("scholarship_program")
+  @@index([resultsPublishedAt(sort: Desc)])
 }
 
 /// (B) TENANT-SCOPED application — standard RLS on school_id.
@@ -182,5 +191,6 @@ model ScholarshipApplication {
   @@index([schoolId])
   @@index([schoolId, status])
   @@index([programId, status])
+  @@index([programId, examScorePct(sort: Desc)])
   @@map("scholarship_application")
 }

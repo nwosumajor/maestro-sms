@@ -1,4 +1,4 @@
-import type { ScholarshipApplicationDto, ScholarshipPortalDto, Serialized } from "@sms/types";
+import type { PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipPortalDto, Serialized } from "@sms/types";
 import { regionOf } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScholarshipPortal } from "@/components/scholarship/ScholarshipPortal";
+import { PublishedResults } from "@/components/scholarship/PublishedResults";
 import { SchoolApplications } from "@/components/scholarship/SchoolApplications";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -34,10 +35,15 @@ export default async function ScholarshipsPage() {
   // "Requests & decisions" tile on the dashboard, and the page then told them
   // they could see their students' applications here while fetching none.
   const canOversee = hasPermission(user.permissions, "scholarship.read");
-  const [portal, schoolApplications] = await Promise.all([
+  const [portal, schoolApplications, published] = await Promise.all([
     needsPortal ? apiGet<Portal>("/scholarships/portal") : Promise.resolve(null),
     canOversee
       ? apiGet<Serialized<ScholarshipApplicationDto>[]>("/scholarships/school-applications")
+      : Promise.resolve(null),
+    // PUBLISHED RESULTS, which every school on the platform may read — that is
+    // the point of publishing. Same audience as the portal.
+    needsPortal || canOversee
+      ? apiGet<Serialized<PublishedScholarshipResultsDto>[]>("/scholarships/results")
       : Promise.resolve(null),
   ]);
 
@@ -47,6 +53,10 @@ export default async function ScholarshipsPage() {
         <PageHeader title={<>Scholarships</>} subtitle={<>Platform-sponsored scholarships for students at your school. Students request directly with a detailed
             form — the request is approved by the class supervisor, then a parent/guardian, then the principal,
             before the sponsor reviews, examines qualified candidates, and awards the best three.</>} />
+
+        {/* A failed read renders NOTHING rather than "no results yet" — the
+            second is a statement about every scholarship the platform has run. */}
+        {published && published.length > 0 && <PublishedResults published={published} />}
 
         {needsPortal && portal ? (
           <ScholarshipPortal portal={portal} roles={user.roles} />

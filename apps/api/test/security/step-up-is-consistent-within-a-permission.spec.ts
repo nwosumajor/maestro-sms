@@ -44,6 +44,10 @@ import { apiRoutes } from "../support/api-routes";
  * stop reading.
  */
 const ALLOWED: Record<string, string> = {
+  "POST /scholarships/programs/:id/publish-results":
+    "Moves no money and grants no authority. It makes a table of school, position and score visible — and is REVERSIBLE by the withdraw beside it, which is not itself gated for the reason this list already gives about undoing being no harder than doing.",
+  "POST /scholarships/programs/:id/unpublish-results":
+    "Takes a publication back. Re-authenticating to WITHDRAW something is the restrictive direction made harder, which this list exists to keep straight.",
   "POST /students/:studentId/profile/approve": "Approving a submitted profile is routine records work, not a change of authority.",
   "POST /admin/sis/nudge/run": "Sends reminders; changes no authority and moves no money.",
   "POST /admin/users": "Creating an account grants nothing on its own — roles carry the authority, and those are now gated.",
