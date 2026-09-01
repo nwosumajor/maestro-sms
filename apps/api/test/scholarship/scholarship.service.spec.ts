@@ -33,6 +33,10 @@ function makeService(over: {
   const created: Record<string, unknown>[] = [];
   const updates: Record<string, unknown>[] = [];
   const tx = {
+    // Every real TenantTx has this. `apply` reads the school's country to check
+    // the programme's country scope — the same predicate the portal listing
+    // uses, so a family is never offered a scholarship the server will refuse.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: null }) },
     scholarshipProgram: {
       findFirst: jest.fn().mockResolvedValue(over.program ?? OPEN_PROGRAM),
       findMany: jest.fn().mockResolvedValue(over.program === null ? [] : [OPEN_PROGRAM]),

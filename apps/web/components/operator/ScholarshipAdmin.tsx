@@ -39,7 +39,11 @@ const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
  * assumption is visible and so this console cannot disagree with the API about
  * the scale of the number it is sending.
  */
-const awardToMinor = (major: string) => toMinor(parseFloat(major) || 0, CURRENCIES.NGN);
+// SCALED BY THE CURRENCY BEING AWARDED, not by naira. A hard-coded NGN here is
+// correct for a two-decimal currency by accident and 100x wrong for a
+// zero-decimal one — the writing half of the money rule, which this codebase
+// has already been bitten by at fourteen sites.
+const awardToMinor = (major: string, currency: string) => toMinor(parseFloat(major) || 0, currency);
 
 /** The papers a programme has, derived from its questions — never a second list. */
 function subjectsOf(paper: Question[]): string[] {
@@ -54,7 +58,7 @@ export function ScholarshipAdmin() {
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
 
   // create-program form
-  const [f, setF] = React.useState({ title: "", description: "", award: "", award2: "", award3: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "", category: "SPECIAL" });
+  const [f, setF] = React.useState({ title: "", description: "", award: "", award2: "", award3: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "", category: "SPECIAL", currency: CURRENCIES.NGN as string });
   // per-application award position choice
   const [awardPos, setAwardPos] = React.useState<Record<string, number>>({});
   const [appPage, setAppPage] = React.useState(1);
@@ -107,10 +111,11 @@ export function ScholarshipAdmin() {
     const res = await sendWithStepUp("POST", "scholarships/programs", {
       title: f.title,
       description: f.description || null,
-      awardMinor: awardToMinor(f.award),
-      award2Minor: f.award2 ? awardToMinor(f.award2) : null,
-      award3Minor: f.award3 ? awardToMinor(f.award3) : null,
-      budgetMinor: awardToMinor(f.budget),
+      awardMinor: awardToMinor(f.award, f.currency),
+      award2Minor: f.award2 ? awardToMinor(f.award2, f.currency) : null,
+      award3Minor: f.award3 ? awardToMinor(f.award3, f.currency) : null,
+      budgetMinor: awardToMinor(f.budget, f.currency),
+      awardCurrency: f.currency,
       selectionBasis: f.basis,
       opensAt: new Date(f.opensAt).toISOString(),
       closesAt: new Date(f.closesAt).toISOString(),
@@ -120,7 +125,7 @@ export function ScholarshipAdmin() {
     setBusy(null);
     if (res.ok) {
       setMsg({ ok: true, text: "Program created and opened for applications." });
-      setF({ title: "", description: "", award: "", award2: "", award3: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "", category: "SPECIAL" });
+      setF({ title: "", description: "", award: "", award2: "", award3: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "", category: "SPECIAL", currency: CURRENCIES.NGN as string });
       void loadPrograms();
     } else setMsg({ ok: false, text: await readApiError(res) });
   };
@@ -424,7 +429,7 @@ export function ScholarshipAdmin() {
     const schoolMonths = SCHOLARSHIP_SCHOOL_PRIZE_MONTHS[pos as 1 | 2 | 3];
     if (
       !confirm(
-        `Award ${posLabel} position (${money(amount)}) to ${a.studentName} (${a.schoolName})?\n\n` +
+        `Award ${posLabel} position (${money(amount, a.awardCurrency)}) to ${a.studentName} (${a.schoolName})?\n\n` +
           `The pupil's award is credited against an open invoice, or held on their account until one is raised.\n\n` +
           `${a.schoolName} also receives ${schoolMonths} months of ${SCHOLARSHIP_SCHOOL_PRIZE_PLAN} at no charge. ` +
           `Their own plan and bill are unchanged.`,
@@ -499,6 +504,24 @@ export function ScholarshipAdmin() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
+              {/* THE CURRENCY THE AWARD IS PAID IN. It has to match the school's
+                  own fee currency for the credit to post — there is no FX rate
+                  here, and converting one to clear a family's fees would be
+                  worse than refusing. Measured before this existed: three of
+                  six awards in a run were refused because one school bills in
+                  GHS while every award was denominated in naira. */}
+              <select
+                aria-label="Award currency"
+                value={f.currency}
+                onChange={(e) => setF({ ...f, currency: e.target.value })}
+                className={sel}
+              >
+                {Object.values(CURRENCIES).map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
               <select aria-label="Category" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} className={sel}>
                 <option value="GENERAL_SCIENCE">General Science</option>
                 <option value="ART">Art</option>
@@ -737,7 +760,7 @@ export function ScholarshipAdmin() {
                       */
                       <p className={`mt-1 text-xs ${a.disbursed === false ? "text-amber-600 dark:text-amber-400" : "text-primary"}`}>
                         {a.awardPosition ? `${a.awardPosition === 1 ? "🥇 1st" : a.awardPosition === 2 ? "🥈 2nd" : "🥉 3rd"} place — ` : ""}
-                        Awarded {money(a.awardMinor)} ·{" "}
+                        Awarded {money(a.awardMinor, a.awardCurrency)} ·{" "}
                         {a.disbursed === false
                           ? "NOT yet credited — the school does not bill in the award's currency, so this needs posting by hand."
                           : a.disbursementKind === "CREDIT"
@@ -894,7 +917,7 @@ function ProgramRow({
         <span>
           <span className="font-medium">{pr.title}</span>{" "}
           <span className="text-muted-foreground">
-            🥇{money(pr.awardMinor)} 🥈{money(pr.award2Minor ?? pr.awardMinor)} 🥉{money(pr.award3Minor ?? pr.awardMinor)}
+            🥇{money(pr.awardMinor, pr.awardCurrency)} 🥈{money(pr.award2Minor ?? pr.awardMinor, pr.awardCurrency)} 🥉{money(pr.award3Minor ?? pr.awardMinor, pr.awardCurrency)}
           </span>{" "}
           <Badge variant="outline">{String(pr.category).replaceAll("_", " ").toLowerCase()}</Badge>{" "}
           <Badge variant={pr.status === "OPEN" ? "secondary" : "outline"}>{pr.status}</Badge>{" "}
@@ -905,7 +928,7 @@ function ProgramRow({
               set, so nothing is shown. */}
           {pr.budgetMinor > 0 && (
             <Badge variant={pr.committedMinor >= pr.budgetMinor ? "destructive" : "outline"} className="font-normal">
-              {money(pr.committedMinor)} of {money(pr.budgetMinor)} committed
+              {money(pr.committedMinor, pr.awardCurrency)} of {money(pr.budgetMinor, pr.awardCurrency)} committed
             </Badge>
           )}
           {pr.examMode && pr.examAt && (

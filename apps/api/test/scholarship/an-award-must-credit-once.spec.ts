@@ -66,7 +66,17 @@ function make(opts: { existingPayments?: Array<Record<string, unknown>>; claimCo
     // Every real instance has one — Nest constructs it as a field.
     logger: { error: jest.fn(), warn: jest.fn(), log: jest.fn() }, privileged: { client: db }, notifications: {}, audit: { record: jest.fn() } });
   const disburse = (s as unknown as {
-    disburseFeesCredit: (d: unknown, sc: string, st: string, a: number, id: string, by: string) => Promise<unknown>;
+    // The currency is a REQUIRED parameter — a default is how the hard-coded
+    // NGN survived across a 37-country catalogue.
+    disburseFeesCredit: (
+      d: unknown,
+      sc: string,
+      st: string,
+      a: number,
+      id: string,
+      by: string,
+      cur: string,
+    ) => Promise<unknown>;
   }).disburseFeesCredit.bind(s);
   return { s, db, created, disburse };
 }
@@ -74,7 +84,7 @@ function make(opts: { existingPayments?: Array<Record<string, unknown>>; claimCo
 describe("disbursing an award", () => {
   it("credits the invoice once", async () => {
     const { db, created, disburse } = make();
-    const out = await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
+    const out = await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1", "NGN");
     expect(created).toHaveLength(1);
     expect(out).toMatchObject({ amountMinor: 500_000 });
     expect(created[0].reference).toBe(REF);
@@ -85,7 +95,7 @@ describe("disbursing an award", () => {
     const { db, created, disburse } = make({
       existingPayments: [{ id: "pay-old", reference: REF, status: "POSTED", amountMinor: 500_000, kind: "SCHOLARSHIP" }],
     });
-    const out = await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
+    const out = await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1", "NGN");
     expect(created).toHaveLength(0);
     // Returns the payment that already exists, so the application still records
     // which one paid it rather than losing the link.
@@ -105,7 +115,7 @@ describe("disbursing an award", () => {
         { id: "pay-rev", reference: `SCHOLARSHIP-REVERSAL:${APP}`, status: "POSTED", amountMinor: 500_000, kind: "REFUND" },
       ],
     });
-    await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
+    await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1", "NGN");
     expect(created).toHaveLength(1);
   });
 
@@ -118,7 +128,7 @@ describe("disbursing an award", () => {
         { id: "r1", reference: `SCHOLARSHIP-REVERSAL:${APP}`, status: "POSTED", amountMinor: 500_000, kind: "REFUND" },
       ],
     });
-    const out = await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
+    const out = await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1", "NGN");
     expect(created).toHaveLength(0);
     expect(out).toMatchObject({ paymentId: "c2" });
   });
@@ -127,7 +137,7 @@ describe("disbursing an award", () => {
     const { db, created, disburse } = make({
       existingPayments: [{ id: "p1", reference: "OTHER", status: "POSTED", amountMinor: 900_000, kind: "PAYMENT" }],
     });
-    await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
+    await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1", "NGN");
     expect(created[0].amountMinor).toBe(100_000); // 1,000,000 total less 900,000 paid
   });
 
@@ -138,7 +148,7 @@ describe("disbursing an award", () => {
         { id: "p2", reference: "OTHER", status: "POSTED", amountMinor: 400_000, kind: "REFUND" },
       ],
     });
-    await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
+    await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1", "NGN");
     // 900,000 paid less a 400,000 refund leaves 500,000 owed of 1,000,000.
     expect(created[0].amountMinor).toBe(500_000);
   });

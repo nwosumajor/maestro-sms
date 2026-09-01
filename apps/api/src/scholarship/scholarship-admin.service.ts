@@ -1,4 +1,4 @@
-import { SCHOLARSHIP_COUNT_CAP, SCHOLARSHIP_UNDECIDED_STATUSES } from "@sms/types";
+import { PLATFORM_HOME_CURRENCY, SCHOLARSHIP_COUNT_CAP, schoolTimeString, SCHOLARSHIP_UNDECIDED_STATUSES } from "@sms/types";
 import type {
   PublishedScholarshipResultsDto,
   ScholarshipSchoolSpreadDto,
@@ -34,6 +34,7 @@ import {
   type ScholarshipProgramDto,
 } from "@sms/types";
 import { scholarshipSupervisorStage, uniqueEntityCode } from "@sms/types";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -56,7 +57,22 @@ import { formatMoney } from "@sms/types";
  * it lands on belongs to a SCHOOL, whose currency may be any of the catalogue.
  * Nothing compared the two.
  */
-const AWARD_CURRENCY = "NGN";
+/**
+ * What money an award is paid in, when the programme does not say.
+ *
+ * This was `AWARD_CURRENCY = "NGN"` — a constant, on a platform whose catalogue
+ * holds 37 countries. `disburseFeesCredit` refuses a currency it cannot match,
+ * correctly, so the effect was that the prize never reached a family outside
+ * the home currency: measured on a 5,000-applicant exercise, THREE OF SIX
+ * awards were refused because one school bills in GHS, each standing as
+ * AWARDED with nothing posted.
+ *
+ * A programme now names its own, and null still means this — so every
+ * programme authored before the column is unchanged.
+ */
+function awardCurrencyOf(program: { awardCurrency?: string | null } | null | undefined): string {
+  return program?.awardCurrency ?? PLATFORM_HOME_CURRENCY;
+}
 
 /**
  * What happened when an award tried to reach the fees ledger.
@@ -92,6 +108,8 @@ interface ProgramInput {
   examAt?: string | null;
   examVenue?: string | null;
   maxCandidatesPerSchool?: number | null;
+  awardCurrency?: string | null;
+  countries?: string[] | null;
   /** Per-position prizes (kobo) — 2nd/3rd fall back to awardMinor when null. */
   award2Minor?: number | null;
   award3Minor?: number | null;
@@ -173,6 +191,10 @@ export class ScholarshipAdminService {
     // Which product modules a school actually has. @Global, 10-minute cache,
     // invalidated across tasks on any entitlement write.
     private readonly modules: ModuleEntitlementService,
+    // The school's own clock. @Global, 60-second cache — resolved ONCE PER
+    // SCHOOL for the whole announce, not once per candidate, which is the
+    // lesson the dunning and HR reminder sweeps already record.
+    private readonly regions: SchoolRegionService,
   ) {}
 
   private client(): PrismaClient {
@@ -220,6 +242,8 @@ export class ScholarshipAdminService {
         examAt: input.examAt ? new Date(input.examAt) : null,
         examVenue: input.examVenue ?? null,
         maxCandidatesPerSchool: input.maxCandidatesPerSchool ?? null,
+        awardCurrency: input.awardCurrency ?? null,
+        countries: input.countries ?? [],
         award2Minor: input.award2Minor ?? null,
         award3Minor: input.award3Minor ?? null,
         examDurationMin: input.examDurationMin ?? 30,
@@ -250,6 +274,8 @@ export class ScholarshipAdminService {
     if (input.examAt !== undefined) data.examAt = input.examAt ? new Date(input.examAt) : null;
     if (input.examVenue !== undefined) data.examVenue = input.examVenue ?? null;
     if (input.maxCandidatesPerSchool !== undefined) data.maxCandidatesPerSchool = input.maxCandidatesPerSchool ?? null;
+    if (input.awardCurrency !== undefined) data.awardCurrency = input.awardCurrency ?? null;
+    if (input.countries !== undefined) data.countries = input.countries ?? [];
     if (input.award2Minor !== undefined) data.award2Minor = input.award2Minor ?? null;
     if (input.award3Minor !== undefined) data.award3Minor = input.award3Minor ?? null;
     if (input.examDurationMin !== undefined) data.examDurationMin = input.examDurationMin;
@@ -371,7 +397,7 @@ export class ScholarshipAdminService {
     const [programs, users, schools] = await Promise.all([
       db.scholarshipProgram.findMany({
         where: { id: { in: programIds } },
-        select: { id: true, title: true, awardMinor: true, examMode: true, examAt: true },
+        select: { id: true, title: true, awardMinor: true, examMode: true, examAt: true, awardCurrency: true },
       }),
       db.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
       db.school.findMany({ where: { id: { in: schoolIds } }, select: { id: true, name: true } }),
@@ -384,6 +410,7 @@ export class ScholarshipAdminService {
       programId: r.programId,
       programTitle: prog.get(r.programId)?.title ?? "Scholarship",
       awardMinorOffered: prog.get(r.programId)?.awardMinor ?? 0,
+      awardCurrency: awardCurrencyOf(prog.get(r.programId)),
       // Granted is not CREDITED — see the DTO. This is the operator's own
       // review queue, so it is the screen that most needs to say so.
       // EITHER LINK counts as disbursed. Reading only the payment id was true
@@ -692,7 +719,7 @@ export class ScholarshipAdminService {
     else if (body.action === "AWARD") {
       const program = await db.scholarshipProgram.findFirst({
         where: { id: app.programId },
-        select: { title: true, awardMinor: true, award2Minor: true, award3Minor: true, awardKind: true, budgetMinor: true },
+        select: { title: true, awardMinor: true, award2Minor: true, award3Minor: true, awardKind: true, budgetMinor: true, awardCurrency: true },
       });
       // Position 1|2|3 → the matching prize (2nd/3rd fall back to 1st when unset);
       // an explicit awardMinor override still wins. Each position granted ONCE.
@@ -787,10 +814,14 @@ export class ScholarshipAdminService {
         throw e;
       }
       if (claimed.count === 0) throw new BadRequestException("This application has already been finalised");
+      // ONE resolution for the whole award — the posting, the refusal messages
+      // and what the family is told. Two spellings of "which money is this" is
+      // how a pair drifts.
+      const awardCurrency = awardCurrencyOf(program);
       // Disburse a fees credit into the student's OWN school (privileged; the
       // Payment carries the school's id so it's correctly tenant-owned).
       if ((program?.awardKind ?? "FEES_CREDIT") === "FEES_CREDIT") {
-        disbursement = await this.disburseFeesCredit(db, app.schoolId, app.studentId, awardMinor, app.id, p.userId);
+        disbursement = await this.disburseFeesCredit(db, app.schoolId, app.studentId, awardMinor, app.id, p.userId, awardCurrency);
       }
       // AND THE WINNER'S SCHOOL IS AWARDED TOO. A scholarship rewards the pupil
       // with fees and the school that taught them with free ENTERPRISE: a
@@ -827,9 +858,9 @@ export class ScholarshipAdminService {
         // the pupil has no open invoice AND the school does not bill in the
         // award's currency, so a credit written here could never be spent.
         this.logger.error(
-          `scholarship ${id}: award of ${formatMoney(awardMinor, AWARD_CURRENCY)} not posted — ` +
+          `scholarship ${id}: award of ${formatMoney(awardMinor, awardCurrency)} not posted — ` +
             `the school bills in ${disbursement.schoolCurrency} and a scholarship is denominated ` +
-            `in ${AWARD_CURRENCY}. Post the credit manually in the school's own currency.`,
+            `in ${awardCurrency}. Post the credit manually in the school's own currency.`,
         );
       }
       if (disbursement && !disbursement.ok && disbursement.reason === "currency_mismatch") {
@@ -838,9 +869,9 @@ export class ScholarshipAdminService {
         // hand or after the award is re-denominated — but nothing else will
         // notice, so it must be loud where the platform's logs are read.
         this.logger.error(
-          `scholarship ${id}: award of ${formatMoney(awardMinor, AWARD_CURRENCY)} not posted — ` +
+          `scholarship ${id}: award of ${formatMoney(awardMinor, awardCurrency)} not posted — ` +
             `the student's invoice is in ${disbursement.invoiceCurrency}, and a scholarship is ` +
-            `denominated in ${AWARD_CURRENCY}. Post the credit manually in the school's own currency.`,
+            `denominated in ${awardCurrency}. Post the credit manually in the school's own currency.`,
         );
       }
       const posLabel = position === 1 ? "1st" : position === 2 ? "2nd" : "3rd";
@@ -859,8 +890,8 @@ export class ScholarshipAdminService {
         !disbursement?.ok
           ? `Congratulations on finishing in ${posLabel} position! The award has been granted; the school will apply it to the student's fees.`
           : disbursement.kind === "INVOICE"
-            ? `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, AWARD_CURRENCY)} has been credited against the student's school fees.`
-            : `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, AWARD_CURRENCY)} is being held as credit on the student's account and will come off the next school bill.`,
+            ? `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, awardCurrency)} has been credited against the student's school fees.`
+            : `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, awardCurrency)} is being held as credit on the student's account and will come off the next school bill.`,
       );
       const [row] = await this.listApplicationById(db, id);
       return row;
@@ -1255,7 +1286,8 @@ export class ScholarshipAdminService {
     }
 
     // --- notify every candidate + guardians -----------------------------------
-    const when = program.examAt.toISOString().slice(0, 16).replace("T", " at ");
+    // The UTC reading, used only where a school's own clock cannot be resolved.
+    const whenUtc = `${program.examAt.toISOString().slice(0, 16).replace("T", " at ")} (UTC)`;
     const howTo =
       program.examMode === "ONLINE_CBT" ? "Sit it under CBT Exams in the app on the exam date."
       : program.examMode === "GAMES" ? "Enter it from Games → Ultimate on the exam date."
@@ -1277,12 +1309,28 @@ export class ScholarshipAdminService {
     // never reached for it. Sibling asymmetry, with the careful one written
     // first, again.
     const title = `Scholarship exam scheduled — “${program.title}”`;
-    const body = `Category: ${String(program.category).replaceAll("_", " ").toLowerCase()}. The exam holds via ${modeLabel} on ${when} (UTC)${program.examVenue ? ` — ${program.examVenue}` : ""}. ${howTo} Good luck!`;
+    // A TIME THE FAMILY CAN ACT ON. This said `(UTC)` to every candidate in
+    // every country — honest, and it makes each family do the conversion for
+    // the one fact that decides whether they turn up. `schoolTimeString`
+    // already exists for exactly this, and this path did not use it.
+    const bodyFor = (when: string) =>
+      `Category: ${String(program.category).replaceAll("_", " ").toLowerCase()}. The exam holds via ${modeLabel} on ${when}${program.examVenue ? ` — ${program.examVenue}` : ""}. ${howTo} Good luck!`;
     let notified = 0;
     let notifyFailed = 0;
     for (const [schoolId, studentIds] of bySchool) {
       const ctx = { schoolId, userId: p.userId };
       try {
+        // ONCE PER SCHOOL, not once per candidate. A school whose region cannot
+        // be read falls back to the labelled UTC reading rather than to a
+        // silently wrong local time.
+        let when = whenUtc;
+        try {
+          const region = await this.regions.forSchool(schoolId);
+          if (region?.timezone) when = schoolTimeString(region.timezone, program.examAt);
+        } catch {
+          /* keep the UTC reading */
+        }
+        const body = bodyFor(when);
         // ONE guardian read for the whole school, not one per pupil.
         const links = (await this.db.runAsTenant(ctx, (tx) =>
           tx.parentChild.findMany({ where: { studentId: { in: studentIds } }, select: { parentId: true } }),
@@ -1822,6 +1870,7 @@ export class ScholarshipAdminService {
     awardMinor: number,
     applicationId: string,
     actorId: string,
+    awardCurrency: string,
   ): Promise<DisbursementOutcome> {
     const invoice = await db.invoice.findFirst({
       where: { schoolId, studentId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
@@ -1842,7 +1891,7 @@ export class ScholarshipAdminService {
     // wrong here (a scholarship is not a charge), so this takes the credit
     // ledger, which is the mechanism built for exactly "money arrived and there
     // is no invoice yet".
-    if (!invoice) return this.holdAsCredit(db, schoolId, studentId, awardMinor, applicationId, actorId);
+    if (!invoice) return this.holdAsCredit(db, schoolId, studentId, awardMinor, applicationId, actorId, awardCurrency);
     // THE CURRENCY MUST MATCH BEFORE ANYTHING POSTS.
     //
     // `awardMinor` is a platform figure in kobo; `invoice.currency` is the
@@ -1857,7 +1906,7 @@ export class ScholarshipAdminService {
     // the comparison happens BEFORE the write, because a refusal leaves the
     // invoice untouched and is recoverable, while a posting is not — nothing
     // in the system revisits a settled invoice.
-    if (invoice.currency !== AWARD_CURRENCY) {
+    if (invoice.currency !== awardCurrency) {
       return { ok: false, reason: "currency_mismatch", invoiceCurrency: invoice.currency };
     }
     // IDEMPOTENT ON THE APPLICATION, because the claim above cannot help across
@@ -1941,10 +1990,13 @@ export class ScholarshipAdminService {
     awardMinor: number,
     applicationId: string,
     actorId: string,
+    // REQUIRED, never defaulted: a default is how the hard-coded NGN survived
+    // across a 37-country catalogue in the first place.
+    awardCurrency: string,
   ): Promise<DisbursementOutcome> {
     const school = await db.school.findFirst({ where: { id: schoolId }, select: { country: true, currency: true } });
     const schoolCurrency = resolveRegion(school ?? {}).currency;
-    if (schoolCurrency !== AWARD_CURRENCY) {
+    if (schoolCurrency !== awardCurrency) {
       return { ok: false, reason: "school_bills_another_currency", schoolCurrency };
     }
     const reference = `SCHOLARSHIP:${applicationId}`;
@@ -1958,7 +2010,7 @@ export class ScholarshipAdminService {
         // STAMPED, never left null: null means "the school's own currency", and
         // an award is denominated by the PLATFORM. They agree today because the
         // guard above requires it, and saying so keeps that true if it changes.
-        currency: AWARD_CURRENCY,
+        currency: awardCurrency,
         reason: "SCHOLARSHIP",
         reference,
         note: "Platform-sponsored scholarship — no open invoice when awarded",
@@ -1975,7 +2027,7 @@ export class ScholarshipAdminService {
     const [program, student, applicant, school] = await Promise.all([
       db.scholarshipProgram.findFirst({
         where: { id: r.programId },
-        select: { title: true, awardMinor: true, examMode: true, examAt: true },
+        select: { title: true, awardMinor: true, examMode: true, examAt: true, awardCurrency: true },
       }),
       db.user.findFirst({ where: { id: r.studentId }, select: { name: true } }),
       db.user.findFirst({ where: { id: r.applicantId }, select: { name: true } }),
@@ -1983,6 +2035,7 @@ export class ScholarshipAdminService {
     ]);
     return [{
       id: r.id, programId: r.programId, programTitle: program?.title ?? "Scholarship", awardMinorOffered: program?.awardMinor ?? 0,
+      awardCurrency: awardCurrencyOf(program),
       // EITHER LINK counts as disbursed. Reading only the payment id was true
       // while an award could reach nowhere else; an award held on the credit
       // ledger has moved real money and would have read "not yet credited".
@@ -2040,6 +2093,8 @@ export class ScholarshipAdminService {
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
     maxCandidatesPerSchool: number | null;
+    awardCurrency: string | null;
+    countries: string[];
     examDurationMin: number; examQuestions: unknown; examSchedule: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }, committedMinor = 0): ScholarshipProgramDto {
     return {
@@ -2050,6 +2105,8 @@ export class ScholarshipAdminService {
       opensAt: r.opensAt, closesAt: r.closesAt, status: r.status,
       category: r.category, examMode: r.examMode, examAt: r.examAt, examVenue: r.examVenue,
       maxCandidatesPerSchool: r.maxCandidatesPerSchool,
+      awardCurrency: awardCurrencyOf(r),
+      countries: r.countries,
       examDurationMin: r.examDurationMin,
       examQuestionCount: Array.isArray(r.examQuestions) ? r.examQuestions.length : 0,
       resultsPublishedAt: r.resultsPublishedAt ?? null,

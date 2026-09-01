@@ -13,6 +13,7 @@ import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto, ScholarshipSchoolSpreadDto } from "@sms/types";
 import { narrowStatus, pageNumber } from "../common/status-filter";
+import { CURRENCIES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -47,6 +48,23 @@ const programSchema = z.object({
   // A cap of zero would qualify nobody and read as a mistake, so the floor is 1
   // and "no cap" is expressed by null rather than by 0.
   maxCandidatesPerSchool: z.number().int().min(1).max(10_000).nullish(),
+  // Any currency the platform can EXPRESS — not only the ones it can SELL in.
+  // An award is paid into a school's own fee ledger, and `school.currency` is a
+  // free-form ISO code, so restricting this to the sellable set would refuse a
+  // prize for a market the platform already serves.
+  // ISO-3166 alpha-2. Empty array = every country, same as omitting it.
+  countries: z
+    .array(z.string().trim().toUpperCase().length(2))
+    .max(60)
+    .nullish(),
+  awardCurrency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((c) => Object.values(CURRENCIES).includes(c as never), {
+      message: "awardCurrency must be a currency the platform can express",
+    })
+    .nullish(),
   examDurationMin: z.number().int().min(1).max(600).optional(),
 });
 const examQuestion = z.object({

@@ -121,6 +121,17 @@ model ScholarshipProgram {
   /// existed. Enforced when an application is QUALIFIED — the point at which
   /// the operator decides who actually sits — not when it is applied for, so a
   /// family is never turned away from applying by another school's numbers.
+  /// ISO code the award is paid in. Null = the platform's home currency, which
+  /// is what every programme authored before this column used. It must match the
+  /// school's own fee currency for the credit to post — a scholarship cannot be
+  /// converted, because this platform holds no FX rate and inventing one to
+  /// clear a family's fees would be worse than refusing.
+  awardCurrency String?
+  /// ISO-3166 alpha-2 codes this programme is open to. Null or empty = every
+  /// country, which is what every programme authored before this column used.
+  /// A LIST so the owner chooses the granularity per programme — one country,
+  /// a region, or the whole platform.
+  countries String[]
   maxCandidatesPerSchool Int?
   /// ONLINE_CBT sitting length (minutes).
   examDurationMin Int                       @default(30)

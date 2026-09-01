@@ -50,6 +50,9 @@ function makeService(rows: Array<Record<string, unknown>>) {
     // Entitled by default: this suite is about auditing, not about which
     // schools hold the CBT module.
     { isEnabled: jest.fn().mockResolvedValue(true) } as never,
+    // The school's own clock, used to tell each family the exam time in a
+    // timezone they can act on rather than in UTC.
+    { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
   );
   return { service, audit, client };
 }

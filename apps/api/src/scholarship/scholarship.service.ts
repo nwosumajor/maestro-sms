@@ -10,7 +10,13 @@
 // Relationship scoping: applicant → students they may apply for; anyone else 404.
 // =============================================================================
 
-import { scholarshipSupervisorStage, WORKFLOW_PERMISSIONS } from "@sms/types";
+import {
+  DEFAULT_COUNTRY,
+  PLATFORM_HOME_CURRENCY,
+  scholarshipCoversCountry,
+  scholarshipSupervisorStage,
+  WORKFLOW_PERMISSIONS,
+} from "@sms/types";
 import { classIdsTaughtBy, teacherIdsOfClasses, teachesAnyOf } from "../common/teaches";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto, type CbtSittingViewDto, type ScholarshipExamPaperDto } from "@sms/types";
@@ -247,13 +253,26 @@ export class ScholarshipService {
     return ids;
   }
 
-  private async openPrograms(tx: TenantTx) {
+  private async openPrograms(tx: TenantTx, schoolId: string) {
     const now = new Date();
     const rows = await tx.scholarshipProgram.findMany({
       where: { status: "OPEN", opensAt: { lte: now }, closesAt: { gte: now } },
       orderBy: { closesAt: "asc" },
     });
-    return rows;
+    // NARROWED TO THIS SCHOOL'S COUNTRY, using the SAME predicate the apply
+    // guard uses. Offering a family a scholarship the server will refuse is the
+    // control-that-403s shape this repo keeps finding; the two halves are one
+    // rule and a second spelling is how they drift.
+    //
+    // Filtered in NODE rather than in SQL on purpose: the scope is an ARRAY on
+    // the row and the question is "does it contain my country OR is it empty",
+    // which Prisma cannot express in one `where` — and the open set is a handful
+    // of programmes, not a table that grows with the platform.
+    const school = (await tx.school.findFirst({
+      where: { id: schoolId },
+      select: { country: true },
+    })) as { country: string | null } | null;
+    return rows.filter((r) => scholarshipCoversCountry(r.countries, school?.country, DEFAULT_COUNTRY));
   }
 
   // ---------------------------------------------------------------------------
@@ -261,7 +280,7 @@ export class ScholarshipService {
   // ---------------------------------------------------------------------------
   async getPortal(p: Principal): Promise<ScholarshipPortalDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const [programs, applicable] = await Promise.all([this.openPrograms(tx), this.applicableStudentIds(tx, p)]);
+      const [programs, applicable] = await Promise.all([this.openPrograms(tx, p.schoolId), this.applicableStudentIds(tx, p)]);
       const studentIds = [...applicable];
       const students = studentIds.length
         ? await tx.user.findMany({ where: { id: { in: studentIds } }, select: { id: true, name: true }, orderBy: { name: "asc" } })
@@ -359,6 +378,20 @@ export class ScholarshipService {
       const now = new Date();
       if (program.status !== "OPEN" || program.opensAt > now || program.closesAt < now) {
         throw new BadRequestException("This scholarship is not open for applications");
+      }
+      // THE COUNTRY SCOPE, checked BEFORE the pupil lookup so the refusal is
+      // about the programme rather than about the child. A school outside the
+      // scope is told plainly: this is not a secret, and a family that can see
+      // a scholarship listed and is refused without a reason experiences it as
+      // arbitrary.
+      const school = (await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { country: true },
+      })) as { country: string | null } | null;
+      if (!scholarshipCoversCountry(program.countries, school?.country, DEFAULT_COUNTRY)) {
+        throw new BadRequestException(
+          `This scholarship is open to schools in ${program.countries.join(", ")} only.`,
+        );
       }
       const applicable = await this.applicableStudentIds(tx, p);
       if (!applicable.has(input.studentId)) throw new NotFoundException("Student not found"); // 404 not 403
@@ -715,6 +748,8 @@ export class ScholarshipService {
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
     maxCandidatesPerSchool: number | null;
+    awardCurrency: string | null;
+    countries: string[];
     examDurationMin: number; examQuestions: unknown; examSchedule: unknown; resultsPublishedAt: Date | null; createdAt: Date;
   }) {
     return {
@@ -732,6 +767,12 @@ export class ScholarshipService {
       // otherwise experience as arbitrary. Unlike the question set two fields
       // up, which never leaves the platform-owned row.
       maxCandidatesPerSchool: pr.maxCandidatesPerSchool,
+      // RESOLVED here too, and it matters more on this surface than on the
+      // operator's: the portal shows a family a figure, and an amount without
+      // its currency is not an amount. Null on the row still means the
+      // platform's home currency.
+      awardCurrency: pr.awardCurrency ?? PLATFORM_HOME_CURRENCY,
+      countries: pr.countries,
       examDurationMin: pr.examDurationMin,
       // SECURITY: the count only — the question set (with answers) never leaves
       // the platform-owned row toward applicants.
@@ -763,12 +804,21 @@ export class ScholarshipService {
     const [programs, users] = await Promise.all([
       tx.scholarshipProgram.findMany({
         where: { id: { in: programIds } },
-        select: { id: true, title: true, awardMinor: true, examMode: true, examAt: true },
+        select: { id: true, title: true, awardMinor: true, examMode: true, examAt: true, awardCurrency: true },
       }),
       tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
     ]);
     const prog = new Map(
-      programs.map((pr: { id: string; title: string; awardMinor: number; examMode: string | null; examAt: Date | null }) => [pr.id, pr]),
+      programs.map(
+        (pr: {
+          id: string;
+          title: string;
+          awardMinor: number;
+          examMode: string | null;
+          examAt: Date | null;
+          awardCurrency: string | null;
+        }) => [pr.id, pr],
+      ),
     );
     const name = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
     return rows.map((r) => ({
@@ -776,6 +826,7 @@ export class ScholarshipService {
       programId: r.programId,
       programTitle: prog.get(r.programId)?.title ?? "Scholarship",
       awardMinorOffered: prog.get(r.programId)?.awardMinor ?? 0,
+      awardCurrency: prog.get(r.programId)?.awardCurrency ?? PLATFORM_HOME_CURRENCY,
       // Granted is not the same as CREDITED. Null unless the award was made, so
       // "not awarded" and "awarded but not yet credited" stay distinguishable —
       // the ambiguity the export bundle's coverage manifest exists to remove,

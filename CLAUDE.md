@@ -898,6 +898,85 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A scholarship denominated in one country's money, offered to thirty-seven
+Asked whether scholarships should be scoped by country. Answered from the code,
+then built the three things the answer named. **It is NOT an efficiency
+question** — the queue and the published table are already O(page), and a
+country filter changes 20 ms to 20 ms. It is a correctness one, and the
+5,000-applicant run had already measured the cost.
+**1. THE AWARD CURRENCY WAS A CONSTANT.** `const AWARD_CURRENCY = "NGN"` for a
+catalogue of 37 countries. `disburseFeesCredit` refuses a currency it cannot
+match — correctly, since crediting 60,000 pesewas against a naira figure would
+clear a family's fees while the books recorded a hundredth of it — so the effect
+was that **the prize never reached a family outside the home currency**.
+Measured in the run: THREE OF SIX awards refused because one school bills GHS,
+each standing as AWARDED with nothing posted. `scholarship_program
+.awardCurrency` (migration `20270127000000`, NULLABLE — null still means the
+platform's home currency, so every existing programme is unchanged).
+```
+naira award to a GHS school   disbursed=false kind=null    (unchanged, still right)
+cedi  award to a GHS school   disbursed=true  kind=CREDIT  currency=GHS
+an unknown currency           400 at the boundary
+```
+// A REQUIRED PARAMETER on both disbursement paths, never defaulted — a default
+is exactly how the hard-coded NGN survived, and a required one is a search for
+every caller relying on it. The same trick that found the Paystack currency
+sites.
+// THE WRITING HALF TOO. `awardToMinor` scaled by `CURRENCIES.NGN`, so an award
+typed into a zero-decimal currency would store 100x — the fourteen-site defect
+this file already records, in a fifteenth place. It scales by the currency being
+awarded now, and the create form has a currency selector.
+// THE FIGURE CARRIES ITS CURRENCY TO THE SCREEN: `awardCurrency` is on the
+programme DTO and on the APPLICATION row, resolved so it is never null on the
+wire. A funder reading "Awarded 100,000" needs to know which money, and the
+console rendered every award figure in the platform default.
+**2. THE COUNTRY SCOPE IS A LIST, NOT A COUNTRY** (`countries text[]`, migration
+`20270128000000`, null/empty = everywhere). The owner runs "Nigeria", "West
+Africa", or the whole platform, PER PROGRAMME — fixing the granularity in the
+schema would be the platform deciding a commercial question, and the cost being
+balanced is real: 37 countries x 3 positions from one budget is a much smaller
+prize each.
+```
+a Nigerian school is offered   Nigeria only · West Africa · Global
+a Ghanaian school is offered                 West Africa · Global
+the Ghanaian school applying
+  to the Nigeria-only one      400 "open to schools in NG only."
+```
+// **ONE PREDICATE FOR BOTH HALVES.** What a family is OFFERED and what the
+server ACCEPTS are one rule, and a second spelling is how they drift into the
+control-that-403s shape. `scholarshipCoversCountry` is pure and shared.
+// A SCHOOL WITH NO COUNTRY RESOLVES TO THE PLATFORM'S HOME, exactly as
+`resolveRegion` does everywhere: treating it as "nowhere" would silently exclude
+every school that has never set a region, which is most of them.
+// CHECKED BEFORE THE PUPIL LOOKUP, so the refusal is about the PROGRAMME rather
+than about the child — and it NAMES the countries, because a family that can see
+a scholarship listed and is refused without a reason experiences it as arbitrary.
+// FILTERED IN NODE, deliberately: the scope is an array on the row and the
+question is "contains my country OR is empty", which Prisma cannot express in
+one `where`; the open set is a handful of programmes, not a table that grows.
+**3. THE EXAM TIME WAS ANNOUNCED IN UTC TO EVERY COUNTRY.** Honest — it said
+`(UTC)` — and it made every family do the conversion for the one fact that
+decides whether they turn up. `schoolTimeString` already existed for this and
+this path did not use it. Live, one 09:00 UTC instant:
+```
+MeastroTest School   (GH)             told 2026-09-20 09:00
+St. Andrews Academy  (unset -> NG)    told 2026-09-20 10:00
+```
+// ONCE PER SCHOOL, not per candidate — the lesson the dunning and HR sweeps
+already record — and a school whose region cannot be read falls back to the
+LABELLED UTC reading rather than to a silently wrong local time.
+// GOTCHA: four fixtures needed `school.findFirst`, `$queryRaw`, a widened bound
+signature and a region stub — all things every real client has.
+// GOTCHA: two existing tests asserted the literal `AWARD_CURRENCY`, the
+constant being removed. Both guarded the right PROPERTY (the credit row is
+stamped, a mismatch is refused) and were re-anchored rather than deleted.
+// PROBE: five programmes, four applications, two credit entries and every
+notice removed; no school holds a grant and the tables are as found.
+Mutation-validated eight ways: an empty scope excluding everyone, a school with
+no country matching nothing, the listing deciding for itself, the scope checked
+after the pupil lookup, the hard-coded NGN restored, the currency parameter
+defaulted, the credit row left null, and the announce back in UTC.
+
 ### An announce that could not reach 5,000, and a prize the biggest school always won
 Two things asked for after the 5,000-applicant exercise: fix the announce
 timeout, and let the platform owner cap how many candidates one school may put

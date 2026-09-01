@@ -61,7 +61,13 @@ describe("no open invoice is not a dead end", () => {
     // Null means "the school's own currency", and an award is denominated by
     // the PLATFORM. They agree only because the guard below requires it.
     const body = methodBody("private async holdAsCredit(");
-    expect(body).toContain("currency: AWARD_CURRENCY");
+    // The PROGRAMME's currency now, not a hard-coded constant: `AWARD_CURRENCY
+    // = "NGN"` is gone, because it stopped the prize reaching any school
+    // outside the platform's home currency — three of six awards in a
+    // 5,000-applicant run. The property is unchanged: the row is STAMPED, and
+    // null would mean "the school's own currency", which is a different claim.
+    expect(body).toContain("currency: awardCurrency");
+    expect(body).not.toContain("currency: null");
     expect(body).toContain("reason: \"SCHOLARSHIP\"");
   });
 
@@ -71,7 +77,7 @@ describe("no open invoice is not a dead end", () => {
     // is no FX rate here and inventing one would be worse than the gap.
     const body = methodBody("private async holdAsCredit(");
     expect(body).toContain("school_bills_another_currency");
-    expect(body).toMatch(/schoolCurrency !== AWARD_CURRENCY/);
+    expect(body).toMatch(/schoolCurrency !== awardCurrency/);
   });
 
   it("is idempotent on the application, like the invoice arm", () => {

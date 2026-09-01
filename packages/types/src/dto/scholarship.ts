@@ -62,6 +62,29 @@ export const SCHOLARSHIP_APPLICATION_STATUSES = [
  * Paging is NOT bounded by it: `hasMore` comes from fetching one row past the
  * page, so every application stays reachable.
  */
+/**
+ * Is a school in a programme's country scope?
+ *
+ * NULL OR EMPTY MEANS EVERY COUNTRY — the behaviour of every programme authored
+ * before the column, so nothing moves for them. Pure, and shared by the apply
+ * guard and the portal listing, because a family offered a scholarship they
+ * cannot win and a family refused one they were offered are the two halves of
+ * one rule, and two spellings of it is how a pair drifts.
+ *
+ * A school with NO country set resolves to the platform's home country, exactly
+ * as `resolveRegion` does everywhere else — so an unconfigured school is treated
+ * as being where the platform is, rather than being silently excluded from
+ * everything.
+ */
+export function scholarshipCoversCountry(
+  countries: readonly string[] | null | undefined,
+  schoolCountry: string | null | undefined,
+  homeCountry: string,
+): boolean {
+  if (!countries || countries.length === 0) return true;
+  return countries.includes((schoolCountry ?? homeCountry).toUpperCase());
+}
+
 export const SCHOLARSHIP_COUNT_CAP = 10_000;
 
 export const SCHOLARSHIP_UNDECIDED_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "SHORTLISTED"] as const;
@@ -168,6 +191,19 @@ export interface ScholarshipProgramDto {
    * podium places and the smallest got no exam at all.
    */
   maxCandidatesPerSchool: number | null;
+  /**
+   * ISO-3166 alpha-2 codes this programme is open to. EMPTY means every
+   * country — the behaviour of every programme authored before the field.
+   */
+  countries: string[];
+  /**
+   * ISO code the award is paid in — RESOLVED, so it is never null on the wire
+   * even when the row is: a screen showing an amount has to know which money it
+   * is. It must match the school's own fee currency for the credit to post; the
+   * platform holds no FX rate, and inventing one to clear a family's fees would
+   * be worse than refusing.
+   */
+  awardCurrency: string;
   examDurationMin: number;
   /** How many CBT questions the owner has authored (never the questions). */
   examQuestionCount: number;
@@ -275,6 +311,8 @@ export interface ScholarshipApplicationDto {
   programId: string;
   programTitle: string;
   awardMinorOffered: number;
+  /** ISO code both award figures on this row are in. Resolved, never null. */
+  awardCurrency: string;
   schoolId: string;
   /** School name — only populated in the cross-tenant operator review view. */
   schoolName: string | null;
