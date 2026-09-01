@@ -727,7 +727,20 @@ export class ScholarshipAdminService {
         if (existing) {
           await db.cbtExam.update({
             where: { id: existing.id },
-            data: { startAt: program.examAt, endAt: examEnd, durationMinutes: program.examDurationMin ?? 30, status: "PUBLISHED" },
+            data: {
+              startAt: program.examAt,
+              endAt: examEnd,
+              durationMinutes: program.examDurationMin ?? 30,
+              status: "PUBLISHED",
+              // THE ANNOUNCE IS THE RELEASE for a PLATFORM exam. A school's own
+              // scheduled exam waits for a day-of release by its principal or
+              // head teacher; a scholarship exam has no school invigilator —
+              // the platform owner set the window and owns the paper. Requiring
+              // a school release made it unsittable in two ways at once: nobody
+              // there is responsible for it, and the release route is inside
+              // the PREMIUM CBT module the candidate's school may not have.
+              releasedAt: new Date(),
+            },
           });
           cbtExams += 1;
           continue;
@@ -794,6 +807,8 @@ export class ScholarshipAdminService {
             startAt: program.examAt,
             endAt: examEnd,
             status: "PUBLISHED",
+            // See the reuse branch above: the announce IS the release here.
+            releasedAt: new Date(),
             shuffle: true,
             scholarshipProgramId: programId,
             createdById: p.userId,

@@ -11,7 +11,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
-import type { ScholarshipApplicationDto, ScholarshipExamQuestionDto } from "@sms/types";
+import type { CbtSittingViewDto, ScholarshipApplicationDto, ScholarshipExamQuestionDto } from "@sms/types";
 import { narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -60,6 +60,24 @@ const programUpdateSchema = programSchema.partial().extend({
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
 const revokeSchema = z.object({ reason: z.string().min(1).max(2000) });
+/** One multiple-choice answer. Bounded at the boundary like every other body. */
+const theoryAnswerSchema = z.object({ questionId: z.string().uuid(), text: z.string().max(20000) });
+const integritySchema = z.object({
+  events: z
+    .array(
+      z.object({
+        type: z.enum(["FOCUS_LOSS", "PASTE"]),
+        awayMs: z.number().int().min(0).max(6 * 60 * 60 * 1000).optional(),
+        chars: z.number().int().min(0).max(100_000).optional(),
+      }),
+    )
+    .max(200),
+});
+const answerSchema = z.object({
+  questionId: z.string().uuid(),
+  choiceIndex: z.number().int().min(0).max(9),
+});
+
 const awardSchema = z.object({
   awardMinor: z.number().int().positive().optional(),
   position: z.number().int().min(1).max(3).optional(),
@@ -131,6 +149,62 @@ export class ScholarshipController {
     @Body(new ZodValidationPipe(stageDecisionSchema)) body: z.infer<typeof stageDecisionSchema>,
   ) {
     return this.scholarships.decideStage(p, id, body);
+  }
+
+  // --- sitting the exam (candidates) -----------------------------------------
+  //
+  // ALWAYS-ON, deliberately. The `cbt` routes are `@RequireModule(MODULES.CBT)`, a
+  // PREMIUM module, so a qualified candidate at a STANDARD school was told to
+  // sit an exam and met a 404. These routes carry the same audience as the rest
+  // of the scholarship — `scholarship.apply`, which students hold — and the
+  // SERVICE refuses anything that is not a scholarship exam, so the paid
+  // module's gate is untouched rather than made conditional.
+  @Post("exams/:programId/start")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  startExam(@CurrentPrincipal() p: Principal, @Param("programId") programId: string): Promise<CbtSittingViewDto> {
+    return this.scholarships.startExam(p, programId);
+  }
+
+  @Get("sittings/:id")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  examSitting(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtSittingViewDto> {
+    return this.scholarships.getExamSitting(p, id);
+  }
+
+  @Post("sittings/:id/answer")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  answerExam(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(answerSchema)) body: z.infer<typeof answerSchema>,
+  ): Promise<{ ok: true }> {
+    return this.scholarships.answerExam(p, id, body.questionId, body.choiceIndex);
+  }
+
+  @Post("sittings/:id/submit")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  submitExam(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtSittingViewDto> {
+    return this.scholarships.submitExam(p, id);
+  }
+
+  @Post("sittings/:id/answer-theory")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  answerExamTheory(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(theoryAnswerSchema)) body: z.infer<typeof theoryAnswerSchema>,
+  ): Promise<{ ok: true }> {
+    return this.scholarships.answerExamTheory(p, id, body.questionId, body.text);
+  }
+
+  @Post("sittings/:id/integrity")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  examIntegrity(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(integritySchema)) body: z.infer<typeof integritySchema>,
+  ) {
+    return this.scholarships.recordExamIntegrity(p, id, body.events);
   }
 
   // --- platform owner (super_admin) ------------------------------------------

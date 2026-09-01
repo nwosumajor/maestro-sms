@@ -1345,6 +1345,10 @@
       "kind": "ui",
       "note": "reviewed: components/operator/ScholarshipAdmin.tsx reads the paper back into the Review-questions panel so the operator can check the answer key and remove a wrong question"
     },
+    "GET /scholarships/sittings/:p": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/scholarships/sitting/[id]/page.tsx renders the shared CbtExamRoom with basePath=scholarships, so a candidate sits their paper without the PREMIUM CBT module"
+    },
     "GET /scholarships/programs": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2892,6 +2896,26 @@
     "POST /scholarships/applications/:p/submit": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/exams/:p/start": {
+      "kind": "ui",
+      "note": "reviewed: the Start-the-exam button in components/scholarship/ScholarshipPortal.tsx creates the sitting and routes to it"
+    },
+    "POST /scholarships/sittings/:p/answer": {
+      "kind": "ui",
+      "note": "reviewed: components/cbt/CbtExamRoom.tsx posts here when basePath is scholarships"
+    },
+    "POST /scholarships/sittings/:p/answer-theory": {
+      "kind": "ui",
+      "note": "reviewed: components/cbt/CbtExamRoom.tsx posts here when basePath is scholarships"
+    },
+    "POST /scholarships/sittings/:p/integrity": {
+      "kind": "ui",
+      "note": "reviewed: components/cbt/CbtExamRoom.tsx posts client integrity signals here when basePath is scholarships"
+    },
+    "POST /scholarships/sittings/:p/submit": {
+      "kind": "ui",
+      "note": "reviewed: components/cbt/CbtExamRoom.tsx submits here when basePath is scholarships"
     },
     "POST /scholarships/programs": {
       "kind": "ui",

@@ -898,6 +898,73 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A scholarship exam the candidate's school had to have paid for
+`ScholarshipService.startExam` and the four sitting routes on the always-on
+scholarship surface; `CbtExamRoom` gains a `basePath`. Owner's decision, §1 of
+the scholarship exam programme.
+A qualified candidate at a STANDARD school could not sit their paper, in TWO
+independent ways:
+```
+1  the sitting routes live on CbtController, @RequireModule(MODULES.CBT), a
+   PREMIUM module — GET /cbt/exams is 404 on STANDARD, 200 on ENTERPRISE, and
+   the portal linked them straight to it
+2  announceExam created the exam PUBLISHED and never RELEASED, and releasing is
+   itself a CBT-module action performed by a school PRINCIPAL — for a PLATFORM
+   exam nobody there is responsible for, in a module their school may not have
+```
+The second only appeared by DRIVING it: the first fix landed and the sitting
+still refused, with "wait for your invigilator to open it".
+// **THE ENTITLEMENT GATE IS NOT WEAKENED, and that was the design choice.**
+Making `@RequireModule` conditional per user would leave every later reader
+unsure what it guarantees. Instead the scholarship surface — which its own
+header already calls "a platform growth lever, open to every plan" — carries its
+own sitting routes for its own audience (`scholarship.apply`, which students
+hold). The paid module is untouched.
+// **NOR IS THE AUTHORISATION RE-IMPLEMENTED.** `CbtService.startSitting` ALREADY
+asks everything that matters — PUBLISHED, RELEASED, a QUALIFIED application on
+that programme (404-not-403, so a scholarship exam is invisible to anyone who
+did not qualify), and inside the window. These routes add exactly ONE thing: that
+the exam is a scholarship exam at all.
+// THAT ONE CHECK IS LOAD-BEARING. `startExam` resolves the exam BY PROGRAMME
+(`where: { scholarshipProgramId }`), so an ordinary school exam is unreachable
+here by construction; every sitting route re-asserts it, and the two refusals are
+byte-identical so this cannot become a way to ask what exams a school is running.
+// THE ANNOUNCE IS THE RELEASE for a platform exam. A school's own scheduled exam
+still waits for a day-of release by a human there; a scholarship exam has no such
+person.
+// ONE EXAM ROOM, TWO DOORS: `CbtExamRoom` takes a `basePath` rather than being
+copied, and the scholarship surface carries ALL FOUR sitting routes plus
+answer-theory and integrity, so the same screen behaves identically whichever
+door the candidate came through. A second copy is how two exams start disagreeing
+about the same answer.
+Live, driven end to end with the school set to STANDARD:
+```
+GET  /cbt/exams                     404   (the old door, still paid)
+POST /scholarships/exams/:id/start  201   2 questions, answerIndex null
+     answer                         201
+     submit                         201
+collect-results                     {"updated":1}, score on the application
+```
+// CHECKED, NOT ASSUMED: `answerIndex` is **null** at start, on re-read AND after
+submit, with `answersReleased: false` — a competitive cross-school paper must not
+hand the key to the first candidate who finishes.
+// CLEAN NEGATIVE: `scholarship_application` is already indexed for every hot
+path — `@@unique([programId, studentId])` is exactly what the qualification
+lookup uses, plus `(programId, status)` and `(schoolId, status)`. My first read
+said "no indexes at all" and was a too-short grep window.
+// **GOTCHA, AND IT IS A LANDMINE FOR EVERY GATE IN THIS REPO: a path glob in a
+comment breaks comment-stripping.** I wrote `` `/cbt/*` `` in a comment; its
+`/*` pairs with a LATER JSDoc's `*/`, so the naive
+`/\/\*[\s\S]*?\*\//g` stripper every gate here uses swallowed the routes in
+between. The test could not see six decorators that grep found immediately. Same
+family as the backtick that closes an SQL template literal. **A sweep found 17
+FILES across the codebase with unbalanced block-comment delimiters**, so any gate
+stripping comments is reading a mangled copy of them — and a `not.toMatch` over a
+swallowed region passes VACUOUSLY.
+Mutation-validated five ways: reach an exam by its own id (the bypass), guard
+only the first sitting route, gate the routes on `cbt.take`, stop releasing on
+announce, and hard-code the exam room's path again.
+
 ### Two ways a scholarship reached nobody, both reported as a success
 `DISBURSABLE_AWARD_KINDS` (`@sms/types/dto/scholarship.ts`), `decide`,
 `announceExam`. Found by ANSWERING A QUESTION rather than by hunting: the owner

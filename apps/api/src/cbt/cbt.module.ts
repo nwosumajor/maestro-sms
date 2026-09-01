@@ -14,5 +14,10 @@ import { BrandingModule } from "../branding/branding.module";
   imports: [BrandingModule, WorkflowModule, GradebookModule, NotificationModule],
   controllers: [CbtController],
   providers: [CbtService],
+  // Exported so the ALWAYS-ON scholarship surface can serve a scholarship
+  // sitting without the PREMIUM CBT module. One engine, two doors — a second
+  // sampling or scoring path is how two exams start disagreeing about the same
+  // answer.
+  exports: [CbtService],
 })
 export class CbtModule {}

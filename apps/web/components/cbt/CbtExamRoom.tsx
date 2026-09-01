@@ -24,7 +24,23 @@ function useCountdown(deadline: string): number {
   return Math.max(0, Math.floor((new Date(deadline).getTime() - now) / 1000));
 }
 
-export function CbtExamRoom({ initial }: { initial: Sitting }) {
+export function CbtExamRoom({
+  initial,
+  basePath = "cbt",
+}: {
+  initial: Sitting;
+  /**
+   * Which surface this sitting is served from — `cbt` for a school's own exam,
+   * `scholarships` for a platform scholarship.
+   *
+   * ONE exam room, two doors. `/cbt/*` is gated on the PREMIUM CBT module, so a
+   * scholarship candidate at a STANDARD school could not reach it; the
+   * scholarship surface is always-on and carries the same four sitting routes.
+   * A second copy of this screen is how the two would start behaving
+   * differently for the same candidate.
+   */
+  basePath?: "cbt" | "scholarships";
+}) {
   const [s, setS] = React.useState<Sitting>(initial);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -75,7 +91,7 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
   const flush = React.useCallback(async () => {
     if (queue.current.length === 0) return;
     const events = queue.current.splice(0, 25);
-    const res = await fetch(`/api/sms/cbt/sittings/${s.sittingId}/integrity`, {
+    const res = await fetch(`/api/sms/${basePath}/sittings/${s.sittingId}/integrity`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events }),
@@ -125,7 +141,7 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
     if (!open) return;
     // Optimistic: the local mark lands immediately; the server save follows.
     setS((cur) => ({ ...cur, answers: { ...cur.answers, [questionId]: choiceIndex } }));
-    const res = await fetch(`/api/sms/cbt/sittings/${s.sittingId}/answer`, {
+    const res = await fetch(`/api/sms/${basePath}/sittings/${s.sittingId}/answer`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ questionId, choiceIndex }),
@@ -141,7 +157,7 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
     setS((cur) => ({ ...cur, theoryAnswers: { ...cur.theoryAnswers, [questionId]: text } }));
     clearTimeout(timers.current[questionId]);
     timers.current[questionId] = setTimeout(async () => {
-      const res = await fetch(`/api/sms/cbt/sittings/${s.sittingId}/answer-theory`, {
+      const res = await fetch(`/api/sms/${basePath}/sittings/${s.sittingId}/answer-theory`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questionId, text }),
@@ -153,7 +169,7 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
   async function submit() {
     setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/sms/cbt/sittings/${s.sittingId}/submit`, { method: "POST" });
+    const res = await fetch(`/api/sms/${basePath}/sittings/${s.sittingId}/submit`, { method: "POST" });
     setBusy(false);
     if (res.ok) setS((await res.json()) as Sitting);
     else setMsg(await readApiError(res));

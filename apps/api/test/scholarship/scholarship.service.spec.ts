@@ -78,7 +78,10 @@ function makeService(over: {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
-  const service = new ScholarshipService(db as never, audit as never, notifications as never, { academicInTx: async () => ({ grading: { components: GRADE_COMPONENTS } }) } as never);
+  // The CBT engine, which this suite never reaches — it covers applying and
+  // the approval chain, not sitting the paper.
+  const cbt = {} as never;
+  const service = new ScholarshipService(db as never, audit as never, notifications as never, { academicInTx: async () => ({ grading: { components: GRADE_COMPONENTS } }) } as never, cbt);
   return { service, tx, created, updates, audit };
 }
 

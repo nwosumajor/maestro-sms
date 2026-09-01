@@ -14,7 +14,7 @@ import type { ScholarshipPortalDto, ScholarshipApplicationDto, ScholarshipReques
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { sendSms } from "@/components/game/play-ui";
+import { postSms, sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,6 +66,47 @@ const FORM_FIELDS: Array<{ key: keyof ScholarshipRequestForm; label: string; req
   { key: "extracurricular", label: "Clubs & extracurricular activities" },
   { key: "futureGoals", label: "Future goals" },
 ];
+
+/**
+ * Open the scholarship paper.
+ *
+ * A START, not a link: the sitting is created server-side (sampled once, clock
+ * fixed) and we go to it. The server refuses with a plain sentence when the
+ * window is not open or the invigilator has not released it, and that sentence
+ * is shown rather than swallowed — a dead button on the morning of an exam is
+ * the worst possible moment for silence.
+ */
+function StartScholarshipExam({ programId }: { programId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setErr(null);
+          const res = await postSms(`scholarships/exams/${programId}/start`, {});
+          setBusy(false);
+          if (res.ok) {
+            const sitting = res.data as { sittingId?: string } | null;
+            if (sitting?.sittingId) {
+              router.push(`/scholarships/sitting/${sitting.sittingId}`);
+              return;
+            }
+          }
+          setErr(res.error ?? "The exam could not be opened.");
+        }}
+      >
+        {busy ? "Opening…" : "Start the exam →"}
+      </Button>
+      {err && <span className="text-xs text-destructive">{err}</span>}
+    </span>
+  );
+}
 
 export function ScholarshipPortal({ portal, roles }: { portal: Portal; roles: string[] }) {
   // Dates follow the SCHOOL's timezone, not the platform's.
@@ -469,8 +510,11 @@ function ApplicationRow({
               {app.examAt ? ` — ${shortDate(app.examAt)}` : ""}
               {app.examMode === "PHYSICAL" ? " (physical — see your Notifications for the venue)." : "."}
             </span>
+            {/* THE SCHOLARSHIP'S OWN DOOR. This pointed at /cbt, which is gated
+                on the PREMIUM CBT module — so a qualified candidate at a
+                STANDARD school was told to sit an exam and met a 404. */}
             {isStudent && app.examMode === "ONLINE_CBT" && (
-              <Link href="/cbt" className="underline">Go to CBT Exams →</Link>
+              <StartScholarshipExam programId={app.programId} />
             )}
             {isStudent && app.examMode === "GAMES" && (
               <Link href="/games/ultimate" className="underline">Enter the Games arena →</Link>

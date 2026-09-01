@@ -13,7 +13,7 @@
 import { scholarshipSupervisorStage, WORKFLOW_PERMISSIONS } from "@sms/types";
 import { classIdsTaughtBy, teacherIdsOfClasses, teachesAnyOf } from "../common/teaches";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto } from "@sms/types";
+import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto, type CbtSittingViewDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -23,6 +23,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { CbtService } from "../cbt/cbt.service";
 import { NotificationService } from "../notifications/notification.service";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
 import { toMinor } from "../common/money";
@@ -37,10 +38,119 @@ export class ScholarshipService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
     private readonly region: SchoolRegionService,
+    // The CBT engine. Reused rather than reimplemented: a second scoring or
+    // sampling path is how two exams start disagreeing about the same answer.
+    private readonly cbt: CbtService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  // ===========================================================================
+  // SITTING A SCHOLARSHIP EXAM
+  // ===========================================================================
+  //
+  // The exam is served from HERE, not from the `cbt` routes, and that is the
+  // whole point: `CbtController` is `@RequireModule(MODULES.CBT)`, a PREMIUM
+  // module,
+  // so a qualified candidate at a STANDARD school was notified, handed a link
+  // and answered 404 by it — measured live. This controller is deliberately
+  // always-on ("the scholarship is a platform growth lever, open to every
+  // plan"), so a candidate reaches their paper whatever their school pays for.
+  //
+  // NOTHING ABOUT THE ENTITLEMENT GATE IS WEAKENED. Making `@RequireModule`
+  // conditional per user would leave every later reader unsure what it
+  // guarantees; instead a different, always-on surface serves a different
+  // audience, and the paid CBT module is untouched.
+  //
+  // NOR IS THE AUTHORISATION RE-IMPLEMENTED. `CbtService.startSitting` already
+  // asks every question that matters — the exam is PUBLISHED and RELEASED, the
+  // caller holds a QUALIFIED application on that programme (404-not-403, so a
+  // scholarship exam is invisible to anyone who did not qualify), and now is
+  // inside the window. These methods add exactly ONE thing on top: that the
+  // exam is a SCHOLARSHIP exam at all.
+  //
+  // THAT ONE CHECK IS LOAD-BEARING. Without it these always-on routes would
+  // start and answer an ordinary school exam too, which is precisely the
+  // module-gate bypass this design exists to avoid.
+
+  /** The scholarship exam waiting for this candidate in their own school. */
+  async startExam(p: Principal, programId: string): Promise<CbtSittingViewDto> {
+    const examId = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // RLS scopes this to the caller's school, and `scholarshipProgramId`
+      // being set is what makes it a scholarship exam — so an ordinary exam
+      // cannot be reached through this route by construction.
+      const exam = await tx.cbtExam.findFirst({
+        where: { scholarshipProgramId: programId },
+        select: { id: true },
+      });
+      if (!exam) throw new NotFoundException("Exam not found");
+      return exam.id;
+    });
+    return this.cbt.startSitting(p, examId);
+  }
+
+  /** Read a scholarship sitting. Auto-expiry on read is the CBT service's. */
+  async getExamSitting(p: Principal, sittingId: string): Promise<CbtSittingViewDto> {
+    await this.assertScholarshipSitting(p, sittingId);
+    return this.cbt.getSitting(p, sittingId);
+  }
+
+  async answerExam(p: Principal, sittingId: string, questionId: string, choiceIndex: number): Promise<{ ok: true }> {
+    await this.assertScholarshipSitting(p, sittingId);
+    return this.cbt.answer(p, sittingId, questionId, choiceIndex);
+  }
+
+  async submitExam(p: Principal, sittingId: string): Promise<CbtSittingViewDto> {
+    await this.assertScholarshipSitting(p, sittingId);
+    return this.cbt.submit(p, sittingId);
+  }
+
+  async answerExamTheory(p: Principal, sittingId: string, questionId: string, text: string): Promise<{ ok: true }> {
+    await this.assertScholarshipSitting(p, sittingId);
+    return this.cbt.answerTheory(p, sittingId, questionId, text);
+  }
+
+  /**
+   * Client integrity signals for a scholarship sitting.
+   *
+   * FULL PARITY with the CBT surface on purpose: the exam room is ONE component
+   * serving both, so a route missing here would make the same screen behave
+   * differently depending on which door the candidate came through. The
+   * service's own consent gate still applies — telemetry about a minor is
+   * DROPPED, not refused, where the school has not consented, so a
+   * non-consenting candidate is never stopped from sitting their paper.
+   */
+  async recordExamIntegrity(
+    p: Principal,
+    sittingId: string,
+    events: Parameters<CbtService["recordIntegrityEvents"]>[2],
+  ): Promise<unknown> {
+    await this.assertScholarshipSitting(p, sittingId);
+    return this.cbt.recordIntegrityEvents(p, sittingId, events);
+  }
+
+  /**
+   * This sitting belongs to a SCHOLARSHIP exam, and to the caller.
+   *
+   * 404 either way: a sitting that is not theirs and one that is an ordinary
+   * school exam must be indistinguishable, or these routes become a way to ask
+   * which exams a school is running.
+   */
+  private async assertScholarshipSitting(p: Principal, sittingId: string): Promise<void> {
+    await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const sitting = await tx.cbtSitting.findFirst({
+        where: { id: sittingId, studentId: p.userId },
+        select: { examId: true },
+      });
+      if (!sitting) throw new NotFoundException("Sitting not found");
+      const exam = await tx.cbtExam.findFirst({
+        where: { id: sitting.examId },
+        select: { scholarshipProgramId: true },
+      });
+      if (!exam?.scholarshipProgramId) throw new NotFoundException("Sitting not found");
+    });
   }
 
   /** Student ids the caller may apply for: a STUDENT applies for THEMSELVES; a
