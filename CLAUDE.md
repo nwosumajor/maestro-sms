@@ -898,6 +898,110 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### 5,000 applicants, driven — and the queue could see 500 of them
+A full scholarship exercise at the scale asked for: 5,000 applicants across
+three tenants, 2,000 qualified, 1,000 sitting a two-subject CBT paper and 1,000
+a physical one, 1st/2nd/3rd awarded in each category, both result tables
+published platform-wide. Then re-measured against a REALISTIC DECADE — 505,004
+applications, of which 5,000 still await a decision — because "no lagging after
+many years" is a question about shape, not about today's row count.
+**THE HEADLINE DEFECT: `listApplications` was `take: 500`, newest-first, with no
+paging and no total.** An application is undecided precisely because nobody has
+answered it, so undecided rows AGE — and newest-first drops the OLDEST off the
+end. Measured live at 5,000: the queue returned 500 rows, the family that
+applied FIRST was reachable by NO filter the product offered, and nothing said
+the other 4,500 existed. Fourth instance of the register-is-not-a-queue class
+after approvals, leave, assessments, disputes and admissions, and the same fix:
+paged in SQL, `total` + `undecidedTotal` counted in SQL, and **oldest-first while
+a row is undecided** (a review queue is worked from the front) turning
+newest-first once it is history.
+// `undecidedTotal` IS NEVER NARROWED BY THE FILTER — a count a filter can change
+is a count a filter can hide — and it answers "is anyone waiting on us".
+**AND THEN THE INDEXES, each measured with a BOUND PARAMETER and five warm-up
+executions so the plan under test is the GENERIC one a pooled application gets.
+That distinction was the whole finding:**
+```
+                    literal   parameter (generic plan)   after
+unfiltered page      2.1 ms     63.0 ms  seq scan+sort    0.24 ms
+?status= page        0.5 ms    213.3 ms  497,011 buffers  0.09 ms
+?programId= page       —       153.8 ms  497,071 buffers  0.09 ms
+backlog count          —        46.5 ms  parallel seq     0.75 ms
+```
+With a literal Postgres picked the right index and the filtered page read 0.5 ms;
+with a parameter it took the generic plan, walked the whole `(createdAt, id)`
+index OLDEST-FIRST looking for rows that are the NEWEST, and took 213 ms. **A
+measurement taken with a literal would have reported this as already fixed.**
+// THREE INDEXES, EACH VERIFIED BY DROPPING IT and watching the plan collapse
+back. A FOURTH — partial, on the undecided statuses — was built, measured, and
+NOT kept: `(status, createdAt, id)` already serves that count at 0.75 ms, and an
+index nothing selects is write amplification on a table that only grows. Same
+conclusion as the three trigram indexes and the invoice-list variant.
+// **THE CAP MUST BE APPLIED IN SQL, and measuring is what settled it.** Copying
+the notification inbox's `findMany({ take: CAP }).length` shipped 10,000 ids
+through the ORM and measured **250-444 ms — WORSE than the unbounded `count` it
+replaced**. The same cap as a `LIMIT` inside a subquery stops the index scan at
+the cap: 13 buffers, 2.4 ms, against 418 buffers and 30 ms. Paging runs off
+`hasMore` (one row past the page), so the cap can never become a wall in front
+of the applications behind it.
+**SECOND DEFECT: THERE WAS NO WAY TO QUALIFY A COHORT.** A scholarship qualifies
+a group, not an individual, and the only path was one call per application.
+Measured: 1,000 QUALIFY calls took 15.7 s, and on the second programme **the
+platform's OWN per-tenant limiter refused 494 of 1,000 with a 429** — 1,200/min
+keyed on the caller's school, which for the owner is the platform org. The same
+gap this repo already closed for invoices, where "there was no batch way to issue
+a batch". `POST /scholarships/applications/decide-bulk` does the same 1,000 in
+**0.41 s**, one statement, one audit row.
+// AWARD IS NOT EXPRESSIBLE IN IT — the schema's enum has four values and AWARD
+is not one. It moves money, grants a school a free tier and consumes one of
+three positions, so it stays one pupil at a time behind step-up. Live: **400**
+naming the four it accepts.
+// PARTIAL SUCCESS IS REPORTED, and that is deliberately the OPPOSITE call from
+the physical mark sheet next door, which refuses whole. A mark sheet is one
+document where a missing name is invisible; this is a SELECTION an operator made
+on screen, where "3 of 500 were already finalised" is actionable and the other
+497 should not wait on them. Live: `{"updated":1,"skipped":[{"reason":"already
+finalised"}]}`.
+**WHAT THE EXERCISE MEASURED AND FOUND SOUND**, recorded so it is not re-chased:
+```
+announce to 1,000 candidates, 3 tenants   8.5 s   (see the bound below)
+collect 1,000 CBT results, 2 papers each  0.19 s  single UPDATE ... FROM (VALUES)
+record 1,000 physical marks (2 sheets)    0.31 s
+six awards, two podiums                   all 201, fees credit on each
+school prizes stacking 9+6+3+9+6+3        grantedUntil exactly 3 years out
+publish both tables                       0.10 s each
+GET /scholarships/results (every school)  19.6 ms, 50 rows/programme, 7 KB
+                                          — and carries NO pupil name at 1,000
+```
+// KNOWN BOUNDS, stated rather than hidden. A DEEP page (`?page=5000`, 250,000
+rows skipped) is 185 ms — inherent to OFFSET paging, and nobody browses there
+because the queue is worked from the front; keyset paging is the answer if that
+ever changes. `announce` is SYNCHRONOUS and O(candidates): 8.5 s for 1,000, so
+~45 s for 5,000, which is inside a 60 s proxy timeout and not comfortably.
+// **THE PER-TENANT LIMIT IS A CAPACITY FACT WORTH KNOWING**: 1,200 req/min per
+school (`TENANT_RATE_LIMIT_PER_MIN`). A 1,000-candidate CBT exam in ONE school
+brushes it at the opening bell, when every candidate presses start at once.
+// GOTCHA, MINE, TWICE, AND THE SAME LESSON: my sitting probe sent `answerIndex`
+where the API takes `choiceIndex`, and `sitting.id` where the DTO says
+`sittingId` — and it CHECKED NO RESPONSES, so it reported "40 candidates sat 80
+papers" while every answer was a 400 and every script stayed IN_PROGRESS. I read
+`collect: {"updated":960}` as a product defect for a minute. A probe that does
+not read its own answers reports a fact about itself.
+// GOTCHA: the first volume fixture left 255,000 applications "awaiting a
+decision", which models a platform that never decided anything — the
+unrealistic-distribution trap this file already records twice. Corrected to a
+decade of FINISHED programmes with only the current cohort undecided, which is
+what made the backlog count's true shape visible.
+// GOTCHA: `ADMIN.indexOf("async decide")` now matches `async decideBulk`, which
+sits earlier in the file, so an existing gate sliced a different method and went
+red on code it does not police. Re-anchored on the signature `async decide(`.
+// GOTCHA: two fixtures had no `$queryRaw`, which every real PrismaClient has.
+// PROBE: 5,000 users, 505,004 applications, 100 programmes, 2,000 sittings,
+4,006 notifications and the school prize all removed; `scholarship_application`
+REINDEXed and VACUUM FULLed from 169 MB of churn bloat back to 176 kB.
+Mutation-validated three ways on the bulk path (skip silently, one statement
+becomes one row, re-decide a finalised application) and the index set validated
+by dropping each of the three in turn.
+
 ### A paper exam that could be set, sat, and never marked
 `recordPhysicalScores` + `POST /scholarships/programs/:id/scores`, options A–E,
 in-place question editing, and `revokeSchoolPrize`. Found by ANSWERING TWO

@@ -12,7 +12,7 @@ import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto } from "@sms/types";
-import { narrowStatus } from "../common/status-filter";
+import { narrowStatus, pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -69,6 +69,15 @@ const programUpdateSchema = programSchema.partial().extend({
 });
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
+const decideBulkSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(1000),
+  // AWARD is absent on purpose: it moves money, grants a school a free tier and
+  // consumes one of three positions, so it stays one pupil at a time behind
+  // step-up.
+  action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]),
+  note: z.string().max(2000).optional(),
+});
+
 const physicalScoresSchema = z.object({
   marks: z
     .array(
@@ -314,6 +323,22 @@ export class ScholarshipController {
     return this.scholarships.listForSchool(p);
   }
 
+  /**
+   * Move a whole selection through the funnel at once.
+   *
+   * Declared BEFORE `applications/:id/review` so "decide-bulk" can never be
+   * captured as an application id — the same ordering `invoices/issue-bulk`
+   * already relies on.
+   */
+  @Post("applications/decide-bulk")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  decideBulk(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(decideBulkSchema)) body: z.infer<typeof decideBulkSchema>,
+  ) {
+    return this.admin.decideBulk(p, body.ids, body.action, body.note);
+  }
+
   /** Cross-tenant review queue (non-DRAFT applications across all schools). */
   @Get("applications")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
@@ -321,10 +346,14 @@ export class ScholarshipController {
     @CurrentPrincipal() p: Principal,
     @Query("status") status?: string,
     @Query("programId") programId?: string,
+    @Query("page") page?: string,
   ) {
     return this.admin.listApplications(p, {
       status: narrowStatus(status, SCHOLARSHIP_APPLICATION_STATUSES),
       programId,
+      // Through the shared narrower, so `?page=abc` is a 400 naming the range
+      // rather than `skip: NaN` reaching the database as a 500.
+      page: pageNumber(page),
     });
   }
 

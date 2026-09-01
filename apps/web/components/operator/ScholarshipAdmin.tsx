@@ -9,6 +9,7 @@ import type {
   ScholarshipExamQuestionDto,
   ScholarshipProgramDto,
   ScholarshipApplicationDto,
+  ScholarshipApplicationPageDto,
   Serialized,
 } from "@sms/types";
 
@@ -55,16 +56,46 @@ export function ScholarshipAdmin() {
   const [f, setF] = React.useState({ title: "", description: "", award: "", award2: "", award3: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "", category: "SPECIAL" });
   // per-application award position choice
   const [awardPos, setAwardPos] = React.useState<Record<string, number>>({});
+  const [appPage, setAppPage] = React.useState(1);
+  const [appPageInfo, setAppPageInfo] = React.useState({
+    total: 0,
+    pageSize: 50,
+    undecidedTotal: 0,
+    hasMore: false,
+    countCap: 10_000,
+  });
+  const [appsFailed, setAppsFailed] = React.useState(false);
+  /** Rows ticked for a bulk decision. Cleared whenever the page or filter moves,
+   *  so a tick made on page 1 can never be acted on from page 2. */
+  const [picked, setPicked] = React.useState<Set<string>>(new Set());
 
   const loadPrograms = React.useCallback(async () => {
     const res = await fetch("/api/sms/scholarships/programs");
     if (res.ok) setPrograms((await res.json()) as Program[]);
   }, []);
   const loadApps = React.useCallback(async () => {
-    const qs = statusFilter ? `?status=${statusFilter}` : "";
-    const res = await fetch(`/api/sms/scholarships/applications${qs}`);
-    if (res.ok) setApps((await res.json()) as Application[]);
-  }, [statusFilter]);
+    const qs = new URLSearchParams();
+    if (statusFilter) qs.set("status", statusFilter);
+    if (appPage > 1) qs.set("page", String(appPage));
+    const res = await fetch(`/api/sms/scholarships/applications?${qs.toString()}`);
+    if (!res.ok) {
+      // A failed read must not read as "nobody has applied" — that is a claim
+      // about families waiting on a decision.
+      setAppsFailed(true);
+      return;
+    }
+    setAppsFailed(false);
+    const page = (await res.json()) as Serialized<ScholarshipApplicationPageDto>;
+    setApps(page.items);
+    setPicked(new Set());
+    setAppPageInfo({
+      total: page.total,
+      pageSize: page.pageSize,
+      undecidedTotal: page.undecidedTotal,
+      hasMore: page.hasMore,
+      countCap: page.countCap,
+    });
+  }, [statusFilter, appPage]);
 
   React.useEffect(() => { void loadPrograms(); }, [loadPrograms]);
   React.useEffect(() => { void loadApps(); }, [loadApps]);
@@ -175,6 +206,39 @@ export function ScholarshipAdmin() {
     if (res.ok) { setMsg({ ok: true, text: "Question removed." }); void loadPrograms(); return true; }
     setMsg({ ok: false, text: await readApiError(res) });
     return false;
+  };
+
+  /**
+   * Decide a whole selection at once.
+   *
+   * Qualifying a cohort one row at a time is 2,000 requests for a 5,000-applicant
+   * programme, and the platform's own per-tenant limiter refuses about half of
+   * them — measured, not predicted.
+   */
+  const decideSelected = async (action: "REVIEW" | "SHORTLIST" | "QUALIFY" | "REJECT") => {
+    const ids = [...picked];
+    if (ids.length === 0) return;
+    setBusy("bulk");
+    setMsg(null);
+    const res = await sendSms("POST", "scholarships/applications/decide-bulk", { ids, action });
+    setBusy(null);
+    if (!res.ok) {
+      setMsg({ ok: false, text: res.error ?? "The decision could not be recorded." });
+      return;
+    }
+    const d = res.data as { updated?: number; skipped?: Array<{ id: string; reason: string }> } | null;
+    const skipped = d?.skipped ?? [];
+    // REPORT WHAT WAS NOT DONE. "Qualified 497" over a selection of 500 reads as
+    // complete, and the three left behind are the ones somebody has to chase.
+    setMsg({
+      ok: true,
+      text:
+        `${d?.updated ?? 0} application(s) moved to ${action.toLowerCase()}.` +
+        (skipped.length > 0
+          ? ` ${skipped.length} left unchanged — ${[...new Set(skipped.map((x) => x.reason))].join("; ")}.`
+          : ""),
+    });
+    void loadApps();
   };
 
   /**
@@ -473,7 +537,7 @@ export function ScholarshipAdmin() {
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <p className="text-xs font-medium text-muted-foreground">Applications</p>
-            <select aria-label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={sel}>
+            <select aria-label="Status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setAppPage(1); }} className={sel}>
               <option value="">All (submitted)</option>
               <option value="SUBMITTED">Submitted</option>
               <option value="UNDER_REVIEW">Under review</option>
@@ -483,7 +547,64 @@ export function ScholarshipAdmin() {
               <option value="REJECTED">Rejected</option>
             </select>
           </div>
-          {apps.length === 0 && <p className="text-sm text-muted-foreground">No applications match.</p>}
+          {/* THE BACKLOG, PLATFORM-WIDE, and never narrowed by the filter or the
+              page: a count a filter can change is a count a filter can hide,
+              and this one answers "is anyone waiting on us". */}
+          {appPageInfo.undecidedTotal > 0 && (
+            <p className="text-xs text-muted-foreground">
+              <strong>
+                {appPageInfo.undecidedTotal.toLocaleString()}
+                {appPageInfo.undecidedTotal >= appPageInfo.countCap ? "+" : ""}
+              </strong>{" "}
+              awaiting a decision{statusFilter ? " (platform-wide, not just this filter)" : ""} — oldest first.
+            </p>
+          )}
+          {picked.size > 0 && (
+            <div className="flex flex-wrap items-center gap-1 rounded-md border border-border/70 bg-muted/40 p-2 text-xs">
+              <span className="mr-1 font-medium">{picked.size} selected</span>
+              {(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"] as const).map((a) => (
+                <Button
+                  key={a}
+                  size="sm"
+                  variant={a === "REJECT" ? "outline" : "ghost"}
+                  disabled={busy === "bulk"}
+                  onClick={() => decideSelected(a)}
+                >
+                  {a === "REVIEW" ? "Mark reviewing" : a === "SHORTLIST" ? "Shortlist" : a === "QUALIFY" ? "Qualify for exam" : "Reject"}
+                </Button>
+              ))}
+              <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
+                Clear
+              </Button>
+              {/* Awarding is deliberately absent: it moves money, grants the
+                  school a free tier and takes one of three positions, so it
+                  stays one pupil at a time behind re-authentication. */}
+              <span className="text-muted-foreground">Awarding stays per pupil.</span>
+            </div>
+          )}
+          {apps.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                aria-label="Select every application on this page"
+                checked={picked.size === apps.length}
+                onChange={(e) => setPicked(e.target.checked ? new Set(apps.map((a) => a.id)) : new Set())}
+              />
+              Select this page ({apps.length})
+            </label>
+          )}
+          {appsFailed ? (
+            <p className="text-sm text-destructive">
+              Applications could not be loaded. Reload before treating the queue as clear — families are
+              waiting on a decision.
+            </p>
+          ) : (
+            apps.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                {statusFilter ? "No applications match this filter." : "No applications yet."}
+              </p>
+            )
+          )}
           {/* When viewing QUALIFIED candidates, rank by exam score so the best
               three are obvious before awarding by position. */}
           <div className="space-y-2">
@@ -498,6 +619,20 @@ export function ScholarshipAdmin() {
                   <div key={a.id} className="rounded-md border border-border/70 p-3 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span>
+                        <input
+                          type="checkbox"
+                          className="mr-2 align-middle"
+                          aria-label={`Select ${a.studentName}`}
+                          checked={picked.has(a.id)}
+                          onChange={(e) =>
+                            setPicked((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(a.id);
+                              else next.delete(a.id);
+                              return next;
+                            })
+                          }
+                        />
                         {rankingByScore && <span className="mr-1 font-semibold text-primary">#{idx + 1}</span>}
                         <span className="font-medium">{a.studentName}</span>
                         <span className="text-muted-foreground"> · {a.schoolName} · {a.programTitle}</span>
@@ -607,6 +742,27 @@ export function ScholarshipAdmin() {
                 );
               })}
           </div>
+          {(appPageInfo.hasMore || appPage > 1) && (
+            <div className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+              <Button size="sm" variant="ghost" disabled={appPage <= 1} onClick={() => setAppPage((n) => n - 1)}>
+                Previous
+              </Button>
+              <span>
+                Showing {(appPage - 1) * appPageInfo.pageSize + 1}&ndash;
+                {(appPage - 1) * appPageInfo.pageSize + apps.length} of{" "}
+                {appPageInfo.total.toLocaleString()}
+                {appPageInfo.total >= appPageInfo.countCap ? "+" : ""}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!appPageInfo.hasMore}
+                onClick={() => setAppPage((n) => n + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

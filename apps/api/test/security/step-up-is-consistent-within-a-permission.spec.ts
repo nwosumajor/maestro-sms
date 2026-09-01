@@ -82,6 +82,8 @@ const ALLOWED: Record<string, string> = {
     "what the school has.",
   "POST /operator/platform-delegations/:id/revoke": "TAKES authority away. The restrictive direction should never be harder than the permissive one.",
   "POST /scholarships/applications/:id/review": "Documented decision: REVIEW/SHORTLIST/REJECT carry no money; only AWARD does, and AWARD is gated.",
+  "POST /scholarships/applications/decide-bulk":
+    "The same four actions as :id/review, on a selection — its schema cannot express AWARD at all, so the money route stays one pupil at a time behind step-up.",
   "POST /scholarships/programs/:id/announce-exam": "Tells candidates when the exam is; carries no decision and no money.",
   "POST /scholarships/programs/:id/collect-results": "Gathers results already recorded elsewhere.",
   "POST /students/:studentId/readmit": "Restores a pupil's access, which is the direction that helps them rather than harms them.",

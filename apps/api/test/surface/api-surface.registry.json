@@ -2945,6 +2945,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /scholarships/applications/decide-bulk": {
+      "kind": "ui",
+      "note": "bulk funnel actions on the selected rows in ScholarshipAdmin.tsx"
+    },
     "POST /scholarships/programs/:p/scores": {
       "kind": "ui",
       "note": "the physical mark sheet on ScholarshipAdmin.tsx"

@@ -48,6 +48,24 @@ export const SCHOLARSHIP_APPLICATION_STATUSES = [
   "REJECTED",
 ] as const;
 
+/**
+ * Awaiting a decision from the PLATFORM OWNER — the rows the review queue
+ * exists to work through, and the ones that age while nobody answers them.
+ * DRAFT and the three PENDING_* stages are waiting on the SCHOOL, not on us;
+ * QUALIFIED is decided (they sit the exam next); AWARDED and REJECTED are
+ * finished.
+ */
+/**
+ * Counts stop here and render with a "+". A plain count walks every application
+ * the platform has ever received — 30 ms on every page load at a decade of
+ * volume, growing every year — and "10,000+" is as useful to read as "417,231".
+ * Paging is NOT bounded by it: `hasMore` comes from fetching one row past the
+ * page, so every application stays reachable.
+ */
+export const SCHOLARSHIP_COUNT_CAP = 10_000;
+
+export const SCHOLARSHIP_UNDECIDED_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "SHORTLISTED"] as const;
+
 /** Program category the platform owner selects. */
 export const SCHOLARSHIP_CATEGORIES = [
   "GENERAL_SCIENCE",
@@ -197,6 +215,41 @@ export interface ApplicationSignalsDto {
 }
 
 /** One scholarship application (the applicant view + the platform review row). */
+/**
+ * The platform owner's review queue, PAGED.
+ *
+ * It used to be `take: 500` newest-first with no total and no paging. An
+ * application is undecided precisely because nobody has answered it, so
+ * undecided rows AGE — and newest-first drops the OLDEST off the end. Measured
+ * on 5,000 applicants: the queue returned 500 and the family that applied
+ * FIRST was reachable by nothing, with no filter that could get to them and
+ * nothing saying the other 4,500 existed.
+ */
+export interface ScholarshipApplicationPageDto {
+  items: ScholarshipApplicationDto[];
+  /**
+   * Matching the filter, not the page — and CAPPED at `countCap`. When it
+   * equals the cap there are at least that many, so a screen renders "10,000+"
+   * rather than a number it cannot stand behind.
+   */
+  total: number;
+  /**
+   * Whether another PAGE exists. Derived from fetching one row past the page,
+   * NOT from `total` — which is why the cap can never become a wall in front of
+   * the applications behind it.
+   */
+  hasMore: boolean;
+  countCap: number;
+  page: number;
+  pageSize: number;
+  /**
+   * Everything still awaiting a decision, PLATFORM-WIDE, whatever the current
+   * filter is. A count a filter can change is a count a filter can hide, and
+   * this one answers "is anyone waiting on us".
+   */
+  undecidedTotal: number;
+}
+
 export interface ScholarshipApplicationDto {
   id: string;
   programId: string;

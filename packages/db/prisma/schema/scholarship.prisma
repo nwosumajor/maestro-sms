@@ -202,5 +202,16 @@ model ScholarshipApplication {
   @@index([schoolId, status])
   @@index([programId, status])
   @@index([programId, examScorePct(sort: Desc)])
+  // The platform owner's review queue: paged ORDER BY createdAt, id. Without
+  // this it is a seq scan of every application ever, on every page load.
+  //
+  // The two filter-leading ones matter for the same reason and are NOT
+  // interchangeable with it: with a BOUND parameter Postgres takes a generic
+  // plan, and without a filter-leading index it walks this one oldest-first
+  // looking for rows that are the newest — 213 ms over 497,011 buffers at a
+  // decade of volume. Migration 20270125000000 records every measurement.
+  @@index([createdAt, id])
+  @@index([status, createdAt, id])
+  @@index([programId, createdAt, id])
   @@map("scholarship_application")
 }

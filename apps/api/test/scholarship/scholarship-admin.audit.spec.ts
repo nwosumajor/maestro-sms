@@ -33,6 +33,10 @@ function makeService(rows: Array<Record<string, unknown>>) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const client = {
     scholarshipApplication: { findMany: jest.fn().mockResolvedValue(rows) },
+    // Every real PrismaClient has this. The capped counts beside the page are
+    // raw SQL — the cap is applied as a LIMIT inside a subquery rather than by
+    // counting rows in Node, which measured 250 ms against 2.4 ms at volume.
+    $queryRaw: jest.fn().mockResolvedValue([{ n: BigInt(rows.length) }]),
     scholarshipProgram: { findMany: jest.fn().mockResolvedValue([]) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "stu-1", name: "Ada Pupil" }]) },
     school: { findMany: jest.fn().mockResolvedValue([{ id: "school-A", name: "St Anne's" }]) },
@@ -84,7 +88,19 @@ describe("ScholarshipAdminService cross-tenant queue", () => {
   // empty result set is exactly where an audit call is easy to place wrongly.
   it("audits an EMPTY queue too", async () => {
     const { service, audit } = makeService([]);
-    await expect(service.listApplications(owner, {})).resolves.toEqual([]);
+    // A PAGE, not a bare array — the queue used to return `take: 500` with no
+    // total and no paging, so the 4,500 an operator could not see were the
+    // families who had waited longest. An empty PAGE must still carry the
+    // backlog honestly rather than looking like an empty queue.
+    await expect(service.listApplications(owner, {})).resolves.toEqual({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+      undecidedTotal: 0,
+      hasMore: false,
+      countCap: 10_000,
+    });
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: "scholarship.applications.view", metadata: expect.objectContaining({ count: 0 }) }),
       expect.anything(),

@@ -61,7 +61,13 @@ describe("an award kind that cannot pay out is not offered", () => {
     // Refusing after the claim would mark it AWARDED and then throw — the
     // application would be finalised with nothing disbursed, which is the
     // defect wearing a different hat.
-    const m = ADMIN.slice(ADMIN.indexOf("async decide"));
+    // ANCHORED ON THE SIGNATURE, not the prefix: `async decide` also matches
+    // `async decideBulk`, which sits earlier in the file, so this sliced a
+    // different method entirely and went red on code it does not police. The
+    // fixed-anchor failure this repo keeps recording.
+    const at = ADMIN.indexOf("async decide(");
+    expect(at).toBeGreaterThan(-1);
+    const m = ADMIN.slice(at);
     const body = m.slice(0, m.indexOf("\n  async "));
     expect(body.indexOf("isDisbursableAwardKind")).toBeGreaterThan(-1);
     expect(body.indexOf("isDisbursableAwardKind")).toBeLessThan(body.indexOf("claimed.count === 0"));
