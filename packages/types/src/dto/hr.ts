@@ -59,6 +59,17 @@ export interface StaffDocumentDto {
   documentId: string | null;
   expiresAt: Date | null;
   daysUntilExpiry: number | null;
+  /**
+   * EXPIRING | EXPIRED | null, decided on the SCHOOL's day — the same day and
+   * the same rule the nightly reminder sweep uses.
+   *
+   * Derived here rather than left to each screen to infer from a negative
+   * `daysUntilExpiry`: the register rendered "expires {date} ({days}d)" for
+   * everything, so a licence that lapsed a year ago read "expires 2024-06-01
+   * (-400d)" — the future tense about something that has already happened,
+   * styled identically to one expiring in 29 days.
+   */
+  expiryStage: "EXPIRING" | "EXPIRED" | null;
   reminderSentAt: Date | null;
   createdAt: Date;
 }

@@ -110,8 +110,31 @@ function DocumentsSection({ userId, documents, post, busy }: { userId: string; d
             {documents.map((d) => (
               <li key={d.id} className="flex justify-between">
                 <span>{d.kind.replace(/_/g, " ").toLowerCase()} · {d.name}</span>
-                <span className={d.daysUntilExpiry != null && d.daysUntilExpiry < 30 ? "text-destructive" : "text-muted-foreground"}>
-                  {d.expiresAt ? `expires ${d.expiresAt.slice(0, 10)}${d.daysUntilExpiry != null ? ` (${d.daysUntilExpiry}d)` : ""}` : "no expiry"}
+                {/* THE TENSE FOLLOWS THE FACT. This read `expires {date}
+                    ({days}d)` for everything, so a licence that lapsed a year
+                    ago said "expires 2024-06-01 (-400d)" — the future tense
+                    about something that has already happened, in the same red
+                    as one expiring in 29 days. The two need different actions:
+                    one is "renew it soon", the other is "this school is
+                    operating without it".
+
+                    `expiryStage` comes from the server, decided on the SCHOOL's
+                    day and by the same rule the nightly sweep uses, so the
+                    register and the notice it triggers cannot disagree. */}
+                <span
+                  className={
+                    d.expiryStage === "EXPIRED"
+                      ? "font-medium text-destructive"
+                      : d.expiryStage === "EXPIRING"
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-muted-foreground"
+                  }
+                >
+                  {!d.expiresAt
+                    ? "no expiry"
+                    : d.expiryStage === "EXPIRED"
+                      ? `EXPIRED ${d.expiresAt.slice(0, 10)} — no longer valid`
+                      : `expires ${d.expiresAt.slice(0, 10)}${d.daysUntilExpiry != null ? ` (${d.daysUntilExpiry}d)` : ""}`}
                 </span>
               </li>
             ))}

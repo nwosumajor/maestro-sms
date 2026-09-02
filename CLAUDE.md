@@ -898,6 +898,53 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The notice said EXPIRED; the register said "expires (-823d)"
+`StaffDocumentDto.expiryStage` + `documentDto(..., today)` + the HR document
+row. Found by working the `AWAITING_A_SCREEN` backlog and reading the HR
+document register on the way past.
+This file already records fixing the staff-document reminder for exactly this:
+*"The wording is the FUTURE TENSE about a licence that had already lapsed."* The
+sweep says **"Staff document has EXPIRED"**. The REGISTER a school actually
+reads was left behind:
+```
+<span className={days != null && days < 30 ? "text-destructive" : ...}>
+  expires {expiresAt} ({days}d)
+```
+So a licence that lapsed two years ago read **"expires 2024-06-01 (-823d)"** —
+the future tense about something that has already happened — in the same red as
+one expiring in 29 days. Sibling asymmetry inside one feature, the careful half
+written first, and the reader must spot a minus sign to tell "renew this soon"
+from "this school is operating without it".
+// **AND IT WAS THE WRONG DAY.** `daysUntilExpiry` was computed against
+`Date.now()` while `expiryStage` takes an explicit `today` and the sweep passes
+`schoolToday(tz)` with the comment "Valid THROUGH the day it names". Two
+readings of one fact, on two different clocks. The mapper takes the school's
+day now, resolved ONCE per page rather than per row.
+// THE STAGE IS DERIVED SERVER-SIDE, not inferred by each screen from a negative
+number — so the register and the notice it triggers cannot disagree, and a test
+asserts they give the same answer at every boundary (-800, -1, 0, 1, 29, 30, 31,
+400 days).
+// THE COUNTDOWN STAYS for anything not yet expired: losing it to fix the tense
+would be a worse register, because "renew it soon" has to say how soon. Three
+states, three colours — a reader scanning a list sees colour before text.
+Live, three documents on one member of staff:
+```
+PROBE Licence (lapsed)     EXPIRED   -823d  ->  "EXPIRED 2024-06-01 — no longer valid"
+PROBE Permit (expiring)    EXPIRING    10d  ->  "expires 2026-09-12 (10d)"
+PROBE Contract (fine)      null      1217d  ->  "expires 2030-01-01 (1217d)"
+```
+// FOUND WHILE READING THE BACKLOG, and the other three entries were checked
+rather than guessed at: `feeItemId` is WRITTEN and read by NOTHING — building a
+screen for it would populate a dead column, so it stays on the list with that
+noted; `documentId` on a staff document is read but never set, so the register
+records a certificate the school cannot produce; `lessonsPerSubject` is
+referenced nowhere in the API at all.
+// PROBE: three staff documents created and removed; the table is empty again,
+as found.
+Mutation-validated five ways: decide the stage on the server's clock, expire a
+certificate on the day it names, restore the future tense, use one colour for
+both states, and drop the countdown from a document that has not expired.
+
 ### A feature that cannot be found is not delivered
 Reported plainly: "I can't find the question bank page." The page WAS there, the
 nav entry WAS right, and the panel WAS in the shipped bundle — measured all

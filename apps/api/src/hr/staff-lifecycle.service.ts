@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { schoolToday } from "@sms/types";
 import type { ChecklistItemDto, StaffChecklistDto, StaffDocumentDto, TrainingRecordDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -166,7 +167,7 @@ export class StaffLifecycleService {
         { actorId: p.userId, action: "hr.document.add", entity: "staff_document", entityId: doc.id, schoolId: p.schoolId, metadata: { userId, kind: input.kind } },
         tx,
       );
-      return this.documentDto(doc, user.name);
+      return this.documentDto(doc, user.name, await this.todayAtSchool(p));
     });
   }
 
@@ -175,8 +176,16 @@ export class StaffLifecycleService {
       const docs = await tx.staffDocument.findMany({ where: userId ? { userId } : {}, orderBy: { expiresAt: "asc" } });
       const users = await tx.user.findMany({ where: { id: { in: [...new Set(docs.map((d) => d.userId))] } }, select: { id: true, name: true } });
       const nameById = new Map(users.map((u) => [u.id, u.name]));
-      return docs.map((d) => this.documentDto(d, nameById.get(d.userId) ?? null));
+      // Resolved ONCE for the whole page, not once per row.
+      const today = await this.todayAtSchool(p);
+      return docs.map((d) => this.documentDto(d, nameById.get(d.userId) ?? null, today));
     });
+  }
+
+  /** The school's own calendar day — what "expired" is measured against. */
+  private async todayAtSchool(p: Principal): Promise<Date> {
+    const region = await this.region.forSchool(p.schoolId);
+    return schoolToday(region.timezone);
   }
 
   /**
@@ -286,8 +295,12 @@ export class StaffLifecycleService {
   private documentDto(
     d: { id: string; userId: string; kind: string; name: string; documentId: string | null; expiresAt: Date | null; reminderSentAt: Date | null; createdAt: Date },
     userName: string | null,
+    // THE SCHOOL'S DAY, not the server's — the same day the nightly sweep
+    // decides the stage against. A register that disagrees with the notice it
+    // triggers is the failure this codebase already fixed once, on the notice.
+    today: Date,
   ): StaffDocumentDto {
-    const days = d.expiresAt ? Math.floor((d.expiresAt.getTime() - Date.now()) / 86_400_000) : null;
+    const days = d.expiresAt ? Math.floor((d.expiresAt.getTime() - today.getTime()) / 86_400_000) : null;
     return {
       id: d.id,
       userId: d.userId,
@@ -297,6 +310,16 @@ export class StaffLifecycleService {
       documentId: d.documentId,
       expiresAt: d.expiresAt,
       daysUntilExpiry: days,
+      // THE STAGE THE SWEEP WOULD GIVE IT, derived here rather than left to
+      // each screen to infer from a negative number.
+      //
+      // The row rendered `expires {date} ({days}d)` for EVERYTHING, so a
+      // certificate that lapsed a year ago read "expires 2024-06-01 (-400d)" —
+      // the FUTURE TENSE about something that has already happened, styled
+      // identically to one expiring in 29 days. The notice was fixed for
+      // exactly this ("Staff document has EXPIRED"); the register a school
+      // actually reads was not. Sibling asymmetry, inside one feature.
+      expiryStage: expiryStage(d.expiresAt, today),
       reminderSentAt: d.reminderSentAt,
       createdAt: d.createdAt,
     };
