@@ -34,6 +34,7 @@ import {
   type ScholarshipProgramDto,
 } from "@sms/types";
 import { scholarshipSupervisorStage, uniqueEntityCode } from "@sms/types";
+import { renderPaperPdf } from "../cbt/paper-pdf";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { NotificationService } from "../notifications/notification.service";
@@ -1589,6 +1590,101 @@ export class ScholarshipAdminService {
     }
     await this.auditOwn(p, "scholarship.exam.collect", programId, { examMode: program.examMode, updated });
     return { updated };
+  }
+
+  /**
+   * Print a scholarship paper — one subject, as a question paper or an answer
+   * key.
+   *
+   * A PHYSICAL programme could be authored and had NOWHERE to send the
+   * questions. `announceExam` materialises a CBT exam only for ONLINE_CBT, so
+   * for a paper sitting `examQuestions` was stored, readable in the console,
+   * and used by NOTHING — the owner typed a paper and could not get it onto
+   * paper. Driven live before this: a physical programme announced with
+   * `cbtExams: 0` and no print path anywhere in the module.
+   *
+   * ONE SUBJECT PER CALL, because that is what a paper IS here: the papers are
+   * DERIVED from the questions' subjects (`groupQuestionsBySubject`), so
+   * printing "the programme" would staple two different exams together.
+   *
+   * OWNER ONLY. The route is gated on `scholarship.admin`, which no school
+   * holds — the same reason `assertNotAPlatformExam` stops a candidate's own
+   * school printing the key to a competition their pupil is about to sit.
+   */
+  async examPaperPdf(
+    p: Principal,
+    programId: string,
+    subject: string | null,
+    withAnswers: boolean,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const db = this.client();
+    const program = await db.scholarshipProgram.findFirst({
+      where: { id: programId },
+      select: {
+        title: true,
+        category: true,
+        examQuestions: true,
+        examDurationMin: true,
+        examSchedule: true,
+        examMode: true,
+      },
+    });
+    if (!program) throw new NotFoundException("Program not found");
+    const all = Array.isArray(program.examQuestions)
+      ? (program.examQuestions as unknown as Array<{
+          text: string;
+          options: string[];
+          answerIndex: number;
+          subject?: string | null;
+        }>)
+      : [];
+    if (all.length === 0) throw new BadRequestException("This programme has no questions yet.");
+
+    // The SAME grouping the sitting uses, so a printed paper and an online one
+    // can never be different sets of questions.
+    // A question naming no subject belongs to the programme's CATEGORY — the
+    // same fallback the sitting uses, so the two can never disagree about which
+    // paper a question is on.
+    const papers = groupQuestionsBySubject(all, String(program.category));
+    const wanted = subject ?? papers[0]?.subject ?? null;
+    const paper = papers.find((x) => x.subject === wanted);
+    if (!paper) {
+      // Names what CAN be printed rather than refusing blankly — an operator
+      // holding a subject that is not on this paper needs to know which are.
+      throw new BadRequestException(
+        `No paper for that subject. This programme has: ${papers.map((x) => x.subject).join(", ")}.`,
+      );
+    }
+
+    const schedule = (program.examSchedule ?? null) as Record<string, { durationMin?: number }> | null;
+    const durationMinutes = (wanted ? schedule?.[wanted]?.durationMin : undefined) ?? program.examDurationMin ?? 30;
+    const buffer = await renderPaperPdf(
+      {
+        exam: { title: examTitleFor(program.title, paper.subject, papers.length), durationMinutes, shuffle: false },
+        bankName: program.title,
+        // The PLATFORM's paper, not a school's — the heading has to say so, or
+        // an invigilator reads a competing school's name on a national exam.
+        schoolName: "Scholarship exam",
+        subjectName: paper.subject,
+        className: null,
+        ordered: paper.questions.map((q) => ({
+          prompt: q.text,
+          choices: q.options,
+          answerIndex: q.answerIndex,
+          type: "OBJECTIVE",
+          maxMarks: 1,
+        })),
+      },
+      withAnswers,
+      null,
+    );
+    await this.auditOwn(p, withAnswers ? "scholarship.answer-key.print" : "scholarship.paper.print", programId, {
+      subject: paper.subject,
+      questions: paper.questions.length,
+    });
+    const kind = withAnswers ? "answer-key" : "question-paper";
+    const safe = `${program.title}-${paper.subject}`.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 50);
+    return { buffer, filename: `${kind}-${safe}.pdf` };
   }
 
   /**

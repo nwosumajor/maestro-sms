@@ -8,10 +8,12 @@
 // are step-up gated.
 // =============================================================================
 
-import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto, ScholarshipSchoolSpreadDto } from "@sms/types";
+import type { Response } from "express";
+import { safeFilename } from "../documents/safe-content-type";
 import { narrowStatus, pageNumber } from "../common/status-filter";
 import { CURRENCIES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -444,6 +446,52 @@ export class ScholarshipController {
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   announceExam(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.admin.announceExam(p, id);
+  }
+
+  /**
+   * The printed paper for ONE subject, for a physical sitting.
+   *
+   * A PHYSICAL programme could be authored and had nowhere to send the
+   * questions: `announceExam` materialises a CBT exam only for ONLINE_CBT, so
+   * for a paper exam `examQuestions` was stored and used by NOTHING.
+   *
+   * `?subject=` picks the paper; omitted takes the first. Both routes are
+   * gated on `scholarship.admin`, which no school holds — the platform owns
+   * this paper.
+   */
+  @Get("programs/:id/paper.pdf")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  async paperPdf(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Res() res: Response,
+    @Query("subject") subject?: string,
+  ) {
+    const { buffer, filename } = await this.admin.examPaperPdf(p, id, subject ?? null, false);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
+    res.send(buffer);
+  }
+
+  /**
+   * The same paper WITH the answers.
+   *
+   * Its own route rather than a `?answers=1` flag, for the reason the CBT
+   * module already separates them: printing a key is exam-integrity material
+   * and must be distinguishable in the audit trail from printing the paper.
+   */
+  @Get("programs/:id/answer-key.pdf")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  async answerKeyPdf(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Res() res: Response,
+    @Query("subject") subject?: string,
+  ) {
+    const { buffer, filename } = await this.admin.examPaperPdf(p, id, subject ?? null, true);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
+    res.send(buffer);
   }
 
   /** How the programme is spread across schools — applied / qualified / awarded

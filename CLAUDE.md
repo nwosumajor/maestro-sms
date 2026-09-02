@@ -898,6 +898,62 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A paper exam whose questions could not be written, or printed
+`renderPaperPdf` (extracted to `cbt/paper-pdf.ts`), `ScholarshipAdminService
+.examPaperPdf`, `GET /scholarships/programs/:id/paper.pdf` and `/answer-key.pdf`.
+Asked how the platform owner prepares questions, and whether there is a page
+like the CBT module's where they author per subject and then publish or print.
+The honest answer was: **partly, only for CBT, and never print.**
+**TWO GAPS, and the first is the sharper.** The console's composer is gated
+`pr.examMode === "ONLINE_CBT"` — both the toggle and the panel — so for a
+PHYSICAL programme **the owner could not write the questions at all**, while the
+API accepted `examQuestions` the whole time. And `announceExam` materialises a
+CBT exam only for ONLINE_CBT, so for a paper sitting the questions were stored,
+readable in the console, and read by NOTHING: measured live, `cbtExams: 0` and
+no PDF path anywhere in the module. An owner could type a paper and had no way
+to get it onto paper.
+// THE TWO MODES DIFFER IN HOW A PAPER REACHES A CANDIDATE, NOT IN HOW IT IS
+WRITTEN — which is why the fix is to open the composer rather than to build a
+second one.
+// ONE RENDERER. `renderPaperPdf` was private to `CbtService`, right while a
+school's own exam was the only thing printed; a scholarship paper is the same
+document for a different audience, and a second copy is how two papers start
+disagreeing about what a question looks like on the page. Extracted verbatim and
+called by both.
+// ONE SUBJECT PER CALL, because that is what a paper IS here: the papers are
+DERIVED from the questions' subjects, so printing "the programme" would staple
+two different exams together. `?subject=` picks one; omitted takes the first; a
+subject that is not on the paper is refused BY NAMING the ones that are.
+// THE KEY IS A SEPARATE ROUTE, not a `?answers=1` flag — the reason the CBT
+module already separates them: printing a key is exam-integrity material and has
+to be distinguishable in the audit trail from printing the paper.
+`scholarship.paper.print` and `scholarship.answer-key.print`.
+// OWNER ONLY. Both routes are gated on `scholarship.admin`, which no school
+holds — the same posture as `assertNotAPlatformExam`, which stops a candidate's
+own school printing the key to a competition their pupil is about to sit.
+// THE HEADING IS THE PLATFORM'S, naming no school: an invigilator reading a
+competing school's name on a national paper is its own problem. Verified in the
+bytes.
+// THE PER-SUBJECT DURATION IS HONOURED — a staggered exam sets one per paper,
+and printing the programme default would be wrong on every sheet but the first.
+Live, decoding the actual PDF bytes on a two-subject physical programme:
+```
+question paper (Maths)   its own questions · no English · no *marker · no key banner
+answer key     (Maths)   its own questions · *E. 11 marked · "NOT FOR CANDIDATES"
+?subject=Chemistry       400 "This programme has: Mathematics, English."
+neither sheet names a school
+```
+// GOTCHA, MINE: my first extractor decoded OCTAL escapes and reported both PDFs
+as empty — I nearly wrote up a blank-document defect. pdfkit writes text as HEX
+strings, and the repo's own `paper-pdf.spec` extractor already knew that. A
+probe that gets the encoding wrong reports a fact about itself.
+// PROBE: one programme created and removed; four remain, as found.
+Mutation-validated seven ways: print every subject onto one sheet, put the
+answers on the question paper, audit the key as an ordinary print, ignore the
+per-subject duration, hide the composer from a physical programme again, offer
+the print before there are any questions, and collapse the per-subject links
+into one.
+
 ### A meeting announced to every guardian, called off in silence
 `announce(..., kind)` + `withdrawSlot` + `meeting.withdrawn`. Found by sweeping
 for tables that have never held a row — `meeting_invitee` was one — and reading

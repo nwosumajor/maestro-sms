@@ -63,6 +63,7 @@ import { TermResultService } from "../gradebook/term-result.service";
 import { NotificationService } from "../notifications/notification.service";
 import PDFDocument from "pdfkit";
 import { BrandingService } from "../branding/branding.service";
+import { renderPaperPdf } from "./paper-pdf";
 import { createPdfDocument } from "../common/pdf-document";
 
 /** Grace after the duration elapses before a late save/submit is refused. */
@@ -1317,7 +1318,7 @@ export class CbtService {
     // Outside the transaction: object storage is a network call and a PDF must
     // not hold a DB transaction open across one.
     const logo = (await this.branding?.getLogoBytes(p.schoolId).catch(() => null)) ?? null;
-    const buffer = await this.renderPaperPdf(data as never, withAnswers, logo);
+    const buffer = await renderPaperPdf(data as never, withAnswers, logo);
     const kind = withAnswers ? "answer-key" : "question-paper";
     const safe = data.exam.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 40);
     return { buffer, filename: `${kind}-${safe}.pdf` };
@@ -1325,98 +1326,6 @@ export class CbtService {
 
   /** Render the paper. Deliberately plain: this is a document an invigilator
    *  photocopies, so it must survive a monochrome printer and a stapler. */
-  private renderPaperPdf(
-    d: {
-      exam: { title: string; durationMinutes: number; shuffle: boolean };
-      bankName: string;
-      schoolName: string;
-      subjectName: string | null;
-      className: string | null;
-      ordered: Array<{ prompt: string; choices: string[]; answerIndex: number; type: string; maxMarks: number }>;
-    },
-    withAnswers: boolean,
-    logo: Buffer | null,
-  ): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const doc = createPdfDocument({ size: "A4", margin: 50 });
-      const chunks: Buffer[] = [];
-      doc.on("data", (c: Buffer) => chunks.push(c));
-      doc.on("end", () => resolve(Buffer.concat(chunks)));
-      doc.on("error", reject);
-
-      if (logo) {
-        try {
-          doc.image(logo, doc.page.width / 2 - 22, 40, { fit: [44, 44], align: "center" });
-          doc.moveDown(3);
-        } catch {
-          /* an unsupported image must not cost an invigilator their paper */
-        }
-      }
-      doc.fontSize(15).text(d.schoolName || "Question Paper", { align: "center" });
-      doc.moveDown(0.2).fontSize(13).text(d.exam.title, { align: "center" });
-      doc.moveDown(0.2).fontSize(9);
-      const meta = [d.subjectName, d.className, `${d.exam.durationMinutes} minutes`].filter(Boolean).join("  ·  ");
-      doc.text(meta, { align: "center" });
-
-      if (withAnswers) {
-        // Unmissable on a photocopy: this sheet carries the key.
-        doc.moveDown(0.5).fontSize(11).fillColor("#b00").text("ANSWER KEY — NOT FOR CANDIDATES", { align: "center" });
-        doc.fillColor("#000");
-      }
-      if (d.exam.shuffle) {
-        // The honest caveat. Online candidates each get their own draw, so this
-        // sheet is one variant — printing it as "the paper" would be a lie.
-        doc.moveDown(0.4).fontSize(8).fillColor("#666").text(
-          "This exam shuffles: each online candidate receives a different selection. " +
-            "This sheet is ONE variant, suitable for an offline sitting or moderation.",
-          { align: "center" },
-        );
-        doc.fillColor("#000");
-      }
-
-      doc.moveDown(1).fontSize(9).fillColor("#444")
-        .text("Answer ALL questions. Shade or write your answer clearly.", { align: "center" });
-      doc.fillColor("#000").moveDown(1);
-
-      let n = 0;
-      let section = "";
-      for (const q of d.ordered) {
-        const label = q.type === "THEORY" ? "SECTION B — Theory" : "SECTION A — Objective";
-        if (label !== section) {
-          section = label;
-          doc.moveDown(0.6).fontSize(11).text(label);
-          doc.moveDown(0.3);
-        }
-        n += 1;
-        doc.fontSize(10).text(`${n}.  ${q.prompt}`, { paragraphGap: 2 });
-        if (q.type === "THEORY") {
-          doc.fontSize(8).fillColor("#666").text(`(${q.maxMarks} mark${q.maxMarks === 1 ? "" : "s"})`);
-          doc.fillColor("#000");
-          // Ruled space to actually write in — a theory paper with no room to
-          // answer is not a usable document.
-          doc.moveDown(0.4);
-          for (let i = 0; i < 4; i++) doc.moveDown(0.9);
-        } else {
-          q.choices.forEach((c, i) => {
-            const letter = String.fromCharCode(65 + i);
-            const correct = withAnswers && i === q.answerIndex;
-            doc.fontSize(10).fillColor(correct ? "#0a0" : "#000")
-              .text(`     ${correct ? "*" : " "}${letter}.  ${c}`);
-          });
-          doc.fillColor("#000");
-        }
-        doc.moveDown(0.5);
-        if (doc.y > doc.page.height - 90) doc.addPage();
-      }
-
-      doc.moveDown(1).fontSize(8).fillColor("#666")
-        .text(`${n} question${n === 1 ? "" : "s"} · generated ${new Date().toISOString().slice(0, 10)}`, {
-          align: "center",
-        });
-      doc.end();
-    });
-  }
-
   /** Staff: per-exam results table (names + scores; no answer sheets here). */
   async examResults(p: Principal, examId: string): Promise<CbtExamResultsDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {

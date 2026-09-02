@@ -94,3 +94,33 @@ describe("a physical exam can be marked", () => {
     expect(src).toMatch(/pr\.examMode === "GAMES" \|\| pr\.examMode === "PHYSICAL"/);
   });
 });
+
+describe("a physical exam can be written and printed", () => {
+  // The composer was gated on ONLINE_CBT, so an owner running a PHYSICAL exam
+  // could not write its questions at all — while the API accepted them the
+  // whole time and nothing printed them. The two modes differ in how the paper
+  // reaches a candidate, not in how it is written.
+  it("offers the composer for a physical programme too", () => {
+    expect(src).toMatch(/pr\.examMode === "ONLINE_CBT" \|\| pr\.examMode === "PHYSICAL"/);
+    // Both halves: the toggle that opens it and the panel it opens.
+    const matches = src.match(/pr\.examMode === "ONLINE_CBT" \|\| pr\.examMode === "PHYSICAL"/g) ?? [];
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // ONE LINK PER SUBJECT. The papers are derived from the questions' subjects,
+  // so a single "print" would staple two different exams together.
+  it("offers a print link per subject, and the key as its own link", () => {
+    expect(src).toMatch(/paper\.pdf\$\{subj \? `\?subject=/);
+    expect(src).toMatch(/answer-key\.pdf\$\{subj \? `\?subject=/);
+    expect(src).toMatch(/new Set\(paper\.map\(\(q\) => q\.subject \?\? ""\)\)/);
+  });
+
+  it("marks the key as what it is, rather than a second plain link", () => {
+    expect(src).toMatch(/not for candidates/i);
+  });
+
+  // A programme with no questions must not offer a print that would 400.
+  it("offers nothing to print until there are questions", () => {
+    expect(src).toMatch(/paper !== null && paper\.length > 0 && \(/);
+  });
+});

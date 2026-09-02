@@ -987,7 +987,12 @@ function ProgramRow({
         <Button size="sm" variant="outline" disabled={busy === `exam-${pr.id}`} onClick={() => onSaveExam({ mode, at, venue, duration, cap })}>
           Save exam
         </Button>
-        {pr.examMode === "ONLINE_CBT" && (
+        {/* AUTHORING IS THE SAME WORK whichever way the paper is sat. This was
+            gated on ONLINE_CBT, so an owner running a PHYSICAL exam could not
+            write its questions at all — while the API accepted them the whole
+            time and nothing printed them. The two modes differ in how the paper
+            reaches a candidate, not in how it is written. */}
+        {(pr.examMode === "ONLINE_CBT" || pr.examMode === "PHYSICAL") && (
           <Button
             size="sm"
             variant="ghost"
@@ -1160,9 +1165,43 @@ function ProgramRow({
         </div>
       )}
 
-      {/* CBT question composer */}
-      {showQ && pr.examMode === "ONLINE_CBT" && (
+      {/* The question paper — authored the same way for both modes. */}
+      {showQ && (pr.examMode === "ONLINE_CBT" || pr.examMode === "PHYSICAL") && (
         <div className="space-y-2 rounded-md border border-dashed border-border p-2">
+          {/* PRINT. The papers are DERIVED from the questions' subjects, so there
+              is one link per subject — printing "the programme" would staple
+              two different exams together. Both are owner-only routes; a
+              candidate's own school can print neither.
+              The KEY is a separate link, not a checkbox, because printing it is
+              exam-integrity material and has to be distinguishable in the audit
+              trail from printing the paper. */}
+          {paper !== null && paper.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-border/60 pb-2 text-xs">
+              <span className="text-muted-foreground">Print:</span>
+              {[...new Set(paper.map((q) => q.subject ?? ""))].map((subj) => (
+                <span key={subj || "default"} className="flex items-center gap-1">
+                  <a
+                    className="underline"
+                    href={`/api/sms/scholarships/programs/${pr.id}/paper.pdf${subj ? `?subject=${encodeURIComponent(subj)}` : ""}`}
+                  >
+                    {subj || "paper"}
+                  </a>
+                  <a
+                    className="text-destructive underline"
+                    title="The answer key — not for candidates"
+                    href={`/api/sms/scholarships/programs/${pr.id}/answer-key.pdf${subj ? `?subject=${encodeURIComponent(subj)}` : ""}`}
+                  >
+                    key
+                  </a>
+                </span>
+              ))}
+              {pr.examMode === "PHYSICAL" && (
+                <span className="text-muted-foreground">
+                  — a physical exam is sat from these sheets; nothing is published to candidates.
+                </span>
+              )}
+            </div>
+          )}
           {paperFailed ? (
             // A failed read must not read as "this paper is empty" — that would
             // invite the operator to type the whole thing again.

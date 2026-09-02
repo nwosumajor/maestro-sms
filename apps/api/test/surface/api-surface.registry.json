@@ -2949,6 +2949,14 @@
       "kind": "ui",
       "note": "bulk funnel actions on the selected rows in ScholarshipAdmin.tsx"
     },
+    "GET /scholarships/programs/:p/answer-key.pdf": {
+      "kind": "ui",
+      "note": "the per-subject \"Key\" link on the paper panel in ScholarshipAdmin.tsx"
+    },
+    "GET /scholarships/programs/:p/paper.pdf": {
+      "kind": "ui",
+      "note": "the per-subject \"Print\" link on the paper panel in ScholarshipAdmin.tsx"
+    },
     "GET /scholarships/programs/:p/school-spread": {
       "kind": "ui",
       "note": "the \"Spread by school\" panel on ScholarshipAdmin.tsx"
