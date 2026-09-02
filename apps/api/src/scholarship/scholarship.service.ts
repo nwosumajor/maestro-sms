@@ -93,6 +93,27 @@ export class ScholarshipService {
    */
   async examPapers(p: Principal, programId: string): Promise<ScholarshipExamPaperDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // ONLY A QUALIFIED CANDIDATE HAS PAPERS.
+      //
+      // The header above already states the rule — "a scholarship exam is
+      // invisible to anyone who did not qualify" — and it was true of
+      // `startSitting` and never asked here. So `start` correctly answered 404
+      // while this LIST handed any pupil in the school the paper's title, when
+      // it opens, how long it runs and HOW MANY QUESTIONS it has. Measured: a
+      // non-qualified pupil of the candidate's own school got the full row.
+      //
+      // A refusal must not be contradicted by a listing one route over — the
+      // same rule this repo records in the other direction, where a 403 said
+      // "not found".
+      //
+      // AN EMPTY LIST, not a 404: this is a list, its sibling `listExams`
+      // filters the same way, and "you have no papers" is the honest answer
+      // rather than a claim about whether the programme exists.
+      const qualified = await tx.scholarshipApplication.findFirst({
+        where: { studentId: p.userId, programId, status: "QUALIFIED" },
+        select: { id: true },
+      });
+      if (!qualified) return [];
       // RLS scopes this to the caller's school, and `scholarshipProgramId`
       // being set is what makes it a scholarship exam.
       const exams = await tx.cbtExam.findMany({

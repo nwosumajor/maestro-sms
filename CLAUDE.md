@@ -898,6 +898,77 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Thirteen doors onto a scholarship paper, and the listing that contradicted the refusal
+`requireMarkable` + `markingProgress` gain the platform guard;
+`ScholarshipService.examPapers` gains the qualification check. Asked for
+directly: no school may reach a scholarship question until it is released to
+the qualified candidates, and a candidate may reach it only when the OWNER
+releases it. Answered by DRIVING every door rather than by reading the call
+graph — which is what found the two that were still open.
+**THE SCHOOL SIDE IS THIRTEEN DOORS, AND TWO WERE STILL OPEN** after the bank
+fix one entry down. Both are the MARKING routes, and they are the widest of the
+lot: `markingQueue` returns a theory question's PROMPT and its `markGuide` —
+the marking scheme, which for a theory question IS the answer — plus every
+candidate's script, and `markAnswer` beside it SETS the marks in a cross-school
+competition. `canTouchBank` is true for school-wide staff and neither asked
+about the programme.
+// **AND MY OWN FIX CLAIMED MORE THAN IT DID.** I put the guard in
+`requireMarkable` and wrote that "all three marking routes resolve through
+here". Two do. `markingProgress` takes no `questionId`, does NOT come that way,
+and returns every theory question's PROMPT — it answered **200** while the
+other twelve answered 404. Reading the call graph said it was covered; driving
+all thirteen by DIRECT ID said otherwise. The comment is corrected to what is
+true.
+```
+principal / school admin, by direct id, after:
+  404  the bank's questions (with the key)      404  the ANSWER KEY pdf
+  404  the bank's availability                  404  the marking queue
+  404  appending / editing / deleting a question 404  marking progress
+  404  the question paper                       404  closing · publish · answer release
+  404  writing its marks into the gradebook
+  200  its own pupils' RESULTS — deliberately still theirs
+```
+**AND ON THE CANDIDATE SIDE, THE LISTING CONTRADICTED THE REFUSAL.** The
+service's own header states the rule — *"a scholarship exam is invisible to
+anyone who did not qualify"* — and it was true of `startSitting` and never
+asked in `examPapers`. So `start` correctly answered 404 while the LIST handed
+any pupil in the school the paper's title, when it opens, how long it runs and
+**how many questions it has**. Measured on a non-qualified pupil of the
+candidate's own school, who got the full row. A comment asserting a property
+nothing enforced, for the fourth time in this file.
+// AN EMPTY LIST, NOT A 404, and the check runs BEFORE the exams are read: this
+is a list, its sibling `listExams` filters the same way, and "you have no
+papers" is the honest answer rather than a claim about whether the programme
+exists.
+**WHAT WAS ALREADY RIGHT, driven and recorded so it is not re-chased:**
+```
+before the owner announces   pupil's paper list []   ·  start 404
+qualified but NOT announced  start 404
+the owner announces          the paper appears, open=false
+                             opening it early -> 409 "The exam has not opened yet"
+the window opens             the QUALIFIED candidate opens it, 2 questions
+                             answerIndex [null,null] · answersReleased=false
+                             no markGuide anywhere in the payload
+after submitting             the key is STILL withheld
+throughout                   principal / admin / teacher list 0 banks, 0 exams
+```
+// **THE ANNOUNCE IS THE RELEASE**, and it is the owner's alone — a school
+cannot announce, and the exam window is a second gate after it, so "released"
+and "open" are separable and both are enforced.
+// WHAT THE SCHOOL KEEPS is its own pupils' RESULTS, and a test pins that the
+guard does not grow into hiding a school's own data — the same line the exam
+fix already drew.
+// GOTCHA in my own gate: the method-body helper sliced to the first `\n  }`,
+which cuts a method at its first nested block closed at class indentation —
+`recordExamGrades` carries its guard after one, so the gate reported a guard
+that was plainly there. Bounded by the NEXT method now, with a minimum length,
+because a window that finds almost nothing checks almost nothing.
+// PROBE: the programme, its exam, bank, questions, sitting, application and
+ten notices removed; four programmes remain, as found.
+Mutation-validated five ways: reopen the marking queue, reopen marking
+progress, drop the qualification check, ask it AFTER assembling the exams, and
+over-correct by guarding the school's own results.
+
 ### A leave entitlement of 200 days, and no way back
 `LeaveService.updateLeaveType` + `PUT /hr/leave/types/:id`, the apply picker's
 `active` filter, and the Edit / Retire controls. The third find off the

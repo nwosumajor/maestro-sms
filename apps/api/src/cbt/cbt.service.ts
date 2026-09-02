@@ -1659,6 +1659,11 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
+      // THIS ONE DOES NOT GO THROUGH `requireMarkable` — it takes no
+      // questionId — so the guard there did not cover it, and it returns every
+      // theory question's PROMPT. Found by driving all thirteen school-side
+      // doors by direct id: twelve answered 404 and this one answered 200.
+      this.assertNotAPlatformExam(exam);
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
       if (!bank || !(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Exam not found");
       const rows = await tx.cbtTheoryAnswer.findMany({
@@ -2077,6 +2082,20 @@ export class CbtService {
     if (!bank || !p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) || !(await this.canTouchBank(tx, p, bank))) {
       throw new NotFoundException("Exam not found");
     }
+    // MARKING IS THE LAST DOOR ONTO A PLATFORM PAPER, and it is a wide one:
+    // what this returns is the question's PROMPT and its `markGuide` — the
+    // marking scheme, which for a theory question IS the answer — together with
+    // every candidate's script. `canTouchBank` is true for school-wide staff,
+    // so without this the leadership of a candidate's own school could read a
+    // cross-school paper's model answers, and `markAnswer` beside it could set
+    // the marks in a competition their pupil is in.
+    //
+    // TWO of the three marking routes resolve through here — `markingQueue`
+    // and `markAnswer` — so this covers the one that READS a script and the one
+    // that WRITES a mark. `markingProgress` takes no questionId and does NOT
+    // come this way; it carries the guard itself, and I only found that by
+    // driving every door rather than by reading the call graph.
+    this.assertNotAPlatformBank(bank);
     const question = await tx.cbtQuestion.findFirst({
       where: { id: questionId },
       select: { prompt: true, markGuide: true, maxMarks: true, type: true, bankId: true },
