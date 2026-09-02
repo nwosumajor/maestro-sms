@@ -36,6 +36,11 @@ import {
 } from "../integrity/integrity.foundation";
 import { SYSTEM_ACTOR_ID } from "./billing.constants";
 
+/** Who is told that the school earned a free term — the people who run it.
+ *  Mirrors `GRANT_NOTICE_RECIPIENTS` in the dunning sweep: the same question,
+ *  about the same subscription, deserves the same answer. */
+const REWARD_NOTICE_RECIPIENTS = ["principal", "school_admin"] as const;
+
 function addMonths(from: Date, months: number): Date {
   const d = new Date(from);
   d.setMonth(d.getMonth() + months);
@@ -60,7 +65,9 @@ export interface ReferralGrant {
   referrerSchoolId: string;
   referrerSchoolName: string;
   /** The user who created the code — the reward notification recipient. */
-  referrerRecipientId: string | null;
+  /** Everyone at the referring school who should hear about it. Never empty
+   *  by design, but a school with no active leadership yields none. */
+  referrerRecipientIds: string[];
   referrerPeriodEnd: Date;
   referredSchoolName: string;
   /** The paying school's period end INCLUDING the bonus term. */
@@ -222,7 +229,20 @@ export class ReferralService {
       return {
         referrerSchoolId: input.referrerSchoolId,
         referrerSchoolName: referrerSchool?.name ?? "your school",
-        referrerRecipientId: codeRow?.createdById ?? null,
+        // WHO AT THE REFERRING SCHOOL IS TOLD.
+        //
+        // This was the code's creator ALONE. Measured live: a bursar generated
+        // the code, later left, the school earned three free months — and the
+        // one notice went to an EXITED account, so `persist` correctly dropped
+        // every external channel (zero deliveries queued) and they could not
+        // sign in to read the in-app row either. The school's own school_admin
+        // and principal, both ACTIVE, were told nothing.
+        //
+        // Every OTHER billing notice — dunning, renewal, the grant-expiry
+        // warning — already goes to the leadership ROLES with a `status:
+        // ACTIVE` filter. This one did not. Same asymmetry, and this is the
+        // notice about money the school has EARNED.
+        referrerRecipientIds: await this.rewardRecipients(tx, input.referrerSchoolId, codeRow?.createdById ?? null),
         referrerPeriodEnd,
         referredSchoolName: payingSchool?.name ?? "the school",
         referredPeriodEnd,
@@ -232,6 +252,40 @@ export class ReferralService {
       // 3. ALWAYS restore the paying school's tenant for the rest of the tx.
       await this.setTxTenant(tx, input.payingSchoolId);
     }
+  }
+
+  /**
+   * Who hears that the school earned a free term.
+   *
+   * The people who RUN the school, plus the person who did the referring if
+   * they are still there — the same set and the same `status: ACTIVE` filter
+   * every other billing notice already uses. A leaver is excluded rather than
+   * merely deprioritised: `NotificationService.persist` drops every external
+   * channel for a non-ACTIVE recipient and they cannot sign in to read the
+   * in-app row, so addressing one is addressing nobody.
+   *
+   * Runs under the REFERRER's tenant — the caller has already switched.
+   */
+  private async rewardRecipients(tx: TenantTx, schoolId: string, codeCreatorId: string | null): Promise<string[]> {
+    const leaders = (await tx.user.findMany({
+      where: {
+        schoolId,
+        status: "ACTIVE",
+        roles: { some: { role: { name: { in: [...REWARD_NOTICE_RECIPIENTS] } } } },
+      },
+      select: { id: true },
+    })) as Array<{ id: string }>;
+    const ids = new Set(leaders.map((l) => l.id));
+    if (codeCreatorId) {
+      // The person who did the referring, but only if they are still here — the
+      // same question, asked of them as of everyone else.
+      const creator = (await tx.user.findFirst({
+        where: { id: codeCreatorId, status: "ACTIVE" },
+        select: { id: true },
+      })) as { id: string } | null;
+      if (creator) ids.add(creator.id);
+    }
+    return [...ids];
   }
 
   /** Transaction-local RLS tenant switch (see the SECURITY note above). */

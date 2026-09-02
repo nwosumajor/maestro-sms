@@ -1473,17 +1473,24 @@ export class BillingService {
     } catch {
       // a notification failure must never undo a recorded payment
     }
-    // Best-effort reward notice to the REFERRER (the code's creator).
-    if (ok.referral?.referrerRecipientId) {
+    // Best-effort reward notice to the REFERRING SCHOOL's leadership.
+    //
+    // This went to the code's CREATOR alone. Measured live: a bursar generated
+    // the code and later left; the school earned three free months and the one
+    // notice went to an EXITED account, so zero external deliveries were queued
+    // and they could not sign in to read the in-app row. Nobody at the school
+    // knew it had earned anything.
+    if (ok.referral && ok.referral.referrerRecipientIds.length > 0) {
       try {
-        await this.notifications.enqueue(
-          { schoolId: ok.referral.referrerSchoolId, userId: ok.referral.referrerRecipientId },
+        // ONE transaction for the lot, like every other multi-recipient notice.
+        await this.notifications.enqueueMany(
+          { schoolId: ok.referral.referrerSchoolId, userId: SYSTEM_ACTOR_ID },
+          ok.referral.referrerRecipientIds,
           {
-            recipientId: ok.referral.referrerRecipientId,
             type: "BILLING",
             title: "Referral reward earned",
             body:
-              `${ok.referral.referredSchoolName} subscribed using your referral code — ` +
+              `${ok.referral.referredSchoolName} subscribed using your school's referral code — ` +
               `your school earned ${ok.referral.rewardMonths} months of free platform usage. ` +
               `Your subscription now runs until ${schoolDateString((await this.region.forSchool(ok.referral.referrerSchoolId)).timezone, ok.referral.referrerPeriodEnd)}.`,
             channels: ["EMAIL"],
@@ -1492,6 +1499,13 @@ export class BillingService {
       } catch {
         // best-effort
       }
+    } else if (ok.referral) {
+      // NOT SILENT. A school that earned a free term and has nobody active to
+      // tell is a fact the platform owner should be able to find afterwards —
+      // the reward stands either way, and the log is where it is explicable.
+      this.logger.warn(
+        `referral reward for school ${ok.referral.referrerSchoolId}: no active principal or school_admin to notify`,
+      );
     }
     return { ok: true };
   }

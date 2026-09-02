@@ -898,6 +898,65 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The school earned three free months and nobody who works there was told
+`rewardRecipients` / `REWARD_NOTICE_RECIPIENTS` (`billing/referral.service.ts`)
+and the notice in `billing.service.ts`. Found by driving the referral programme
+end to end for the first time — `school_referral_code` and
+`school_referral_conversion` had never held a row.
+**THE REWARD WENT TO ONE PERSON: whoever generated the code.** Driven with the
+REAL signed Paystack webhook, on a bursar who generated the code and later left:
+```
+webhook (charge.success, kind=subscription)   201
+referrer period end   2027-06-21 -> 2027-09-21   (+3 months, earned)
+conversion recorded                              1
+the notice                Demo Accountant, status EXITED
+external deliveries queued                       0
+the school's ACTIVE school_admin and principal   told nothing
+```
+`NotificationService.persist` drops every external channel for a non-ACTIVE
+recipient — correctly — and a leaver cannot sign in to read the in-app row
+either. So the school earned money and **nobody who works there knew**.
+// **EVERY OTHER BILLING NOTICE ALREADY GOT THIS RIGHT.** Dunning, renewal and
+the grant-expiry warning all address the leadership ROLES with a `status:
+ACTIVE` filter (`GRANT_NOTICE_RECIPIENTS`). This one addressed an individual and
+filtered nothing — sibling asymmetry, with the careful ones written first, and
+this is the notice about money the school has EARNED.
+// SAME CLASS AS `holdersOf` ("an approver is somebody who is still here"),
+`assertStillHere` and the operator directory that named a departed admin. A
+leaver is EXCLUDED rather than deprioritised: addressing one is addressing
+nobody.
+// THE CODE'S CREATOR IS STILL INCLUDED — they did the referring — but only if
+they are still there, which is the same question asked of them as of everyone
+else. De-duplicated, so a principal who also made the code is told once.
+// ONE TRANSACTION for the set (`enqueueMany`), like every other multi-recipient
+notice; `enqueue` per recipient opens a transaction and a queue round trip each.
+// NOT SILENT WHEN THERE IS NOBODY. A school that earned a free term and has no
+active leadership is a fact the platform owner should be able to find
+afterwards — the reward stands either way, and the log is where it is
+explicable.
+Live after, same webhook, same scenario:
+```
+creator EXITED    told: Demo Admin (school_admin), Demo Principal (principal)
+                  EMAIL deliveries: 2 SENT   (was 0)
+creator ACTIVE    told: all three, deduplicated
+```
+// GOTCHA in the probe, twice: the webhook is `POST /payments/webhook`, not
+`/fees/paystack/webhook` — and it is a NO-OP unless a PENDING
+`platform_subscription_payment` already carries that reference, because it only
+applies payments the platform itself initiated. Both attempts returned a
+cheerful `201 {"ok":true}` while doing nothing, which reads exactly like a
+broken reward.
+// GOTCHA in the fixture: the harness's `findMany` returned everyone regardless
+of the `where`, so the status assertion would have passed against a service that
+had stopped filtering. It honours the query now.
+// PROBE ARTEFACT, caught on the way out: the webhook I fired carried
+`plan: STANDARD`, which moved a demo school from ENTERPRISE to STANDARD. Spotted
+in the closing state check and restored. Every referral row, payment row and
+notice removed; the code's creator is ACTIVE again, as found.
+Mutation-validated five ways: drop the ACTIVE filter, include a departed
+creator, tell one person twice, go back to a single recipient, and stay silent
+when there is nobody to tell.
+
 ### A question written once, and reused for years
 `scholarship_question` (migration `20270129000000`, rls/50 part C),
 `listLibrary` / `createLibraryQuestion` / `updateLibraryQuestion` /
