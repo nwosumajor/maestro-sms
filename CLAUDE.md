@@ -898,6 +898,79 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A promo budget of one, spent three times
+`GrowthService.validatePromo` / `inFlightRedemptions`, and migration
+`20270201000000_promo_inflight_index`. Found by driving the promo lever for the
+first time — `promo_code` had never held a row, so a revenue giveaway had never
+been exercised.
+**`maxUses` IS MONEY THE OWNER DECIDED TO GIVE AWAY, AND IT DID NOT BOUND
+ANYTHING.** The cap was checked at CHECKOUT against `usedCount`, which is
+incremented at SETTLE — so between the two the code was unlocked, and that gap
+is not a millisecond race but however long a payer takes on the gateway.
+Measured on a school that had never paid, against a code with `maxUses: 1`:
+```
+attempt 1   201   PENDING  NGN 100  promoCode PROBE-ONE
+attempt 2   201   PENDING  NGN 100  promoCode PROBE-ONE
+attempt 3   201   PENDING  NGN 100  promoCode PROBE-ONE
+```
+Three live discounted charges from ONE school; across schools it is unbounded,
+because a code posted publicly can be checked out by everyone before the first
+one settles.
+// **TWO NUMBERS, EACH MEANING ONE THING, so nothing can drift**: `usedCount`
+is what has actually been redeemed and the PENDING charges carrying the code
+are what is in flight. The budget is the SUM. A second counter of the same fact
+is the shape this file keeps finding, so there isn't one.
+// **AND IT RELEASES ITSELF.** The dunning sweep's `expireStaleIntents` already
+marks an abandoned checkout ABANDONED, so a budget committed to a checkout
+nobody finishes comes back with no sweep of our own. Proved as the control:
+with the three in-flight rows abandoned, EXACTLY ONE more checkout is allowed
+and the next two are refused.
+// TWO SENTENCES, because they need different actions — a code that is spent is
+spent, and one that is merely committed may free up: *"fully committed — every
+remaining use is on a checkout in progress. Try again shortly"* against
+*"has been fully redeemed"*.
+// PRIVILEGED, because the count crosses every school and
+`platform_subscription_payment` is tenant-scoped: an app-role read under no GUC
+returns nothing, which would silently restore the hole.
+// FALLS BACK TO ZERO with a warning when there is no privileged client, which
+is what the check did before it existed. Refusing every promo checkout because
+a database URL is unset would be a self-inflicted outage over a giveaway
+budget — and the log says which happened.
+// AN UNLIMITED CODE PAYS NOTHING: the count runs only when there is a budget
+to bound, and a test asserts it is not even called otherwise.
+**AND IT NEEDED AN INDEX, measured rather than assumed** — with a BOUND
+PARAMETER after five warm-ups, so the plan under test is the GENERIC one a
+pooled application gets:
+```
+600,000 payments, no index    Parallel Seq Scan   13,335 buffers   38.9 ms
+                  partial      Index Only Scan          3 buffers    0.015 ms
+```
+// PARTIAL, ON THE LIVE CHECKOUTS ONLY, and that is why it is **16 kB**: a
+pending intent is transient, so the index holds a handful of rows however long
+the platform runs, while the table itself grows with every renewal of every
+school for ever. Declaring it as a full Prisma `@@index` instead would build a
+second, far larger one over every payment ever taken — so it lives in the
+migration with the measurement, and the schema carries a comment pointing at
+it, exactly as the take-rate partial index already does.
+**WHAT THE SAME PASS FOUND SOUND**, recorded so it is not re-chased: the
+boundary refuses `percentOff` outside 1–100 and a duplicate code with a 409; a
+promo is already refused for a school that has paid before (*"Promo codes apply
+to a school's first subscription payment only"*), which is what made the
+one-school demonstration take a never-paid tenant; and a retried webhook cannot
+double-increment, because `applySubscriptionPayment` returns early on a row
+already PAID and the redeem sits behind that.
+// GOTCHA in the probe, and it matters: the only never-paid school's principals
+are REAL accounts, and this file records that overwriting a real password with
+bcrypt cannot be undone. Driven with a MINTED token instead — no password was
+touched.
+// PROBE: one promo code and four subscription-payment rows removed; the
+payment table is back to the 18 rows it held, Elshaddi has none, and the
+600,000-row volume fixture was deleted and VACUUM FULLed back to 80 kB.
+Mutation-validated five ways: back to `usedCount` alone, count every status
+rather than the live ones, one sentence for both refusals, refuse the checkout
+when the privileged client is missing, and count in flight for an unlimited
+code.
+
 ### A last working day of 31 April, filed in May
 `common/calendar-day.ts` (`ISO_DAY_PATTERN` / `isIsoDay` / `isoDay`), replacing
 **forty-two** hand-rolled copies across 24 files, plus the same hole in

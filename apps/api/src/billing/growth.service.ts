@@ -45,10 +45,61 @@ export class GrowthService {
     const promo = await prisma.promoCode.findFirst({ where: { code } });
     if (!promo || !promo.active) throw new BadRequestException("That promo code is not valid");
     if (promo.expiresAt && promo.expiresAt < new Date()) throw new BadRequestException("That promo code has expired");
-    if (promo.maxUses != null && promo.usedCount >= promo.maxUses) {
-      throw new BadRequestException("That promo code has been fully redeemed");
+    if (promo.maxUses != null) {
+      // THE BUDGET HAS TO COUNT WHAT IS ALREADY IN FLIGHT.
+      //
+      // `usedCount` is incremented at SETTLE and this check ran at CHECKOUT, so
+      // between the two the code was unlocked — and that gap is not a
+      // millisecond race, it is however long a payer takes on the gateway.
+      // Measured: a code with `maxUses: 1` produced THREE live discounted
+      // charges from one school, and across schools it is unbounded. `maxUses`
+      // is money the owner decided to give away, so a control that does not
+      // bound it is not a control.
+      //
+      // Two numbers, each meaning one thing: `usedCount` is what has actually
+      // been redeemed, and the PENDING charges carrying this code are what is
+      // in flight. No second counter of the same fact, so nothing can drift —
+      // and the dunning sweep's `expireStaleIntents` marks an abandoned
+      // checkout ABANDONED, which releases its share of the budget without a
+      // sweep of our own.
+      const inFlight = await this.inFlightRedemptions(promo.code);
+      if (promo.usedCount + inFlight >= promo.maxUses) {
+        throw new BadRequestException(
+          inFlight > 0 && promo.usedCount < promo.maxUses
+            ? "That promo code is fully committed — every remaining use is on a checkout in progress. Try again shortly."
+            : "That promo code has been fully redeemed",
+        );
+      }
     }
     return { code: promo.code, percentOff: promo.percentOff };
+  }
+
+  /**
+   * Checkouts carrying this code that have started and not finished.
+   *
+   * PRIVILEGED, because the count is across every school and
+   * `platform_subscription_payment` is tenant-scoped — an app-role read under
+   * no GUC returns nothing, which would silently restore the hole.
+   *
+   * FALLS BACK TO ZERO when there is no privileged client, which is what this
+   * check did before it existed. Refusing every promo checkout because a
+   * database URL is unset would be a self-inflicted outage over a giveaway
+   * budget, and the log says which happened.
+   */
+  private async inFlightRedemptions(code: string): Promise<number> {
+    const client = this.privileged.client;
+    if (!client) {
+      this.logger.warn(`promo ${code}: no privileged DB — in-flight checkouts not counted against maxUses`);
+      return 0;
+    }
+    try {
+      return await client.platformSubscriptionPayment.count({
+        where: { promoCode: code, status: "PENDING" },
+      });
+    } catch (e) {
+      this.logger.warn(`promo ${code}: could not count in-flight checkouts: ${(e as Error).message}`);
+      return 0;
+    }
   }
 
   /** Settle-time redemption: count the use. Best-effort (a missed increment

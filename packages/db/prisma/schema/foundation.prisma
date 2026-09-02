@@ -633,6 +633,14 @@ model PlatformSubscriptionPayment {
   /// Without this it was a Parallel Seq Scan — fine at 150k rows, linear for
   /// ever after. This table only ever grows.
   @@index([createdAt])
+  // A promo code's live checkouts. PARTIAL on
+  // `status = 'PENDING' AND "promoCode" IS NOT NULL`, which Prisma cannot
+  // express — declared here for visibility and created by migration
+  // `20270201000000_promo_inflight_index`, which carries the measurement
+  // (38.9ms -> 0.015ms on 600,000 payments; 16 kB, because a pending intent is
+  // transient and the dunning sweep abandons it). Declaring it as a full
+  // Prisma index instead would build a second, far larger one over every
+  // payment the platform has ever taken.
   @@map("platform_subscription_payment")
   /// For a kind=ADDON payment: WHICH module was bought. Null for every other
   /// kind. A column rather than metadata, because the webhook reads this row to
