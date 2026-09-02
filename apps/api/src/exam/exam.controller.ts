@@ -10,7 +10,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { ExamService } from "./exam.service";
 import { safeFilename } from "../documents/safe-content-type";
 
-const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+import { hhmm } from "../common/time-of-day";
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const sittingSchema = z
   .object({

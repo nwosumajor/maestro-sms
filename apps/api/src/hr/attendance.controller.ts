@@ -2,6 +2,7 @@
 // StaffAttendanceController — register (hr.write/hr.read) + kiosk clock-in (hr.self)
 // =============================================================================
 
+import { hhmm } from "../common/time-of-day";
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, RawBodyRequest, Req } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
@@ -31,9 +32,9 @@ const markSchema = z.object({
 const kioskSchema = z.object({
   enabled: z.boolean().optional(),
   allowedIps: z.string().max(500).nullish(),
-  windowStart: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
-  windowEnd: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
-  lateAfter: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
+  windowStart: hhmm.optional(),
+  windowEnd: hhmm.optional(),
+  lateAfter: hhmm.optional(),
   rotateSecret: z.boolean().optional(),
 });
 const clockInSchema = z.object({ code: z.string().min(4).max(10) });

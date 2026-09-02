@@ -216,7 +216,7 @@ function TripsPanel({ routes, onMsg }: { routes: Route[]; onMsg: (s: string) => 
 }
 
 function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s: string) => void }) {
-  const { minorFrom, money, shortDate } = useFormat();
+  const { minorFrom, money, shortDate, region } = useFormat();
   const [list, setList] = React.useState<Serialized<VehicleMaintenanceDto>[]>([]);
   const [vehicleId, setVehicleId] = React.useState(vehicles[0]?.id ?? "");
   const [type, setType] = React.useState("SERVICE");
@@ -247,7 +247,7 @@ function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s:
           <select aria-label="Vehicle" className={sel} value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
           <select aria-label="Type" className={sel} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t[0] + t.slice(1).toLowerCase()}</option>)}</select>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-36" />
-          <Input placeholder="cost ₦" value={cost} onChange={(e) => setCost(e.target.value)} className="w-24" />
+          <Input placeholder={`cost (${region.currency})`} value={cost} onChange={(e) => setCost(e.target.value)} className="w-24" />
           {type === "FUEL" && <Input placeholder="litres" value={litres} onChange={(e) => setLitres(e.target.value)} className="w-20" />}
           <Button size="sm" onClick={add}>Log</Button>
         </div>

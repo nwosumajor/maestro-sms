@@ -2,6 +2,7 @@
 // DutyController — duty roster (hr.write assigns; hr.read views; hr.self = mine)
 // =============================================================================
 
+import { hhmm } from "../common/time-of-day";
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { HR_PERMISSIONS, MODULES } from "@sms/types";
@@ -17,8 +18,8 @@ const assignSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(50),
   dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(31),
   title: z.string().min(1).max(120),
-  startTime: z.string().regex(/^\d{1,2}:\d{2}$/),
-  endTime: z.string().regex(/^\d{1,2}:\d{2}$/),
+  startTime: hhmm,
+  endTime: hhmm,
   note: z.string().max(300).optional(),
 });
 const rangeSchema = z.object({

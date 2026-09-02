@@ -14,6 +14,7 @@
 // their OWN history, hr.read sees all. Tenant-isolated (RLS).
 // =============================================================================
 
+import { isHhmm, normaliseHhmm } from "../common/time-of-day";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { Prisma } from "@sms/db";
@@ -216,18 +217,26 @@ export class StaffAttendanceService {
     p: Principal,
     input: { enabled?: boolean; allowedIps?: string | null; windowStart?: string; windowEnd?: string; lateAfter?: string; rotateSecret?: boolean },
   ): Promise<KioskConfigDto> {
+    // THE SERVICE RE-CHECKS, and with the SAME rule as the boundary. Both
+    // copies used to accept `25:99`, and the readers then disagreed about what
+    // to do with it: `deriveClockInStatus` fails OPEN (everyone PRESENT, so
+    // nobody is ever late) and `inClockInWindow` fails CLOSED (nobody can clock
+    // in). A value that should never have been stored is what makes two
+    // sensible fail-safes point in opposite directions.
     for (const f of ["windowStart", "windowEnd", "lateAfter"] as const) {
       const v = input[f];
-      if (v !== undefined && !/^\d{1,2}:\d{2}$/.test(v)) throw new BadRequestException(`${f} must be HH:MM`);
+      if (v !== undefined && !isHhmm(v)) {
+        throw new BadRequestException(`${f} must be a time of day as HH:MM (00:00–23:59)`);
+      }
     }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const existing = await tx.attendanceKiosk.findFirst({});
       const data = {
         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
         ...(input.allowedIps !== undefined ? { allowedIps: (input.allowedIps ?? "").trim() || null } : {}),
-        ...(input.windowStart !== undefined ? { windowStart: input.windowStart } : {}),
-        ...(input.windowEnd !== undefined ? { windowEnd: input.windowEnd } : {}),
-        ...(input.lateAfter !== undefined ? { lateAfter: input.lateAfter } : {}),
+        ...(input.windowStart !== undefined ? { windowStart: normaliseHhmm(input.windowStart) } : {}),
+        ...(input.windowEnd !== undefined ? { windowEnd: normaliseHhmm(input.windowEnd) } : {}),
+        ...(input.lateAfter !== undefined ? { lateAfter: normaliseHhmm(input.lateAfter) } : {}),
         updatedById: p.userId,
       };
       if (!existing) {

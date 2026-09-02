@@ -898,6 +898,74 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A typo in "late after", and nobody was ever late again
+`common/time-of-day.ts` (`HHMM_PATTERN` / `hhmm` / `isHhmm` / `normaliseHhmm`),
+replacing six hand-rolled validators across four modules. Found by driving the
+trip schedule and the maintenance log — `transport_trip` and
+`vehicle_maintenance` had never held a row — and the first probe stored a trip
+departing at **25:99**.
+**SIX SPELLINGS OF ONE RULE, AND THEY DID NOT AGREE.** The timetable and the
+exam planner required a real 24-hour clock (`([01]\d|2[0-3]):[0-5]\d`);
+transport and every HR field took `\d{1,2}:\d{2}`, which accepts `25:99`,
+`8:60` and `99:99`. A control written six times is right five times — the CSV
+formula guard's lesson, in a sixth place.
+**THE SHARP ONE IS `lateAfter`, WHICH DECIDES WHETHER A MEMBER OF STAFF IS
+MARKED LATE.** Driven, the same clock-in at the same minute:
+```
+lateAfter "99:99"   stored, 200        clock-in -> PRESENT
+lateAfter "06:00"   the real setting   clock-in -> LATE
+```
+So a typo in that box switches lateness recording off for the whole school,
+silently and for ever — and staff attendance feeds lateness reports and pay.
+// **THE READERS WERE ALREADY DEFENSIVE, AND THAT IS THE PROBLEM RATHER THAN
+THE FIX.** `hhmmToMinutes` correctly returns NaN, and the two comparators then
+handle it in OPPOSITE directions: `deriveClockInStatus` fails OPEN (everyone
+PRESENT) and `inClockInWindow` fails CLOSED (nobody may clock in at all).
+Neither is wrong on its own. A value that should never have been stored is what
+makes two sensible fail-safes point opposite ways, which is exactly why the
+control belongs at the boundary and not in the readers.
+// ZERO-PADDED IS LOAD-BEARING, not tidiness: the trip list is
+`orderBy: { departTime: "asc" }` in SQL, where `"9:30"` sorts after `"15:45"`.
+// AND A PERSON TYPING `9:30` IS NOT MAKING A MISTAKE. The kiosk's window and
+late-after boxes are FREE TEXT, not `type="time"`, so the value is NORMALISED
+first and validated after — the stricter rule must not refuse something
+reasonable. Live: `"9:30"` is accepted and stored as `"09:30"`.
+// BOTH DOORS. The controller schema AND the service re-check, and both copies
+had the loose pattern — a guard on one path is not a guard.
+// THE ALREADY-CORRECT ONES MOVED TOO (timetable, exam). Leaving them on their
+own private-but-right regex is how a seventh spelling appears; the gate refuses
+any hand-rolled HH:MM check anywhere, and separately asserts each module still
+reaches for the shared one — an empty offender list also passes for code that
+stopped validating at all.
+// `hhmmToMinutes` IS DELIBERATELY EXEMPT and the gate says so: it READS an
+already-validated value and its tolerance is not a boundary check.
+**AND FOUR MONEY PLACEHOLDERS STILL SAID ₦.** `school-money-uses-the-schools-
+region` asks about the FIGURES, and four screens passed it while the box a
+bursar types INTO read `₦` — a staff allowance, their own compensation, and a
+vehicle's fuel and service cost. All four sit in files that already call
+`useFormat()` and scale correctly through `minorFrom`. `SalaryChanges` had had
+exactly this fixed in its LABEL and the siblings beside it were left, which is
+how four survived. The gate now covers the placeholder, one layer out from
+where it was looking. The public marketing page's `₦4.2m` is deliberately out
+of scope — the platform's own illustration, not a school's money.
+// CLEAN NEGATIVE, recorded so it is not re-chased: the fleet map's read is
+already right — `DISTINCT ON ("vehicleId") … ORDER BY "vehicleId", "recordedAt"
+DESC`, one query, riding `(schoolId, vehicleId, recordedAt)`, with the ping
+stream bounded ON WRITE by a retention window rather than being allowed to grow
+to millions of rows.
+// GOTCHA, MINE, and the trap this file already records: my first sweep grepped
+`apps/web` for the PRISMA MODEL NAME (`transportTrip`) and reported that two
+whole features had no screen. The web uses the HTTP path. **A probe that
+searches for a name the code does not use reports the absence of the name.**
+Both screens have existed since the module shipped.
+// PROBE: five trips (one of them the `25:99` the old validator accepted, now
+unfixable through the product), three maintenance rows and two staff clock-ins
+removed by id; both tables are empty again and the kiosk is back to 06:00, as
+found.
+Mutation-validated five ways: restore the loose pattern, stop normalising (so
+`9:30` is refused), hand-roll a seventh copy, drop a module's validation
+entirely, and put a naira placeholder back.
+
 ### A gate code that had expired, in a 4xl font
 `lib/use-polled.ts` (the hook, extracted), `ExamDayBoard`, `TransportOps` and
 the kiosk display in `AttendanceAdmin`. Found by sweeping the class the entry

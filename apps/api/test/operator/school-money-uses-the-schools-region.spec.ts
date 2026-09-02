@@ -19,6 +19,7 @@
 
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
+import { stripComments } from "../support/strip-comments";
 
 const WEB = join(__dirname, "../../../web/components");
 
@@ -90,6 +91,30 @@ describe("school money uses the school's region", () => {
     ]) {
       expect(readFileSync(join(WEB, rel), "utf8")).toMatch(/useFormat\(\)/);
     }
+  });
+
+  /**
+   * ONE LAYER OUT FROM WHERE THE RULE ABOVE LOOKS.
+   *
+   * That rule asks about the FIGURES, and four screens passed it while the
+   * placeholder a bursar types INTO was still `₦` — a staff member's monthly
+   * allowance, their own compensation, and a vehicle's fuel and service costs.
+   * `SalaryChanges` had already had the same defect fixed in its LABEL and the
+   * siblings beside it were left, which is how the four survived.
+   *
+   * The public marketing page is deliberately not in scope: its `₦4.2m` is the
+   * platform's own illustration, not a school's money.
+   */
+  it("a money input's placeholder follows the school too", () => {
+    const offenders: string[] = [];
+    expect(files.length).toBeGreaterThan(100);
+    for (const rel of files) {
+      const src = stripComments(readFileSync(rel, "utf8"));
+      for (const m of src.matchAll(/placeholder=(?:"[^"]*[₦₵]|\{`[^`]*[₦₵])/g)) {
+        offenders.push(`${rel.slice(WEB.length + 1)}: ${m[0]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it("names only files that still exist", () => {

@@ -22,7 +22,7 @@ import { TimetableService } from "./timetable.service";
 import { LessonCoverService } from "./lesson-cover.service";
 import { safeFilename } from "../documents/safe-content-type";
 
-const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+import { hhmm } from "../common/time-of-day";
 const periodSchema = z.object({
   name: z.string().min(1).max(60),
   sequence: z.number().int().min(1).max(50),

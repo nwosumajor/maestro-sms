@@ -39,7 +39,7 @@ async function req(method: string, path: string, body?: unknown) {
 export function MyCompensation({ slips, loans: initialLoans }: { slips: Slip[]; loans: Loan[] }) {
   // The SCHOOL's currency and locale, not the platform's — this used to be a
   // module-level `naira()` that hard-coded ₦, en-NG and a divide by 100.
-  const { money, minorFrom } = useFormat();
+  const { money, minorFrom, region } = useFormat();
   const [loans, setLoans] = React.useState<Loan[]>(initialLoans);
   const [principal, setPrincipal] = React.useState("");
   const [monthly, setMonthly] = React.useState("");
@@ -117,7 +117,7 @@ export function MyCompensation({ slips, loans: initialLoans }: { slips: Slip[]; 
               type="number"
               min="0"
               step="0.01"
-              placeholder="Amount ₦"
+              placeholder={`Amount (${region.currency})`}
               value={principal}
               onChange={(e) => setPrincipal(e.target.value)}
             />
@@ -126,7 +126,7 @@ export function MyCompensation({ slips, loans: initialLoans }: { slips: Slip[]; 
               type="number"
               min="0"
               step="0.01"
-              placeholder="Monthly ₦"
+              placeholder={`Monthly (${region.currency})`}
               value={monthly}
               onChange={(e) => setMonthly(e.target.value)}
             />

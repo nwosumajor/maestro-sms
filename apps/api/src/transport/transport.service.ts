@@ -9,6 +9,7 @@
 // All mutations audited.
 // =============================================================================
 
+import { isHhmm, normaliseHhmm } from "../common/time-of-day";
 import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import { schoolToday, TRANSPORT_PERMISSIONS, FEES_PERMISSIONS, FEE_SOURCES, formatMoney } from "@sms/types";
@@ -557,7 +558,7 @@ export class TransportService {
     p: Principal,
     input: { routeId: string; direction: string; name?: string | null; departTime: string; daysOfWeek?: string[] },
   ): Promise<TransportTripDto> {
-    if (!/^\d{2}:\d{2}$/.test(input.departTime)) throw new BadRequestException("departTime must be HH:MM");
+    if (!isHhmm(input.departTime)) throw new BadRequestException("departTime must be a time of day as HH:MM (00:00–23:59)");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertRouteInScope(tx, p, input.routeId);
       const row = await tx.transportTrip.create({
@@ -566,7 +567,7 @@ export class TransportService {
           routeId: input.routeId,
           direction: input.direction,
           name: input.name?.trim() || null,
-          departTime: input.departTime,
+          departTime: normaliseHhmm(input.departTime),
           daysOfWeek: (input.daysOfWeek ?? ["MON", "TUE", "WED", "THU", "FRI"]) as unknown as Prisma.InputJsonValue,
           status: "ACTIVE",
         },
@@ -581,7 +582,7 @@ export class TransportService {
     id: string,
     input: { name?: string | null; departTime?: string; daysOfWeek?: string[]; status?: string },
   ): Promise<TransportTripDto> {
-    if (input.departTime && !/^\d{2}:\d{2}$/.test(input.departTime)) throw new BadRequestException("departTime must be HH:MM");
+    if (input.departTime && !isHhmm(input.departTime)) throw new BadRequestException("departTime must be a time of day as HH:MM (00:00–23:59)");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const row = await tx.transportTrip.findFirst({ where: { id } });
       if (!row) throw new NotFoundException("Trip not found");
