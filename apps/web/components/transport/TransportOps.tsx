@@ -4,6 +4,7 @@ import { useFormat } from "@/components/shell/RegionProvider";
 
 import type { TransportRouteDto, TransportTripDto, TransportBoardingDto, VehicleMaintenanceDto, VehicleLocationDto, VehicleDto, TransportAssignmentDto, Serialized } from "@sms/types";
 import * as React from "react";
+import { usePolled } from "@/lib/use-polled";
 import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -126,19 +127,17 @@ function BoardingPanel({ routes, assignments, onMsg }: { routes: Route[]; assign
 function GpsPanel({ vehicles, canManage, onMsg }: { vehicles: Vehicle[]; canManage: boolean; onMsg: (s: string) => void }) {
   // Times follow the SCHOOL's clock, not the browser's.
   const { timeOfDay } = useFormat();
-  const [locs, setLocs] = React.useState<Serialized<VehicleLocationDto>[]>([]);
   const [vehicleId, setVehicleId] = React.useState(vehicles[0]?.id ?? "");
   const [lat, setLat] = React.useState("");
   const [lng, setLng] = React.useState("");
-  const load = React.useCallback(async () => {
-    const r = await fetch("/api/sms/transport/locations");
-    if (r.ok) setLocs(await r.json());
-  }, []);
-  React.useEffect(() => {
-    void load();
-    const t = setInterval(load, 15000); // refresh the live map every 15s
-    return () => clearInterval(t);
-  }, [load]);
+  // A MAP THAT HAS STOPPED REFRESHING SHOWS A BUS'S LAST KNOWN POSITION AS IF
+  // IT WERE LIVE, which is a statement about where children are. The card's own
+  // description promises it auto-refreshes; when it is not, it says so.
+  const { data: locs, refresh: load, stale } = usePolled<Serialized<VehicleLocationDto>[]>(
+    "transport/locations",
+    [],
+    { intervalMs: 15_000 },
+  );
   const push = async () => {
     const r = await send("POST", "/transport/locations", { vehicleId, lat: Number(lat), lng: Number(lng) });
     onMsg(r.ok ? "Location updated." : (r.error ?? "Failed."));
@@ -148,6 +147,12 @@ function GpsPanel({ vehicles, canManage, onMsg }: { vehicles: Vehicle[]; canMana
     <Card>
       <CardHeader><CardTitle className="text-base">Live fleet (GPS)</CardTitle><CardDescription>Latest known position per vehicle (auto-refreshes).</CardDescription></CardHeader>
       <CardContent className="space-y-3">
+        {stale && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            This map has stopped refreshing — it is still trying. These are the last positions it
+            received, not where the vehicles are now.
+          </p>
+        )}
         <div className="max-h-40 space-y-1 overflow-y-auto">
           {locs.length === 0 && <p className="text-sm text-muted-foreground">No location pings yet.</p>}
           {locs.map((l) => (

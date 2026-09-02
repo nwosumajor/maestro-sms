@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { usePolled } from "@/lib/use-polled";
 import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
 import { useRouter } from "next/navigation";
@@ -39,18 +40,26 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
   const [loading, setLoading] = React.useState(true);
   const [openRegister, setOpenRegister] = React.useState<string | null>(null);
 
-  const load = React.useCallback(async (d: string) => {
-    const res = await fetch(`/api/sms/exams/day?date=${d}`);
-    if (res.ok) setBoard((await res.json()) as Board);
+  // A BOARD THAT HAS STOPPED REFRESHING IS THE ONE FAILURE THIS SCREEN CANNOT
+  // ABSORB: it is what an exam officer works from on the morning, and a frozen
+  // roll looks exactly like a hall where nothing has changed.
+  const { data: polled, refresh, stale } = usePolled<Board | null>(
+    `exams/day?date=${date}`,
+    null,
+    { intervalMs: REFRESH_MS },
+  );
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    await refresh();
     setLoading(false);
-  }, []);
+  }, [refresh]);
 
   React.useEffect(() => {
-    setLoading(true);
-    void load(date);
-    const t = setInterval(() => void load(date), REFRESH_MS);
-    return () => clearInterval(t);
-  }, [date, load]);
+    void load();
+  }, [load]);
+  React.useEffect(() => {
+    if (polled) setBoard(polled);
+  }, [polled]);
 
   const act = async (fn: () => Promise<{ ok: boolean; error?: string | null }>, ok: string) => {
     setBusy(true);
@@ -59,7 +68,7 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
     setBusy(false);
     setMsg(res.ok ? ok : res.error ?? "Failed.");
     if (res.ok) {
-      await load(date);
+      await load();
       router.refresh();
     }
   };
@@ -94,13 +103,21 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
-              <Button size="sm" variant="outline" onClick={() => void load(date)}>
+              <Button size="sm" variant="outline" onClick={() => void load()}>
                 Refresh
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
+          {/* SAID BEFORE THE COUNTS, because every figure below it is the one
+              the board is trusted for and every one of them may be behind. */}
+          {stale && (
+            <p className="mb-3 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              This board has stopped refreshing — it is still trying. The counts below may be behind
+              what is happening in the halls.
+            </p>
+          )}
           {loading && !board ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : halls.length === 0 ? (
@@ -169,7 +186,7 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
 
                     {openRegister === h.sittingId && (
                       <div className="mt-3 border-t pt-3">
-                        <SittingRegister sittingId={h.sittingId} onSaved={() => void load(date)} />
+                        <SittingRegister sittingId={h.sittingId} onSaved={() => void load()} />
                       </div>
                     )}
                   </div>

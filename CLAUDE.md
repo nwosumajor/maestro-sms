@@ -898,6 +898,67 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A gate code that had expired, in a 4xl font
+`lib/use-polled.ts` (the hook, extracted), `ExamDayBoard`, `TransportOps` and
+the kiosk display in `AttendanceAdmin`. Found by sweeping the class the entry
+below fixed in the games rather than stopping there — **four screens repeated a
+read on a timer and all four wrote `if (res.ok) setData(...)`**, so a refused or
+failed refresh silently kept the old data and the screen simply stopped moving.
+These are exactly the screens whose point is that something IS changing.
+**THE GATE DISPLAY IS THE SHARPEST, and it is worse than stale — it is WRONG.**
+The clock-in code is a TOTP on a 30-second step, verified within ±1 step, polled
+every 5 s and rendered at `text-4xl`. A display that lost its connection went on
+showing a confident six-digit code that no longer works: every member of staff
+arriving reads it, types it, is refused, and nothing on the screen suggests the
+screen is the problem. The caption underneath asserted "refreshes every 30s"
+while it was not. On an anti-spoofing control.
+// **AND THE SERVER'S REFUSAL POINTS AT THE DISPLAY**: *"That code isn't current
+— read it off the display and try again"* — measured live, and exactly the wrong
+instruction when the display is the stale thing. The pair now agree: the screen
+says to wait for a code to appear rather than retyping the old one.
+// **IT EXPIRES BY ITS OWN CLOCK, which is stronger than catching a failed
+fetch.** A slept laptop, a throttled background tab and a refused request all
+end the same way — the code on the glass is past its window — and only the clock
+catches all three. `secondsRemaining` was already on the wire and this screen
+computed nothing with it; it is the countdown now, and the expiry.
+// ±1 STEP, MIRRORED FROM THE SERVER, and driven to find the real boundary
+rather than read for it:
+```
+code rotated on its step        294943 -> 027238
+the PREVIOUS code               201  accepted
+two steps old                   409  "That code isn't current"
+```
+So `until + KIOSK_STEP_MS` is right, and one named constant says why — the
+display's idea of "still valid" drifting from the server's idea of "still
+accepted" is the whole failure.
+// A FAILED REFRESH DOES NOT BLANK IT: the code on screen is valid until its own
+window runs out, and discarding it early would stop clock-ins that would have
+worked. The countdown removes it, not the fetch.
+// AND NOT A BLANK PANEL when it does go: a display showing nothing reads as
+"the kiosk is off" and sends staff looking for an administrator. It says which
+of the two it is.
+**THE OTHER TWO, same shape, different stakes.** `TransportOps` shows a bus's
+LAST KNOWN position as though it were live — a statement about where children
+are, under a description promising it auto-refreshes — so it now says the
+positions are "not where the vehicles are now" rather than only that something
+failed. `ExamDayBoard` is what an exam officer works from on the morning, and a
+frozen roll looks exactly like a hall where nothing has changed; the notice sits
+ABOVE the counts, because every figure below it may be behind.
+// **ONE HOOK, and that is the point of the round.** Four hand-rolled copies of
+one loop is how four of them came to share one hole; `usePolled` moved to
+`lib/use-polled.ts` and `play-ui` re-exports it, so a fix reaches all of them.
+The two-player boards keep theirs from the previous round.
+// GOTCHA, and it is the good kind: moving the hook turned
+`a-screen-that-says-it-stopped-moving` red, because it read the body out of
+`play-ui.tsx`. The property was untouched — re-anchored to where the rule now
+lives, and re-validated by mutating the moved file.
+// PROBE: the clock-in test recorded a real `staff_attendance` row for the demo
+teacher; removed by id, and the table holds nothing for today, as found.
+Mutation-validated six ways: a fifth hand-rolled copy, the exam board swallowing
+again, the map dropping what the positions ARE, an expired code shown again, the
+display's tolerance drifting from the server's, and a failed refresh blanking a
+still-valid code.
+
 ### A class of thirty-one, and the quiz stopped moving
 `PerCandidateRateLimit` widened to the class-game play routes, and `stale` on
 `usePolled` / `useLiveGame` / `LiveDot`. Found by carrying the entry below to

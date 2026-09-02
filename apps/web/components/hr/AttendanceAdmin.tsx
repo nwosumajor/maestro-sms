@@ -145,29 +145,74 @@ export function AttendanceAdmin({
   );
 }
 
+/**
+ * The server's TOTP step (`KIOSK_STEP_SEC = 30` in `attendance.service.ts`) and
+ * the ±1-step tolerance `verifyTotp` allows. Written here as ONE constant so
+ * the display's idea of "still valid" cannot drift from the server's idea of
+ * "still accepted" — the two disagreeing is the whole failure this guards.
+ */
+const KIOSK_STEP_MS = 30_000;
+
 function KioskCard({ initial, canWrite }: { initial: Serialized<KioskConfigDto> | null; canWrite: boolean }) {
   const [cfg, setCfg] = React.useState(initial);
-  const [code, setCode] = React.useState<{ code: string; secondsRemaining: number } | null>(null);
+  const [code, setCode] = React.useState<{ code: string; secondsRemaining: number; until: number } | null>(null);
   const [showDisplay, setShowDisplay] = React.useState(false);
   const [ips, setIps] = React.useState(initial?.allowedIps ?? "");
   const [lateAfter, setLateAfter] = React.useState(initial?.lateAfter ?? "08:00");
   const [err, setErr] = React.useState<string | null>(null);
 
-  // Poll the rotating code while the display is open.
+  // THE GATE DISPLAY, AND THE ONE SCREEN WHERE STALE IS WORSE THAN BLANK.
+  //
+  // The code is a TOTP on a 30-second step, verified within ±1 step, and the
+  // poll kept the last one on screen whenever a refresh failed. So a display
+  // that lost its connection went on showing a confident six-digit code in a
+  // 4xl font that no longer works: every member of staff arriving reads it,
+  // types it, is refused, and nothing on the screen suggests the screen is the
+  // problem. On an anti-spoofing control, and the caption underneath asserts
+  // "refreshes every 30s" while it is not.
+  //
+  // IT EXPIRES BY ITS OWN CLOCK, which is stronger than catching a failed
+  // fetch: `secondsRemaining` comes from the server and was computed and then
+  // thrown away by this screen. A laptop that slept, a throttled background
+  // tab and a refused request all end the same way — the code on the glass is
+  // past its window — and only the clock catches all three.
   React.useEffect(() => {
     if (!showDisplay) return;
     let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       const r = await req("GET", `/hr/attendance/kiosk/code`);
-      if (alive && r.ok) setCode(r.data as { code: string; secondsRemaining: number });
+      if (!alive) return;
+      if (r.ok) {
+        const c = r.data as { code: string; secondsRemaining: number };
+        setCode({ ...c, until: Date.now() + c.secondsRemaining * 1000 });
+      }
+      // No `else`: a failed refresh does not blank the code, because the one on
+      // screen is still valid until its own window runs out. The countdown is
+      // what removes it.
+      if (alive) timer = setTimeout(tick, 5000);
     };
     void tick();
-    const iv = setInterval(tick, 5000);
     return () => {
       alive = false;
-      clearInterval(iv);
+      clearTimeout(timer);
     };
   }, [showDisplay]);
+
+  // Tick the countdown so an expired code stops being shown the moment it
+  // expires, rather than at the next successful poll.
+  const [nowMs, setNowMs] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!showDisplay) return;
+    const id = setInterval(() => setNowMs(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [showDisplay]);
+  // ±1 STEP, matching `verifyTotp(secret, code, 1, ...)` on the server: a code
+  // read at the very end of its window is still accepted for one more step, so
+  // showing it for that step is correct rather than generous.
+  const codeExpiresAt = code ? code.until + KIOSK_STEP_MS : 0;
+  const codeLive = Boolean(code) && nowMs < codeExpiresAt;
+  const secondsLeft = Math.max(0, Math.ceil((codeExpiresAt - nowMs) / 1000));
 
   async function save(patch: Record<string, unknown>) {
     setErr(null);
@@ -205,10 +250,28 @@ function KioskCard({ initial, canWrite }: { initial: Serialized<KioskConfigDto> 
             <Button size="sm" variant="outline" onClick={() => setShowDisplay((v) => !v)}>
               {showDisplay ? "Hide display code" : "Show display code"}
             </Button>
-            {showDisplay && code && (
+            {showDisplay && codeLive && code && (
               <div className="mt-2 rounded-md border bg-muted/40 p-4 text-center">
                 <div className="font-mono text-4xl font-bold tracking-[0.3em]">{code.code}</div>
-                <div className="mt-1 text-xs text-muted-foreground">refreshes every 30s</div>
+                {/* THE COUNTDOWN THE SERVER WAS ALREADY SENDING. Without it a
+                    member of staff cannot tell one second from twenty-nine, and
+                    reads a code that changes while they are typing it. */}
+                <div className="mt-1 text-xs text-muted-foreground">
+                  valid for {secondsLeft}s · refreshes every 30s
+                </div>
+              </div>
+            )}
+            {showDisplay && !codeLive && (
+              // NOT A BLANK PANEL: a display showing nothing reads as "the
+              // kiosk is off" and staff go looking for an administrator. It
+              // says which of the two it is.
+              <div className="mt-2 rounded-md border border-destructive/50 bg-destructive/10 p-4 text-center text-sm text-destructive">
+                <p className="font-medium">No current code.</p>
+                <p className="mt-1">
+                  This display has lost touch with the server, so any code it was showing has
+                  expired and will not be accepted. It is still trying — staff clocking in should
+                  wait for a code to appear rather than retyping the old one.
+                </p>
               </div>
             )}
           </div>

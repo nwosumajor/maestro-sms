@@ -11,6 +11,11 @@
 // =============================================================================
 
 import * as React from "react";
+// ONE definition of "poll and say when it stops getting through",
+// shared with the transport map, the exam-day board and the gate
+// display — four hand-rolled copies all had the same hole.
+import { usePolled } from "@/lib/use-polled";
+export { usePolled };
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -61,65 +66,6 @@ export async function postSms<T = unknown>(
   return sendSms<T>("POST", path, body);
 }
 
-/**
- * Poll a BFF GET path on an interval, seeded with server-rendered initial data.
- * Pauses polling once `stop(data)` is true (e.g. the game finished).
- */
-export function usePolled<T>(
-  path: string,
-  initial: T,
-  opts: { intervalMs?: number; stop?: (data: T) => boolean } = {},
-): { data: T; refresh: () => Promise<boolean>; stale: boolean } {
-  const { intervalMs = 2500, stop } = opts;
-  const [data, setData] = React.useState<T>(initial);
-  // A FAILED POLL IS NOT "NOTHING CHANGED".
-  //
-  // This swallowed every non-ok response, so a screen whose refreshes were
-  // being refused simply stopped moving — indistinguishable from a game where
-  // nothing is happening. Measured on the running stack, a live quiz polls its
-  // session every 1.5s per player and one CLASS is over the school's request
-  // budget: 21% of polls refused at forty players, 39% at sixty. The host
-  // advanced the question and the pupils' screens did not.
-  const [stale, setStale] = React.useState(false);
-  const dataRef = React.useRef<T>(initial);
-  dataRef.current = data;
-
-  const refresh = React.useCallback(async () => {
-    const res = await fetch(`/api/sms/${path}`, { cache: "no-store" }).catch(() => null);
-    if (res?.ok) {
-      setData((await res.json()) as T);
-      setStale(false);
-      return true;
-    }
-    setStale(true);
-    return false;
-  }, [path]);
-
-  React.useEffect(() => {
-    if (stop && stop(dataRef.current)) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    // BACK OFF WHEN REFUSED, rather than hammering at the same rate. A poll
-    // that meets a rate limit and retries immediately is part of the reason it
-    // is being limited; the wait doubles to ten seconds and resets on success.
-    let wait = intervalMs;
-    const tick = async () => {
-      if (cancelled) return;
-      if (!(stop && stop(dataRef.current))) {
-        const ok = await refresh();
-        wait = ok ? intervalMs : Math.min(wait * 2, 10_000);
-      }
-      if (!cancelled) timer = setTimeout(tick, wait);
-    };
-    timer = setTimeout(tick, intervalMs);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [refresh, intervalMs, stop]);
-
-  return { data, refresh, stale };
-}
 
 /** Resolve the live game socket base. Behind nginx the API is same-origin under
  *  /ws/* (see infrastructure/nginx). In local dev set NEXT_PUBLIC_WS_URL to the
