@@ -957,8 +957,18 @@ export function ScholarshipAdmin() {
                       <p className={`mt-1 text-xs ${a.disbursed === false ? "text-amber-600 dark:text-amber-400" : "text-primary"}`}>
                         {a.awardPosition ? `${a.awardPosition === 1 ? "🥇 1st" : a.awardPosition === 2 ? "🥈 2nd" : "🥉 3rd"} place — ` : ""}
                         Awarded {money(a.awardMinor, a.awardCurrency)} ·{" "}
+                        {a.disbursed === false ? "NOT credited — " : ""}
+                        {/* THE REASON, not a guess at it. `disburseFeesCredit`
+                            refuses for three different reasons needing three
+                            different actions, and this line stated ONE of them
+                            as though it were always the reason — so an award
+                            that simply had no bill to credit sent an operator
+                            to check a currency setting that was correct. The
+                            audit row has recorded which since that arm was
+                            written; the screen somebody works from had not. */}
                         {a.disbursed === false
-                          ? "NOT yet credited — the school does not bill in the award's currency, so this needs posting by hand."
+                          ? a.disbursementIssue ??
+                            "NOT yet credited. This award was decided before the reason was recorded — check the audit log for it."
                           : a.disbursementKind === "CREDIT"
                             ? "held as credit on the pupil's account — it comes off their next bill."
                             : "fees credit posted against an open invoice."}

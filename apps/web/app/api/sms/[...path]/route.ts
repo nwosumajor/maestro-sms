@@ -66,6 +66,18 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   // The API sets this too; repeated here because this is the response the
   // browser actually sees, and a proxy that rebuilds headers owns them.
   out["X-Content-Type-Options"] = "nosniff";
+  // AND THE ONE HEADER A REFUSED CLIENT NEEDS. The API computes exactly when a
+  // rate-limit window reopens and sets `Retry-After`; this proxy rebuilt the
+  // header set without it, so every client behind the BFF had to GUESS. The
+  // exam room is where that costs something — a candidate's answer refused by
+  // the per-school limiter is retried against a window that can be a minute
+  // away — and it is the same defect as the dropped `Content-Disposition` this
+  // file already carries. The budget headers ride along so a client can pace
+  // itself BEFORE it is refused.
+  for (const h of ["retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"]) {
+    const v = res.headers.get(h);
+    if (v) out[h] = v;
+  }
   // NOTHING PROXIED FROM THE API IS A PAGE. Data and downloads have no reason
   // to run script, load an image or be framed, so this response is sandboxed
   // into an opaque origin with everything denied. It is the backstop for the

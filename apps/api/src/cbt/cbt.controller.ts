@@ -7,6 +7,7 @@ import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_INTEG
 import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto, CbtIntegritySummaryDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
+import { PerCandidateRateLimit } from "../auth/per-candidate-rate-limit.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -284,18 +285,21 @@ export class CbtController {
   }
 
   // --- students ------------------------------------------------------------------
+  @PerCandidateRateLimit()
   @Post("exams/:id/start")
   @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
   start(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtSittingViewDto> {
     return this.cbt.startSitting(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Get("sittings/:id")
   @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
   sitting(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtSittingViewDto> {
     return this.cbt.getSitting(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post("sittings/:id/answer")
   @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
   answer(
@@ -307,6 +311,7 @@ export class CbtController {
   }
 
   /** Candidate saves a THEORY answer (one row upserted, not a JSON blob). */
+  @PerCandidateRateLimit()
   @Post("sittings/:id/answer-theory")
   @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
   answerTheory(
@@ -353,6 +358,7 @@ export class CbtController {
    * SIGNALS ONLY — recording one never penalises, voids or submits the paper
    * (Golden Rule #8). Staff are notified once a sitting crosses the threshold.
    */
+  @PerCandidateRateLimit()
   @Post("sittings/:id/integrity")
   @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
   integrity(
@@ -363,6 +369,7 @@ export class CbtController {
     return this.cbt.recordIntegrityEvents(p, id, body.events);
   }
 
+  @PerCandidateRateLimit()
   @Post("sittings/:id/submit")
   @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
   submit(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtSittingViewDto> {

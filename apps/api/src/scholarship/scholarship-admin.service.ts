@@ -98,6 +98,30 @@ type DisbursementOutcome =
   | { ok: false; reason: "currency_mismatch"; invoiceCurrency: string }
   | { ok: false; reason: "school_bills_another_currency"; schoolCurrency: string };
 
+/**
+ * The sentence an operator reads when an award did not reach the family.
+ *
+ * ONE definition, written where the outcomes are, so the console cannot invent
+ * a fourth reading — and it names the ACTION, because "not credited" alone
+ * sends somebody to look at a currency setting that may be perfectly correct.
+ */
+export function disbursementIssueOf(
+  outcome: Extract<DisbursementOutcome, { ok: false }>,
+  awardCurrency: string,
+): string {
+  switch (outcome.reason) {
+    case "nothing_outstanding":
+      // NOT A PROBLEM TO CHASE, and saying so is the point: the family owes
+      // nothing today, so there was no bill to credit. Only a school that bills
+      // in another currency needs a hand posting.
+      return "The pupil had nothing outstanding when this was awarded, so there was no bill to credit and no credit was held.";
+    case "currency_mismatch":
+      return `The pupil's open invoice is in ${outcome.invoiceCurrency} and this award is in ${awardCurrency}. Post it by hand in the invoice's own currency.`;
+    case "school_bills_another_currency":
+      return `The school bills families in ${outcome.schoolCurrency} and this award is in ${awardCurrency}, so a credit written here could never be spent. Post it by hand, or run this programme in ${outcome.schoolCurrency}.`;
+  }
+}
+
 interface ProgramInput {
   title: string;
   description?: string | null;
@@ -427,6 +451,7 @@ export class ScholarshipAdminService {
       disbursed:
         r.status === "AWARDED" ? Boolean(r.disbursementPaymentId || r.disbursementCreditEntryId) : null,
       disbursementKind: r.disbursementPaymentId ? "INVOICE" : r.disbursementCreditEntryId ? "CREDIT" : null,
+      disbursementIssue: r.disbursementIssue ?? null,
       schoolId: r.schoolId,
       schoolName: school.get(r.schoolId) ?? null,
       studentId: r.studentId,
@@ -842,8 +867,20 @@ export class ScholarshipAdminService {
           where: { id },
           data:
             disbursement.kind === "INVOICE"
-              ? { disbursementPaymentId: disbursement.paymentId }
-              : { disbursementCreditEntryId: disbursement.creditEntryId },
+              ? { disbursementPaymentId: disbursement.paymentId, disbursementIssue: null }
+              : { disbursementCreditEntryId: disbursement.creditEntryId, disbursementIssue: null },
+        });
+      } else if (disbursement) {
+        // KEPT ON THE AWARD, not only in the audit log. The three refusals need
+        // three different actions — the pupil owes nothing, the open invoice is
+        // in another currency, the school does not bill in the award's currency
+        // at all — and the operator's own queue could say only "not credited",
+        // so it stated ONE of them as though it were always the reason. The
+        // audit row has recorded which since this arm was written; the screen
+        // somebody actually works from had not.
+        await db.scholarshipApplication.update({
+          where: { id },
+          data: { disbursementIssue: disbursementIssueOf(disbursement, awardCurrency) },
         });
       }
       // The audit row records WHY nothing was posted, not just that nothing was.
@@ -2549,6 +2586,7 @@ private libraryQuestionDto(r: Record<string, never>): ScholarshipLibraryQuestion
       disbursed:
         r.status === "AWARDED" ? Boolean(r.disbursementPaymentId || r.disbursementCreditEntryId) : null,
       disbursementKind: r.disbursementPaymentId ? "INVOICE" : r.disbursementCreditEntryId ? "CREDIT" : null,
+      disbursementIssue: r.disbursementIssue ?? null,
       schoolId: r.schoolId, schoolName: school?.name ?? null, studentId: r.studentId, studentName: student?.name ?? "Student",
       applicantId: r.applicantId, applicantName: applicant?.name ?? "Applicant", applicantRole: r.applicantRole,
       answers: r.answers ?? null, signals: (r.signals as ScholarshipApplicationDto["signals"]) ?? null, status: r.status,

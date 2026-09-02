@@ -103,8 +103,17 @@ describe("a platform exam needs no school invigilator", () => {
 describe("one exam room, two doors", () => {
   it("takes the surface as a parameter rather than being copied", () => {
     expect(ROOM).toMatch(/basePath = "cbt"/);
-    expect(ROOM.match(/\/api\/sms\/\$\{basePath\}\/sittings\//g) ?? []).toHaveLength(4);
+    // ANCHORED ON THE PROPERTY, not on a count. This asserted exactly four
+    // occurrences and went red when the answer and answer-theory saves were
+    // folded into ONE retrying helper — a fixed-text assertion firing on a
+    // change that STRENGTHENS what it guards, which this repo records
+    // repeatedly. What matters is that every sitting URL is built from the
+    // parameter and none is hard-coded to a surface.
+    const urls = ROOM.match(/`\/api\/sms\/[^`]*sittings\/[^`]*`/g) ?? [];
+    expect(urls.length).toBeGreaterThanOrEqual(3);
+    for (const u of urls) expect(u).toContain("${basePath}");
     expect(ROOM).not.toMatch(/\/api\/sms\/cbt\/sittings\//);
+    expect(ROOM).not.toMatch(/\/api\/sms\/scholarships\/sittings\//);
   });
 
   it("is opened from the portal by starting, not by a link to the paid page", () => {

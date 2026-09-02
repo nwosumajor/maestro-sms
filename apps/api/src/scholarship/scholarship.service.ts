@@ -796,6 +796,7 @@ export class ScholarshipService {
       awardMinor: number | null; reviewNote: string | null; createdAt: Date; updatedAt: Date;
       disbursementPaymentId?: string | null;
       disbursementCreditEntryId?: string | null;
+      disbursementIssue?: string | null;
     }>,
   ): Promise<ScholarshipApplicationDto[]> {
     if (rows.length === 0) return [];
@@ -837,6 +838,7 @@ export class ScholarshipService {
       disbursed:
         r.status === "AWARDED" ? Boolean(r.disbursementPaymentId || r.disbursementCreditEntryId) : null,
       disbursementKind: r.disbursementPaymentId ? "INVOICE" : r.disbursementCreditEntryId ? "CREDIT" : null,
+      disbursementIssue: r.disbursementIssue ?? null,
       schoolId: r.schoolId,
       schoolName: null,
       studentId: r.studentId,

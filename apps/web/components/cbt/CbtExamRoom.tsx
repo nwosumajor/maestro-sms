@@ -137,16 +137,78 @@ export function CbtExamRoom({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reason: submit is stable within this component's lifetime.
   }, [secondsLeft, open]);
 
+  // ANSWERS THE SERVER DOES NOT HOLD.
+  //
+  // Every save here is optimistic — the tick lands on screen and the POST
+  // follows — and a failed POST used to leave the tick standing. The candidate
+  // saw their choice selected, believed it recorded, and the script held
+  // nothing: silent partial success, on a child's exam answer.
+  //
+  // It is not hypothetical. The per-tenant limiter is 1,200 requests a minute
+  // KEYED ON THE SCHOOL, and an exam hall is precisely where one school makes
+  // many at once — measured, a compressed 1,000-candidate sitting is refused
+  // 429 mid-paper. A school's own wifi does the same thing for free.
+  //
+  // So: retry a transient failure, and where it still fails SAY WHICH
+  // QUESTIONS ARE UNSAVED rather than only flashing a banner. The choice stays
+  // on screen — losing the candidate's intent would be a worse answer than
+  // showing it as not yet saved — and submit warns before it closes over one.
+  const [unsaved, setUnsaved] = React.useState<Record<string, true>>({});
+  const mark = (questionId: string, failed: boolean) =>
+    setUnsaved((cur) => {
+      if (failed) return cur[questionId] ? cur : { ...cur, [questionId]: true };
+      if (!cur[questionId]) return cur;
+      const next = { ...cur };
+      delete next[questionId];
+      return next;
+    });
+  const unsavedCount = Object.keys(unsaved).length;
+
+  /**
+   * POST, and keep trying while the failure is a transient one.
+   *
+   * The question is FLAGGED FROM THE FIRST FAILURE rather than after the last
+   * attempt: the whole point is that the screen must never show an answer the
+   * server does not hold, and a retry that takes a minute would leave it
+   * looking saved for that minute.
+   *
+   * `Retry-After` is honoured where the server sends it — the per-school
+   * window can be up to a minute away, and guessing 400ms against that burns
+   * every attempt for nothing.
+   */
+  const saveAnswer = React.useCallback(
+    async (questionId: string, path: string, body: unknown) => {
+      let last: Response | null = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt > 0) {
+          const after = Number(last?.headers.get("retry-after") ?? 0);
+          const waitMs = after > 0 ? Math.min(after * 1000 + 250, 65_000) : 400 * attempt;
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
+        last = await fetch(`/api/sms/${basePath}/sittings/${s.sittingId}/${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).catch(() => null as unknown as Response);
+        if (last?.ok) return null;
+        mark(questionId, true);
+        // A REFUSAL IS NOT A BLIP. 400/403/409 mean the server has decided —
+        // the sitting is closed, the question is not on this paper — and
+        // retrying it three more times only delays telling the candidate.
+        if (last && last.status < 500 && last.status !== 429) break;
+      }
+      return last ? await readApiError(last) : "The answer could not be sent. Check your connection.";
+    },
+    [basePath, s.sittingId],
+  );
+
   const pick = async (questionId: string, choiceIndex: number) => {
     if (!open) return;
     // Optimistic: the local mark lands immediately; the server save follows.
     setS((cur) => ({ ...cur, answers: { ...cur.answers, [questionId]: choiceIndex } }));
-    const res = await fetch(`/api/sms/${basePath}/sittings/${s.sittingId}/answer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ questionId, choiceIndex }),
-    });
-    if (!res.ok) setMsg(await readApiError(res));
+    const err = await saveAnswer(questionId, "answer", { questionId, choiceIndex });
+    mark(questionId, err !== null);
+    setMsg(err);
   };
 
   // THEORY autosave. Debounced per question so typing doesn't post per keystroke,
@@ -157,12 +219,12 @@ export function CbtExamRoom({
     setS((cur) => ({ ...cur, theoryAnswers: { ...cur.theoryAnswers, [questionId]: text } }));
     clearTimeout(timers.current[questionId]);
     timers.current[questionId] = setTimeout(async () => {
-      const res = await fetch(`/api/sms/${basePath}/sittings/${s.sittingId}/answer-theory`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId, text }),
-      });
-      if (!res.ok) setMsg(await readApiError(res));
+      // The same retry and the same marker. Reverting is NOT the answer here —
+      // the candidate has typed an essay and destroying it would be worse than
+      // the bug — so the text stays and the question is flagged unsaved.
+      const err = await saveAnswer(questionId, "answer-theory", { questionId, text });
+      mark(questionId, err !== null);
+      setMsg(err);
     }, 800);
   };
 
@@ -271,16 +333,22 @@ export function CbtExamRoom({
             <div className="flex flex-wrap gap-1.5">
               {s.questions.map((q, i) => {
                 const done = answeredIds.has(q.id);
+                // A THIRD state, and it is the point: an answer the server has
+                // not taken is neither "answered" nor "still to do", and
+                // colouring it as answered is the lie being fixed.
+                const notSaved = unsaved[q.id] === true;
                 return (
                   <button
                     key={q.id}
                     type="button"
                     onClick={() => jumpTo(q.id)}
-                    aria-label={`Question ${i + 1}: ${done ? "answered" : "not answered"}${q.type === "THEORY" ? " (theory)" : ""}`}
-                    title={done ? `Question ${i + 1} — answered` : `Question ${i + 1} — not answered yet`}
+                    aria-label={`Question ${i + 1}: ${notSaved ? "answered but NOT saved" : done ? "answered" : "not answered"}${q.type === "THEORY" ? " (theory)" : ""}`}
+                    title={notSaved ? `Question ${i + 1} — your answer has not been saved` : done ? `Question ${i + 1} — answered` : `Question ${i + 1} — not answered yet`}
                     className={cn(
                       "tnum grid h-8 w-8 place-items-center rounded-md border text-xs font-semibold transition-colors",
-                      done
+                      notSaved
+                        ? "border-destructive bg-destructive/15 text-destructive"
+                        : done
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-amber-500/60 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400",
                       // Theory questions are visually distinct — they take longer,
@@ -295,6 +363,7 @@ export function CbtExamRoom({
             </div>
             <p className="text-[0.7rem] text-muted-foreground">
               Filled = answered · outlined = still to do{s.questions.some((q) => q.type === "THEORY") ? " · round = theory (written answer)" : ""}
+              {unsavedCount > 0 ? " · red = not saved, choose it again" : ""}
             </p>
           </CardContent>
         </Card>
@@ -319,12 +388,17 @@ export function CbtExamRoom({
                 Section B — Theory (written answers)
               </h2>
             )}
-          <Card ref={(el) => { cardRefs.current[q.id] = el; }} className={cn(open && !done && "border-amber-500/40")}>
+          <Card ref={(el) => { cardRefs.current[q.id] = el; }} className={cn(open && unsaved[q.id] ? "border-destructive/60" : open && !done && "border-amber-500/40")}>
             <CardContent className="space-y-3 p-4">
               <p className="text-sm font-medium">
                 <span className="mr-2 text-muted-foreground">{i + 1}.</span>
                 {q.prompt}
-                {open && !done && (
+                {open && unsaved[q.id] && (
+                  <span className="ml-2 rounded bg-destructive/15 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase text-destructive">
+                    not saved — choose again
+                  </span>
+                )}
+                {open && !done && !unsaved[q.id] && (
                   <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase text-amber-700 dark:text-amber-400">
                     not answered
                   </span>
@@ -393,6 +467,17 @@ export function CbtExamRoom({
         );
       })}
 
+      {/* NAMED, not just counted. "Something went wrong" sends a candidate
+          looking; the question numbers tell them exactly what to click again. */}
+      {open && unsavedCount > 0 && (
+        <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {unsavedCount === 1 ? "One answer has" : `${unsavedCount} answers have`} not been saved
+          — question{unsavedCount === 1 ? "" : "s"}{" "}
+          {s.questions.map((q, i) => (unsaved[q.id] ? i + 1 : null)).filter(Boolean).join(", ")}.
+          Choose {unsavedCount === 1 ? "it" : "them"} again. Your paper is scored from what the
+          server holds, not from what is shown here.
+        </p>
+      )}
       {msg && <p className="text-sm text-destructive">{msg}</p>}
       {open && (
         <div className="sticky bottom-4 flex justify-end">
@@ -400,6 +485,22 @@ export function CbtExamRoom({
             size="lg"
             disabled={busy}
             onClick={() => {
+              // AN UNSAVED ANSWER IS ASKED ABOUT FIRST, and separately, because
+              // it is a different fact from an unanswered one: the candidate DID
+              // answer and the server did not take it, so submitting now loses a
+              // mark they earned. Named by number, and it lands them on it.
+              const stillUnsaved = s.questions.filter((q) => unsaved[q.id]);
+              if (
+                stillUnsaved.length > 0 &&
+                !window.confirm(
+                  `${stillUnsaved.length} answer${stillUnsaved.length === 1 ? "" : "s"} could not be saved (question${stillUnsaved.length === 1 ? "" : "s"} ${stillUnsaved
+                    .map((q) => s.questions.indexOf(q) + 1)
+                    .join(", ")}). Submitting now scores this paper WITHOUT them. Submit anyway?`,
+                )
+              ) {
+                jumpTo(stillUnsaved[0].id);
+                return;
+              }
               // A last check before the paper closes — easy to miss one on a long
               // page, and after submitting there is no way back.
               if (

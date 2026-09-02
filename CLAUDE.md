@@ -898,6 +898,139 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The limiter ate the exam, and the screen said the answer was saved
+`PerCandidateRateLimit` (`auth/per-candidate-rate-limit.decorator.ts`),
+`saveAnswer` / `unsaved` in `CbtExamRoom`, `Retry-After` on the BFF, and
+`disbursementIssueOf` + `scholarship_application.disbursementIssue` (migration
+`20270131000000`). Found by running the 5,000-applicant exercise again with the
+question banks in it — 1,000 sitting a two-paper CBT and 1,000 a written one.
+**THE HEADLINE: A COHORT SITTING ONE PAPER IS NOT ONE SCHOOL FLOODING THE API,
+and the limiter could not tell them apart.** `TENANT_RATE_LIMIT_PER_MIN` is
+1,200 keyed on the SCHOOL, and its own header says it is there "to cap
+pathological floods, not to shape traffic". An exam hall is the one workload in
+this platform that is legitimately not interactive. Measured, driven:
+```
+                      papers done   429s     schools that sat   wall
+school-keyed (before)   517/2000    7,207          1 of 3       17m53s
+candidate-keyed (after) 2000/2000       0          3 of 3       13m46s
+```
+The refused candidates did not merely wait — the exam WINDOW closed on them, so
+the paper was scored without the questions they were being refused on. The
+limiter did not slow the exam down; it ate it.
+// THE KEY MOVES, NOT THE CEILING. Each candidate keeps a full budget — far more
+than a person can use, one answer per question on their own open sitting — and
+candidates stop contending for a number that has nothing to do with them. The
+abuse the limiter exists for is still caught: a token belongs to ONE user, so a
+scripted loop is still one key hitting its own ceiling.
+// DELIBERATELY NOT AN EXEMPTION (Golden Rule #7), and a test asserts the
+limiter is never SKIPPED for these routes. What they can do is already bounded
+by the sitting — a candidate answers only questions on their own paper, each
+answer is an upsert, and the server's own deadline closes it.
+// BOTH DOORS, because a guard on one is not a guard: `/cbt/*` is the paid
+module and `/scholarships/*` is the always-on surface that exists precisely
+because a candidate at a STANDARD school cannot reach the first.
+**AND THE SHARPER HALF, WHICH THE 429s ONLY EXPOSED: the exam room showed
+answers the server did not hold.** `pick` was optimistic — the tick lands, the
+POST follows — and a failed POST left the tick standing under a banner. The
+candidate saw their choice selected, believed it recorded, and the script held
+nothing. Silent partial success, on a child's marks, and the limiter is not
+even the likeliest cause: a school's own wifi does it for free.
+// THE CHOICE STAYS ON SCREEN and the question is FLAGGED. Reverting the tick
+would lose the candidate's intent over a transient failure, which is a worse
+answer than showing it unsaved — and for a THEORY answer it would destroy an
+essay they have typed.
+// FLAGGED FROM THE FIRST FAILURE, not after the last retry: a retry that takes
+a minute would otherwise leave the answer looking saved for that minute, which
+is the lie being fixed.
+// NAMED, NOT COUNTED. The navigator gains a THIRD state (an unsaved answer is
+neither "answered" nor "still to do"), the question card says "not saved —
+choose again", and the banner lists the question NUMBERS. And submit asks about
+them SEPARATELY from unanswered ones, because the candidate DID answer and
+submitting now scores the paper without a mark they earned.
+// A REFUSAL IS NOT A BLIP: 400/403/409 mean the server has decided — the
+sitting is closed, the question is not on this paper — and retrying those only
+delays telling the candidate.
+// **AND THE PROXY DROPPED THE ONE HEADER A REFUSED CLIENT NEEDS.** The API
+computes exactly when the window reopens and sets `Retry-After`; the BFF
+REBUILDS the header set from scratch, so it never reached the browser and every
+client had to guess — 400ms against a window up to a minute away burns every
+attempt for nothing. Same defect as the dropped `Content-Disposition` this file
+already records. The budget headers ride along too, so a client can pace itself
+BEFORE it is refused.
+**A FOURTH FINDING, from reading the podium: the console guessed why a prize did
+not reach a family.** `disburseFeesCredit` refuses for THREE reasons needing
+three different actions — the pupil owed nothing, the open invoice is in another
+currency, the school does not bill in the award's currency at all — and the
+operator's queue carried a bare `disbursed: false` and stated ONE of them as
+though it were always the reason. So an award with simply no bill to credit sent
+an operator to check a currency setting that was perfectly correct.
+// THE AUDIT ROW HAS RECORDED WHICH SINCE THAT ARM WAS WRITTEN, under a comment
+saying exactly why it matters: *"'disbursed: 0' is the same entry for a family
+with no open invoice and for an award refused because it was denominated in
+another currency, and only one of those needs somebody to act."* Somebody wrote
+that reasoning down for the LOG and left the screen guessing. Sibling asymmetry,
+careful half first, again.
+// STORED ON THE AWARD, not re-derived at read time: a school's currency can
+change afterwards, and re-deriving would then answer differently from what
+actually happened. Nullable — an award decided before the column cannot say
+which it was, and the console points at the audit log rather than inventing one.
+Live, the real case from the run:
+```
+1. MeastroTest School   NOT credited — The school bills families in GHS and this
+                        award is in NGN, so a credit written here could never be
+                        spent. Post it by hand, or run this programme in GHS.
+2. St. Andrews Academy  credited (CREDIT)
+```
+**WHAT THE EXERCISE MEASURED AND FOUND SOUND**, recorded so it is not re-chased:
+```
+120 questions written into two banks          2.8 s
+two 80-question two-subject papers assembled  150 ms
+5,000-application queue, first page           32 ms   (undecidedTotal 5,000)
+       page 40, the far end                   33 ms
+qualify 1,000 in bulk                         107 ms  · AWARD still refused in bulk
+the per-school cap made to bite               486 -> 300, 186 skipped BY NAME
+announce to 1,000, twice                      641 / 350 ms, notifyFailed 0
+1,000 physical marks, five sheets of 200      188 ms  · a stranger refuses the WHOLE sheet
+collect 1,000 CBT results                     220 ms
+six awards across two podiums                 all 201, school prizes stacked 9+6+3
+publish both tables                           30 / 25 ms
+GET /scholarships/results, as a pupil         36 ms, 7.2 KB, NO pupil name at 100 rows
+```
+// THE CANDIDATE'S PAYLOAD NEVER CARRIED THE KEY: `keyLeaks: 0` across 2,000
+papers, `answerIndex: null` at start, on re-read and after submit.
+// GOTCHA, FOUR TIMES, ALL MINE, AND ALL THE SAME LESSON: the bulk field is
+`ids` not `applicationIds`; the mark sheet takes `marks` not `scores`; the award
+has its OWN route with `position`, not the review enum; and a sitting question is
+`prompt`/`choices`, not `text`/`options`. **A probe that guesses a field name
+reports a fact about itself** — this file already records it and I did it four
+times in one run.
+// GOTCHA in the fixture: seeding `createdAt` from the same counter as the school
+made application AGE perfectly correlated with the school, so an oldest-first
+queue drained one school at a time and the cap never fired. The
+unrealistic-distribution trap, third instance.
+// GOTCHA, MINE, AND THE COSTLIEST: `git checkout` on an UNCOMMITTED file
+discards the FIX, not the mutation. This file records it; I did it anyway,
+mid-mutation-run, and had to reapply the whole exam-room change. Use a file
+backup.
+// GOTCHA: `a-candidate-can-sit-without-the-paid-module` asserted EXACTLY four
+literal `${basePath}/sittings/` occurrences and went red when the two answer
+saves were folded into one retrying helper — a fixed-text assertion firing on a
+change that STRENGTHENS what it guards, for the seventh time in this file.
+Re-anchored to the property: every sitting URL is built from the parameter and
+none is hard-coded.
+// PROBE: 5,000 users, 5,000 applications, 3 programmes, 2,000 sittings, 6 exams
+and their 6 materialised per-tenant question banks, 240 questions, 5 credit
+entries, 2,026 notifications and 5,262 audit rows removed; three school prizes
+cleared by reason; `scholarship_application` VACUUM FULLed from 6,920 kB of
+churn back to 176 kB. Four programmes and four applications remain, as found.
+Mutation-validated fourteen ways: five on the exam room (single attempt, retry a
+refusal, stop marking, throw the answer away, colour unsaved as answered), two
+more on it (drop the submit warning, count without naming), three on the
+Retry-After work (guess the backoff, the BFF drops it, flag only at the end),
+four on the limiter (back to the school key, fix one door only, exempt instead
+of re-key, a renamed route the gate cannot find), and five on the disbursement
+reason.
+
 ### A question library with no way to write a paper into it
 `scholarship_question_bank` (migration `20270130000000`, rls/50 part D),
 `listBanks` / `getBank` / `createBank` / `saveBank` / `reopenBank` /

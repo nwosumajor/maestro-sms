@@ -29,6 +29,7 @@ import type { Response } from "express";
 import { safeFilename } from "../documents/safe-content-type";
 import { narrowStatus, pageNumber } from "../common/status-filter";
 import { CURRENCIES, SCHOLARSHIP_BANK_STATUSES, scholarshipSubjectOptions } from "@sms/types";
+import { PerCandidateRateLimit } from "../auth/per-candidate-rate-limit.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -274,12 +275,14 @@ export class ScholarshipController {
   // module's gate is untouched rather than made conditional.
   /** The papers this candidate has, and where each stands. A scholarship may be
    *  examined in several subjects, so "the exam" is a list. */
+  @PerCandidateRateLimit()
   @Get("exams/:programId/papers")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   examPapers(@CurrentPrincipal() p: Principal, @Param("programId") programId: string): Promise<ScholarshipExamPaperDto[]> {
     return this.scholarships.examPapers(p, programId);
   }
 
+  @PerCandidateRateLimit()
   @Post("exams/:programId/start")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   startExam(
@@ -290,12 +293,14 @@ export class ScholarshipController {
     return this.scholarships.startExam(p, programId, body.examId);
   }
 
+  @PerCandidateRateLimit()
   @Get("sittings/:id")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   examSitting(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtSittingViewDto> {
     return this.scholarships.getExamSitting(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post("sittings/:id/answer")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   answerExam(
@@ -306,12 +311,14 @@ export class ScholarshipController {
     return this.scholarships.answerExam(p, id, body.questionId, body.choiceIndex);
   }
 
+  @PerCandidateRateLimit()
   @Post("sittings/:id/submit")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   submitExam(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtSittingViewDto> {
     return this.scholarships.submitExam(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post("sittings/:id/answer-theory")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   answerExamTheory(
@@ -322,6 +329,7 @@ export class ScholarshipController {
     return this.scholarships.answerExamTheory(p, id, body.questionId, body.text);
   }
 
+  @PerCandidateRateLimit()
   @Post("sittings/:id/integrity")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   examIntegrity(

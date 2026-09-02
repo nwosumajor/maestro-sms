@@ -464,6 +464,19 @@ export interface ScholarshipApplicationDto {
    * which, because only one of them shows up on a balance today.
    */
   disbursementKind: "INVOICE" | "CREDIT" | null;
+  /**
+   * WHY a granted award did not reach the family, in words an operator can act
+   * on. Null when it did, and null on an award decided before this was
+   * recorded — an old row cannot say which of the three reasons it was, and
+   * inventing one would be worse than saying nothing.
+   *
+   * The three need three different actions, which is the whole reason it is
+   * here: the pupil owed nothing (no action), the open invoice is in another
+   * currency (post by hand), or the school bills in another currency entirely
+   * (post by hand, or run the programme in theirs). The console used to state
+   * the second as though it were always the reason.
+   */
+  disbursementIssue: string | null;
   reviewNote: string | null;
   createdAt: Date;
   updatedAt: Date;

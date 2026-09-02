@@ -14,6 +14,7 @@ import type { Request, Response } from "express";
 import { isDelegatablePlatformPermission, type ModuleKey } from "@sms/types";
 import { activeGrantPermissions } from "./active-grants";
 import { PERMISSION_KEY } from "./require-permission.decorator";
+import { PER_CANDIDATE_RATE_LIMIT_KEY } from "./per-candidate-rate-limit.decorator";
 import { MODULE_KEY } from "./require-module.decorator";
 import { STEPUP_KEY } from "./require-stepup.decorator";
 import { PUBLIC_KEY } from "./public.decorator";
@@ -120,7 +121,17 @@ export class PermissionGuard implements CanActivate {
     // Per-tenant rate limit — BEFORE the module/permission DB work, so a flooding
     // tenant is rejected cheaply. Keyed on the JWT school_id; fails OPEN if Redis
     // is down. Noisy-neighbor isolation: one school's budget never touches another's.
-    const rl = await this.rateLimit.consume(principal.schoolId);
+    // PER-CANDIDATE ON THE EXAM ROUTES. A cohort sitting one paper is not one
+    // school flooding the API, and metering them together let the limiter eat a
+    // candidate's exam time — see `PerCandidateRateLimit` for the measurement.
+    // The school still bounds everything else it does.
+    const perCandidate = this.reflector.getAllAndOverride<boolean | undefined>(
+      PER_CANDIDATE_RATE_LIMIT_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    const rl = await this.rateLimit.consume(
+      perCandidate ? `${principal.schoolId}:${principal.userId}` : principal.schoolId,
+    );
     const res = context.switchToHttp().getResponse<Response>();
     res.setHeader("X-RateLimit-Limit", rl.limit);
     res.setHeader("X-RateLimit-Remaining", rl.remaining);

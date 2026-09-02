@@ -201,6 +201,11 @@ model ScholarshipApplication {
   /// pupil had no open invoice at the moment it was decided. Exactly one of
   /// this and `disbursementPaymentId` is set on a disbursed award.
   disbursementCreditEntryId String?                  @db.Uuid
+  /// Why a granted award did not reach the family — null when it did, or when
+  /// there was nothing to post. The audit row has always recorded this; the
+  /// operator's own queue could only say "not credited" and guessed at which of
+  /// the three reasons it was.
+  disbursementIssue         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

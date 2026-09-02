@@ -1,0 +1,13 @@
+-- WHY A PRIZE DID NOT REACH A FAMILY, kept on the award rather than only in the
+-- audit log.
+--
+-- `disburseFeesCredit` refuses for three different reasons — the pupil owes
+-- nothing, the open invoice is in another currency, or the school does not bill
+-- in the award's currency at all — and only some of them need somebody to act.
+-- The audit row has recorded which since the arm was written, and the operator's
+-- own review queue carried a single `disbursed: false` and stated ONE of the
+-- three as though it were always the reason.
+--
+-- Nullable, and null means nothing went wrong: every award already granted is
+-- unchanged, and an award that posted correctly carries no issue.
+ALTER TABLE "scholarship_application" ADD COLUMN IF NOT EXISTS "disbursementIssue" TEXT;
