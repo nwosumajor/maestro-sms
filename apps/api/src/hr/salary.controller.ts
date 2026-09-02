@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { SalaryChangeDto } from "@sms/types";
@@ -13,7 +14,7 @@ import { SalaryService } from "./salary.service";
 const requestSchema = z.object({
   newSalaryMinor: z.number().int().min(0),
   reason: z.string().max(500).nullish(),
-  effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  effectiveDate: isoDay.nullish(),
 });
 const decideSchema = z.object({ approve: z.boolean(), reason: z.string().max(500).nullish() });
 

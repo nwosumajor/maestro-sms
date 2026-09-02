@@ -1,3 +1,4 @@
+import { isIsoDay } from "./calendar-day";
 import { PAYSTACK_CURRENCIES } from "@sms/types";
 // =============================================================================
 // A filter nobody validated answers a question nobody asked
@@ -159,9 +160,15 @@ export function dateFilter(
   if (!dateOnly && !ISO_STAMP.test(v)) {
     throw new BadRequestException(`${field} must be a date (YYYY-MM-DD) or an ISO 8601 timestamp`);
   }
-  // A shape that parses is not a date that exists: "2026-13-45" passes the
-  // pattern and `new Date` yields Invalid Date, which reaches Prisma as a 500
-  // exactly like the unguarded sites did.
+  // A shape that parses is not a date that exists — and the NaN check alone
+  // only catches HALF of them. "2026-13-45" yields Invalid Date and was caught;
+  // "2026-04-31" ROLLS FORWARD to 1 May, so it parsed cleanly and the window
+  // silently began in the wrong month. Both are refused now, through the same
+  // `isIsoDay` the body schemas use — the day part is checked whichever of the
+  // two shapes the caller sent.
+  if (!isIsoDay(v.slice(0, 10))) {
+    throw new BadRequestException(`${field} is not a real date`);
+  }
   const d = new Date(dateOnly ? `${v}T${opts.end ? "23:59:59.999" : "00:00:00.000"}Z` : v);
   if (Number.isNaN(d.getTime())) {
     throw new BadRequestException(`${field} is not a real date`);

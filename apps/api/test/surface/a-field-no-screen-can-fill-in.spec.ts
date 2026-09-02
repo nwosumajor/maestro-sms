@@ -88,7 +88,11 @@ function optionalBodyFields(): Map<string, string[]> {
   const found = new Map<string, string[]>();
   for (const file of new Set(apiRoutes().map((r) => r.file))) {
     const src = readFileSync(file, "utf8");
-    const re = /(\w+)\s*:\s*z\.[^,\n]*?\.(optional|nullish)\(\)/g;
+    // A field is optional however its schema is SPELLED. This matched only
+    // `z.…` and went blind the moment a field moved to a shared validator
+    // (`completedAt: isoDay.nullish()`) — the extractor keying on a syntactic
+    // shape rather than on the property, so a real backlog entry looked stale.
+    const re = /(\w+)\s*:\s*(?:z\.[^,\n]*?|[A-Za-z_$][\w$]*)\.(optional|nullish)\(\)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
       const where = found.get(m[1]) ?? [];

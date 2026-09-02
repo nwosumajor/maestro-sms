@@ -2,6 +2,7 @@
 // EmploymentController — confirmation/promotion/renewal maker-checker endpoints
 // =============================================================================
 
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { HR_PERMISSIONS, MODULES } from "@sms/types";
@@ -18,7 +19,7 @@ const requestSchema = z.object({
   type: z.enum(["CONFIRMATION", "PROMOTION", "RENEWAL"]),
   newJobTitle: z.string().max(120).optional(),
   newGradeLevel: z.string().max(40).optional(),
-  newEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  newEndDate: isoDay.optional(),
   reason: z.string().max(500).optional(),
 });
 const decideSchema = z.object({ approve: z.boolean() });

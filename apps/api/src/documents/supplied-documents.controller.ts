@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
@@ -51,7 +52,7 @@ const startUploadSchema = z.object({
 const decideSchema = z.object({
   status: z.enum(["VERIFIED", "REJECTED"]),
   reason: z.string().max(400).optional(),
-  expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  expiresAt: isoDay.optional(),
 });
 
 const promoteSchema = z.object({

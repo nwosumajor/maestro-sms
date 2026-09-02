@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from "@nestjs/common";
 import { csvDocument } from "../common/csv";
 import { MODULES, USER_KINDS, type UserKind , SUBJECT_STAGES, CLASS_STREAMS, CLASS_ARMS, WORKFLOW_PERMISSIONS } from "@sms/types";
@@ -46,10 +47,10 @@ const enrollStatusSchema = z.object({
 });
 const sessionSchema = z.object({
   name: z.string().min(1).max(60),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  startDate: isoDay.nullish(),
+  endDate: isoDay.nullish(),
 });
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish();
+const isoDate = isoDay.nullish();
 /** Every field optional: an edit that only renames must not require the dates. */
 const sessionUpdateSchema = z.object({
   name: z.string().min(1).max(60).optional(),
@@ -106,15 +107,15 @@ const gradingPolicySchema = z.object({
 const catalogueAddSchema = z.object({ codes: z.array(z.string().min(1).max(16)).min(1).max(100) });
 const standardSessionSchema = z.object({
   name: z.string().min(1).max(60),
-  yearStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  yearStart: isoDay,
   makeCurrent: z.boolean().optional(),
   // Omitted => the school's own shape, which defaults to its country's.
   template: z.string().max(24).optional(),
 });
 const holidaySchema = z.object({
   name: z.string().min(1).max(100),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startDate: isoDay,
+  endDate: isoDay,
 });
 const teacherSchema = z.object({ teacherId: z.string().uuid() });
 const studentSchema = z.object({ studentId: z.string().uuid() });

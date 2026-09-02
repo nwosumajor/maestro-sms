@@ -2,6 +2,7 @@
 // DutyController — duty roster (hr.write assigns; hr.read views; hr.self = mine)
 // =============================================================================
 
+import { isoDay } from "../common/calendar-day";
 import { hhmm } from "../common/time-of-day";
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { z } from "zod";
@@ -16,15 +17,15 @@ import { DutyService } from "./duty.service";
 
 const assignSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(50),
-  dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(31),
+  dates: z.array(isoDay).min(1).max(31),
   title: z.string().min(1).max(120),
   startTime: hhmm,
   endTime: hhmm,
   note: z.string().max(300).optional(),
 });
 const rangeSchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  from: isoDay,
+  to: isoDay,
 });
 
 @RequireModule(MODULES.HR)

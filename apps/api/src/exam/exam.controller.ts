@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
@@ -11,7 +12,7 @@ import { ExamService } from "./exam.service";
 import { safeFilename } from "../documents/safe-content-type";
 
 import { hhmm } from "../common/time-of-day";
-const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const ymd = isoDay;
 const sittingSchema = z
   .object({
     title: z.string().min(1).max(200),

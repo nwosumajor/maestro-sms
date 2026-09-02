@@ -2,6 +2,7 @@
 // StaffAttendanceController — register (hr.write/hr.read) + kiosk clock-in (hr.self)
 // =============================================================================
 
+import { isoDay } from "../common/calendar-day";
 import { hhmm } from "../common/time-of-day";
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, RawBodyRequest, Req } from "@nestjs/common";
 import type { Request } from "express";
@@ -25,7 +26,7 @@ import { boundedInt } from "../common/status-filter";
 
 const markSchema = z.object({
   userId: z.string().uuid(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: isoDay,
   status: z.enum(["PRESENT", "LATE", "ABSENT"]),
   note: z.string().max(300).optional(),
 });

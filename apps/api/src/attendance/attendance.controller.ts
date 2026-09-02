@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -15,7 +16,7 @@ import { JobRunsService } from "../maintenance/job-runs.service";
 const pageSchema = z.coerce.number().int().min(1).max(100_000).optional();
 
 const markSchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: isoDay,
   records: z
     .array(
       z.object({

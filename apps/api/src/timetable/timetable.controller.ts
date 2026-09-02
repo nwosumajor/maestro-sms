@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { MODULES } from "@sms/types";
@@ -69,7 +70,7 @@ const availabilitySchema = z.object({
 const entryUpdateSchema = entrySchema.partial();
 const coverSchema = z.object({
   timetableEntryId: z.string().uuid(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: isoDay,
   coveringTeacherId: z.string().uuid(),
   note: z.string().max(500).optional(),
 });

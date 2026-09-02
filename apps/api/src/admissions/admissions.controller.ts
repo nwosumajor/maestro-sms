@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Put, UseGuards, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -20,7 +21,7 @@ const detailsSchema = z.object({
   parentAddress: z.string().max(400).nullish(),
   relationship: z.string().max(60).nullish(),
   childName: z.string().min(1).max(200),
-  childDob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  childDob: isoDay.nullish(),
   childGender: z.string().max(20).nullish(),
   desiredClass: z.string().max(80).nullish(),
   priorSchool: z.string().max(200).nullish(),
@@ -33,7 +34,7 @@ const submitSchema = z.object({
   applicantEmail: z.string().email(),
   applicantPhone: z.string().max(40).nullish(),
   childName: z.string().min(1).max(200),
-  childDob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  childDob: isoDay.nullish(),
   desiredClass: z.string().max(80).nullish(),
   notes: z.string().max(2000).nullish(),
   details: detailsSchema.nullish(),

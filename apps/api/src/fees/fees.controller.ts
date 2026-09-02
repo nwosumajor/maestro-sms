@@ -1,3 +1,4 @@
+import { isIsoDay, isoDay } from "../common/calendar-day";
 import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Put, Query, Req, Res } from "@nestjs/common";
 import { boundedInt, narrowStatus } from "../common/status-filter";
 import { MODULES } from "@sms/types";
@@ -33,7 +34,7 @@ const feeItemSchema = z.object({
 const feeItemUpdateSchema = feeItemSchema.partial();
 const invoiceSchema = z.object({
   studentId: z.string().uuid(),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dueDate: isoDay,
   reference: z.string().max(64).optional(),
   notes: z.string().max(2000).nullish(),
   currency: z.string().length(3).optional(),
@@ -95,7 +96,7 @@ const lateFeeSchema = z.object({
 
 const planSchema = z.object({
   tranches: z
-    .array(z.object({ dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), amountMinor: z.number().int().min(1) }))
+    .array(z.object({ dueDate: isoDay, amountMinor: z.number().int().min(1) }))
     .min(1)
     .max(24),
 });
@@ -205,7 +206,7 @@ export class FeesController {
     @Query("to") to: string,
     @Res() res: Response,
   ) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(from ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(to ?? "")) {
+    if (!isIsoDay(from ?? "") || !isIsoDay(to ?? "")) {
       throw new BadRequestException("from/to must be YYYY-MM-DD");
     }
     const { csv, filename } = await this.feeOps.journalCsv(p, from, to);

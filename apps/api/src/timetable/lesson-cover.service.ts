@@ -10,6 +10,7 @@
 // already teach. Reads are staff-wide; a teacher sees their own cover duties.
 // =============================================================================
 
+import { isIsoDay } from "../common/calendar-day";
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { CoverLessonDto, MyCoverDutyDto } from "@sms/types";
 import { schoolToday } from "@sms/types";
@@ -55,7 +56,7 @@ export class LessonCoverService {
    */
   private parseDay(v: string | undefined): Date | undefined {
     if (v === undefined || v === "") return undefined;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new BadRequestException("Date must be YYYY-MM-DD");
+    if (!isIsoDay(v)) throw new BadRequestException("Date must be YYYY-MM-DD");
     const d = new Date(`${v}T00:00:00.000Z`);
     if (Number.isNaN(d.getTime())) throw new BadRequestException("Date must be YYYY-MM-DD");
     return d;

@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -14,8 +15,8 @@ const employeeSchema = z.object({
   jobTitle: z.string().min(1).max(120),
   department: z.string().max(120).nullish(),
   employmentType: z.enum(["FULL_TIME", "PART_TIME", "CONTRACT"]).optional(),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  startDate: isoDay,
+  endDate: isoDay.nullish(),
   salaryMinor: z.number().int().min(0).nullish(),
   status: z.string().max(40).optional(),
   tin: z.string().max(40).nullish(),

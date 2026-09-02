@@ -14,6 +14,7 @@
 // their OWN history, hr.read sees all. Tenant-isolated (RLS).
 // =============================================================================
 
+import { isIsoDay } from "../common/calendar-day";
 import { isHhmm, normaliseHhmm } from "../common/time-of-day";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
@@ -56,7 +57,7 @@ type MarkRow = {
 };
 
 function dayUtc(dateStr: string): Date {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) throw new BadRequestException("date must be YYYY-MM-DD");
+  if (!isIsoDay(dateStr)) throw new BadRequestException("date must be YYYY-MM-DD");
   const d = new Date(`${dateStr}T00:00:00.000Z`);
   if (Number.isNaN(d.getTime())) throw new BadRequestException("invalid date");
   return d;

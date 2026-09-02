@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { RequireModule } from "../auth/require-module.decorator";
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { EXEAT_STATUSES, HOSTEL_PERMISSIONS, MODULES } from "@sms/types";
@@ -55,7 +56,7 @@ const feeSchema = z.object({
   dueDate: z.string(),
   description: z.string().max(200).optional(),
 });
-const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 const rollCallSchema = z.object({
   date: isoDay,
   records: z

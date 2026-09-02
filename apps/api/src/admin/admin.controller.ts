@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Delete, Get, Header, Param, Post, Put } from "@nestjs/common";
 import { z } from "zod";
 import { ADMIN_PERMISSIONS, LMS_PERMISSIONS, SIS_PERMISSIONS } from "@sms/types";
@@ -36,7 +37,7 @@ const sisRowSchema = z.object({
   // school's domain. Most pupils have no address of their own.
   email: z.string().email().nullish(),
   admissionNumber: z.string().max(60).nullish(),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  dateOfBirth: isoDay.nullish(),
   gender: z.string().max(20).nullish(),
   phone: z.string().max(40).nullish(),
   address: z.string().max(400).nullish(),

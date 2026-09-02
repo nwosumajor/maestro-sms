@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { TRANSPORT_PERMISSIONS, MODULES } from "@sms/types";
@@ -67,7 +68,7 @@ const assignSchema = z.object({
 });
 const changeSchema = z.object({ routeId: z.string().uuid(), stopId: z.string().uuid().nullish() });
 const feeSchema = z.object({ routeId: z.string().uuid().optional(), dueDate: z.string(), description: z.string().max(200).optional() });
-const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 // The shared one — this file's own copy took `25:99`, and the trip list is
 // ordered by this column as a string.
 import { hhmm } from "../common/time-of-day";

@@ -8,6 +8,7 @@
 // salary maker-checker separately. Tenant-isolated (RLS); everything audited.
 // =============================================================================
 
+import { isIsoDay } from "../common/calendar-day";
 import { hasSecondApprover, noSecondApproverMessage } from "../common/approvers";
 import { NotificationService } from "../notifications/notification.service";
 import { HR_PERMISSIONS } from "@sms/types";
@@ -78,7 +79,7 @@ export class EmploymentService {
       }
       let newEndDate: Date | null = null;
       if (input.type === "RENEWAL") {
-        if (!input.newEndDate || !/^\d{4}-\d{2}-\d{2}$/.test(input.newEndDate)) {
+        if (!input.newEndDate || !isIsoDay(input.newEndDate)) {
           throw new BadRequestException("A renewal needs the new contract end date (YYYY-MM-DD)");
         }
         newEndDate = new Date(`${input.newEndDate}T00:00:00.000Z`);

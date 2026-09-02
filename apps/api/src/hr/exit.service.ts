@@ -11,6 +11,7 @@
 // (account disabling stays a human checklist task — never automatic).
 // =============================================================================
 
+import { isIsoDay } from "../common/calendar-day";
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { computeFinalSettlement, type FinalSettlement, type StaffExitDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
@@ -65,7 +66,7 @@ export class ExitService {
     p: Principal,
     input: { userId: string; type: "RESIGNATION" | "TERMINATION" | "RETIREMENT"; lastWorkingDay: string; reason?: string },
   ): Promise<StaffExitDto> {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.lastWorkingDay)) {
+    if (!isIsoDay(input.lastWorkingDay)) {
       throw new BadRequestException("lastWorkingDay must be YYYY-MM-DD");
     }
     // The guard below is the sentence a user reads; a partial unique index

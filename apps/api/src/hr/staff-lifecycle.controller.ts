@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { StaffChecklistDto, StaffDocumentDto, TrainingRecordDto, StaffHandoverDto } from "@sms/types";
@@ -17,14 +18,14 @@ const documentSchema = z.object({
   kind: z.enum(["CONTRACT", "WORK_PERMIT", "CERTIFICATION", "MEDICAL", "OTHER"]),
   name: z.string().min(1).max(160),
   documentId: z.string().uuid().nullish(),
-  expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  expiresAt: isoDay.nullish(),
 });
 const trainingSchema = z.object({
   title: z.string().min(1).max(160),
   provider: z.string().max(160).nullish(),
   status: z.enum(["PLANNED", "COMPLETED"]).optional(),
-  completedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
-  expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  completedAt: isoDay.nullish(),
+  expiresAt: isoDay.nullish(),
 });
 
 @RequireModule(MODULES.HR)

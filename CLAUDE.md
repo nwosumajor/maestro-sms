@@ -898,6 +898,66 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A last working day of 31 April, filed in May
+`common/calendar-day.ts` (`ISO_DAY_PATTERN` / `isIsoDay` / `isoDay`), replacing
+**forty-two** hand-rolled copies across 24 files, plus the same hole in
+`dateFilter`. The sibling of the entry below, found by asking the same question
+of the field beside it: `/^\d{4}-\d{2}-\d{2}$/` describes the SHAPE of a date
+rather than a date.
+**MEASURED ON THE SHARPEST PATH — a staff member's LAST WORKING DAY:**
+```
+2026-04-31   201  stored as 2026-05-01   <- a different MONTH
+2026-02-31   201  stored as 2026-03-03
+2026-11-31   201  stored as 2026-12-01   <- a different MONTH
+2026-13-45   500  Internal server error
+0000-01-01   201  stored as written
+```
+// **THE MONTH ROLL IS NOT COSMETIC.** `finalMonthAlreadyPaid` decides whether
+a leaver's final month has already been paid by looking at THE LAST WORKING
+DAY'S MONTH — this file records that reasoning in full — and access is revoked
+on that day. A 31 April typed by somebody who meant the 30th moves both into
+May, silently, on a record that then drives money.
+// **JAVASCRIPT ROLLS RATHER THAN REFUSING**, which is why a shape check AND a
+`Number.isNaN` check both pass: `new Date("2026-04-31")` is 1 May. The only
+reliable test is the ROUND TRIP — is the date we get back the date we were
+given — and a test asserts the roll is real so it cannot pass vacuously.
+// THE 500 IS THE OTHER HALF, and the class this repo has fixed twice before
+(`?page=abc` reaching Prisma as `skip: NaN`; a raw cast before
+`MalformedIdFilter` could see it). A client typo must not become an internal
+error. // GOTCHA: `probe:no-500` could never have found this one — it sweeps
+QUERY STRINGS, and this is a BODY field. A probe's bound is where the next
+instance hides.
+// THE YEAR IS BOUNDED (1900–2200) because `0000-01-01` is what a broken form
+default looks like rather than a date anybody chose. Generous on purpose: a
+sanity bound, not a business rule.
+// **AND THE SHARED QUERY-STRING NARROWER HAD HALF OF IT.** `dateFilter` was
+built for exactly this class and caught `2026-13-45` (an Invalid Date) while
+`2026-04-31` parsed cleanly and the window silently began in the wrong month —
+on the finance links this repo already calls "a first-class input, bookmarked,
+shared with an accountant". Both shapes now go through `isIsoDay` on the day
+part, whichever of the two formats the caller sent.
+Live, after, on both halves:
+```
+POST /hr/exits  lastWorkingDay=2026-04-31   400 "must be a real calendar day…"
+                                2026-04-30   201 stored 2026-04-30
+GET  /security/audit?from=2026-04-31         400 "from is not a real date"
+GET  /events, /library/report  same          400 · a real day still 200
+```
+// GOTCHA, and it is the gate working: replacing the regex with a shared schema
+turned `a-field-no-screen-can-fill-in` red — its extractor matched only `z.…`,
+so `completedAt: isoDay.nullish()` stopped being seen as optional and a live
+backlog entry looked STALE. The extractor keyed on a syntactic shape rather
+than on the property; widened, and checked BOTH ways so it is not blind in the
+other direction either.
+// CLEAN NEGATIVE: `/fees/reports` takes no window at all, so its 200 on a
+nonsense `?from=` was my probe passing a parameter the route ignores, not a
+gap.
+// PROBE: five staff exits and the trips/maintenance rows from the round below
+removed; every table is as found.
+Mutation-validated four ways: shape-only with no round trip (the original
+defect), drop the year bound, stop checking the day exists in the query-string
+window, and hand-roll a forty-third copy.
+
 ### A typo in "late after", and nobody was ever late again
 `common/time-of-day.ts` (`HHMM_PATTERN` / `hhmm` / `isHhmm` / `normaliseHhmm`),
 replacing six hand-rolled validators across four modules. Found by driving the

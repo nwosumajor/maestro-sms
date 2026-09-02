@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -16,7 +17,7 @@ import { SisService } from "./sis.service";
 const nullableStr = z.string().max(2000).nullish();
 const profileSchema = z.object({
   admissionNumber: nullableStr,
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  dateOfBirth: isoDay.nullish(),
   gender: nullableStr,
   phone: nullableStr,
   email: z.string().email().nullish(),

@@ -1,3 +1,4 @@
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Post, Query } from "@nestjs/common";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { LeaveBalanceDto, LeavePageDto, LeaveRequestDto, LeaveTypeDto } from "@sms/types";
@@ -31,8 +32,8 @@ const registerQuerySchema = z.object({
 });
 const requestSchema = z.object({
   leaveTypeId: z.string().uuid(),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startDate: isoDay,
+  endDate: isoDay,
   // Fractional leave in 0.5-day steps (half-day support).
   days: z.number().min(0.5).max(365).refine((d) => Number.isInteger(d * 2), "days must be in 0.5 increments"),
   reason: z.string().max(500).nullish(),

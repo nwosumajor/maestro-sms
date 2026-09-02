@@ -2,6 +2,7 @@
 // ExitController — exit management (initiate hr.write; decide = step-up money)
 // =============================================================================
 
+import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { z } from "zod";
 import { HR_PERMISSIONS, MODULES } from "@sms/types";
@@ -17,7 +18,7 @@ import { ExitService } from "./exit.service";
 const initiateSchema = z.object({
   userId: z.string().uuid(),
   type: z.enum(["RESIGNATION", "TERMINATION", "RETIREMENT"]),
-  lastWorkingDay: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  lastWorkingDay: isoDay,
   reason: z.string().max(500).optional(),
 });
 const decideSchema = z.object({ approve: z.boolean() });

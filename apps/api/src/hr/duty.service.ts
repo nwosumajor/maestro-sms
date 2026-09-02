@@ -7,6 +7,7 @@
 // the whole roster. Tenant-isolated (RLS).
 // =============================================================================
 
+import { isIsoDay } from "../common/calendar-day";
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { DutyAssignmentDto } from "@sms/types";
 import { NotificationService } from "../notifications/notification.service";
@@ -56,7 +57,7 @@ export class DutyService {
     const end = hhmmToMinutes(input.endTime);
     if (Number.isNaN(start) || Number.isNaN(end)) throw new BadRequestException("times must be HH:MM");
     const dates = input.dates.map((d) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new BadRequestException("dates must be YYYY-MM-DD");
+      if (!isIsoDay(d)) throw new BadRequestException("dates must be YYYY-MM-DD");
       return new Date(`${d}T00:00:00.000Z`);
     });
     if (input.userIds.length === 0 || dates.length === 0) throw new BadRequestException("pick staff and dates");
