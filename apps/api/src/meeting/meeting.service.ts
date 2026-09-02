@@ -239,10 +239,15 @@ export class MeetingService {
     slot: { id: string; startsAt: Date; endsAt: Date; location: string | null },
     audience: MeetingAudience,
     label: string,
-  ): Promise<void> {
+    // CALLED or CALLED OFF. One announcer for both, because they are two
+    // readings of the same audience and a second copy is how a pair drifts —
+    // the argument this codebase already made for `meetingWhen` and for the
+    // cover-withdrawal notice.
+    kind: "called" | "withdrawn" = "called",
+  ): Promise<number> {
     try {
       const recipients = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.resolveAudience(tx, audience, slot.id));
-      if (recipients.length === 0) return;
+      if (recipients.length === 0) return 0;
       const when = schoolTimeString(await this.timezoneOf(p), slot.startsAt);
       for (let i = 0; i < recipients.length; i += ANNOUNCE_CHUNK) {
         const chunk = recipients.slice(i, i + ANNOUNCE_CHUNK);
@@ -251,20 +256,27 @@ export class MeetingService {
           // A key, not a sentence: enqueueMany renders per RECIPIENT, so a
           // francophone parent is written to in French and an anglophone one in
           // English from the same call.
-          key: "meeting.called",
+          key: kind === "called" ? "meeting.called" : "meeting.withdrawn",
           params: { audience: label, date: when, location: slot.location ?? "the school" },
-          title: "A meeting has been called",
-          body: `${label} — ${when}${slot.location ? ` at ${slot.location}` : ""}.`,
+          title: kind === "called" ? "A meeting has been called" : "A meeting has been called off",
+          body:
+            kind === "called"
+              ? `${label} — ${when}${slot.location ? ` at ${slot.location}` : ""}.`
+              : `${label} — the meeting on ${when} is no longer taking place. Nothing is needed from you.`,
           data: { slotId: slot.id },
           channels: ["EMAIL"],
         });
       }
-      this.logger.log(`Meeting ${slot.id} announced to ${recipients.length} guardian(s): ${label}`);
+      this.logger.log(`Meeting ${slot.id} ${kind} to ${recipients.length} guardian(s): ${label}`);
+      return recipients.length;
     } catch (err) {
       // Deliberately swallowed and LOGGED. An announcement that fails silently
       // and invisibly is the worse outcome; the meeting still exists and is on
-      // every invited parent's page regardless.
-      this.logger.error(`Meeting ${slot.id} announcement failed: ${String(err)}`);
+      // every invited parent's page regardless — and a withdrawal is already
+      // committed by the time this runs, so losing it to a failed notice would
+      // be worse than the notice.
+      this.logger.error(`Meeting ${slot.id} ${kind} announcement failed: ${String(err)}`);
+      return 0;
     }
   }
 
@@ -488,9 +500,21 @@ export class MeetingService {
   }
 
   /** Withdraw an unbooked slot. Host / staff-wide. */
-  async withdrawSlot(p: Principal, id: string): Promise<{ withdrawn: boolean }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const slot = await tx.meetingSlot.findFirst({ where: { id }, select: { teacherId: true } });
+  async withdrawSlot(p: Principal, id: string): Promise<{ withdrawn: boolean; told: number }> {
+    const { slot } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // The audience is read HERE, with the slot, because the withdrawal has to
+      // reach the same people the announcement did.
+      const slot = await tx.meetingSlot.findFirst({
+        where: { id },
+        select: {
+          teacherId: true,
+          startsAt: true,
+          endsAt: true,
+          location: true,
+          audienceKind: true,
+          audienceRef: true,
+        },
+      });
       if (!slot) throw new NotFoundException("Slot not found");
       if (slot.teacherId !== p.userId && !p.roles.some((r) => STAFF_WIDE.has(r))) {
         throw new ForbiddenException("Only the host or an administrator may withdraw this slot");
@@ -502,8 +526,39 @@ export class MeetingService {
         { actorId: p.userId, action: "meeting.slot.withdraw", entity: "meeting_slot", entityId: id, schoolId: p.schoolId },
         tx,
       );
-      return { withdrawn: true };
+      return { slot };
     });
+
+    // THE OTHER HALF OF THE ANNOUNCEMENT, and it runs OUTSIDE the transaction
+    // for the same reason `announce` does on create: a whole-school audience is
+    // thousands of notification rows, and holding the withdrawal's transaction
+    // open for them would be the 5-second interactive cap this codebase has
+    // already been bitten by twice.
+    //
+    // RETRACT ONLY WHAT WAS ACTUALLY SENT. `announce` fires on create for every
+    // declared audience EXCEPT a single-pupil appointment, which is a private
+    // offer nobody was told about — so a retraction for one would be the first
+    // its recipient heard of any of it. Same condition, both ways.
+    let told = 0;
+    if (slot.audienceKind && slot.audienceKind !== "STUDENT") {
+      const audience: MeetingAudience = {
+        kind: slot.audienceKind as MeetingAudience["kind"],
+        ref: slot.audienceRef ?? null,
+      };
+      // The audience is RE-RESOLVED rather than replayed: nothing records who
+      // was told, and telling whoever the class holds NOW is closer to right
+      // than telling nobody. A parent who joined since gets a notice about a
+      // meeting they never heard of, which is noise; a parent who was told and
+      // is not told again would turn up.
+      told = await this.announce(
+        p,
+        { id, startsAt: slot.startsAt, endsAt: slot.endsAt, location: slot.location },
+        audience,
+        await this.audienceLabelFor(p, audience),
+        "withdrawn",
+      );
+    }
+    return { withdrawn: true, told };
   }
 
   /** The caller's own hosted slots (teacher/staff) with booking counts. */
@@ -990,6 +1045,21 @@ export class MeetingService {
       out.set(r.slotId, arr);
     }
     return out;
+  }
+
+  /**
+   * The wording for ONE audience, resolved on its own.
+   *
+   * `audienceNamesFor` is built for a page of slots; a withdrawal has exactly
+   * one, and it needs the same wording the announcement used or a family reads
+   * two different descriptions of the same meeting. Reuses BOTH pieces —
+   * the name lookup and `describeAudience` — rather than composing a second
+   * sentence, which is how "All JSS2 parents" ends up worded three ways.
+   */
+  private async audienceLabelFor(p: Principal, a: MeetingAudience): Promise<string> {
+    const row = { audienceKind: a.kind, audienceRef: a.ref ?? null } as SlotRow;
+    const names = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.audienceNamesFor(tx, [row]));
+    return describeAudience(a, names(row));
   }
 
   private async audienceNamesFor(tx: TenantTx, slots: SlotRow[]) {

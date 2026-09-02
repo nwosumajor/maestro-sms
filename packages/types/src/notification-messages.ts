@@ -138,6 +138,20 @@ export const NOTIFICATION_MESSAGES: Record<string, MessageTemplate> = {
       fr: "{audience} — le {date} à {location}.",
     },
   },
+  /**
+   * The other half of `meeting.called`. Announcing a meeting reaches the whole
+   * audience — up to every guardian in the school — and withdrawing it reached
+   * nobody, so families held a notice for a meeting that had been called off.
+   * The same rule this codebase already applies to a withdrawn cover duty, a
+   * retracted bus boarding, a corrected absence and a cancelled invoice.
+   */
+  "meeting.withdrawn": {
+    title: { en: "A meeting has been called off", fr: "Une réunion est annulée" },
+    body: {
+      en: "{audience} — the meeting on {date} is no longer taking place. Nothing is needed from you.",
+      fr: "{audience} — la réunion du {date} n'aura pas lieu. Aucune action n'est requise de votre part.",
+    },
+  },
   "meeting.cohost_added": {
     title: { en: "You have been added to a meeting", fr: "Vous avez été ajouté(e) à une réunion" },
     body: {

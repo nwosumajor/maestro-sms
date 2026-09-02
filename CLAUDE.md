@@ -898,6 +898,67 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A meeting announced to every guardian, called off in silence
+`announce(..., kind)` + `withdrawSlot` + `meeting.withdrawn`. Found by sweeping
+for tables that have never held a row — `meeting_invitee` was one — and reading
+outwards from there rather than at it.
+Creating a slot ANNOUNCES it to the whole audience: a class, a stream, a stage,
+or EVERY guardian in the school, by email, with the time on the school's own
+clock. `withdrawSlot` notified nobody. Measured live on a class meeting:
+```
+create   2 parents told "A meeting has been called — All History 101
+         parents — 2026-09-09 06:57 at Room 4."
+withdraw 200 {"withdrawn":true}   ·   0 notices of any kind
+```
+The families still hold the notice for a meeting that is no longer taking
+place, and on a whole-school audience that is every guardian in the school.
+Fifth instance of the class this file already records — a withdrawn cover duty,
+a retracted bus boarding, a corrected absence, a cancelled invoice — and the
+one with the largest audience of any of them.
+// THE BOOKED CASE WAS ALREADY SAFE, which is what made the gap survivable and
+also what hid it: `withdrawSlot` REFUSES while any booking stands (409, "cancel
+those first"), and `cancelBooking` tells the counterparty. So the person who had
+booked was always told; the far larger set who were merely ANNOUNCED to was not.
+// **RETRACT ONLY WHAT WAS ACTUALLY SENT.** The create-side announce fires for
+every declared audience EXCEPT a single-pupil appointment — a private offer
+nobody was told about — so the withdrawal applies the SAME condition. A
+retraction there would be the first its recipient heard of any of it, the rule
+the transport-boarding fix already states. Live: a STUDENT-audience slot
+withdraws with `told: 0` and writes nothing.
+// ONE ANNOUNCER, TWO MESSAGES. `announce` takes a `kind` rather than being
+copied, so both readings resolve the SAME audience through `resolveAudience` and
+share the same chunking — a second copy is how a pair drifts, the argument this
+file already makes for `meetingWhen`.
+// OUTSIDE THE TRANSACTION, like the create-side announce and for the reason the
+scholarship announce had to learn twice: a whole-school audience is thousands of
+notification rows and an interactive transaction is capped at 5 seconds. The
+withdrawal commits first; the notice is best-effort after it, because losing a
+committed withdrawal to a failed notice would be worse.
+// THE AUDIENCE IS RE-RESOLVED, not replayed — nothing records who was told.
+Telling whoever the class holds NOW is closer to right than telling nobody: a
+parent who joined since gets a notice about a meeting they never heard of, which
+is noise, while a parent who WAS told and is not told again turns up.
+// `told` IS RETURNED, so a host knows how many were reached rather than only
+that the slot went away — the report-what-you-did rule.
+// `audienceLabelFor` reuses BOTH the name lookup and `describeAudience` rather
+than composing a second sentence: the retraction has to word the audience the
+way the announcement did, or a family reads two descriptions of one meeting.
+// THE TRANSLATION GATE CAUGHT IT MID-FIX, which is the gate working: adding
+`meeting.withdrawn` to the catalogue before wiring a producer failed
+`every-translation-has-a-producer` immediately.
+// GOTCHA: a mutation dropping `fr` from the new entry did not COMPILE —
+`MessageTemplate` types both maps as `Record<MessageLanguage, string>`, so the
+compiler owns "a language is missing" and the test cannot claim it. What the
+test guards instead is the PAIR staying in step as the catalogue grows, and the
+comment says so rather than implying more.
+// GOTCHA: `audienceLabelFor` did not exist — I called it before writing it. It
+is built from the two pieces that did.
+// PROBE: three slots and four notices removed; the one remaining slot and four
+notices predate the probe by weeks.
+Mutation-validated four ways: withdraw silently again, retract a private
+appointment, notify inside the transaction, and let the retraction carry a
+language its announcement lacks.
+
 ### A scholarship denominated in one country's money, offered to thirty-seven
 Asked whether scholarships should be scoped by country. Answered from the code,
 then built the three things the answer named. **It is NOT an efficiency
