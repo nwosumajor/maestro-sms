@@ -898,6 +898,44 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A feature that cannot be found is not delivered
+Reported plainly: "I can't find the question bank page." The page WAS there, the
+nav entry WAS right, and the panel WAS in the shipped bundle — measured all
+three before changing anything. What was wrong is that I had given a whole
+feature the styling of a caption.
+```
+"New program"        text-sm font-medium, inside a bordered card
+"Question library"   text-xs font-medium text-muted-foreground
+```
+That muted class is what the "Programs" and "Applications" LIST LABELS use, so
+the library read as a heading nobody was meant to click, wedged between two
+cards, with a ghost button beside it. It now carries the same weight as "New
+program" and a sentence saying what it is and why a copy is a copy.
+// THE PAGE ITSELF WAS FINE, and saying so is the point: `/operator/scholarships`
+exists, `AppShell` has "Scholarship admin" gated on `scholarship.admin`, and
+`grep` found the panel in `.next`. Three checks that each said "present", for a
+thing the user genuinely could not find. **Present is not the same as
+findable**, and only the second one is delivery.
+**AND THE FORM CONTRADICTED ITSELF, which the same reading found.** The prize
+and budget labels read `(₦)` — hard-coded — while the currency SELECTOR I had
+added sat two fields away. An owner picking GHS was typing cedis under a naira
+label. They follow the selection now. Same class as the HR salary label and the
+kobo fare boxes this file already records, committed inside the change that
+introduced the selector.
+**THEN THE WIDER QUESTION WAS SWEPT rather than answered by assertion:** 55 nav
+entries against 109 pages. Every nav entry resolves to a real page; of the 30
+pages with no nav entry, every one is linked from somewhere. **Nothing is
+unreachable** — a wide negative worth recording so it is not re-chased.
+Gate: `every-page-can-be-reached.test.ts` — a page with no nav entry AND no
+inbound link anywhere is unreachable, whatever it renders. It cannot see
+styling, which is the failure that prompted it; it catches the harder one.
+Mutation-validated three ways: a nav entry pointing at a page that does not
+exist, a new page nothing links to, and a walk that finds nothing.
+// GOTCHA: `git checkout` cannot restore an UNTRACKED file, so undoing a
+mutation in a brand-new test left it broken and the next run reported
+`Tests: 0 total` — which is not a pass. Restored by hand, and the mutation
+redone as one that compiles and runs.
+
 ### The school earned three free months and nobody who works there was told
 `rewardRecipients` / `REWARD_NOTICE_RECIPIENTS` (`billing/referral.service.ts`)
 and the notice in `billing.service.ts`. Found by driving the referral programme

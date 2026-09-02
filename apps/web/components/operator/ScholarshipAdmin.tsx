@@ -591,10 +591,10 @@ export function ScholarshipAdmin() {
           <p className="text-sm font-medium">New program</p>
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1"><Label className="text-xs">Title</Label><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="STEM Scholarship 2026" /></div>
-            <div className="space-y-1"><Label className="text-xs">🥇 1st prize (₦)</Label><Input type="number" min={0} className="w-28" value={f.award} onChange={(e) => setF({ ...f, award: e.target.value })} /></div>
-            <div className="space-y-1"><Label className="text-xs">🥈 2nd prize (₦)</Label><Input type="number" min={0} className="w-28" value={f.award2} onChange={(e) => setF({ ...f, award2: e.target.value })} placeholder="= 1st" /></div>
-            <div className="space-y-1"><Label className="text-xs">🥉 3rd prize (₦)</Label><Input type="number" min={0} className="w-28" value={f.award3} onChange={(e) => setF({ ...f, award3: e.target.value })} placeholder="= 1st" /></div>
-            <div className="space-y-1"><Label className="text-xs">Budget (₦)</Label><Input type="number" min={0} className="w-32" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} /></div>
+            <div className="space-y-1"><Label className="text-xs">🥇 1st prize ({f.currency})</Label><Input type="number" min={0} className="w-28" value={f.award} onChange={(e) => setF({ ...f, award: e.target.value })} /></div>
+            <div className="space-y-1"><Label className="text-xs">🥈 2nd prize ({f.currency})</Label><Input type="number" min={0} className="w-28" value={f.award2} onChange={(e) => setF({ ...f, award2: e.target.value })} placeholder="= 1st" /></div>
+            <div className="space-y-1"><Label className="text-xs">🥉 3rd prize ({f.currency})</Label><Input type="number" min={0} className="w-28" value={f.award3} onChange={(e) => setF({ ...f, award3: e.target.value })} placeholder="= 1st" /></div>
+            <div className="space-y-1"><Label className="text-xs">Budget ({f.currency})</Label><Input type="number" min={0} className="w-32" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} /></div>
             <div className="space-y-1">
               <Label className="text-xs">Basis</Label>
               <select aria-label="Basis" value={f.basis} onChange={(e) => setF({ ...f, basis: e.target.value })} className={sel}>
@@ -642,9 +642,18 @@ export function ScholarshipAdmin() {
             editing here changes what FUTURE papers are built from and touches
             no paper already built. That is the whole semantics, and the copy
             button says so. */}
-        <div className="space-y-2 rounded-md border border-border/70 p-3">
+        <div className="space-y-2 rounded-md border border-border p-3">
+          {/* THE SAME WEIGHT AS "New program". This was styled as a muted
+              caption — the class used for the "Programs" and "Applications"
+              list LABELS — and wedged between two cards, so a whole feature
+              read as a heading nobody was meant to click. A feature that
+              cannot be found is not delivered. */}
+          <p className="text-sm font-medium">Question library</p>
+          <p className="text-xs text-muted-foreground">
+            Write a question once and reuse it across programmes. A paper takes a COPY, so correcting one here
+            changes what future papers are built from and never alters a paper already sat.
+          </p>
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs font-medium text-muted-foreground">Question library</p>
             <Button
               size="sm"
               variant="ghost"
