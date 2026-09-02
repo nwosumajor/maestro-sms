@@ -543,3 +543,54 @@ export function scholarshipSubjectConcept(category: string): string | null {
       return null;
   }
 }
+
+
+/**
+ * Every secondary subject the platform knows about, across ALL curricula,
+ * deduplicated by concept code.
+ *
+ * A scholarship is cross-school and the schools sitting it follow different
+ * curricula, so the picker cannot be one catalogue's list: a Nigerian school
+ * and a British one must be able to sit the same Mathematics paper. The CONCEPT
+ * is the comparability anchor the catalogue already exists to provide.
+ *
+ * Junior and senior only — a scholarship exam is a secondary-school paper, and
+ * offering "Pre-primary numeracy" would be noise on the one screen where the
+ * list has to be quick to scan.
+ */
+export interface ScholarshipSubjectOption {
+  /** A SUBJECT_CONCEPTS key. */
+  code: string;
+  name: string;
+  group: SubjectGroup;
+  /** JUNIOR_SECONDARY, SENIOR_SECONDARY, or both. */
+  stages: SubjectStage[];
+}
+
+export function scholarshipSubjectOptions(): ScholarshipSubjectOption[] {
+  const by = new Map<string, ScholarshipSubjectOption>();
+  for (const cat of Object.values(SUBJECT_CATALOGUES)) {
+    for (const s of cat.subjects) {
+      const stages = s.stages.filter((x) => x === "JUNIOR_SECONDARY" || x === "SENIOR_SECONDARY");
+      if (stages.length === 0) continue;
+      const existing = by.get(s.code);
+      if (existing) {
+        // A concept taught at both levels in ANY curriculum is offered for both
+        // — the union, not whichever catalogue happened to be read first.
+        for (const st of stages) if (!existing.stages.includes(st)) existing.stages.push(st);
+        continue;
+      }
+      by.set(s.code, {
+        code: s.code,
+        // The CONCEPT's name, not a curriculum's local one: the picker is
+        // platform-wide, so "Mathematics" rather than whichever catalogue was
+        // read first. Falls back to the local name, then to the code, so a
+        // concept missing from the map is still selectable rather than blank.
+        name: SUBJECT_CONCEPTS[s.code] ?? s.name ?? s.code,
+        group: s.group,
+        stages: [...stages],
+      });
+    }
+  }
+  return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
+}

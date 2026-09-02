@@ -12,7 +12,7 @@
 --       platform owner reviews across tenants via the privileged path. Academic
 --       RECORD: SELECT/INSERT/UPDATE but NO DELETE (decisions are append-only).
 -- Run as the privileged migration role. Sentinel (entrypoint idempotency key):
--- the LAST policy created, scholarship_question_deny_all.
+-- the LAST policy created, scholarship_question_bank_deny_all.
 -- ============================================================================
 
 -- (A) GLOBAL program — RLS-exempt, read-only for the app role.
@@ -59,4 +59,11 @@ ALTER TABLE "scholarship_question" FORCE  ROW LEVEL SECURITY;
 REVOKE ALL ON "scholarship_question" FROM major_user;
 
 CREATE POLICY scholarship_question_deny_all ON "scholarship_question" FOR ALL
+  USING (false) WITH CHECK (false);
+-- The bank carries no answers itself, but it is the platform's own and the app
+-- role has no business reading it — same posture as the questions inside it.
+ALTER TABLE "scholarship_question_bank" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "scholarship_question_bank" FORCE  ROW LEVEL SECURITY;
+REVOKE ALL ON "scholarship_question_bank" FROM major_user;
+CREATE POLICY scholarship_question_bank_deny_all ON "scholarship_question_bank" FOR ALL
   USING (false) WITH CHECK (false);

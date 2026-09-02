@@ -247,8 +247,47 @@ model ScholarshipApplication {
 /// carries an answer key to a cross-school competition and no tenant context
 /// ever needs one — a question reaches a candidate only by being copied into a
 /// programme and materialised as a CbtQuestion inside that school's own tenant.
+/// A bank of questions for ONE subject, built up and then declared finished.
+///
+/// The library began as a flat list of questions each carrying a subject. That
+/// is enough to REUSE a question and not enough to WORK: an owner writes sixty
+/// to a hundred questions for one subject in a sitting and needs somewhere to
+/// build, correct and finish them.
+///
+/// STATUS is what makes it a place rather than a label: a bank being written is
+/// DRAFT and cannot be drawn on, so a half-written paper can never reach a
+/// candidate.
+///
+/// SECURITY: platform-owned, DENY-ALL to the app role (rls/50), like the
+/// questions it holds.
+model ScholarshipQuestionBank {
+  id   String @id @default(uuid()) @db.Uuid
+  name String
+  /// A SUBJECT_CONCEPTS key — the comparability anchor the subject catalogue
+  /// already uses, so a bank means the same thing whatever curriculum a school
+  /// follows. A scholarship spans schools on several.
+  subjectCode String
+  /// The display name as at creation. Denormalised on purpose: a catalogue
+  /// rename must not silently retitle a bank an owner built.
+  subjectName String
+  /// DRAFT while it is being written; READY once "Save bank" is pressed.
+  status      String @default("DRAFT")
+  /// DB FK to user; scalar, no Prisma relation — the documented pattern here.
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  questions ScholarshipQuestion[]
+
+  @@index([subjectCode, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@map("scholarship_question_bank")
+}
+
 model ScholarshipQuestion {
   id          String   @id @default(uuid()) @db.Uuid
+  /// The bank this belongs to. A bank IS its questions, so the FK cascades.
+  bankId      String   @db.Uuid
   subject     String
   text        String
   options     String[]
@@ -260,6 +299,9 @@ model ScholarshipQuestion {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  bank ScholarshipQuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
+
+  @@index([bankId, createdAt])
   @@index([subject, createdAt(sort: Desc), id(sort: Desc)])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@map("scholarship_question")

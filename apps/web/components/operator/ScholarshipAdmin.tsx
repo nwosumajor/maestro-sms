@@ -81,8 +81,6 @@ export function ScholarshipAdmin() {
   const [libFailed, setLibFailed] = React.useState(false);
   const [libFilter, setLibFilter] = React.useState({ subject: "", q: "", page: 1 });
   const [libPicked, setLibPicked] = React.useState<Set<string>>(new Set());
-  const [libDraft, setLibDraft] = React.useState({ subject: "", text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" });
-  const [libEditing, setLibEditing] = React.useState<string | null>(null);
 
   const loadPrograms = React.useCallback(async () => {
     const res = await fetch("/api/sms/scholarships/programs");
@@ -254,47 +252,7 @@ export function ScholarshipAdmin() {
     if (libOpen) void loadLibrary();
   }, [libOpen, loadLibrary]);
 
-  const saveLibraryQuestion = async () => {
-    const options = [libDraft.a, libDraft.b, libDraft.c, libDraft.d, libDraft.e].map((o) => o.trim()).filter(Boolean);
-    if (!libDraft.subject.trim() || !libDraft.text.trim() || options.length < 2) {
-      setMsg({ ok: false, text: "A library question needs a subject, the question, and at least two options." });
-      return;
-    }
-    setBusy("lib");
-    setMsg(null);
-    const body = {
-      subject: libDraft.subject.trim(),
-      text: libDraft.text.trim(),
-      options,
-      answerIndex: Math.min(libDraft.answer, options.length - 1),
-      note: libDraft.note.trim() || null,
-    };
-    const res = libEditing
-      ? await sendWithStepUp("PUT", `scholarships/questions/${libEditing}`, body)
-      : await sendWithStepUp("POST", "scholarships/questions", body);
-    setBusy(null);
-    if (!res.ok) {
-      setMsg({ ok: false, text: await readApiError(res) });
-      return;
-    }
-    setMsg({ ok: true, text: libEditing ? "Question updated in the library." : "Question added to the library." });
-    setLibEditing(null);
-    setLibDraft({ subject: libDraft.subject, text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" });
-    void loadLibrary();
-  };
 
-  const deleteLibraryQuestion = async (id: string) => {
-    // Says what is NOT affected. Without it an owner reasonably fears that
-    // deleting a question alters an exam already sat from it.
-    if (!confirm("Remove this from the library?\n\nPapers already built from it are unaffected — they hold a copy.")) return;
-    setBusy("lib");
-    const res = await sendWithStepUp("DELETE", `scholarships/questions/${id}`, undefined);
-    setBusy(null);
-    if (res.ok) {
-      setMsg({ ok: true, text: "Removed from the library. No paper changed." });
-      void loadLibrary();
-    } else setMsg({ ok: false, text: await readApiError(res) });
-  };
 
   const copyLibraryTo = async (programId: string) => {
     const ids = [...libPicked];
@@ -703,40 +661,15 @@ export function ScholarshipAdmin() {
 
           {lib && (
             <>
-              {/* Compose or correct a library question. */}
-              <div className="flex flex-wrap items-end gap-1.5 rounded-md border border-dashed border-border p-2">
-                <Input className="h-8 w-32" aria-label="Subject" placeholder="Subject *" value={libDraft.subject}
-                  onChange={(e) => setLibDraft((d) => ({ ...d, subject: e.target.value }))} />
-                <Input className="h-8 w-64" aria-label="Question" placeholder="Question *" value={libDraft.text}
-                  onChange={(e) => setLibDraft((d) => ({ ...d, text: e.target.value }))} />
-                {(["a", "b", "c", "d", "e"] as const).map((k, i) => (
-                  <span key={k} className="flex items-center gap-1">
-                    <input
-                      type="radio"
-                      aria-label={`${String.fromCharCode(65 + i)} is the correct answer`}
-                      checked={libDraft.answer === i}
-                      onChange={() => setLibDraft((d) => ({ ...d, answer: i }))}
-                    />
-                    <Input className="h-8 w-24" aria-label={`Option ${String.fromCharCode(65 + i)}`}
-                      placeholder={`${String.fromCharCode(65 + i)}${i < 2 ? " *" : ""}`}
-                      value={libDraft[k]}
-                      onChange={(e) => setLibDraft((d) => ({ ...d, [k]: e.target.value }))} />
-                  </span>
-                ))}
-                <Input className="h-8 w-40" aria-label="Private note" placeholder="Note (never printed)"
-                  value={libDraft.note} onChange={(e) => setLibDraft((d) => ({ ...d, note: e.target.value }))} />
-                <Button size="sm" disabled={busy === "lib"} onClick={saveLibraryQuestion}>
-                  {libEditing ? "Save question" : "Add to library"}
-                </Button>
-                {libEditing && (
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    setLibEditing(null);
-                    setLibDraft({ subject: libDraft.subject, text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" });
-                  }}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
+              {/* AUTHORING MOVED, and this says where. A question now belongs to
+                  a BANK, and a bank is written on its own page — leaving the old
+                  compose form here would offer a control the server refuses,
+                  which is the defect this repo keeps recording. */}
+              <p className="rounded-md border border-dashed border-border p-2 text-xs text-muted-foreground">
+                Questions are written on the{" "}
+                <a className="underline" href="/operator/question-banks">Question banks</a>{" "}
+                page, a bank at a time. This panel draws SAVED questions onto a paper.
+              </p>
 
               {/* Copy the selection onto a paper. */}
               {libPicked.size > 0 && programs.length > 0 && (
@@ -782,19 +715,6 @@ export function ScholarshipAdmin() {
                         <span className="ml-1.5 text-muted-foreground">answer: {q.options[q.answerIndex] ?? "(none)"}</span>
                         {q.note && <span className="ml-1.5 italic text-muted-foreground">({q.note})</span>}
                       </span>
-                      <Button size="sm" variant="ghost" aria-label={`Edit "${q.text.slice(0, 30)}"`}
-                        onClick={() => {
-                          const [a = "", b = "", c = "", d = "", e = ""] = q.options;
-                          setLibDraft({ subject: q.subject, text: q.text, a, b, c, d, e, answer: q.answerIndex, note: q.note ?? "" });
-                          setLibEditing(q.id);
-                        }}>
-                        Edit
-                      </Button>
-                      <Button size="sm" variant="ghost" className="text-destructive"
-                        aria-label={`Remove "${q.text.slice(0, 30)}" from the library`}
-                        disabled={busy === "lib"} onClick={() => deleteLibraryQuestion(q.id)}>
-                        Remove
-                      </Button>
                     </li>
                   ))}
                 </ol>

@@ -898,6 +898,91 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A question library with no way to write a paper into it
+`scholarship_question_bank` (migration `20270130000000`, rls/50 part D),
+`listBanks` / `getBank` / `createBank` / `saveBank` / `reopenBank` /
+`deleteBank`, `scholarshipSubjectOptions()`, and `/operator/question-banks`.
+Asked for after the discoverability fix: a page like the CBT module's — create a
+bank, pick a subject, write questions in the CBT format with options a to e,
+edit or delete any of them, and a **Save bank** button that commits the set.
+**THE LIBRARY WAS A FLAT LIST OF QUESTIONS, WHICH IS NOT HOW A PAPER IS
+WRITTEN.** Sixty questions were sixty independent rows typed into a form wedged
+into the programme console, each carrying a free-text `subject` — so "Maths",
+"Mathematics" and "MATHS" were three subjects, and there was no such thing as a
+paper being FINISHED. An owner drawing on the library could take half a bank
+that was still being written and never know.
+// **A BANK IS THE UNIT, AND ITS TWO STATES ARE THE WHOLE CONTROL.** A DRAFT is
+being written and a paper may not draw on it; a READY bank is finished and
+cannot be added to without deliberately reopening it. Without that, "Save bank"
+is a label rather than a control. Live:
+```
+draw on a DRAFT bank   400 "Mathematics is still being written. Save the
+                            bank before drawing on it."
+add to a READY bank    400 "This bank is saved. Reopen it before adding
+                            questions."
+save an empty bank     400 "Add at least one question before saving the bank."
+```
+// **THE SUBJECT COMES FROM THE SHARED CATALOGUE**, not from free text:
+`scholarshipSubjectOptions()` is the union of every curriculum's junior and
+senior secondary subjects, deduplicated by CONCEPT CODE — 100 subjects, 0
+unnamed. A scholarship is cross-school and the schools sitting it follow
+different curricula, so the code is what makes "Mathematics" mean the same
+thing in each; the NAME is what a person reads and both are stored. A subject
+off the list is refused rather than created.
+// ONE PLACE SAYS WHAT SUBJECT A QUESTION IS. The bank decides it and
+`createLibraryQuestion` takes it from there — the caller cannot send one. Two
+places to say it would be two places to disagree, and the PAPERS are derived
+from the questions' subjects, so a disagreement splits one exam into two.
+// **60–100 IS GUIDANCE, NOT A RULE**, and the screen says so without enforcing
+it. An empty bank cannot be saved — that is not a paper — and anything else can:
+refusing at 59 would invent a rule nobody set. A test asserts the save button is
+gated on there being ANY question and never on the target.
+// THE COMPOSER CLEARS AND STAYS OPEN after each save. Sixty questions is sixty
+uses of one form, and re-opening it each time is the difference between a usable
+screen and an unusable one. // GOTCHA: a bare search for `setDraft(EMPTY)`
+matched the Cancel button and the bank-open reset, so deleting the one in the
+SAVE handler left the test green — the match-by-accident class, caught by
+mutation and now bounded to that handler.
+// **DELETING A BANK CHANGES NO PAPER, and the confirmation says so.** A paper
+holds COPIES — the semantics the library was built on — so an owner who fears
+otherwise keeps dead banks for ever. `ON DELETE CASCADE` takes the questions
+with it and nothing else.
+// COUNTED, NEVER LOADED: `_count` on the list. A hundred questions per bank
+across a page of twenty-five is 2,500 rows shipped through the ORM to render a
+number.
+// **DENY-ALL TO THE APP ROLE**, like `scholarship_question` beside it and for
+the same reason: every row is on the answer-key side of a cross-school
+competition, and a question reaches a candidate only by being COPIED onto a
+paper. Proved live: `psql -U major_user` gets **permission denied for table
+scholarship_question_bank**.
+// **THE OLD PANEL WOULD HAVE 400ed AND WAS RETIRED RATHER THAN LEFT.** A
+question now needs a `bankId`, so the compose form on the programme console
+offered a control the server refuses — the exact defect this file keeps
+recording, and it would have arrived inside the fix for it. That panel now
+DRAWS ON saved banks and names the page where authoring lives; a test asserts
+it no longer offers authoring and does say where it went.
+// STEP-UP ON EVERY WRITE, matching the routes it sits beside, and a test
+asserts no write goes out as a bare `fetch`.
+// GOTCHA in the migration, and it stopped the API booting: the backfill used
+`min(q."createdById")` and **Postgres has no `min(uuid)`** — 42883, then P3018.
+I had applied it by hand and read only `tail -3`, missing the error above.
+`(array_agg(...))[1]` picks an author without a cast. Two more from the same
+half hour: the migration is baked into the IMAGE, so fixing the file and
+restarting changes nothing (`docker compose build backend`); and recording it
+with a hand-written `'manual'` checksum would have broken every future
+`migrate deploy` — deleted, the `ADD CONSTRAINT` made re-runnable with a
+preceding `DROP ... IF EXISTS`, and Prisma left to apply it.
+// VERIFIED: all 240 migrations replay onto a fresh database with `bankId` NOT
+NULL and the cascade in place; 5,625 API tests, 233 web tests, 13/13 typecheck,
+and the route smoke green for every role across 110 routes including the owner.
+// PROBE: one bank, two questions and one programme removed; both tables are
+empty again and four programmes remain, as found.
+Mutation-validated ten ways — six on the service (draw on a draft, add to a
+saved bank, take the subject from the caller, save an empty bank, accept any
+subject string, load questions instead of counting) and four on the screen
+(offer Save bank on an empty bank, stop clearing the composer, drop the
+what-is-not-affected wording, send a write without step-up).
+
 ### The notice said EXPIRED; the register said "expires (-823d)"
 `StaffDocumentDto.expiryStage` + `documentDto(..., today)` + the HR document
 row. Found by working the `AWAITING_A_SCREEN` backlog and reading the HR

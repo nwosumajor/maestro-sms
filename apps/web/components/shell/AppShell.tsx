@@ -127,6 +127,7 @@ type NavKey =
   | "operatortenants"
   | "operatorjobs"
   | "operatorscholarships"
+  | "operatorquestionbanks"
   | "operatoraudit"
   | "directory"
   | "announcements"
@@ -165,6 +166,7 @@ const NAV: {
   { key: "operatortenants", label: "Tenant registry", icon: ServerIcon, href: "/operator/tenants", perm: "platform.tenants.read" },
   { key: "operatorjobs", label: "Background jobs", icon: ClockIcon, href: "/operator/jobs", perm: "platform.tenants.read" },
   { key: "operatorscholarships", label: "Scholarship admin", icon: AwardIcon, href: "/operator/scholarships", perm: "scholarship.admin" },
+  { key: "operatorquestionbanks", label: "Question banks", icon: AwardIcon, href: "/operator/question-banks", perm: "scholarship.admin" },
   { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.audit.read" },
   // The operations documents. Sits with the platform group because that is who
   // reads them: the incident playbook is a map of where the load-bearing parts
@@ -298,6 +300,7 @@ const PLATFORM_OWNER_NAV = new Set<NavKey>([
   // and its permission were right, only this allow-list was not.
   "operatorjobs",
   "operatorscholarships",
+  "operatorquestionbanks",
   "operatoraudit",
   "directory",
   "ultimate",
@@ -333,7 +336,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   workflows: "operations", tasks: "operations", scholarships: "operations",
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",
-  operator: "platform", operatorattention: "platform", operatorpricing: "platform", operatorgroups: "platform", operatortenants: "platform", operatorjobs: "platform", operatorscholarships: "platform",
+  operator: "platform", operatorattention: "platform", operatorpricing: "platform", operatorgroups: "platform", operatortenants: "platform", operatorjobs: "platform", operatorscholarships: "platform", operatorquestionbanks: "platform",
   operatoraudit: "platform", runbooks: "platform", directory: "platform", admin: "platform", account: "platform",
   feedback: "platform", operatorfeedback: "platform",
   help: "platform",

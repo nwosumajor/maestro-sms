@@ -281,6 +281,49 @@ export interface ScholarshipSchoolSpreadDto {
   seatsLeft: number | null;
 }
 
+/**
+ * A bank being written is DRAFT and cannot be drawn on; "Save bank" makes it
+ * READY. That is what stops a half-written paper reaching a candidate.
+ */
+export const SCHOLARSHIP_BANK_STATUSES = ["DRAFT", "READY"] as const;
+export type ScholarshipBankStatus = (typeof SCHOLARSHIP_BANK_STATUSES)[number];
+
+/**
+ * How many questions a bank is expected to hold. Guidance on the screen, NOT a
+ * rule: a school wanting a 40-question paper is not making a mistake, and
+ * refusing to save at 59 would be inventing a rule nobody set. An EMPTY bank
+ * cannot be saved, because that is not a paper.
+ */
+export const SCHOLARSHIP_BANK_TARGET_MIN = 60;
+export const SCHOLARSHIP_BANK_TARGET_MAX = 100;
+
+export interface ScholarshipQuestionBankDto {
+  id: string;
+  name: string;
+  subjectCode: string;
+  subjectName: string;
+  status: ScholarshipBankStatus;
+  questionCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** A bank with its questions — bounded by the bank, so never paged. */
+export interface ScholarshipBankDetailDto extends ScholarshipQuestionBankDto {
+  questions: ScholarshipLibraryQuestionDto[];
+}
+
+export interface ScholarshipBankPageDto {
+  items: ScholarshipQuestionBankDto[];
+  total: number;
+  hasMore: boolean;
+  countCap: number;
+  page: number;
+  pageSize: number;
+  /** Every subject a bank exists for, so a filter never offers an empty one. */
+  subjects: Array<{ code: string; name: string }>;
+}
+
 /** One question in the platform owner's reusable library. */
 export interface ScholarshipLibraryQuestionDto {
   id: string;
@@ -290,6 +333,7 @@ export interface ScholarshipLibraryQuestionDto {
   answerIndex: number;
   /** The owner's own note. Never printed on a paper. */
   note: string | null;
+  bankId: string;
   createdAt: Date;
 }
 

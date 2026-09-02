@@ -1,6 +1,11 @@
 import { PLATFORM_HOME_CURRENCY, SCHOLARSHIP_COUNT_CAP, schoolTimeString, SCHOLARSHIP_UNDECIDED_STATUSES } from "@sms/types";
+import { scholarshipSubjectOptions } from "@sms/types";
 import type {
   PublishedScholarshipResultsDto,
+  ScholarshipBankDetailDto,
+  ScholarshipBankPageDto,
+  ScholarshipBankStatus,
+  ScholarshipQuestionBankDto,
   ScholarshipLibraryPageDto,
   ScholarshipLibraryQuestionDto,
   ScholarshipSchoolSpreadDto,
@@ -1596,6 +1601,183 @@ export class ScholarshipAdminService {
 
   // --- the reusable question library ------------------------------------------
 
+  // --- question banks ---------------------------------------------------------
+
+  /**
+   * The banks, paged. One row per bank with its question COUNT — never the
+   * questions, which are only wanted when a bank is opened.
+   */
+  async listBanks(
+    p: Principal,
+    filter: { subjectCode?: string; status?: string; page?: number },
+  ): Promise<ScholarshipBankPageDto> {
+    const db = this.client();
+    const page = Math.max(1, filter.page ?? 1);
+    const pageSize = 25;
+    const where: Prisma.ScholarshipQuestionBankWhereInput = {
+      ...(filter.subjectCode ? { subjectCode: filter.subjectCode } : {}),
+      ...(filter.status ? { status: filter.status } : {}),
+    };
+    const [rows, total, subjects] = await Promise.all([
+      db.scholarshipQuestionBank.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize + 1,
+        // COUNTED, never loaded: a hundred questions per bank across a page of
+        // twenty-five is 2,500 rows to render a number.
+        include: { _count: { select: { questions: true } } },
+      }),
+      db.scholarshipQuestionBank.count({ where }),
+      db.scholarshipQuestionBank.findMany({
+        distinct: ["subjectCode"],
+        select: { subjectCode: true, subjectName: true },
+        orderBy: { subjectName: "asc" },
+      }),
+    ]);
+    const hasMore = rows.length > pageSize;
+    if (hasMore) rows.pop();
+    return {
+      items: rows.map((r) => this.bankDto(r as unknown as Record<string, never>)),
+      total,
+      hasMore,
+      countCap: SCHOLARSHIP_COUNT_CAP,
+      page,
+      pageSize,
+      subjects: (subjects as Array<{ subjectCode: string; subjectName: string }>).map((x) => ({
+        code: x.subjectCode,
+        name: x.subjectName,
+      })),
+    };
+  }
+
+  private bankDto(r: Record<string, never>): ScholarshipQuestionBankDto {
+    const row = r as unknown as {
+      id: string;
+      name: string;
+      subjectCode: string;
+      subjectName: string;
+      status: string;
+      createdAt: Date;
+      updatedAt: Date;
+      _count?: { questions: number };
+    };
+    return {
+      id: row.id,
+      name: row.name,
+      subjectCode: row.subjectCode,
+      subjectName: row.subjectName,
+      status: row.status as ScholarshipBankStatus,
+      questionCount: row._count?.questions ?? 0,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  /** One bank WITH its questions — bounded by the bank, so never paged. */
+  async getBank(p: Principal, id: string): Promise<ScholarshipBankDetailDto> {
+    const db = this.client();
+    const row = await db.scholarshipQuestionBank.findFirst({
+      where: { id },
+      include: {
+        _count: { select: { questions: true } },
+        questions: { orderBy: { createdAt: "asc" } },
+      },
+    });
+    if (!row) throw new NotFoundException("Question bank not found");
+    await this.auditOwn(p, "scholarship.bank.read", id, { subject: row.subjectCode });
+    const q = (row as unknown as { questions: Array<Record<string, never>> }).questions;
+    return {
+      ...this.bankDto(row as unknown as Record<string, never>),
+      questions: q.map((x) => this.libraryQuestionDto(x)),
+    };
+  }
+
+  async createBank(
+    p: Principal,
+    input: { name?: string | null; subjectCode: string },
+  ): Promise<ScholarshipQuestionBankDto> {
+    const db = this.client();
+    // THE SUBJECT COMES FROM THE CATALOGUE, not from free text: a bank is drawn
+    // on across schools following different curricula, and the concept code is
+    // what makes "Mathematics" mean the same thing in each.
+    const subject = scholarshipSubjectOptions().find((x) => x.code === input.subjectCode);
+    if (!subject) throw new BadRequestException("Choose a subject from the list.");
+    const row = await db.scholarshipQuestionBank.create({
+      data: {
+        // Named for the subject unless the owner says otherwise — a bank with no
+        // name is one nobody can tell from the next.
+        name: input.name?.trim() || subject.name,
+        subjectCode: subject.code,
+        subjectName: subject.name,
+        createdById: p.userId,
+      },
+      include: { _count: { select: { questions: true } } },
+    });
+    await this.auditOwn(p, "scholarship.bank.create", row.id, { subject: subject.code });
+    return this.bankDto(row as unknown as Record<string, never>);
+  }
+
+  /**
+   * Declare a bank finished.
+   *
+   * An EMPTY bank cannot be saved — that is not a paper. Anything else can:
+   * 60-100 is guidance on the screen, and refusing at 59 would be inventing a
+   * rule nobody set.
+   */
+  async saveBank(p: Principal, id: string): Promise<ScholarshipQuestionBankDto> {
+    const db = this.client();
+    const row = await db.scholarshipQuestionBank.findFirst({
+      where: { id },
+      include: { _count: { select: { questions: true } } },
+    });
+    if (!row) throw new NotFoundException("Question bank not found");
+    const count = (row as unknown as { _count: { questions: number } })._count.questions;
+    if (count === 0) throw new BadRequestException("Add at least one question before saving the bank.");
+    const saved = await db.scholarshipQuestionBank.update({
+      where: { id },
+      data: { status: "READY" },
+      include: { _count: { select: { questions: true } } },
+    });
+    await this.auditOwn(p, "scholarship.bank.save", id, { questions: count });
+    return this.bankDto(saved as unknown as Record<string, never>);
+  }
+
+  /** Back to DRAFT, so a finished bank can be corrected and finished again. */
+  async reopenBank(p: Principal, id: string): Promise<ScholarshipQuestionBankDto> {
+    const db = this.client();
+    const row = await db.scholarshipQuestionBank.update({
+      where: { id },
+      data: { status: "DRAFT" },
+      include: { _count: { select: { questions: true } } },
+    }).catch(() => null);
+    if (!row) throw new NotFoundException("Question bank not found");
+    await this.auditOwn(p, "scholarship.bank.reopen", id, {});
+    return this.bankDto(row as unknown as Record<string, never>);
+  }
+
+  /**
+   * Delete a bank AND its questions.
+   *
+   * PAPERS ARE UNAFFECTED, by construction: a programme holds COPIES, so
+   * nothing anywhere points at these rows. That is the whole reason the copy is
+   * a copy, and it is what makes deleting a bank a safe act rather than one
+   * that could empty an exam somebody has already sat.
+   */
+  async deleteBank(p: Principal, id: string): Promise<{ deleted: true; questions: number }> {
+    const db = this.client();
+    const row = await db.scholarshipQuestionBank.findFirst({
+      where: { id },
+      include: { _count: { select: { questions: true } } },
+    });
+    if (!row) throw new NotFoundException("Question bank not found");
+    const count = (row as unknown as { _count: { questions: number } })._count.questions;
+    // The FK cascades, so the questions go with it in one statement.
+    await db.scholarshipQuestionBank.delete({ where: { id } });
+    await this.auditOwn(p, "scholarship.bank.delete", id, { questions: count });
+    return { deleted: true, questions: count };
+  }
+
   /**
    * The library, paged and filtered IN SQL.
    *
@@ -1645,15 +1827,7 @@ export class ScholarshipAdminService {
     if (hasMore) rows.pop();
     await this.auditOwn(p, "scholarship.library.read", "library", { subject: subject ?? null, count: rows.length });
     return {
-      items: rows.map((r) => ({
-        id: r.id,
-        subject: r.subject,
-        text: r.text,
-        options: r.options,
-        answerIndex: r.answerIndex,
-        note: r.note,
-        createdAt: r.createdAt,
-      })),
+      items: rows.map((r) => this.libraryQuestionDto(r as unknown as Record<string, never>)),
       total,
       hasMore,
       countCap: SCHOLARSHIP_COUNT_CAP,
@@ -1663,11 +1837,34 @@ export class ScholarshipAdminService {
     };
   }
 
+private libraryQuestionDto(r: Record<string, never>): ScholarshipLibraryQuestionDto {
+    const row = r as unknown as {
+      id: string; bankId: string; subject: string; text: string;
+      options: string[]; answerIndex: number; note: string | null; createdAt: Date;
+    };
+    return {
+      id: row.id, bankId: row.bankId, subject: row.subject, text: row.text,
+      options: row.options, answerIndex: row.answerIndex, note: row.note, createdAt: row.createdAt,
+    };
+  }
+
   async createLibraryQuestion(
     p: Principal,
-    input: { subject: string; text: string; options: string[]; answerIndex: number; note?: string | null },
+    input: { bankId: string; text: string; options: string[]; answerIndex: number; note?: string | null },
   ): Promise<ScholarshipLibraryQuestionDto> {
     const db = this.client();
+    // A QUESTION BELONGS TO A BANK, and the bank decides its subject — two
+    // places to say what subject a question is would be two places to disagree.
+    const bank = await db.scholarshipQuestionBank.findFirst({
+      where: { id: input.bankId },
+      select: { id: true, subjectName: true, status: true },
+    });
+    if (!bank) throw new NotFoundException("Question bank not found");
+    // A READY bank is a finished paper. Adding to one silently would change
+    // what a programme draws on after somebody declared it done.
+    if (bank.status === "READY") {
+      throw new BadRequestException("This bank is saved. Reopen it before adding questions.");
+    }
     // The boundary bounds the shape; this bounds the MEANING — an answerIndex
     // past the last option is a question nobody can get right, and it would be
     // copied into a paper and mark every candidate wrong.
@@ -1676,7 +1873,8 @@ export class ScholarshipAdminService {
     }
     const row = await db.scholarshipQuestion.create({
       data: {
-        subject: input.subject.trim(),
+        bankId: bank.id,
+        subject: bank.subjectName,
         text: input.text.trim(),
         options: input.options.map((o) => o.trim()),
         answerIndex: input.answerIndex,
@@ -1684,14 +1882,14 @@ export class ScholarshipAdminService {
         createdById: p.userId,
       },
     });
-    await this.auditOwn(p, "scholarship.library.create", row.id, { subject: row.subject });
-    return { id: row.id, subject: row.subject, text: row.text, options: row.options, answerIndex: row.answerIndex, note: row.note, createdAt: row.createdAt };
+    await this.auditOwn(p, "scholarship.library.create", row.id, { bankId: bank.id, subject: row.subject });
+    return this.libraryQuestionDto(row as unknown as Record<string, never>);
   }
 
   async updateLibraryQuestion(
     p: Principal,
     id: string,
-    input: { subject?: string; text?: string; options?: string[]; answerIndex?: number; note?: string | null },
+    input: { text?: string; options?: string[]; answerIndex?: number; note?: string | null },
   ): Promise<ScholarshipLibraryQuestionDto> {
     const db = this.client();
     const current = await db.scholarshipQuestion.findFirst({ where: { id } });
@@ -1704,7 +1902,6 @@ export class ScholarshipAdminService {
     const row = await db.scholarshipQuestion.update({
       where: { id },
       data: {
-        ...(input.subject !== undefined ? { subject: input.subject.trim() } : {}),
         ...(input.text !== undefined ? { text: input.text.trim() } : {}),
         ...(input.options !== undefined ? { options } : {}),
         ...(input.answerIndex !== undefined ? { answerIndex } : {}),
@@ -1712,7 +1909,7 @@ export class ScholarshipAdminService {
       },
     });
     await this.auditOwn(p, "scholarship.library.update", id, { subject: row.subject });
-    return { id: row.id, subject: row.subject, text: row.text, options: row.options, answerIndex: row.answerIndex, note: row.note, createdAt: row.createdAt };
+    return this.libraryQuestionDto(row as unknown as Record<string, never>);
   }
 
   /**
@@ -1754,13 +1951,26 @@ export class ScholarshipAdminService {
       select: { examQuestions: true },
     });
     if (!program) throw new NotFoundException("Program not found");
-    const rows = (await db.scholarshipQuestion.findMany({ where: { id: { in: questionIds } } })) as Array<{
+    const rows = (await db.scholarshipQuestion.findMany({
+      where: { id: { in: questionIds } },
+      include: { bank: { select: { status: true, name: true } } },
+    })) as Array<{
       id: string;
       subject: string;
       text: string;
       options: string[];
       answerIndex: number;
+      bank: { status: string; name: string };
     }>;
+    // A DRAFT BANK CANNOT BE DRAWN ON — that is what the status is for. Without
+    // this, "save bank" is a label rather than a control, and half a paper
+    // could reach a candidate.
+    const unfinished = [...new Set(rows.filter((r) => r.bank.status !== "READY").map((r) => r.bank.name))];
+    if (unfinished.length > 0) {
+      throw new BadRequestException(
+        `${unfinished.join(", ")} ${unfinished.length === 1 ? "is" : "are"} still being written. Save the bank before drawing on it.`,
+      );
+    }
     const found = new Map(rows.map((r) => [r.id, r]));
     const missing = questionIds.filter((id) => !found.has(id));
     if (missing.length > 0) {

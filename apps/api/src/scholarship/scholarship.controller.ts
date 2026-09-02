@@ -11,11 +11,24 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
-import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto, ScholarshipLibraryPageDto, ScholarshipLibraryQuestionDto, ScholarshipSchoolSpreadDto } from "@sms/types";
+import type {
+  CbtSittingViewDto,
+  PublishedScholarshipResultsDto,
+  ScholarshipApplicationDto,
+  ScholarshipBankDetailDto,
+  ScholarshipBankPageDto,
+  ScholarshipExamPaperDto,
+  ScholarshipExamQuestionDto,
+  ScholarshipLibraryPageDto,
+  ScholarshipLibraryQuestionDto,
+  ScholarshipQuestionBankDto,
+  ScholarshipSchoolSpreadDto,
+  ScholarshipSubjectOption,
+} from "@sms/types";
 import type { Response } from "express";
 import { safeFilename } from "../documents/safe-content-type";
 import { narrowStatus, pageNumber } from "../common/status-filter";
-import { CURRENCIES } from "@sms/types";
+import { CURRENCIES, SCHOLARSHIP_BANK_STATUSES, scholarshipSubjectOptions } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -92,8 +105,16 @@ const programUpdateSchema = programSchema.partial().extend({
 });
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
+const bankSchema = z.object({
+  // The subject comes from the catalogue, never free text — a bank is drawn on
+  // across schools following different curricula and the concept code is what
+  // makes it mean the same thing in each.
+  subjectCode: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(120).nullish(),
+});
+
 const libraryQuestionSchema = z.object({
-  subject: z.string().trim().min(1).max(80),
+  bankId: z.string().uuid(),
   text: z.string().trim().min(1).max(2000),
   // A to E, matching the composer. The service checks that the answer is one
   // of them — a shape check cannot.
@@ -102,7 +123,9 @@ const libraryQuestionSchema = z.object({
   note: z.string().trim().max(1000).nullish(),
 });
 
-const libraryQuestionPatchSchema = libraryQuestionSchema.partial();
+// A question cannot be MOVED between banks by an edit: the bank owns the
+// subject, and two ways to change it would be two ways to disagree.
+const libraryQuestionPatchSchema = libraryQuestionSchema.omit({ bankId: true }).partial();
 
 const copyQuestionsSchema = z.object({
   questionIds: z.array(z.string().uuid()).min(1).max(200),
@@ -465,6 +488,70 @@ export class ScholarshipController {
   }
 
   // --- the reusable question library (platform owner) -------------------------
+
+  /** The subjects a bank can be created for — the catalogue's secondary
+   *  concepts across every curriculum, so the picker is never one school's. */
+  @Get("subjects")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  subjects(): ScholarshipSubjectOption[] {
+    return scholarshipSubjectOptions();
+  }
+
+  @Get("banks")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  banks(
+    @CurrentPrincipal() p: Principal,
+    @Query("subjectCode") subjectCode?: string,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+  ): Promise<ScholarshipBankPageDto> {
+    return this.admin.listBanks(p, {
+      subjectCode,
+      status: narrowStatus(status, SCHOLARSHIP_BANK_STATUSES),
+      page: pageNumber(page),
+    });
+  }
+
+  /** One bank WITH its questions — bounded by the bank, so never paged. */
+  @Get("banks/:id")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  bank(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ScholarshipBankDetailDto> {
+    return this.admin.getBank(p, id);
+  }
+
+  @Post("banks")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  @RequireStepUp()
+  createBank(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(bankSchema)) body: z.infer<typeof bankSchema>,
+  ): Promise<ScholarshipQuestionBankDto> {
+    return this.admin.createBank(p, body);
+  }
+
+  /** Declare a bank finished. A DRAFT bank cannot be drawn on. */
+  @Post("banks/:id/save")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  @RequireStepUp()
+  saveBank(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ScholarshipQuestionBankDto> {
+    return this.admin.saveBank(p, id);
+  }
+
+  /** Back to DRAFT, so a finished bank can be corrected and finished again. */
+  @Post("banks/:id/reopen")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  @RequireStepUp()
+  reopenBank(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ScholarshipQuestionBankDto> {
+    return this.admin.reopenBank(p, id);
+  }
+
+  /** Papers already built are UNAFFECTED — they hold copies, not references. */
+  @Delete("banks/:id")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  @RequireStepUp()
+  deleteBank(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.admin.deleteBank(p, id);
+  }
 
   /**
    * Browse the library. Paged and filtered in SQL — it holds every question

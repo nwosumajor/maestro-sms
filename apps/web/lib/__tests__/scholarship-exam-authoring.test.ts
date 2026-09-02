@@ -11,6 +11,8 @@ import path from "node:path";
 
 const SRC = path.join(process.cwd(), "components/operator/ScholarshipAdmin.tsx");
 const src = readFileSync(SRC, "utf8");
+const BANKS = path.join(process.cwd(), "components/operator/QuestionBanks.tsx");
+const banks = readFileSync(BANKS, "utf8");
 
 describe("scholarship exam authoring", () => {
   // The API allows up to six options; the form offered FOUR, so an owner
@@ -145,8 +147,13 @@ describe("the reusable question library", () => {
     expect(src).toMatch(/copied onto the paper, so later edits here will not change it/);
   });
 
-  it("says what deleting from the library does NOT affect", () => {
-    expect(src).toMatch(/Papers already built from it are unaffected/);
+  // AUTHORING MOVED to the Question banks page. Leaving the compose form here
+  // would offer a control the server refuses — a question now needs a bankId.
+  it("does not still offer authoring the console cannot do", () => {
+    expect(src).not.toMatch(/Add to library/);
+    expect(src).not.toMatch(/aria-label=\{`Edit "\$\{q\.text/);
+    // and it says where authoring went, rather than simply losing it
+    expect(src).toMatch(/operator\/question-banks/);
   });
 
   // REPORT WHAT WAS NOT ADDED. "added 3" over a selection of 5 reads as
@@ -164,5 +171,89 @@ describe("the reusable question library", () => {
   it("distinguishes a failed read from an empty library", () => {
     expect(src).toMatch(/do not treat it as empty/i);
     expect(src).toMatch(/The library is empty/);
+  });
+});
+
+// =============================================================================
+// The question BANK page — the CBT-shaped authoring flow the library needed.
+// Read from the source because these are CONTROLS: the API has accepted a bank
+// since it shipped, and a screen that cannot reach one is a feature nobody has.
+// =============================================================================
+describe("the scholarship question bank page", () => {
+  // A scholarship is cross-school, so the picker is the CATALOGUE's secondary
+  // subjects across every curriculum — not one school's list.
+  it("offers subjects from the shared catalogue, junior and senior", () => {
+    expect(banks).toMatch(/scholarships\/subjects/);
+    expect(banks).toMatch(/JUNIOR_SECONDARY/);
+  });
+
+  // The CBT composer's shape: five options, a radio marking the correct one.
+  it("takes options A to E and marks which is correct", () => {
+    expect(banks).toContain('["a", "b", "c", "d", "e"] as const');
+    expect(banks).toMatch(/is the correct answer/);
+  });
+
+  // Sixty questions means sixty uses of one form. Re-opening it each time is
+  // the difference between a usable screen and an unusable one.
+  it("clears and stays open after a question is saved", () => {
+    expect(banks).toContain('const EMPTY = { text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" }');
+    // BOUNDED TO THE SAVE HANDLER. A bare search for `setDraft(EMPTY)` matches
+    // the Cancel button and the bank-open reset, so deleting the one that
+    // matters left it green — the match-by-accident class, caught by mutation.
+    const a = banks.indexOf("const saveQuestion = async () => {");
+    const b = banks.indexOf("\n  };", a);
+    expect(a).toBeGreaterThan(-1);
+    const save = banks.slice(a, b);
+    expect(save).toMatch(/setDraft\(EMPTY\)/);
+  });
+
+  it("can edit and delete a saved question", () => {
+    expect(banks).toMatch(/aria-label=\{`Edit question \$\{i \+ 1\}`\}/);
+    expect(banks).toMatch(/aria-label=\{`Delete question \$\{i \+ 1\}`\}/);
+  });
+
+  // "Save bank" is the control that makes a bank drawable-on. A bank with no
+  // questions is not a bank, so the button is not offered.
+  it("offers Save bank only once there is something to save", () => {
+    expect(banks).toMatch(/Save bank/);
+    expect(banks).toMatch(/disabled=\{busy === "bank" \|\| open\.questionCount === 0\}/);
+  });
+
+  // A saved bank is not frozen — a wrong key has to be correctable — but
+  // reopening it withdraws it from papers until it is saved again.
+  it("can reopen a saved bank to correct it", () => {
+    expect(banks).toMatch(/Reopen to edit/);
+    expect(banks).toMatch(/bankAction\("reopen"/);
+    // ONE sender for both, so save and reopen cannot drift on step-up or reload.
+    expect(banks).toMatch(/banks\/\$\{open\.id\}\/\$\{path\}/);
+  });
+
+  // GUIDANCE, NOT A RULE: 60-100 is the usual size, and refusing to save at 59
+  // would invent a rule nobody set.
+  it("states the usual size without enforcing it", () => {
+    expect(banks).toMatch(/SCHOLARSHIP_BANK_TARGET_MIN/);
+    expect(banks).toMatch(/is the usual size/);
+    // the save button is gated on there being ANY question, never on the target
+    expect(banks).not.toMatch(/questionCount < SCHOLARSHIP_BANK_TARGET_MIN[^\n]*disabled/);
+  });
+
+  // A paper holds COPIES, so deleting a bank changes no paper already built.
+  // Saying so is what stops an owner keeping dead banks out of fear.
+  it("says what deleting a bank does NOT affect", () => {
+    expect(banks).toMatch(/Papers already built from it are unaffected/);
+  });
+
+  // A failed read must not read as "no banks" — that invites an owner to write
+  // a paper they already have.
+  it("distinguishes a failed read from having no banks", () => {
+    expect(banks).toMatch(/could not be loaded/);
+    expect(banks).toMatch(/No question banks yet/);
+  });
+
+  // Every write is step-up gated on the server; a bare fetch would 403.
+  it("sends step-up on every write", () => {
+    expect(banks).not.toMatch(/fetch\(`\/api\/sms\/scholarships\/banks`, \{\s*method/);
+    const writes = banks.match(/sendWithStepUp\(/g) ?? [];
+    expect(writes.length).toBeGreaterThanOrEqual(6);
   });
 });

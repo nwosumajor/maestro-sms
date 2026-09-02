@@ -2949,6 +2949,34 @@
       "kind": "ui",
       "note": "bulk funnel actions on the selected rows in ScholarshipAdmin.tsx"
     },
+    "GET /scholarships/subjects": {
+      "kind": "ui",
+      "note": "the subject picker on the Create-a-question-bank card, QuestionBanks.tsx"
+    },
+    "GET /scholarships/banks": {
+      "kind": "ui",
+      "note": "the bank list on QuestionBanks.tsx"
+    },
+    "GET /scholarships/banks/:p": {
+      "kind": "ui",
+      "note": "opening a bank on QuestionBanks.tsx"
+    },
+    "POST /scholarships/banks": {
+      "kind": "ui",
+      "note": "\"Create question bank\" on QuestionBanks.tsx"
+    },
+    "POST /scholarships/banks/:p/save": {
+      "kind": "ui",
+      "note": "\"Save bank\" on QuestionBanks.tsx"
+    },
+    "POST /scholarships/banks/:p/reopen": {
+      "kind": "ui",
+      "note": "\"Reopen to edit\" on QuestionBanks.tsx"
+    },
+    "DELETE /scholarships/banks/:p": {
+      "kind": "ui",
+      "note": "the per-bank Delete on QuestionBanks.tsx"
+    },
     "GET /scholarships/questions": {
       "kind": "ui",
       "note": "the question library panel on ScholarshipAdmin.tsx"
