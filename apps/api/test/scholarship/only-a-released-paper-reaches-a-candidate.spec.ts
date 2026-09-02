@@ -95,6 +95,17 @@ describe("only a released paper reaches a candidate", () => {
     expect(papers).toMatch(/if \(!qualified\) return \[\]/);
   });
 
+  // AND `start` ASKS BEFORE IT DESCRIBES. Its "this scholarship has several
+  // papers — choose which one to sit" is a statement ABOUT THE PROGRAMME, and
+  // a pupil who never applied was getting it: a refusal disclosing the shape of
+  // a paper they have no part in. `startSitting` is still the authority; this
+  // only changes what a non-candidate is told.
+  it("start refuses a non-candidate before it describes the paper", () => {
+    const start = body(SCH, "async startExam(");
+    expect(start).toMatch(/status: "QUALIFIED"/);
+    expect(start.indexOf('status: "QUALIFIED"')).toBeLessThan(start.indexOf("several papers"));
+  });
+
   // The sitting routes add exactly ONE thing on top of the CBT service's own
   // authorisation — that the exam is a scholarship exam at all — and every one
   // of them must, or an always-on route reaches a school's paid exam.

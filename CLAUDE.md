@@ -898,6 +898,71 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The sixth full run: 5,000 applicants, and one refusal that described the paper
+The whole exercise again with this session's fixes in it — banks written and
+CORRECTED, papers assembled from them, 5,000 applicants across three tenants,
+2,000 qualified, 1,000 sitting a two-subject CBT and 1,000 a written paper, two
+podiums, both tables published — plus the security half the owner asked for.
+**THE LIMITER FIX HELD AT SCALE.** The run that was refused 7,207 times and
+finished 517 of 2,000 papers before the window closed:
+```
+                       papers   429s   schools that sat   wall
+school-keyed (before)   517/2000  7,207      1 of 3      17m53s
+candidate-keyed (now)  2000/2000      0      3 of 3      15m15s
+```
+`keyLeaks: 0` across 2,000 papers, `failures: []`.
+**AND THE SCHOOLS SAW NOTHING**, with 1,000 of their own pupils sitting:
+```
+principal / school admin / head teacher / teacher   0 platform banks, 0 platform exams
+by DIRECT id, as a candidate's own principal:
+  404 the questions (with the key) · 404 availability · 404 the paper
+  404 the ANSWER KEY · 404 the marking queue · 404 marking progress
+  404 writing its marks into the gradebook
+  200 its own pupils' RESULTS — deliberately still theirs
+```
+**ONE NEW FINDING, and it is the same shape as the listing fix beside it:
+`startExam` DESCRIBED THE PAPER BEFORE IT ASKED WHO WAS ASKING.** A pupil who
+never applied got `400 "This scholarship has several papers — choose which one
+to sit."` — a statement about the programme's SHAPE, to somebody with no part
+in it. `startSitting` would have refused them a moment later, so nothing was
+reachable; what leaked was the description. Qualification is asked first now,
+and the same pupil gets **404 "Exam not found"**.
+// THE ORDER IS THE FIX, not a new check — `startSitting` remains the
+authority. The same correction the paper LIST needed one method up, which is
+why it is worth recording as a pair: a refusal that describes what it refuses
+is the mirror of a listing that contradicts one.
+**THE REST OF THE RUN, measured:**
+```
+120 questions into two banks, then RENAMED   1.7 s / 1.5 s
+two 80-question two-subject papers            82 / 112 ms
+5,000-application queue, first page            75 ms · page 40  31 ms
+qualify 1,000 in bulk, twice                  120 / 117 ms
+announce to 1,000, twice                     1044 / 518 ms, notifyFailed 0
+1,000 physical marks, five sheets of 200      3.85 s
+collect 1,000 CBT results                      158 ms
+six awards, two podiums                       ~110 ms each
+publish both tables                            33 / 31 ms
+GET /scholarships/results as a pupil            23 ms, 7.1 KB, no pupil named
+```
+// **THE GHS SCHOOL SWEPT THE WRITTEN PODIUM, AND ALL THREE PRIZES WERE
+REFUSED** — correctly, since the programme is denominated NGN and that school
+bills GHS. The `disbursementIssue` work from earlier this session is what makes
+that legible rather than a silent `disbursed: false`: *"The school bills
+families in GHS and this award is in NGN, so a credit written here could never
+be spent. Post it by hand, or run this programme in GHS."*
+// SCHOOL PRIZES STACKED EXACTLY: 3rd alone -> 3 months; 1st+2nd -> 15;
+1st+2nd+3rd -> 18. Extends, never replaces.
+// GOTCHA in my own probe, again: `cbt/exams/all` is 403 for a head teacher, and
+reading `.data` as an array crashed the run. **Read the STATUS before the body**
+— recorded here twice already and walked into a third time.
+// PROBE: 5,000 users, 5,000 applications, 3 programmes, 2,000 sittings, 6
+exams and their materialised banks, 240 questions, 2 library banks, 120 library
+questions, 3 credit entries, 2,018 notices and 4,000 audit rows removed; three
+school prizes cleared; `scholarship_application` VACUUM FULLed back to 176 kB.
+Four programmes, four applications and the user's own Biology bank remain, as
+found.
+Mutation-validated: describe the paper before asking who is asking.
+
 ### Thirteen doors onto a scholarship paper, and the listing that contradicted the refusal
 `requireMarkable` + `markingProgress` gain the platform guard;
 `ScholarshipService.examPapers` gains the qualification check. Asked for

@@ -157,6 +157,17 @@ export class ScholarshipService {
    */
   async startExam(p: Principal, programId: string, examId?: string): Promise<CbtSittingViewDto> {
     const chosen = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // QUALIFICATION FIRST, for the same reason the paper list now asks it
+      // first: the "several papers — choose which one" refusal below is a
+      // statement ABOUT THE PROGRAMME, and a pupil who never applied was
+      // getting it. `startSitting` asks the same question afterwards and is
+      // still the authority; this only stops a refusal disclosing the shape of
+      // a paper to somebody with no part in it.
+      const qualified = await tx.scholarshipApplication.findFirst({
+        where: { studentId: p.userId, programId, status: "QUALIFIED" },
+        select: { id: true },
+      });
+      if (!qualified) throw new NotFoundException("Exam not found");
       const exams = await tx.cbtExam.findMany({
         where: { scholarshipProgramId: programId },
         select: { id: true },
