@@ -205,6 +205,89 @@ export class CbtService {
 
   /** May the caller author against this bank? School-wide staff: any bank.
    *  A teacher: banks they created, or banks for a subject they teach. */
+  /**
+   * Correct a bank's name or its subject.
+   *
+   * A BANK COULD BE CREATED AND NEVER PUT RIGHT — no update, no delete — and
+   * the subject is not a label here, it is the ACCESS KEY and the GRADEBOOK
+   * COLUMN. `canTouchBank` decides who may edit a bank from `bank.subjectId`,
+   * and `recordExamGrades` reads the same field to decide which subject an
+   * exam's marks are written under. So a bank filed under the wrong subject
+   * meant, permanently:
+   *
+   *   - the wrong subject's teachers could edit it and the right one could not
+   *     (only its creator kept access, so it is orphaned the day they leave);
+   *   - every exam drawn from it wrote its marks into the WRONG subject's
+   *     gradebook column, onto pupils' report cards.
+   *
+   * THE SAME AUTHORISATION AS EVERY OTHER BANK WRITE — `canTouchBank`, so a
+   * teacher may only correct a bank they could already edit — AND the same
+   * check `createBank` makes on the DESTINATION: a teacher may not move a bank
+   * into a subject they do not teach, which would otherwise be a way to hand
+   * one to somebody else, or to take one.
+   *
+   * IT DOES NOT REACH MARKS ALREADY RECORDED. A `subject_result` row is the
+   * record of what was entered; correcting the bank fixes where the NEXT exam
+   * lands, and the caller is told so rather than left to assume either way.
+   */
+  async updateBank(
+    p: Principal,
+    id: string,
+    input: { name?: string; subjectId?: string },
+  ): Promise<CbtBankDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id } });
+      // 404-not-403, like every other read of a bank on this surface.
+      if (!bank || !(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Bank not found");
+      this.assertNotAPlatformBank(bank);
+
+      let subjectLabel: string | undefined;
+      if (input.subjectId && input.subjectId !== bank.subjectId) {
+        if (!this.isSchoolWide(p)) {
+          // SECURITY: the DESTINATION is checked, not only the origin. Without
+          // it a teacher could move a bank into a colleague's subject — giving
+          // one away, or taking one, through an edit.
+          const teaches = await tx.classSubjectTeacher.findFirst({
+            where: { teacherId: p.userId, subjectId: input.subjectId },
+            select: { id: true },
+          });
+          if (!teaches) throw new NotFoundException("Subject not found");
+        }
+        const subject = await tx.subject.findFirst({
+          where: { id: input.subjectId },
+          select: { name: true },
+        });
+        if (!subject) throw new NotFoundException("Subject not found");
+        // The label is a denormalised copy of the registry name, never user
+        // text — the schema comment requires the two stay in step.
+        subjectLabel = subject.name;
+      }
+      const name = input.name?.trim();
+      if (name !== undefined && !name) throw new BadRequestException("A bank needs a name");
+
+      const row = await tx.cbtQuestionBank.update({
+        where: { id },
+        data: {
+          ...(name ? { name } : {}),
+          ...(subjectLabel ? { subject: subjectLabel, subjectId: input.subjectId } : {}),
+        },
+      });
+      const questionCount = await tx.cbtQuestion.count({ where: { bankId: id } });
+      await this.log(tx, p, "cbt.bank.update", id, {
+        name: row.name,
+        subjectFrom: subjectLabel ? bank.subjectId : null,
+        subjectTo: subjectLabel ? input.subjectId : null,
+      });
+      return {
+        id: row.id,
+        name: row.name,
+        subject: row.subject,
+        subjectId: row.subjectId,
+        questionCount,
+      } as CbtBankDto;
+    });
+  }
+
   private async canTouchBank(
     tx: TenantTx,
     p: Principal,
@@ -277,6 +360,7 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: bankId } });
       if (!bank) throw new NotFoundException("Bank not found");
+      this.assertNotAPlatformBank(bank);
       const canEdit = p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) && (await this.canTouchBank(tx, p, bank));
       if (!canEdit && !p.permissions.includes(CBT_PERMISSIONS.CBT_REVIEW)) throw new NotFoundException("Bank not found");
       const level = await this.classLevel(tx, classId ?? null);
@@ -348,10 +432,16 @@ export class CbtService {
       // A teacher sees banks for subjects they teach, plus their own. School-wide
       // staff AND read-only reviewers see every bank in the school — a head
       // teacher cannot vet what is going to students if they cannot see it.
+      // A PLATFORM PAPER IS NOT ONE OF THE SCHOOL'S BANKS, for any reader here
+      // — not the head teacher vetting content, not the creator, nobody. It is
+      // listed beside the school's own only by an accident of where it has to
+      // live, and that is how its answer key came to be one click away.
+      const notPlatform = { scholarshipProgramId: null };
       const where =
         this.isSchoolWide(p) || canReview
-          ? {}
+          ? notPlatform
           : {
+              ...notPlatform,
               OR: [
                 { createdById: p.userId },
                 { subjectId: { in: [...(await this.taughtSubjectIds(tx, p))] } },
@@ -453,6 +543,7 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: bankId } });
       if (!bank) throw new NotFoundException("Bank not found");
+      this.assertNotAPlatformBank(bank);
       const canEdit =
         p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) && (await this.canTouchBank(tx, p, bank));
       // A pure reviewer needs cbt.review; anyone else sees nothing (404-not-403).
@@ -532,6 +623,7 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: bankId } });
       if (!bank) throw new NotFoundException("Bank not found");
+      this.assertNotAPlatformBank(bank);
       // 404-not-403: a bank outside the teacher's subjects doesn't exist to them.
       if (!(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Bank not found");
       await tx.cbtQuestion.createMany({
@@ -634,6 +726,14 @@ export class CbtService {
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: q.bankId } });
       // 404-not-403: a bank outside the teacher's subjects does not exist to them.
       if (!bank || !(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Question not found");
+      // A PLATFORM PAPER'S question is not the school's to edit either — the
+      // same refusal, so a materialised scholarship question and one that
+      // simply is not theirs read identically.
+      if (bank.scholarshipProgramId) throw new NotFoundException("Question not found");
+      // A PLATFORM PAPER'S question is not the school's to edit either — the
+      // same refusal, so a materialised scholarship question and one that
+      // simply is not theirs read identically.
+      if (bank.scholarshipProgramId) throw new NotFoundException("Question not found");
 
       const usage = await this.questionUsage(tx, p.schoolId, questionId, q.bankId);
       const touchesThePaper =
@@ -697,6 +797,10 @@ export class CbtService {
       if (!q) throw new NotFoundException("Question not found");
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: q.bankId } });
       if (!bank || !(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Question not found");
+      // A PLATFORM PAPER'S question is not the school's to delete either — the
+      // same refusal, so a materialised scholarship question and one that
+      // simply is not theirs read identically.
+      if (bank.scholarshipProgramId) throw new NotFoundException("Question not found");
 
       const usage = await this.questionUsage(tx, p.schoolId, questionId, q.bankId);
       if (usage.sittings > 0) {
@@ -745,6 +849,7 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: input.bankId } });
       if (!bank) throw new NotFoundException("Bank not found");
+      this.assertNotAPlatformBank(bank);
       if (!(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Bank not found");
       if (!this.isSchoolWide(p)) {
         // SECURITY: a teacher's exam is always scoped to a class where they
@@ -1014,6 +1119,30 @@ export class CbtService {
     if (exam.scholarshipProgramId) {
       throw new NotFoundException("Exam not found");
     }
+  }
+
+  /**
+   * The BANK half of the same rule.
+   *
+   * A scholarship paper is materialised as a question bank INSIDE each
+   * candidate's own school — which is what keeps every sitting RLS-scoped — and
+   * the bank then looked like one of that school's own. `assertNotAPlatformExam`
+   * closed the exam's doors and this one was left open, so the school's bank
+   * list showed the paper and `GET /cbt/banks/:id/questions` returned it WITH
+   * `answerIndex`. Measured live: the candidate's own principal and school_admin
+   * read the answer key to a cross-school competition before their pupil sat it.
+   *
+   * ONE GUARD, ON EVERY DOOR — the same sentence the exam fix records, and the
+   * reason this is an assert rather than a clause inside `canTouchBank`: the
+   * questions read admits a `cbt.review` holder WITHOUT consulting that
+   * predicate, so a rule written there would have missed the very path the leak
+   * came through.
+   *
+   * 404, not 403: the school can see that its pupils have a scholarship exam, so
+   * the refusal says only that this is not theirs to administer.
+   */
+  private assertNotAPlatformBank(bank: { scholarshipProgramId: string | null }): void {
+    if (bank.scholarshipProgramId) throw new NotFoundException("Bank not found");
   }
 
   /** A scholarship-bound exam requires a QUALIFIED application for that program;

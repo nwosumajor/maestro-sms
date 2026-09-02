@@ -898,6 +898,82 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The school held the answer key after all — through the BANK
+`CbtQuestionBank.scholarshipProgramId` (migration `20270202000000`),
+`assertNotAPlatformBank`, and `CbtService.updateBank`. Found by sweeping the
+class the entry below is an instance of — **64 models have a create and no
+update** — and following the one that turned out to have a security half.
+**THE EXAM'S DOORS WERE CLOSED AND THE BANK'S WERE NOT.** This file already
+records `assertNotAPlatformExam`: a scholarship paper is MATERIALISED inside
+each candidate's own school, which is what keeps every sitting RLS-scoped, and
+the leadership of a candidate's school could otherwise print the answer key to
+a cross-school competition. That fix guarded the paper and key PDFs, closing
+the exam, requesting a publish, requesting the answer release, and recording
+its marks. **The BANK the announce creates carried no marker at all.** Measured
+live, on a real programme with a qualified candidate:
+```
+principal      GET /cbt/banks                -> the platform bank, listed
+principal      GET /cbt/banks/:id/questions  -> 200   ANSWER KEY: [1,0]
+school admin   same                          -> 200   ANSWER KEY: [1,0]
+```
+The key to a cross-school paper, to the candidate's own school, before their
+pupil sat it — the very thing the exam fix exists to prevent, through a door it
+did not close.
+// **A COLUMN, NOT A JOIN THROUGH `cbt_exam`.** Deriving the fact would lose it
+exactly when it matters most: a bank whose exam is gone is still a platform
+paper holding a platform answer key. Backfilled from the exams that reference
+each bank, with a belt-and-braces pass on the `"Scholarship: …"` name the
+announce gives them — 31 of 33 banks marked, and the only two left are a
+school's own `CHEMISTRY MOCK` and `PHYSICS MOCK`.
+// **AN ASSERT, NOT A CLAUSE IN `canTouchBank`** — and that distinction is the
+whole fix. `getBankQuestions` admits a `cbt.review` holder WITHOUT consulting
+that predicate (`if (!canEdit && !canReview) throw`), so a rule written inside
+it would have missed the exact path the key came out of.
+// ONE GUARD, ON EVERY DOOR: availability, the questions read, appending a
+question, updating one, deleting one, and the new update. **My first pass fixed
+five of six** — the delete path's insertion silently matched the same first
+occurrence as the update's — and the test written for it caught that
+immediately, which is what "a guard on the one door I happened to test is not a
+guard" means in practice.
+// 404, NOT 403, and the question-level paths keep their own wording
+("Question not found"), so a materialised scholarship question and one that
+simply is not the caller's read identically.
+// OUT OF THE LIST TOO, for EVERY reader — not the head teacher vetting
+content, not the creator, nobody. Not as the control, since the direct id is
+refused, but because a platform paper listed beside the school's own is how its
+key came to be one click away.
+// THE CONTROL, and it is what proves the fix takes nothing the school owns:
+MeastroTest's school_admin still lists **both** of its own banks and **zero**
+platform ones; the demo school now lists nothing, which is correct — it has
+never authored a bank of its own.
+**AND THE DEFECT THAT LED ME THERE: a bank could be created and never put
+right.** No update, no delete — and the subject is not a label here, it is the
+ACCESS KEY (`canTouchBank`) and the GRADEBOOK COLUMN (`recordExamGrades` reads
+`bank.subjectId` to decide which subject an exam's marks are written under). So
+a bank filed under the wrong subject meant, permanently: the wrong subject's
+teachers could edit it and the right one could not — only its creator kept
+access, so it is orphaned the day they leave — and **every exam drawn from it
+wrote its marks into the wrong subject's column, onto pupils' report cards.**
+// THE DESTINATION IS CHECKED, NOT ONLY THE ORIGIN: a teacher may not move a
+bank into a subject they do not teach, which would otherwise be a way to hand
+one to a colleague, or to take one, through an edit.
+// IT DOES NOT REACH MARKS ALREADY RECORDED, and the caller is told so — a
+`subject_result` row is the record of what was entered; correcting the bank
+fixes where the NEXT exam lands.
+// GOTCHA: two existing tests asserted the bank list's `where` was literally
+`{}` — "no subject filter" — and went red when platform banks were excluded, a
+fixed-text assertion firing on a change that STRENGTHENS what it guards, for
+the eighth time in this file. Re-anchored to the property (no subject, no
+author, no status condition) and re-validated by adding a real author filter,
+which both still catch.
+// PROBE: the leak programme, its exam, bank, questions, application and
+notices removed, plus 28 orphaned banks left by this session's earlier
+simulation runs. Two `Science Stars` banks belonging to LIVE programmes and the
+school's own two were left exactly as found; four programmes remain.
+Mutation-validated five ways: stop marking the bank at materialisation, drop
+the guard from the questions read, empty the guard itself, put the platform
+banks back in the list, and drop the guard from the delete path alone.
+
 ### A bank that could only be created, saved or destroyed — mine
 `updateBank` + `PUT /scholarships/banks/:id` and the "Rename / move" control.
 Found by auditing my OWN newest code the way I would audit somebody else's, and

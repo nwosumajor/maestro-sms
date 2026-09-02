@@ -155,8 +155,17 @@ describe("CbtService — teacher subject scoping", () => {
     const head: Principal = { schoolId: "A", userId: "head1", roles: ["head_teacher"], permissions: ["cbt.review"] };
     const list = await service.listBanks(head);
     expect(list.map((b) => b.id)).toEqual(["b1", "b2"]);
-    // School-wide read means NO subject filter was applied.
-    expect(tx.cbtQuestionBank.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    // School-wide read means NO SUBJECT and NO AUTHOR filter was applied.
+    // ANCHORED ON THE PROPERTY, not on an empty object: this asserted
+    // `where: {}` and went red when platform-materialised scholarship banks
+    // were excluded — a fixed-text assertion firing on a change that
+    // STRENGTHENS what it guards, which this repo records repeatedly.
+    const where = (tx.cbtQuestionBank.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.OR).toBeUndefined();
+    expect(where.subjectId).toBeUndefined();
+    expect(where.createdById).toBeUndefined();
+    // and a platform paper is still not one of the school's banks
+    expect(where.scholarshipProgramId).toBeNull();
   });
 
   it("listBanks 404s for someone holding neither cbt.manage nor cbt.review", async () => {

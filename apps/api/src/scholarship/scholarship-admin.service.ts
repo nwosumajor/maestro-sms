@@ -1261,6 +1261,14 @@ export class ScholarshipAdminService {
             subject: subject.name,
             subjectId: subject.id,
             createdById: p.userId,
+            // MARKS IT AS THE PLATFORM'S. The bank has to live inside the
+            // school for the sitting to stay RLS-scoped, and without this it
+            // looked like one of the school's own: it appeared in their bank
+            // list and `GET /cbt/banks/:id/questions` handed school-wide staff
+            // the ANSWER KEY to a cross-school competition their pupil was
+            // about to sit. The exam row has carried the same marker since the
+            // leak was closed on its side.
+            scholarshipProgramId: programId,
           },
         });
         await db.cbtQuestion.createMany({

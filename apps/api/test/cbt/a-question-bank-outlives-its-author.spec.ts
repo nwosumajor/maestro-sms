@@ -96,7 +96,13 @@ describe("after the author has left the school", () => {
     // a `where` naming the creator, or joining `user`, is how this would break.
     const t = makeService();
     await t.svc.listBanks(PRINCIPAL);
-    expect(t.bankFindMany.mock.calls[0][0].where).toEqual({});
+    // The AUTHOR is what must not appear. Asserting an empty object instead
+    // made this go red when platform banks were excluded — a change that has
+    // nothing to do with the author and strengthens the module.
+    const where = t.bankFindMany.mock.calls[0][0].where;
+    expect(where.createdById).toBeUndefined();
+    expect(where.OR).toBeUndefined();
+    expect(where.status).toBeUndefined();
   });
 
   it("and can still open the questions", async () => {

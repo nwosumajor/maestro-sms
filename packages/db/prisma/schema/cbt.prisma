@@ -21,6 +21,13 @@ model CbtQuestionBank {
   /// `subject` above is the denormalised display label, kept in sync server-side.
   subjectId   String   @db.Uuid
   createdById String   @db.Uuid
+  /// Set when this bank was MATERIALISED inside the school by a scholarship
+  /// announce. The paper is the PLATFORM's, so the school may not list it, read
+  /// its questions (they carry the answer key to a cross-school competition) or
+  /// edit it — the same posture `CbtExam.scholarshipProgramId` already gives the
+  /// exam. A column rather than a join through `cbt_exam`, because a bank whose
+  /// exam is gone is still a platform paper holding a platform answer key.
+  scholarshipProgramId String? @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -29,6 +36,7 @@ model CbtQuestionBank {
   exams     CbtExam[]
 
   @@index([schoolId])
+  @@index([scholarshipProgramId])
   @@map("cbt_question_bank")
 }
 
