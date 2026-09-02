@@ -113,6 +113,11 @@ const bankSchema = z.object({
   subjectCode: z.string().trim().min(1).max(40),
   name: z.string().trim().min(1).max(120).nullish(),
 });
+/** Both optional: a rename need not restate the subject, or the other way round. */
+const bankUpdateSchema = z.object({
+  name: z.string().max(120).nullish(),
+  subjectCode: z.string().max(40).optional(),
+});
 
 const libraryQuestionSchema = z.object({
   bankId: z.string().uuid(),
@@ -538,6 +543,18 @@ export class ScholarshipController {
   }
 
   /** Declare a bank finished. A DRAFT bank cannot be drawn on. */
+  /** Correct a bank's name or subject. Step-up, like every other bank write. */
+  @Put("banks/:id")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  @RequireStepUp()
+  updateBank(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(bankUpdateSchema)) body: z.infer<typeof bankUpdateSchema>,
+  ): Promise<ScholarshipQuestionBankDto> {
+    return this.admin.updateBank(p, id, body);
+  }
+
   @Post("banks/:id/save")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   @RequireStepUp()

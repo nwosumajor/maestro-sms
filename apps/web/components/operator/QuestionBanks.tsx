@@ -41,6 +41,10 @@ export function QuestionBanks() {
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [newBank, setNewBank] = React.useState({ subjectCode: "", name: "" });
   const [draft, setDraft] = React.useState(EMPTY);
+  // Correcting an open bank. A typo in the name, or a bank filed under the
+  // wrong subject, used to be permanent — the only way out was to delete it,
+  // which cascades its questions.
+  const [rename, setRename] = React.useState<{ name: string; subjectCode: string } | null>(null);
   const [editing, setEditing] = React.useState<string | null>(null);
 
   const loadBanks = React.useCallback(async () => {
@@ -73,6 +77,7 @@ export function QuestionBanks() {
     setOpen((await res.json()) as Serialized<ScholarshipBankDetailDto>);
     setDraft(EMPTY);
     setEditing(null);
+    setRename(null);
   };
 
   const createBank = async () => {
@@ -129,6 +134,31 @@ export function QuestionBanks() {
     setBusy(null);
     if (!res.ok) { setMsg({ ok: false, text: await readApiError(res) }); return; }
     setMsg({ ok: true, text: "Question removed." });
+    await openBank(open.id);
+    await loadBanks();
+  };
+
+  const saveDetails = async () => {
+    if (!open || !rename) return;
+    setBusy("bank"); setMsg(null);
+    const res = await sendWithStepUp("PUT", `scholarships/banks/${open.id}`, {
+      name: rename.name.trim() || null,
+      ...(rename.subjectCode && rename.subjectCode !== open.subjectCode
+        ? { subjectCode: rename.subjectCode }
+        : {}),
+    });
+    setBusy(null);
+    if (!res.ok) { setMsg({ ok: false, text: await readApiError(res) }); return; }
+    const moved = rename.subjectCode && rename.subjectCode !== open.subjectCode;
+    setMsg({
+      ok: true,
+      // SAYS WHAT IT DID NOT REACH. A paper holds COPIES, so moving a bank
+      // leaves every paper already built from it exactly as it was — the same
+      // sentence the delete gives, for the same reason.
+      text: moved
+        ? "Bank moved, and its questions with it. Papers already built from it are unchanged — they hold copies."
+        : "Bank renamed.",
+    });
     await openBank(open.id);
     await loadBanks();
   };
@@ -228,11 +258,38 @@ export function QuestionBanks() {
                     Reopen to edit
                   </Button>
                 )}
+                <Button size="sm" variant="ghost"
+                  onClick={() => setRename(rename ? null : { name: open.name, subjectCode: open.subjectCode })}>
+                  {rename ? "Cancel" : "Rename / move"}
+                </Button>
                 <Button size="sm" variant="ghost" onClick={() => setOpen(null)}>Close</Button>
               </span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {rename && (
+              <div className="flex flex-wrap items-end gap-2 rounded-md border border-dashed border-border p-3">
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor="bank-rename">Name</Label>
+                  <Input id="bank-rename" className="w-56" value={rename.name}
+                    onChange={(e) => setRename({ ...rename, name: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor="bank-resubject">Subject</Label>
+                  <select id="bank-resubject" className={sel} value={rename.subjectCode}
+                    onChange={(e) => setRename({ ...rename, subjectCode: e.target.value })}>
+                    {(subjects ?? []).map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
+                  </select>
+                </div>
+                <Button size="sm" disabled={busy === "bank"} onClick={saveDetails}>Save details</Button>
+                {rename.subjectCode !== open.subjectCode && (
+                  <p className="w-full text-xs text-muted-foreground">
+                    Moving the subject moves this bank&rsquo;s {open.questionCount} question(s) with it, so they
+                    stay on one paper. Papers already built from it are unchanged — they hold copies.
+                  </p>
+                )}
+              </div>
+            )}
             {open.status === "READY" && (
               <p className="text-xs text-muted-foreground">
                 This bank is saved. Reopen it to add or change questions.

@@ -1756,6 +1756,73 @@ export class ScholarshipAdminService {
   }
 
   /**
+   * Correct a bank's name or its subject.
+   *
+   * MINE, AND THE DEFECT I HAD JUST FIXED NEXT DOOR. Two rounds ago the paper
+   * "could only ever GROW" — no edit, no remove — and I built a bank the same
+   * way: create, save, reopen, delete, and no way to correct a typo. "Mathmatics"
+   * was permanent, and the only way out was to delete the bank, which CASCADES
+   * its sixty questions.
+   *
+   * THE SUBJECT IS THE SHARP HALF. The papers are DERIVED from each question's
+   * subject, so a bank filed under the wrong one puts every question it holds
+   * on the wrong paper — and the subject is denormalised onto the questions at
+   * the moment each is written, so moving the bank has to move them too. One
+   * transaction, or the bank and its own questions disagree about what they
+   * are.
+   *
+   * IT DOES NOT REACH A PAPER ALREADY BUILT, and the caller is told so: a
+   * programme holds COPIES, which is the whole semantics of the library. That
+   * is the same sentence the delete already gives, for the same reason.
+   */
+  async updateBank(
+    p: Principal,
+    id: string,
+    input: { name?: string | null; subjectCode?: string },
+  ): Promise<ScholarshipQuestionBankDto> {
+    const db = this.client();
+    const bank = await db.scholarshipQuestionBank.findFirst({ where: { id } });
+    if (!bank) throw new NotFoundException("Question bank not found");
+
+    const subject = input.subjectCode
+      ? scholarshipSubjectOptions().find((x) => x.code === input.subjectCode)
+      : undefined;
+    if (input.subjectCode && !subject) throw new BadRequestException("Choose a subject from the list.");
+
+    const name = input.name?.trim();
+    // A BLANK NAME IS NOT A NAME. Falling back to the subject matches what
+    // `createBank` does rather than storing an empty string nobody can find.
+    const nextName = name === undefined ? undefined : name || (subject?.name ?? bank.subjectName);
+
+    const row = await db.$transaction(async (tx) => {
+      const updated = await tx.scholarshipQuestionBank.update({
+        where: { id },
+        data: {
+          ...(nextName !== undefined ? { name: nextName } : {}),
+          ...(subject ? { subjectCode: subject.code, subjectName: subject.name } : {}),
+        },
+        include: { _count: { select: { questions: true } } },
+      });
+      // The questions carry the subject, so they move WITH the bank — in the
+      // same transaction, because a bank that says Chemistry over questions
+      // that say Mathematics would split one paper in two.
+      if (subject && subject.name !== bank.subjectName) {
+        await tx.scholarshipQuestion.updateMany({
+          where: { bankId: id },
+          data: { subject: subject.name },
+        });
+      }
+      return updated;
+    });
+    await this.auditOwn(p, "scholarship.bank.update", id, {
+      name: nextName ?? null,
+      subjectFrom: subject && subject.code !== bank.subjectCode ? bank.subjectCode : null,
+      subjectTo: subject && subject.code !== bank.subjectCode ? subject.code : null,
+    });
+    return this.bankDto(row as unknown as Record<string, never>);
+  }
+
+  /**
    * Declare a bank finished.
    *
    * An EMPTY bank cannot be saved — that is not a paper. Anything else can:

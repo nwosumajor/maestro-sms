@@ -898,6 +898,54 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A bank that could only be created, saved or destroyed — mine
+`updateBank` + `PUT /scholarships/banks/:id` and the "Rename / move" control.
+Found by auditing my OWN newest code the way I would audit somebody else's, and
+it is the defect I had fixed next door two rounds earlier.
+**"AN EXAM PAPER THAT COULD ONLY BE ADDED TO" is in this file, above, in my own
+words — and I then built the bank the same way.** Create, save, reopen, delete,
+and no way to correct anything. A typo in the name was permanent, and the only
+way out is DELETE, which cascades sixty questions.
+// **THE SUBJECT IS THE SHARP HALF, not the name.** The papers are DERIVED from
+each question's subject — that is the whole design of `groupQuestionsBySubject`
+— and the subject is denormalised onto each question as it is written. So a
+bank filed under the wrong subject puts every question it holds on the wrong
+paper, and nothing could put it right.
+// THE QUESTIONS MOVE WITH THE BANK, in ONE transaction. A bank that says
+Chemistry over questions that say Mathematics splits one paper in two, so the
+two can never be written separately.
+// A RENAME MOVES NOTHING, and the test asserts the WRITE DID NOT HAPPEN rather
+than that the value is unchanged — a mutation that fired the `updateMany` on
+every rename wrote the SAME subject back and left a value assertion green while
+touching every question in the bank. Match-by-accident, caught only by
+mutation, and the fix is to count the calls.
+// A BLANK NAME FALLS BACK TO THE SUBJECT, matching `createBank`, rather than
+storing an empty string nobody can find in a list.
+// IT SAYS WHAT IT DOES NOT REACH: a programme holds COPIES, so moving a bank
+leaves every paper already built from it exactly as it was. Without that
+sentence an owner who fears otherwise will not correct a mis-filed bank at all
+— the same reasoning, and nearly the same words, as the delete beside it.
+Live, driven end to end:
+```
+as created   "PROBE Mathmatics" · Mathematics · 3 questions say Mathematics
+renamed      "PROBE Mathematics" · still Mathematics · questions untouched
+moved        English Language · its questions moved with it
+off the list 400 · a cleared name -> "English Language" · no step-up -> 403
+```
+// STEP-UP, like every other bank write, and the consistency gate checked it.
+// GOTCHA in the harness, twice, and both are the trap this file records: the
+stub had no `$transaction` and no `scholarshipQuestion.updateMany`, which every
+real client has — and the `updateMany` stub had to HONOUR the where, or a
+service that stopped scoping the move would pass.
+// PROBE: one bank and its three questions removed. **A "Biology" bank with two
+questions was left exactly as found** — it predates every probe this round and
+its questions read like somebody trying the page, so it is not mine to delete.
+Checking that before clearing a table is the whole difference between a cleanup
+and a data loss.
+Mutation-validated five ways: leave the questions behind when the bank moves,
+do it outside a transaction, rewrite every question on a plain rename, store a
+blank name, and drop the sentence about what a move does not reach.
+
 ### A promo budget of one, spent three times
 `GrowthService.validatePromo` / `inFlightRedemptions`, and migration
 `20270201000000_promo_inflight_index`. Found by driving the promo lever for the

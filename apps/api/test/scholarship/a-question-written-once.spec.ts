@@ -211,6 +211,7 @@ function bankSvc(opts: {
   const questions = opts.questions ?? [];
   const audits: Array<{ action: string; meta: Record<string, unknown> }> = [];
   const created: Array<Record<string, unknown>> = [];
+  const questionUpdates: Array<Record<string, unknown>> = [];
   const db = {
     scholarshipQuestionBank: {
       findFirst: async ({ where }: { where: { id: string } }) => {
@@ -252,6 +253,14 @@ function bankSvc(opts: {
         questions
           .filter((q) => where.id.in.includes(q.id as string))
           .map((q) => ({ ...q, bank: banks.find((b) => b.id === q.bankId) })),
+      // Honours the WHERE, like its siblings: a stub that rewrites every row
+      // would pass against a service that had stopped scoping the move.
+      updateMany: async ({ where, data }: { where: { bankId: string }; data: Record<string, unknown> }) => {
+        questionUpdates.push({ where, data });
+        const hit = questions.filter((q) => q.bankId === where.bankId);
+        for (const q of hit) Object.assign(q, data);
+        return { count: hit.length };
+      },
       count: async () => questions.length,
     },
     scholarshipProgram: {
@@ -259,6 +268,11 @@ function bankSvc(opts: {
       update: async () => ({}),
     },
   };
+  // Every real client has `$transaction`; a stub without one models something
+  // the database cannot produce.
+  (db as unknown as { $transaction: unknown }).$transaction = async (
+    fn: (tx: unknown) => Promise<unknown>,
+  ) => fn(db);
   const s = Object.create(ScholarshipAdminService.prototype) as ScholarshipAdminService;
   Object.assign(s, {
     client: () => db,
@@ -266,7 +280,7 @@ function bankSvc(opts: {
       audits.push({ action, meta });
     },
   });
-  return { s, audits, created };
+  return { s, audits, created, questionUpdates };
 }
 
 const BANK = (id: string, status: string, name = "Mathematics") => ({
@@ -391,5 +405,117 @@ describe("a paper may only draw on a finished bank", () => {
       questions: [{ id: "q1", bankId: "b1", subject: "Mathematics", text: "t", options: ["a", "b"], answerIndex: 0, note: null }],
     });
     await expect(s.copyLibraryToProgram(P, "prog", ["q1"])).resolves.toEqual({ added: 1, skipped: 0 });
+  });
+});
+
+// =============================================================================
+// A BANK THAT COULD ONLY BE CREATED, SAVED OR DESTROYED.
+//
+// Mine, and the defect fixed next door two rounds earlier: the paper "could
+// only ever GROW" — no edit, no remove — and the bank was built the same way.
+// A typo in the name was permanent, and the only way out deletes sixty
+// questions with it.
+//
+// The SUBJECT is the sharp half: papers are DERIVED from each question's
+// subject, and the subject is denormalised onto the questions as each is
+// written, so a bank filed under the wrong one puts every question it holds on
+// the wrong paper and cannot be put right.
+// =============================================================================
+describe("a bank can be corrected", () => {
+  const BK = () => BANK("b1", "DRAFT", "Mathematics");
+
+  it("renames without touching the subject or the questions", async () => {
+    const bank = BK();
+    const { s, audits } = bankSvc({ banks: [bank], questions: [{ id: "q1", bankId: "b1", subject: "Mathematics" }] });
+    const out = await s.updateBank(P, "b1", { name: "  Junior paper 1  " });
+    expect(out.name).toBe("Junior paper 1");
+    expect(bank.subjectCode).toBe("MTH");
+    expect(audits.some((a) => a.action === "scholarship.bank.update")).toBe(true);
+  });
+
+  // A BLANK NAME IS NOT A NAME — it falls back to the subject, matching create,
+  // rather than storing an empty string nobody can find in a list.
+  it("falls back to the subject when the name is cleared", async () => {
+    const { s } = bankSvc({ banks: [BK()] });
+    expect((await s.updateBank(P, "b1", { name: "   " })).name).toBe("Mathematics");
+  });
+
+  // THE QUESTIONS MOVE WITH THE BANK. A bank that says Chemistry over questions
+  // that say Mathematics splits one paper in two.
+  it("moves the questions when the subject moves", async () => {
+    const qs = [
+      { id: "q1", bankId: "b1", subject: "Mathematics" },
+      { id: "q2", bankId: "b1", subject: "Mathematics" },
+    ];
+    const { s } = bankSvc({ banks: [BK()], questions: qs });
+    const out = await s.updateBank(P, "b1", { subjectCode: "ENG" });
+    expect(out.subjectCode).toBe("ENG");
+    expect(qs.every((q) => q.subject === out.subjectName)).toBe(true);
+  });
+
+  // ONE TRANSACTION, so the bank and its own questions can never disagree.
+  it("moves the bank and its questions together", async () => {
+    const src = readFileSync(
+      path.join(__dirname, "../../src/scholarship/scholarship-admin.service.ts"),
+      "utf8",
+    );
+    const a = src.indexOf("async updateBank(");
+    const body = src.slice(a, src.indexOf("\n  }", a));
+    expect(body).toMatch(/db\.\$transaction/);
+    expect(body).toMatch(/tx\.scholarshipQuestion\.updateMany/);
+    expect(body).toMatch(/tx\.scholarshipQuestionBank\.update/);
+  });
+
+  // A RENAME MUST NOT MOVE ANYTHING. Sending only a name previously had to
+  // restate the subject, which is how a rename becomes a re-file.
+  it("does not touch the questions on a rename", async () => {
+    const qs = [{ id: "q1", bankId: "b1", subject: "Mathematics" }];
+    const { s, questionUpdates } = bankSvc({ banks: [BK()], questions: qs });
+    await s.updateBank(P, "b1", { name: "Paper 2" });
+    expect(qs[0].subject).toBe("Mathematics");
+    // ASSERTS THE WRITE DID NOT HAPPEN, not merely that the value is the same.
+    // A mutation that fired `updateMany` on every rename — writing the SAME
+    // subject back — left the value assertion green while touching every
+    // question in the bank. Match-by-accident, caught by mutation.
+    expect(questionUpdates).toEqual([]);
+  });
+
+  it("touches them exactly once when the subject really moves", async () => {
+    const qs = [{ id: "q1", bankId: "b1", subject: "Mathematics" }];
+    const { s, questionUpdates } = bankSvc({ banks: [BK()], questions: qs });
+    await s.updateBank(P, "b1", { subjectCode: "ENG" });
+    expect(questionUpdates).toHaveLength(1);
+    expect(questionUpdates[0]).toMatchObject({ where: { bankId: "b1" } });
+  });
+
+  // Re-saving the SAME subject is not a move, so it writes nothing either.
+  it("does not rewrite the questions when the subject is unchanged", async () => {
+    const { s, questionUpdates } = bankSvc({
+      banks: [BK()], questions: [{ id: "q1", bankId: "b1", subject: "Mathematics" }],
+    });
+    await s.updateBank(P, "b1", { subjectCode: "MTH", name: "Paper 3" });
+    expect(questionUpdates).toEqual([]);
+  });
+
+  it("refuses a subject that is not in the catalogue", async () => {
+    const { s } = bankSvc({ banks: [BK()] });
+    await expect(s.updateBank(P, "b1", { subjectCode: "NOPE" })).rejects.toThrow(BadRequestException);
+  });
+
+  it("404s a bank that does not exist", async () => {
+    const { s } = bankSvc();
+    await expect(s.updateBank(P, "nope", { name: "x" })).rejects.toThrow(NotFoundException);
+  });
+
+  // SAYS WHAT IT DID NOT REACH. A paper holds COPIES, so an owner who fears
+  // otherwise will not move a mis-filed bank at all.
+  it("the screen says a paper already built is unchanged", () => {
+    const web = readFileSync(
+      path.join(__dirname, "../../../../apps/web/components/operator/QuestionBanks.tsx"),
+      "utf8",
+    );
+    expect(web).toMatch(/Rename \/ move/);
+    expect(web).toMatch(/Papers already built from it are unchanged/);
+    expect(web).toMatch(/sendWithStepUp\("PUT", `scholarships\/banks\/\$\{open\.id\}`/);
   });
 });

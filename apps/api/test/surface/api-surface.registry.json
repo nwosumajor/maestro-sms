@@ -2965,6 +2965,10 @@
       "kind": "ui",
       "note": "\"Create question bank\" on QuestionBanks.tsx"
     },
+    "PUT /scholarships/banks/:p": {
+      "kind": "ui",
+      "note": "\"Rename / move\" on QuestionBanks.tsx"
+    },
     "POST /scholarships/banks/:p/save": {
       "kind": "ui",
       "note": "\"Save bank\" on QuestionBanks.tsx"
