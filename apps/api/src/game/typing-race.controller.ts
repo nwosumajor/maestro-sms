@@ -13,6 +13,7 @@ import { GAME_PERMISSIONS, MODULES } from "@sms/types";
 import type { TypingProgressResultDto, TypingRaceDto, TypingRaceSummaryDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
+import { PerCandidateRateLimit } from "../auth/per-candidate-rate-limit.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -46,12 +47,14 @@ export class TypingRaceController {
     return this.typing.listRaces(p);
   }
 
+  @PerCandidateRateLimit()
   @Get("typing-races/:id")
   @RequirePermission(GAME_PERMISSIONS.LEADERBOARD_READ)
   get(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<TypingRaceDto> {
     return this.typing.getRace(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post("typing-races/:id/join")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   join(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<TypingRaceDto> {
@@ -64,6 +67,7 @@ export class TypingRaceController {
     return this.typing.startRace(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post("typing-races/:id/progress")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   progress(

@@ -17,7 +17,7 @@ import { Celebrate, StatusLine, postSms, useCelebratable, usePolled } from "./pl
 type Race = Serialized<TypingRaceDto>;
 
 export function TypingPlay({ initial }: { initial: Race }) {
-  const { data: race, refresh } = usePolled<Race>(`typing-races/${initial.id}`, initial, {
+  const { data: race, refresh, stale } = usePolled<Race>(`typing-races/${initial.id}`, initial, {
     intervalMs: 1500,
     stop: (d) => d.status === "FINISHED",
   });
@@ -158,6 +158,12 @@ export function TypingPlay({ initial }: { initial: Race }) {
             <p className="text-sm text-muted-foreground">This race is underway; joining is closed.</p>
           )}
 
+          {stale && (
+            <p className="text-sm text-destructive">
+              This screen has stopped updating — it is still trying. What you can see may be out of
+              date.
+            </p>
+          )}
           <StatusLine msg={msg} error={err} />
 
           {isHost && race.status !== "FINISHED" && (

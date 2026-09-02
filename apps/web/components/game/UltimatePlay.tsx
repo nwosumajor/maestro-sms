@@ -39,7 +39,7 @@ export function UltimatePlay({
   // Live cross-school leaderboard over /ws/watch (mode "ultimate", keyed by the
   // global arena competition id) with a REST poll fallback. A guess in ANY school
   // pushes the refreshed pseudonymous board here.
-  const { data: board, refresh: refreshBoard, live } = useLiveGame<Board>(
+  const { data: board, refresh: refreshBoard, live, stale } = useLiveGame<Board>(
     comp.id,
     `ultimate/competitions/${comp.id}/leaderboard`,
     initialBoard,
@@ -156,7 +156,7 @@ export function UltimatePlay({
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Cross-school leaderboard</CardTitle>
-          <LiveDot live={live} />
+          <LiveDot live={live} stale={stale} />
         </CardHeader>
         <CardContent className="p-0">
           {board.rows.length === 0 ? (

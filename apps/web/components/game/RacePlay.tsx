@@ -15,7 +15,7 @@ import { Celebrate, GuessForm, GuessList, LiveDot, StatusLine, postSms, useCeleb
 type Race = Serialized<RaceDto>;
 
 export function RacePlay({ initial, canOpen }: { initial: Race; canOpen: boolean }) {
-  const { data: race, refresh, live } = useLiveGame<Race>(initial.id, `races/${initial.id}`, initial, {
+  const { data: race, refresh, live, stale } = useLiveGame<Race>(initial.id, `races/${initial.id}`, initial, {
     mode: "race",
     fallbackMs: 2000,
     stop: (r) => r.status === "FINISHED" || r.status === "ABANDONED",
@@ -44,7 +44,7 @@ export function RacePlay({ initial, canOpen }: { initial: Race; canOpen: boolean
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Class Race</CardTitle>
           <div className="flex items-center gap-2">
-            <LiveDot live={live} />
+            <LiveDot live={live} stale={stale} />
             <Badge variant={race.status === "ACTIVE" ? "default" : "secondary"}>{race.status}</Badge>
           </div>
         </CardHeader>

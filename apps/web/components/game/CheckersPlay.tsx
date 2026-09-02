@@ -21,7 +21,7 @@ const eq = (a: Sq, b: Sq) => a[0] === b[0] && a[1] === b[1];
 const last = (m: Move): Sq => m.path[m.path.length - 1]!;
 
 export function CheckersPlay({ initial }: { initial: Game }) {
-  const { data: g, refresh } = usePolled<Game>(`checkers/${initial.id}`, initial, {
+  const { data: g, refresh, stale } = usePolled<Game>(`checkers/${initial.id}`, initial, {
     intervalMs: 1500,
     stop: (d) => d.status === "FINISHED",
   });
@@ -166,6 +166,12 @@ export function CheckersPlay({ initial }: { initial: Game }) {
             )}
           </div>
 
+          {stale && (
+            <p className="text-sm text-destructive">
+              This screen has stopped updating — it is still trying. What you can see may be out of
+              date.
+            </p>
+          )}
           <StatusLine msg={msg} error={err} />
 
           <div className="flex flex-wrap gap-2">

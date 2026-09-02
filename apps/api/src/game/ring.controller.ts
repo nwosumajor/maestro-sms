@@ -13,6 +13,7 @@ import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GAME_PERMISSIONS } from "@sms/types";
 import type { RingDto } from "@sms/types";
+import { PerCandidateRateLimit } from "../auth/per-candidate-rate-limit.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -37,6 +38,7 @@ export class RingController {
     return this.rings.openRing(p, body);
   }
 
+  @PerCandidateRateLimit()
   @Get(":id")
   // Viewing is oversight-grade (players AND the staff who moderate/configure);
   // the service still scopes non-staff to their own seat, 404-not-403.
@@ -45,6 +47,7 @@ export class RingController {
     return this.rings.getRing(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post(":id/join")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   join(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<RingDto> {
@@ -57,6 +60,7 @@ export class RingController {
     return this.rings.startRing(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post(":id/secret")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   secret(
@@ -67,6 +71,7 @@ export class RingController {
     return this.rings.submitSecret(p, id, body.secret);
   }
 
+  @PerCandidateRateLimit()
   @Post(":id/guess")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   guess(

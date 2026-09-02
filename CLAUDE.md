@@ -898,6 +898,65 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A class of thirty-one, and the quiz stopped moving
+`PerCandidateRateLimit` widened to the class-game play routes, and `stale` on
+`usePolled` / `useLiveGame` / `LiveDot`. Found by carrying the entry below to
+its siblings rather than stopping at the one that hurt — the rule this file
+records more often than any other, and the sibling was worse than the original.
+**A LIVE QUIZ POLLS ITS SESSION EVERY 1,500 ms PER PLAYER, and unlike the duel
+and race screens it has NO socket to fall back FROM** — `QuizPlay` uses
+`usePolled`, not `useLiveGame` — so 40 requests a minute per pupil is the
+ORDINARY case, not a degraded one. Measured against the real limiter with real
+pupils of one school:
+```
+30 players   1,167 req/min    0% refused
+40 players   1,551 req/min   21% refused
+60 players   2,318 req/min   39% refused
+```
+**A live quiz stops being reliable at about thirty-one pupils, which is a
+class.** The host advances the question and two in five of the pupils' screens
+do not follow.
+// AND NOTHING SAID SO. `usePolled` was `if (res.ok) setData(...)` — every
+refusal silently kept the old data, so the screen looked exactly like a quiz
+where the host has not moved on. A pupil waiting on the next question does not
+reload.
+// THE SAME TWO FIXES AS THE EXAM, and the second one is the one that matters
+whatever the cause: a school's own wifi refuses a poll for free.
+**1. THE KEY MOVES FOR THE PLAY ROUTES.** A class answering one question is not
+one school flooding the API — the same sentence as the exam hall, in the same
+decorator, whose wording is now about the SHAPE rather than about exams. Live,
+the same 60 players, the same 130 seconds, the only difference being the tag:
+```
+GET /quiz-sessions/:id   (tagged)     2,273 req/min    0% refused
+GET /quiz-sessions       (untagged)   2,337 req/min   42% refused
+```
+The control is the point: the school's budget still binds everything else, so
+this is a re-keying and not an exemption.
+// **HOST ROUTES ARE DELIBERATELY NOT TAGGED, and a test asserts it.** Opening a
+quiz, advancing the question, ending a race are ONE person's actions and belong
+on the school's budget like everything else a member of staff does. Without that
+line the decorator drifts into "the games module is exempt", which is neither
+what was measured nor what was argued.
+**2. A FAILED POLL IS NOT "NOTHING CHANGED".** `stale` is returned by both
+hooks, `LiveDot` gains a THIRD state — "Polling" said the same thing whether the
+polls were getting through or being refused, and the second is precisely when a
+player needs to know — and every polled screen says it in a sentence.
+// ON EVERY POLLED SCREEN, not only the class-sized ones: "my opponent has not
+moved" and "my screen is frozen" are the same picture on a two-player chess
+board, so hangman, chess, checkers and the typing race got it too. Consistency
+was the ask.
+// IT BACKS OFF WHEN REFUSED, doubling to ten seconds and resetting on success.
+A poll that meets a rate limit and retries at the same cadence is part of the
+reason it is being limited. That meant replacing the fixed `setInterval` with a
+self-scheduling timeout — an interval cannot slow down.
+// A THROWN FETCH IS A FAILED REFRESH, not a crash: an unhandled rejection would
+stop the loop, which is the failure this fix exists to prevent, arriving through
+the other door.
+Mutation-validated six ways: put the quiz poll back on the school budget, tag a
+host action, swallow a failed refresh again, hammer at the same rate when
+refused, drop the sentence from the quiz screen, and collapse the indicator back
+to two states.
+
 ### The limiter ate the exam, and the screen said the answer was saved
 `PerCandidateRateLimit` (`auth/per-candidate-rate-limit.decorator.ts`),
 `saveAnswer` / `unsaved` in `CbtExamRoom`, `Retry-After` on the BFF, and

@@ -17,7 +17,7 @@ type Game = Serialized<HangmanGameDto>;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 export function HangmanPlay({ initial }: { initial: Game }) {
-  const { data: g, refresh } = usePolled<Game>(`hangman/${initial.id}`, initial, {
+  const { data: g, refresh, stale } = usePolled<Game>(`hangman/${initial.id}`, initial, {
     intervalMs: 1500,
     stop: (d) => d.status === "FINISHED",
   });
@@ -147,6 +147,12 @@ export function HangmanPlay({ initial }: { initial: Game }) {
             <p className="text-center text-sm text-muted-foreground">This round is underway; joining is closed.</p>
           )}
 
+          {stale && (
+            <p className="text-sm text-destructive">
+              This screen has stopped updating — it is still trying. What you can see may be out of
+              date.
+            </p>
+          )}
           <StatusLine msg={msg} error={err} />
 
           {isHost && g.status !== "FINISHED" && (

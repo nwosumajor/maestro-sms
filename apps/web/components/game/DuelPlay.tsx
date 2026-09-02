@@ -25,7 +25,7 @@ export function DuelPlay({
   canPlay?: boolean;
   canModerate?: boolean;
 }) {
-  const { data: game, refresh, live } = useLiveGame<Game>(initial.id, `games/${initial.id}`, initial, {
+  const { data: game, refresh, live, stale } = useLiveGame<Game>(initial.id, `games/${initial.id}`, initial, {
     stop: (g) => g.status === "FINISHED" || g.status === "ABANDONED",
   });
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -58,7 +58,7 @@ export function DuelPlay({
             {me?.displayName ?? "You"} vs {opponent?.displayName ?? "—"}
           </CardTitle>
           <div className="flex items-center gap-2">
-            <LiveDot live={live} />
+            <LiveDot live={live} stale={stale} />
             <StatusBadge status={game.status} />
           </div>
         </CardHeader>

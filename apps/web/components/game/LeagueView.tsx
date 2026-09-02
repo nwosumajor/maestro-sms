@@ -16,7 +16,7 @@ import { LiveDot, useLiveGame } from "./play-ui";
 type Competition = Serialized<CompetitionDetailDto>;
 
 export function LeagueView({ initial }: { initial: Competition }) {
-  const { data: comp, live } = useLiveGame<Competition>(initial.id, `competitions/${initial.id}`, initial, {
+  const { data: comp, live, stale } = useLiveGame<Competition>(initial.id, `competitions/${initial.id}`, initial, {
     mode: "league",
     // Keep polling even when FINISHED is reachable — a late sweep/cancel can still
     // change it; the socket simply pushes when it does. Stop only when closed out.
@@ -28,7 +28,7 @@ export function LeagueView({ initial }: { initial: Competition }) {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Standings</CardTitle>
-          <LiveDot live={live} />
+          <LiveDot live={live} stale={stale} />
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">

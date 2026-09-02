@@ -69,27 +69,56 @@ export function usePolled<T>(
   path: string,
   initial: T,
   opts: { intervalMs?: number; stop?: (data: T) => boolean } = {},
-): { data: T; refresh: () => Promise<void> } {
+): { data: T; refresh: () => Promise<boolean>; stale: boolean } {
   const { intervalMs = 2500, stop } = opts;
   const [data, setData] = React.useState<T>(initial);
+  // A FAILED POLL IS NOT "NOTHING CHANGED".
+  //
+  // This swallowed every non-ok response, so a screen whose refreshes were
+  // being refused simply stopped moving — indistinguishable from a game where
+  // nothing is happening. Measured on the running stack, a live quiz polls its
+  // session every 1.5s per player and one CLASS is over the school's request
+  // budget: 21% of polls refused at forty players, 39% at sixty. The host
+  // advanced the question and the pupils' screens did not.
+  const [stale, setStale] = React.useState(false);
   const dataRef = React.useRef<T>(initial);
   dataRef.current = data;
 
   const refresh = React.useCallback(async () => {
-    const res = await fetch(`/api/sms/${path}`, { cache: "no-store" });
-    if (res.ok) setData((await res.json()) as T);
+    const res = await fetch(`/api/sms/${path}`, { cache: "no-store" }).catch(() => null);
+    if (res?.ok) {
+      setData((await res.json()) as T);
+      setStale(false);
+      return true;
+    }
+    setStale(true);
+    return false;
   }, [path]);
 
   React.useEffect(() => {
     if (stop && stop(dataRef.current)) return;
-    const id = setInterval(() => {
-      if (stop && stop(dataRef.current)) return;
-      void refresh();
-    }, intervalMs);
-    return () => clearInterval(id);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    // BACK OFF WHEN REFUSED, rather than hammering at the same rate. A poll
+    // that meets a rate limit and retries immediately is part of the reason it
+    // is being limited; the wait doubles to ten seconds and resets on success.
+    let wait = intervalMs;
+    const tick = async () => {
+      if (cancelled) return;
+      if (!(stop && stop(dataRef.current))) {
+        const ok = await refresh();
+        wait = ok ? intervalMs : Math.min(wait * 2, 10_000);
+      }
+      if (!cancelled) timer = setTimeout(tick, wait);
+    };
+    timer = setTimeout(tick, intervalMs);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [refresh, intervalMs, stop]);
 
-  return { data, refresh };
+  return { data, refresh, stale };
 }
 
 /** Resolve the live game socket base. Behind nginx the API is same-origin under
@@ -122,10 +151,11 @@ export function useLiveGame<T>(
   restPath: string,
   initial: T,
   opts: { stop?: (data: T) => boolean; fallbackMs?: number; mode?: "duel" | "ring" | "race" | "league" | "ultimate" } = {},
-): { data: T; refresh: () => Promise<void>; live: boolean } {
+): { data: T; refresh: () => Promise<void>; live: boolean; stale: boolean } {
   const { stop, fallbackMs = 2500, mode = "duel" } = opts;
   const [data, setData] = React.useState<T>(initial);
   const [live, setLive] = React.useState(false);
+  const [stale, setStale] = React.useState(false);
   const dataRef = React.useRef<T>(initial);
   dataRef.current = data;
   // Keep `stop` in a ref so the connect effect doesn't depend on its identity —
@@ -134,9 +164,17 @@ export function useLiveGame<T>(
   stopRef.current = stop;
   const stopped = React.useCallback(() => Boolean(stopRef.current && stopRef.current(dataRef.current)), []);
 
+  // Same rule as `usePolled`: a refresh that was REFUSED is not a screen with
+  // nothing new on it. `live` already says whether the socket is up; `stale`
+  // says whether the fallback is getting through, which is a different fact.
   const refresh = React.useCallback(async () => {
-    const res = await fetch(`/api/sms/${restPath}`, { cache: "no-store" });
-    if (res.ok) setData((await res.json()) as T);
+    const res = await fetch(`/api/sms/${restPath}`, { cache: "no-store" }).catch(() => null);
+    if (res?.ok) {
+      setData((await res.json()) as T);
+      setStale(false);
+      return;
+    }
+    setStale(true);
   }, [restPath]);
 
   React.useEffect(() => {
@@ -242,7 +280,7 @@ export function useLiveGame<T>(
     };
   }, [gameId, mode, refresh, fallbackMs, stopped]);
 
-  return { data, refresh, live };
+  return { data, refresh, live, stale };
 }
 
 /** A guess entry box that enforces N distinct digits before enabling submit. */
@@ -337,19 +375,37 @@ export function GuessList({
 }
 
 /** Connection indicator: live push (green pulse) vs REST poll fallback. */
-export function LiveDot({ live }: { live: boolean }) {
+export function LiveDot({ live, stale }: { live: boolean; stale?: boolean }) {
+  // THREE STATES, because "Polling" said the same thing whether the polls were
+  // getting through or being refused — and a refused poll is precisely when a
+  // player needs to know, since the screen has stopped moving and looks like a
+  // game where nothing is happening.
+  const state = live ? "live" : stale ? "stale" : "polling";
   return (
     <span
-      className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-      title={live ? "Live updates over WebSocket" : "Polling (live socket unavailable)"}
+      className={cn(
+        "inline-flex items-center gap-1 text-xs",
+        state === "stale" ? "text-destructive" : "text-muted-foreground",
+      )}
+      title={
+        state === "live"
+          ? "Live updates over WebSocket"
+          : state === "stale"
+            ? "This screen is not updating — the last refresh did not get through. It will keep trying."
+            : "Polling (live socket unavailable)"
+      }
     >
       <span
         className={cn(
           "h-1.5 w-1.5 rounded-full",
-          live ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/40",
+          state === "live"
+            ? "animate-pulse bg-emerald-500"
+            : state === "stale"
+              ? "bg-destructive"
+              : "bg-muted-foreground/40",
         )}
       />
-      {live ? "Live" : "Polling"}
+      {state === "live" ? "Live" : state === "stale" ? "Not updating" : "Polling"}
     </span>
   );
 }

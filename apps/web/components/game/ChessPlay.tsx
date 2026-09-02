@@ -25,7 +25,7 @@ const GLYPH: Record<string, [string, string]> = {
 const PROMO: Array<["q" | "r" | "b" | "n", string]> = [["q", "Queen"], ["r", "Rook"], ["b", "Bishop"], ["n", "Knight"]];
 
 export function ChessPlay({ initial }: { initial: Game }) {
-  const { data: g, refresh } = usePolled<Game>(`chess/${initial.id}`, initial, {
+  const { data: g, refresh, stale } = usePolled<Game>(`chess/${initial.id}`, initial, {
     intervalMs: 1500,
     stop: (d) => d.status === "FINISHED",
   });
@@ -234,6 +234,12 @@ export function ChessPlay({ initial }: { initial: Game }) {
             </div>
           )}
 
+          {stale && (
+            <p className="text-sm text-destructive">
+              This screen has stopped updating — it is still trying. What you can see may be out of
+              date.
+            </p>
+          )}
           <StatusLine msg={msg} error={err} />
 
           <div className="flex flex-wrap gap-2">

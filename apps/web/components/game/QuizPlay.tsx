@@ -79,7 +79,7 @@ function Podium({ rows }: { rows: Session["leaderboard"] }) {
 }
 
 export function QuizPlay({ initial }: { initial: Session }) {
-  const { data: s, refresh } = usePolled<Session>(`quiz-sessions/${initial.id}`, initial, {
+  const { data: s, refresh, stale } = usePolled<Session>(`quiz-sessions/${initial.id}`, initial, {
     intervalMs: 1500,
     stop: (d) => d.status === "ENDED",
   });
@@ -267,6 +267,17 @@ export function QuizPlay({ initial }: { initial: Session }) {
             </p>
           )}
 
+          {/* THE SCREEN SAYS WHEN IT HAS STOPPED MOVING. A quiz that is not
+              refreshing looks exactly like a quiz where the host has not
+              advanced the question, and a pupil waiting on the second is not
+              going to reload. Measured: a class of forty has a fifth of its
+              refreshes refused, sixty has two fifths. */}
+          {stale && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              This screen has stopped updating — it is still trying. What you can see may be behind
+              the question the class is on.
+            </p>
+          )}
           <StatusLine msg={msg} error={err} />
         </CardContent>
       </Card>

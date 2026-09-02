@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 type Ring = Serialized<RingDto>;
 
 export function RingPlay({ initial, canModerate }: { initial: Ring; canModerate: boolean }) {
-  const { data: ring, refresh, live } = useLiveGame<Ring>(initial.id, `rings/${initial.id}`, initial, {
+  const { data: ring, refresh, live, stale } = useLiveGame<Ring>(initial.id, `rings/${initial.id}`, initial, {
     mode: "ring",
     fallbackMs: 2000,
     stop: (r) => r.status === "FINISHED" || r.status === "ABANDONED",
@@ -66,7 +66,7 @@ export function RingPlay({ initial, canModerate }: { initial: Ring; canModerate:
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Elimination Ring</CardTitle>
           <div className="flex items-center gap-2">
-            <LiveDot live={live} />
+            <LiveDot live={live} stale={stale} />
             <Badge variant={ring.status === "ACTIVE" ? "default" : "secondary"}>{ring.status}</Badge>
           </div>
         </CardHeader>

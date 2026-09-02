@@ -19,6 +19,7 @@ import type {
 } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
+import { PerCandidateRateLimit } from "../auth/per-candidate-rate-limit.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -98,12 +99,14 @@ export class LiveQuizController {
     return this.quiz.listSessions(p);
   }
 
+  @PerCandidateRateLimit()
   @Get("quiz-sessions/:id")
   @RequirePermission(GAME_PERMISSIONS.LEADERBOARD_READ)
   getSession(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<LiveQuizSessionDto> {
     return this.quiz.getSession(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post("quiz-sessions/:id/join")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   join(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<LiveQuizSessionDto> {
@@ -116,6 +119,7 @@ export class LiveQuizController {
     return this.quiz.nextQuestion(p, id);
   }
 
+  @PerCandidateRateLimit()
   @Post("quiz-sessions/:id/answer")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   answer(
