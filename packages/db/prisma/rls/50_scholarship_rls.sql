@@ -12,7 +12,7 @@
 --       platform owner reviews across tenants via the privileged path. Academic
 --       RECORD: SELECT/INSERT/UPDATE but NO DELETE (decisions are append-only).
 -- Run as the privileged migration role. Sentinel (entrypoint idempotency key):
--- the LAST policy created, scholarship_application_update.
+-- the LAST policy created, scholarship_question_deny_all.
 -- ============================================================================
 
 -- (A) GLOBAL program — RLS-exempt, read-only for the app role.
@@ -39,3 +39,24 @@ CREATE POLICY scholarship_application_insert ON "scholarship_application" FOR IN
 CREATE POLICY scholarship_application_update ON "scholarship_application" FOR UPDATE
   USING ("schoolId" = current_setting('app.current_school_id', true)::uuid)
   WITH CHECK ("schoolId" = current_setting('app.current_school_id', true)::uuid);
+
+-- ============================================================================
+-- (C) GLOBAL question library — platform-owned, and DENY-ALL to the app role.
+--
+-- Stricter than `scholarship_program` above, which the app role may SELECT.
+-- Every row here carries an ANSWER KEY to a cross-school competition, and no
+-- tenant context ever needs one: a question reaches a candidate only by being
+-- COPIED into a programme's paper and then materialised as a CbtQuestion inside
+-- that school's own tenant. So the app role is granted nothing at all and the
+-- owner's privileged client is the only reader — Golden Rule #7, the more
+-- restrictive option, with the reason written down.
+--
+-- The same posture as `agent_commission`, and for the same kind of reason.
+-- ============================================================================
+ALTER TABLE "scholarship_question" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "scholarship_question" FORCE  ROW LEVEL SECURITY;
+
+REVOKE ALL ON "scholarship_question" FROM major_user;
+
+CREATE POLICY scholarship_question_deny_all ON "scholarship_question" FOR ALL
+  USING (false) WITH CHECK (false);

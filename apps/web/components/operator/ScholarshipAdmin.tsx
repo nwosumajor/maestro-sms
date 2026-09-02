@@ -10,6 +10,7 @@ import type {
   ScholarshipProgramDto,
   ScholarshipApplicationDto,
   ScholarshipApplicationPageDto,
+  ScholarshipLibraryPageDto,
   ScholarshipSchoolSpreadDto,
   Serialized,
 } from "@sms/types";
@@ -73,6 +74,15 @@ export function ScholarshipAdmin() {
   /** Rows ticked for a bulk decision. Cleared whenever the page or filter moves,
    *  so a tick made on page 1 can never be acted on from page 2. */
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
+  // The reusable question library. A programme's paper holds COPIES, so editing
+  // here changes what future papers are built from and touches no paper already
+  // built — which is what makes reuse safe.
+  const [lib, setLib] = React.useState<Serialized<ScholarshipLibraryPageDto> | null>(null);
+  const [libFailed, setLibFailed] = React.useState(false);
+  const [libFilter, setLibFilter] = React.useState({ subject: "", q: "", page: 1 });
+  const [libPicked, setLibPicked] = React.useState<Set<string>>(new Set());
+  const [libDraft, setLibDraft] = React.useState({ subject: "", text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" });
+  const [libEditing, setLibEditing] = React.useState<string | null>(null);
 
   const loadPrograms = React.useCallback(async () => {
     const res = await fetch("/api/sms/scholarships/programs");
@@ -218,6 +228,95 @@ export function ScholarshipAdmin() {
     if (res.ok) { setMsg({ ok: true, text: "Question removed." }); void loadPrograms(); return true; }
     setMsg({ ok: false, text: await readApiError(res) });
     return false;
+  };
+
+  const loadLibrary = React.useCallback(async () => {
+    const qs = new URLSearchParams();
+    if (libFilter.subject) qs.set("subject", libFilter.subject);
+    if (libFilter.q) qs.set("q", libFilter.q);
+    if (libFilter.page > 1) qs.set("page", String(libFilter.page));
+    const res = await fetch(`/api/sms/scholarships/questions?${qs.toString()}`);
+    if (!res.ok) {
+      // A failed read must not read as "the library is empty" — that would
+      // invite an owner to type questions they already have.
+      setLibFailed(true);
+      return;
+    }
+    setLibFailed(false);
+    setLibPicked(new Set());
+    setLib((await res.json()) as Serialized<ScholarshipLibraryPageDto>);
+  }, [libFilter]);
+
+  // Re-load when the filter or page moves, but ONLY while the library is open:
+  // an operator who never opens it should not pay for a query.
+  const libOpen = lib !== null || libFailed;
+  React.useEffect(() => {
+    if (libOpen) void loadLibrary();
+  }, [libOpen, loadLibrary]);
+
+  const saveLibraryQuestion = async () => {
+    const options = [libDraft.a, libDraft.b, libDraft.c, libDraft.d, libDraft.e].map((o) => o.trim()).filter(Boolean);
+    if (!libDraft.subject.trim() || !libDraft.text.trim() || options.length < 2) {
+      setMsg({ ok: false, text: "A library question needs a subject, the question, and at least two options." });
+      return;
+    }
+    setBusy("lib");
+    setMsg(null);
+    const body = {
+      subject: libDraft.subject.trim(),
+      text: libDraft.text.trim(),
+      options,
+      answerIndex: Math.min(libDraft.answer, options.length - 1),
+      note: libDraft.note.trim() || null,
+    };
+    const res = libEditing
+      ? await sendWithStepUp("PUT", `scholarships/questions/${libEditing}`, body)
+      : await sendWithStepUp("POST", "scholarships/questions", body);
+    setBusy(null);
+    if (!res.ok) {
+      setMsg({ ok: false, text: await readApiError(res) });
+      return;
+    }
+    setMsg({ ok: true, text: libEditing ? "Question updated in the library." : "Question added to the library." });
+    setLibEditing(null);
+    setLibDraft({ subject: libDraft.subject, text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" });
+    void loadLibrary();
+  };
+
+  const deleteLibraryQuestion = async (id: string) => {
+    // Says what is NOT affected. Without it an owner reasonably fears that
+    // deleting a question alters an exam already sat from it.
+    if (!confirm("Remove this from the library?\n\nPapers already built from it are unaffected — they hold a copy.")) return;
+    setBusy("lib");
+    const res = await sendWithStepUp("DELETE", `scholarships/questions/${id}`, undefined);
+    setBusy(null);
+    if (res.ok) {
+      setMsg({ ok: true, text: "Removed from the library. No paper changed." });
+      void loadLibrary();
+    } else setMsg({ ok: false, text: await readApiError(res) });
+  };
+
+  const copyLibraryTo = async (programId: string) => {
+    const ids = [...libPicked];
+    if (ids.length === 0) return;
+    setBusy("lib");
+    const res = await sendWithStepUp("POST", `scholarships/programs/${programId}/questions/copy`, { questionIds: ids });
+    setBusy(null);
+    if (!res.ok) {
+      setMsg({ ok: false, text: await readApiError(res) });
+      return;
+    }
+    const d = (await res.json().catch(() => null)) as { added?: number; skipped?: number } | null;
+    // REPORT WHAT WAS NOT ADDED. A question already on the paper is a skip, not
+    // a duplicate, and "added 3" over a selection of 5 reads as complete.
+    setMsg({
+      ok: true,
+      text:
+        `${d?.added ?? 0} question(s) added to the paper.` +
+        ((d?.skipped ?? 0) > 0 ? ` ${d?.skipped} already on it.` : ""),
+    });
+    setLibPicked(new Set());
+    void loadPrograms();
   };
 
   /**
@@ -535,6 +634,174 @@ export function ScholarshipAdmin() {
             <Button disabled={busy === "create"} onClick={createProgram}>Create & open</Button>
           </div>
           <div className="space-y-1"><Label className="text-xs">Description</Label><Input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Who it's for, criteria…" /></div>
+        </div>
+
+        {/* THE REUSABLE QUESTION LIBRARY.
+            A programme's paper holds COPIES, never references — a paper that
+            has been sat must not change under the candidates who sat it — so
+            editing here changes what FUTURE papers are built from and touches
+            no paper already built. That is the whole semantics, and the copy
+            button says so. */}
+        <div className="space-y-2 rounded-md border border-border/70 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-medium text-muted-foreground">Question library</p>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (lib) { setLib(null); return; }
+                void loadLibrary();
+              }}
+            >
+              {lib ? "Hide" : "Open"} library
+            </Button>
+            {lib && (
+              <>
+                <select
+                  aria-label="Filter the library by subject"
+                  className={sel}
+                  value={libFilter.subject}
+                  onChange={(e) => setLibFilter((f) => ({ ...f, subject: e.target.value, page: 1 }))}
+                >
+                  <option value="">All subjects</option>
+                  {/* Only subjects the library ACTUALLY holds, so a picker can
+                      never offer an empty one. */}
+                  {lib.subjects.map((sub) => (
+                    <option key={sub} value={sub}>{sub}</option>
+                  ))}
+                </select>
+                <Input
+                  className="h-8 w-44"
+                  aria-label="Search the library"
+                  placeholder="Search questions"
+                  value={libFilter.q}
+                  onChange={(e) => setLibFilter((f) => ({ ...f, q: e.target.value, page: 1 }))}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {lib.total.toLocaleString()}
+                  {lib.total >= lib.countCap ? "+" : ""} question(s)
+                </span>
+              </>
+            )}
+          </div>
+
+          {libFailed && (
+            <p className="text-xs text-destructive">
+              The library could not be loaded. Do not treat it as empty — you may retype questions you
+              already have.
+            </p>
+          )}
+
+          {lib && (
+            <>
+              {/* Compose or correct a library question. */}
+              <div className="flex flex-wrap items-end gap-1.5 rounded-md border border-dashed border-border p-2">
+                <Input className="h-8 w-32" aria-label="Subject" placeholder="Subject *" value={libDraft.subject}
+                  onChange={(e) => setLibDraft((d) => ({ ...d, subject: e.target.value }))} />
+                <Input className="h-8 w-64" aria-label="Question" placeholder="Question *" value={libDraft.text}
+                  onChange={(e) => setLibDraft((d) => ({ ...d, text: e.target.value }))} />
+                {(["a", "b", "c", "d", "e"] as const).map((k, i) => (
+                  <span key={k} className="flex items-center gap-1">
+                    <input
+                      type="radio"
+                      aria-label={`${String.fromCharCode(65 + i)} is the correct answer`}
+                      checked={libDraft.answer === i}
+                      onChange={() => setLibDraft((d) => ({ ...d, answer: i }))}
+                    />
+                    <Input className="h-8 w-24" aria-label={`Option ${String.fromCharCode(65 + i)}`}
+                      placeholder={`${String.fromCharCode(65 + i)}${i < 2 ? " *" : ""}`}
+                      value={libDraft[k]}
+                      onChange={(e) => setLibDraft((d) => ({ ...d, [k]: e.target.value }))} />
+                  </span>
+                ))}
+                <Input className="h-8 w-40" aria-label="Private note" placeholder="Note (never printed)"
+                  value={libDraft.note} onChange={(e) => setLibDraft((d) => ({ ...d, note: e.target.value }))} />
+                <Button size="sm" disabled={busy === "lib"} onClick={saveLibraryQuestion}>
+                  {libEditing ? "Save question" : "Add to library"}
+                </Button>
+                {libEditing && (
+                  <Button size="sm" variant="ghost" onClick={() => {
+                    setLibEditing(null);
+                    setLibDraft({ subject: libDraft.subject, text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" });
+                  }}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+
+              {/* Copy the selection onto a paper. */}
+              {libPicked.size > 0 && programs.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/70 bg-muted/40 p-2 text-xs">
+                  <span className="font-medium">{libPicked.size} selected</span>
+                  <span className="text-muted-foreground">add to:</span>
+                  {programs.map((pr) => (
+                    <Button key={pr.id} size="sm" variant="ghost" disabled={busy === "lib"} onClick={() => copyLibraryTo(pr.id)}>
+                      {pr.title}
+                    </Button>
+                  ))}
+                  {/* The semantics, stated where the click happens. */}
+                  <span className="text-muted-foreground">
+                    — copied onto the paper, so later edits here will not change it.
+                  </span>
+                </div>
+              )}
+
+              {lib.items.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {libFilter.subject || libFilter.q ? "No questions match." : "The library is empty — add one above."}
+                </p>
+              ) : (
+                <ol className="space-y-1">
+                  {lib.items.map((q) => (
+                    <li key={q.id} className="flex items-start gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        aria-label={`Select "${q.text.slice(0, 40)}"`}
+                        checked={libPicked.has(q.id)}
+                        onChange={(e) =>
+                          setLibPicked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(q.id); else next.delete(q.id);
+                            return next;
+                          })
+                        }
+                      />
+                      <span className="flex-1">
+                        <span className="mr-1.5 rounded bg-muted px-1 py-0.5 text-[0.65rem] uppercase tracking-wide">{q.subject}</span>
+                        {q.text}
+                        <span className="ml-1.5 text-muted-foreground">answer: {q.options[q.answerIndex] ?? "(none)"}</span>
+                        {q.note && <span className="ml-1.5 italic text-muted-foreground">({q.note})</span>}
+                      </span>
+                      <Button size="sm" variant="ghost" aria-label={`Edit "${q.text.slice(0, 30)}"`}
+                        onClick={() => {
+                          const [a = "", b = "", c = "", d = "", e = ""] = q.options;
+                          setLibDraft({ subject: q.subject, text: q.text, a, b, c, d, e, answer: q.answerIndex, note: q.note ?? "" });
+                          setLibEditing(q.id);
+                        }}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-destructive"
+                        aria-label={`Remove "${q.text.slice(0, 30)}" from the library`}
+                        disabled={busy === "lib"} onClick={() => deleteLibraryQuestion(q.id)}>
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              {(lib.hasMore || libFilter.page > 1) && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Button size="sm" variant="ghost" disabled={libFilter.page <= 1}
+                    onClick={() => setLibFilter((f) => ({ ...f, page: f.page - 1 }))}>Previous</Button>
+                  <span>Page {libFilter.page}</span>
+                  <Button size="sm" variant="ghost" disabled={!lib.hasMore}
+                    onClick={() => setLibFilter((f) => ({ ...f, page: f.page + 1 }))}>Next</Button>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Programs list */}

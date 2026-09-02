@@ -281,6 +281,37 @@ export interface ScholarshipSchoolSpreadDto {
   seatsLeft: number | null;
 }
 
+/** One question in the platform owner's reusable library. */
+export interface ScholarshipLibraryQuestionDto {
+  id: string;
+  subject: string;
+  text: string;
+  options: string[];
+  answerIndex: number;
+  /** The owner's own note. Never printed on a paper. */
+  note: string | null;
+  createdAt: Date;
+}
+
+/**
+ * The library, PAGED.
+ *
+ * It grows with the platform's whole history — a question written for any
+ * programme ever run stays in it — so listing it unbounded is the O(lifetime)
+ * shape this repo has already measured three times.
+ */
+export interface ScholarshipLibraryPageDto {
+  items: ScholarshipLibraryQuestionDto[];
+  /** Matching the filter, capped at `countCap`; see `hasMore`. */
+  total: number;
+  hasMore: boolean;
+  countCap: number;
+  page: number;
+  pageSize: number;
+  /** Every subject the library holds, so a picker never offers an empty one. */
+  subjects: string[];
+}
+
 export interface ScholarshipApplicationPageDto {
   items: ScholarshipApplicationDto[];
   /**

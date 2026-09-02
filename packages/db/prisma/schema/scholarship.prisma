@@ -232,3 +232,35 @@ model ScholarshipApplication {
   @@index([programId, createdAt, id])
   @@map("scholarship_application")
 }
+
+/// A question written ONCE and reused across programmes.
+///
+/// A programme's paper lives inline on the programme, and that is right: a
+/// paper that has been sat must never change under the candidates who sat it.
+/// The cost was that nothing survived the programme — a question written for
+/// last year's exam had to be typed again this year.
+///
+/// So this is a LIBRARY that papers are assembled FROM, never a set of
+/// references a paper points AT. Copying is the whole semantics.
+///
+/// SECURITY: platform-owned and DENY-ALL to the app role (rls/50). Every row
+/// carries an answer key to a cross-school competition and no tenant context
+/// ever needs one — a question reaches a candidate only by being copied into a
+/// programme and materialised as a CbtQuestion inside that school's own tenant.
+model ScholarshipQuestion {
+  id          String   @id @default(uuid()) @db.Uuid
+  subject     String
+  text        String
+  options     String[]
+  answerIndex Int
+  /// The owner's own note. Never printed on a paper and never sent anywhere.
+  note        String?
+  /// DB FK to user; scalar, no Prisma relation — the documented pattern here.
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([subject, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@map("scholarship_question")
+}

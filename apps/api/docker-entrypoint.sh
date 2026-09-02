@@ -117,7 +117,7 @@ apply_rls packages/db/prisma/rls/46_plan_pricing_rls.sql       plan_price_select
 apply_rls packages/db/prisma/rls/47_subject_result_rls.sql     subject_result_update
 apply_rls packages/db/prisma/rls/48_subject_selection_rls.sql  subject_selection_update
 apply_rls packages/db/prisma/rls/49_parent_import_rls.sql       parent_import_batch_update
-apply_rls packages/db/prisma/rls/50_scholarship_rls.sql         scholarship_application_update
+apply_rls packages/db/prisma/rls/50_scholarship_rls.sql         scholarship_question_deny_all
 apply_rls packages/db/prisma/rls/51_lms_progress_rls.sql        lms_progress_delete
 apply_rls packages/db/prisma/rls/52_lms_submission_rls.sql      lms_submission_update
 apply_rls packages/db/prisma/rls/53_lms_module_rls.sql          lms_module_delete

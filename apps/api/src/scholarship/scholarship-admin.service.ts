@@ -1,6 +1,8 @@
 import { PLATFORM_HOME_CURRENCY, SCHOLARSHIP_COUNT_CAP, schoolTimeString, SCHOLARSHIP_UNDECIDED_STATUSES } from "@sms/types";
 import type {
   PublishedScholarshipResultsDto,
+  ScholarshipLibraryPageDto,
+  ScholarshipLibraryQuestionDto,
   ScholarshipSchoolSpreadDto,
   ScholarshipApplicationPageDto,
   ScholarshipExamQuestionDto,
@@ -1590,6 +1592,205 @@ export class ScholarshipAdminService {
     }
     await this.auditOwn(p, "scholarship.exam.collect", programId, { examMode: program.examMode, updated });
     return { updated };
+  }
+
+  // --- the reusable question library ------------------------------------------
+
+  /**
+   * The library, paged and filtered IN SQL.
+   *
+   * It grows with the platform's whole history — every question written for
+   * every programme ever run — so an unbounded list is the O(lifetime) shape
+   * this repo has measured three times. Counted with the same LIMIT-inside-a-
+   * subquery cap as the review queue, for the same measured reason: counting
+   * rows in Node ships them through the ORM and is slower than the count it
+   * replaces.
+   */
+  async listLibrary(
+    p: Principal,
+    filter: { subject?: string; q?: string; page?: number },
+  ): Promise<ScholarshipLibraryPageDto> {
+    const db = this.client();
+    const page = Math.max(1, filter.page ?? 1);
+    const pageSize = 50;
+    const subject = filter.subject?.trim() || undefined;
+    const q = filter.q?.trim() || undefined;
+    const where: Prisma.ScholarshipQuestionWhereInput = {
+      ...(subject ? { subject } : {}),
+      ...(q ? { text: { contains: q, mode: "insensitive" as const } } : {}),
+    };
+    const [rows, total, subjects] = await Promise.all([
+      db.scholarshipQuestion.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        // One past the page: the only honest way to say "there is more" without
+        // paying for a full count.
+        take: pageSize + 1,
+      }),
+      (async () => {
+        const [row] = await db.$queryRaw<Array<{ n: bigint }>>`
+          SELECT count(*)::bigint AS n FROM (
+            SELECT 1 FROM "scholarship_question"
+             WHERE (${subject ?? null}::text IS NULL OR "subject" = ${subject ?? null})
+               AND (${q ?? null}::text IS NULL OR "text" ILIKE '%' || ${q ?? null} || '%')
+             LIMIT ${SCHOLARSHIP_COUNT_CAP}) t`;
+        return Number(row?.n ?? 0);
+      })(),
+      // The subjects the library ACTUALLY holds, so a picker can never offer an
+      // empty one — the same rule the meeting audience picker follows.
+      db.scholarshipQuestion.findMany({ distinct: ["subject"], select: { subject: true }, orderBy: { subject: "asc" } }),
+    ]);
+    const hasMore = rows.length > pageSize;
+    if (hasMore) rows.pop();
+    await this.auditOwn(p, "scholarship.library.read", "library", { subject: subject ?? null, count: rows.length });
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        subject: r.subject,
+        text: r.text,
+        options: r.options,
+        answerIndex: r.answerIndex,
+        note: r.note,
+        createdAt: r.createdAt,
+      })),
+      total,
+      hasMore,
+      countCap: SCHOLARSHIP_COUNT_CAP,
+      page,
+      pageSize,
+      subjects: (subjects as Array<{ subject: string }>).map((x) => x.subject),
+    };
+  }
+
+  async createLibraryQuestion(
+    p: Principal,
+    input: { subject: string; text: string; options: string[]; answerIndex: number; note?: string | null },
+  ): Promise<ScholarshipLibraryQuestionDto> {
+    const db = this.client();
+    // The boundary bounds the shape; this bounds the MEANING — an answerIndex
+    // past the last option is a question nobody can get right, and it would be
+    // copied into a paper and mark every candidate wrong.
+    if (input.answerIndex >= input.options.length) {
+      throw new BadRequestException("The correct answer must be one of the options.");
+    }
+    const row = await db.scholarshipQuestion.create({
+      data: {
+        subject: input.subject.trim(),
+        text: input.text.trim(),
+        options: input.options.map((o) => o.trim()),
+        answerIndex: input.answerIndex,
+        note: input.note?.trim() || null,
+        createdById: p.userId,
+      },
+    });
+    await this.auditOwn(p, "scholarship.library.create", row.id, { subject: row.subject });
+    return { id: row.id, subject: row.subject, text: row.text, options: row.options, answerIndex: row.answerIndex, note: row.note, createdAt: row.createdAt };
+  }
+
+  async updateLibraryQuestion(
+    p: Principal,
+    id: string,
+    input: { subject?: string; text?: string; options?: string[]; answerIndex?: number; note?: string | null },
+  ): Promise<ScholarshipLibraryQuestionDto> {
+    const db = this.client();
+    const current = await db.scholarshipQuestion.findFirst({ where: { id } });
+    if (!current) throw new NotFoundException("Question not found");
+    const options = input.options ? input.options.map((o) => o.trim()) : current.options;
+    const answerIndex = input.answerIndex ?? current.answerIndex;
+    if (answerIndex >= options.length) {
+      throw new BadRequestException("The correct answer must be one of the options.");
+    }
+    const row = await db.scholarshipQuestion.update({
+      where: { id },
+      data: {
+        ...(input.subject !== undefined ? { subject: input.subject.trim() } : {}),
+        ...(input.text !== undefined ? { text: input.text.trim() } : {}),
+        ...(input.options !== undefined ? { options } : {}),
+        ...(input.answerIndex !== undefined ? { answerIndex } : {}),
+        ...(input.note !== undefined ? { note: input.note?.trim() || null } : {}),
+      },
+    });
+    await this.auditOwn(p, "scholarship.library.update", id, { subject: row.subject });
+    return { id: row.id, subject: row.subject, text: row.text, options: row.options, answerIndex: row.answerIndex, note: row.note, createdAt: row.createdAt };
+  }
+
+  /**
+   * Remove a question from the library.
+   *
+   * PAPERS ARE UNAFFECTED, by construction rather than by care: a paper holds a
+   * COPY, not a reference, so nothing anywhere points at this row. Deleting a
+   * question a past exam was built from cannot alter that exam — which is the
+   * whole reason the copy is a copy.
+   */
+  async deleteLibraryQuestion(p: Principal, id: string): Promise<{ deleted: true }> {
+    const db = this.client();
+    const res = await db.scholarshipQuestion.deleteMany({ where: { id } });
+    if (res.count === 0) throw new NotFoundException("Question not found");
+    await this.auditOwn(p, "scholarship.library.delete", id, {});
+    return { deleted: true };
+  }
+
+  /**
+   * Copy library questions onto a programme's paper.
+   *
+   * A COPY, and that is the whole semantics of the library. A paper that has
+   * been sat must never change under the candidates who sat it, so a programme
+   * can never hold a reference to a row somebody may edit later — the same
+   * reason a payslip stores a snapshot rather than recomputing.
+   *
+   * APPENDS, never replaces: the PUT that takes the whole set already exists
+   * for editing, and a copy that wiped the paper would be a destructive action
+   * behind a button that reads "add".
+   */
+  async copyLibraryToProgram(
+    p: Principal,
+    programId: string,
+    questionIds: string[],
+  ): Promise<{ added: number; skipped: number }> {
+    const db = this.client();
+    const program = await db.scholarshipProgram.findFirst({
+      where: { id: programId },
+      select: { examQuestions: true },
+    });
+    if (!program) throw new NotFoundException("Program not found");
+    const rows = (await db.scholarshipQuestion.findMany({ where: { id: { in: questionIds } } })) as Array<{
+      id: string;
+      subject: string;
+      text: string;
+      options: string[];
+      answerIndex: number;
+    }>;
+    const found = new Map(rows.map((r) => [r.id, r]));
+    const missing = questionIds.filter((id) => !found.has(id));
+    if (missing.length > 0) {
+      // The whole selection is refused rather than the recognised part: an
+      // operator building a paper and given fewer questions than they picked
+      // would not know which are missing.
+      throw new BadRequestException(`${missing.length} of those questions no longer exist. Nothing was added.`);
+    }
+    const existing = Array.isArray(program.examQuestions)
+      ? (program.examQuestions as unknown as Array<{ text: string; options: string[]; answerIndex: number; subject?: string | null }>)
+      : [];
+    // ALREADY ON THE PAPER IS A SKIP, not a duplicate. Copying the same
+    // question twice gives a candidate the same question twice.
+    const already = new Set(existing.map((q) => `${(q.subject ?? "").trim()}::${q.text.trim()}`));
+    const additions = questionIds
+      .map((id) => found.get(id)!)
+      .filter((r) => !already.has(`${r.subject.trim()}::${r.text.trim()}`))
+      .map((r) => ({ text: r.text, options: r.options, answerIndex: r.answerIndex, subject: r.subject }));
+    if (additions.length > 0) {
+      await db.scholarshipProgram.update({
+        where: { id: programId },
+        data: { examQuestions: [...existing, ...additions] as unknown as Prisma.InputJsonValue },
+      });
+    }
+    await this.auditOwn(p, "scholarship.library.copy", programId, {
+      requested: questionIds.length,
+      added: additions.length,
+      skipped: questionIds.length - additions.length,
+    });
+    return { added: additions.length, skipped: questionIds.length - additions.length };
   }
 
   /**

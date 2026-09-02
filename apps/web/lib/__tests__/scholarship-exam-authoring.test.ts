@@ -124,3 +124,45 @@ describe("a physical exam can be written and printed", () => {
     expect(src).toMatch(/paper !== null && paper\.length > 0 && \(/);
   });
 });
+
+describe("the reusable question library", () => {
+  it("is offered on the console, with subject and search filters", () => {
+    expect(src).toContain("Question library");
+    expect(src).toMatch(/scholarships\/questions\?\$\{qs\.toString\(\)\}/);
+    expect(src).toMatch(/Filter the library by subject/);
+    expect(src).toMatch(/Search the library/);
+  });
+
+  // Only subjects the library ACTUALLY holds, so a picker can never offer an
+  // empty one.
+  it("offers only the subjects the library holds", () => {
+    expect(src).toMatch(/lib\.subjects\.map/);
+  });
+
+  // A paper holds COPIES, so the click that copies has to say so — an owner
+  // who believes a later edit will propagate will not re-check the paper.
+  it("says at the click that a copy will not change later", () => {
+    expect(src).toMatch(/copied onto the paper, so later edits here will not change it/);
+  });
+
+  it("says what deleting from the library does NOT affect", () => {
+    expect(src).toMatch(/Papers already built from it are unaffected/);
+  });
+
+  // REPORT WHAT WAS NOT ADDED. "added 3" over a selection of 5 reads as
+  // complete, and the two left behind are the ones somebody has to look at.
+  it("reports the questions already on the paper rather than only the added ones", () => {
+    expect(src).toMatch(/already on it/);
+  });
+
+  it("does not read the library until it is opened", () => {
+    expect(src).toMatch(/if \(libOpen\) void loadLibrary\(\)/);
+  });
+
+  // A failed read must not read as "the library is empty" — that invites an
+  // owner to retype questions they already have.
+  it("distinguishes a failed read from an empty library", () => {
+    expect(src).toMatch(/do not treat it as empty/i);
+    expect(src).toMatch(/The library is empty/);
+  });
+});

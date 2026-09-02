@@ -8,10 +8,10 @@
 // are step-up gated.
 // =============================================================================
 
-import { Body, Controller, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { z } from "zod";
 import { DISBURSABLE_AWARD_KINDS, SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
-import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto, ScholarshipSchoolSpreadDto } from "@sms/types";
+import type { CbtSittingViewDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipExamPaperDto, ScholarshipExamQuestionDto, ScholarshipLibraryPageDto, ScholarshipLibraryQuestionDto, ScholarshipSchoolSpreadDto } from "@sms/types";
 import type { Response } from "express";
 import { safeFilename } from "../documents/safe-content-type";
 import { narrowStatus, pageNumber } from "../common/status-filter";
@@ -92,6 +92,22 @@ const programUpdateSchema = programSchema.partial().extend({
 });
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
+const libraryQuestionSchema = z.object({
+  subject: z.string().trim().min(1).max(80),
+  text: z.string().trim().min(1).max(2000),
+  // A to E, matching the composer. The service checks that the answer is one
+  // of them — a shape check cannot.
+  options: z.array(z.string().trim().min(1).max(500)).min(2).max(6),
+  answerIndex: z.number().int().min(0).max(5),
+  note: z.string().trim().max(1000).nullish(),
+});
+
+const libraryQuestionPatchSchema = libraryQuestionSchema.partial();
+
+const copyQuestionsSchema = z.object({
+  questionIds: z.array(z.string().uuid()).min(1).max(200),
+});
+
 const decideBulkSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(1000),
   // AWARD is absent on purpose: it moves money, grants a school a free tier and
@@ -446,6 +462,86 @@ export class ScholarshipController {
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   announceExam(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.admin.announceExam(p, id);
+  }
+
+  // --- the reusable question library (platform owner) -------------------------
+
+  /**
+   * Browse the library. Paged and filtered in SQL — it holds every question
+   * written for every programme ever run.
+   */
+  @Get("questions")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  library(
+    @CurrentPrincipal() p: Principal,
+    @Query("subject") subject?: string,
+    @Query("q") q?: string,
+    @Query("page") page?: string,
+  ): Promise<ScholarshipLibraryPageDto> {
+    return this.admin.listLibrary(p, { subject, q, page: pageNumber(page) });
+  }
+
+  @Post("questions")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  // STEP-UP, like `PUT /scholarships/programs/:id` — the route that authors a
+  // paper today. A library question carries the answer key to a cross-school
+  // competition, and gating one authoring path and not the other is what the
+  // consistency gate exists to catch.
+  @RequireStepUp()
+  createLibraryQuestion(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(libraryQuestionSchema)) body: z.infer<typeof libraryQuestionSchema>,
+  ): Promise<ScholarshipLibraryQuestionDto> {
+    return this.admin.createLibraryQuestion(p, body);
+  }
+
+  @Put("questions/:id")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  // STEP-UP, like `PUT /scholarships/programs/:id` — the route that authors a
+  // paper today. A library question carries the answer key to a cross-school
+  // competition, and gating one authoring path and not the other is what the
+  // consistency gate exists to catch.
+  @RequireStepUp()
+  updateLibraryQuestion(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(libraryQuestionPatchSchema)) body: z.infer<typeof libraryQuestionPatchSchema>,
+  ): Promise<ScholarshipLibraryQuestionDto> {
+    return this.admin.updateLibraryQuestion(p, id, body);
+  }
+
+  /** Papers already built are UNAFFECTED — they hold a copy, not a reference. */
+  @Delete("questions/:id")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  // STEP-UP, like `PUT /scholarships/programs/:id` — the route that authors a
+  // paper today. A library question carries the answer key to a cross-school
+  // competition, and gating one authoring path and not the other is what the
+  // consistency gate exists to catch.
+  @RequireStepUp()
+  deleteLibraryQuestion(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.admin.deleteLibraryQuestion(p, id);
+  }
+
+  /**
+   * Copy library questions onto a programme's paper.
+   *
+   * Declared BEFORE `programs/:id` so "questions/copy" can never be captured as
+   * part of a programme id — the ordering `invoices/issue-bulk` already relies
+   * on.
+   */
+  @Post("programs/:id/questions/copy")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  // STEP-UP, like `PUT /scholarships/programs/:id` — the route that authors a
+  // paper today. A library question carries the answer key to a cross-school
+  // competition, and gating one authoring path and not the other is what the
+  // consistency gate exists to catch.
+  @RequireStepUp()
+  copyLibrary(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(copyQuestionsSchema)) body: z.infer<typeof copyQuestionsSchema>,
+  ) {
+    return this.admin.copyLibraryToProgram(p, id, body.questionIds);
   }
 
   /**

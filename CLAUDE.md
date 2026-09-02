@@ -898,6 +898,85 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A question written once, and reused for years
+`scholarship_question` (migration `20270129000000`, rls/50 part C),
+`listLibrary` / `createLibraryQuestion` / `updateLibraryQuestion` /
+`deleteLibraryQuestion` / `copyLibraryToProgram`, and the library panel on
+`/operator`. Asked for after the print work: the owner writes a question once
+and draws on it across programmes.
+A programme's paper lives INLINE on the programme, and that is right — a paper
+that has been sat must never change under the candidates who sat it. The cost
+was that nothing survived the programme: a question written for last year's exam
+had to be typed again this year, and a correction reached only the one paper it
+was typed into.
+**SO IT IS A LIBRARY PAPERS ARE ASSEMBLED FROM, NEVER A SET OF REFERENCES A
+PAPER POINTS AT.** Copying is the whole semantics, and it is what makes reuse
+safe. Driven live:
+```
+edit the library question   text and key both changed
+the paper built from it     "LIB Which is prime?"  key=11   <- unchanged
+the library                 "... (revised)"        key=4    <- edited
+DELETE it from the library  200
+the paper                   still 3 questions, all intact
+```
+// SAME REASON A PAYSLIP STORES A SNAPSHOT. A reference would let an edit years
+later rewrite an exam somebody has already sat, and a delete would empty it.
+// **DENY-ALL TO THE APP ROLE, which is STRICTER than `scholarship_program`
+beside it** — that one the app role may SELECT. Every row here carries an ANSWER
+KEY to a cross-school competition, and no tenant context ever needs one: a
+question reaches a candidate only by being COPIED onto a paper and materialised
+as a `CbtQuestion` inside that school's own tenant. So `REVOKE ALL` and a
+`USING (false)` policy, the `agent_commission` posture. Proved live:
+`psql -U major_user` gets **permission denied for table scholarship_question**.
+Golden Rule #7 with the reason written down.
+// APPENDS, NEVER REPLACES: the PUT that takes the whole set already exists for
+editing, and a copy that wiped the paper would be a destructive act behind a
+button reading "add". A question ALREADY on the paper is a SKIP and is
+REPORTED — copying it twice gives a candidate the same question twice, and
+"added 3" over a selection of 5 reads as complete.
+// THE WHOLE SELECTION IS REFUSED when one question no longer exists: an
+operator building a paper and handed fewer than they picked would not know
+which.
+// THE MEANING IS CHECKED, NOT ONLY THE SHAPE. The boundary bounds the options;
+the service refuses an `answerIndex` past the last one — a question nobody can
+get right, which would be copied onto a paper and mark every candidate wrong.
+On an EDIT it is checked against the options as they WILL BE, since shortening
+the list without moving the answer is the realistic way to create that state.
+// STEP-UP ON EVERY WRITE, matching `PUT /scholarships/programs/:id` — the route
+that authors a paper today. The consistency gate caught the omission
+immediately, which is what it is for.
+// PAGED AND FILTERED IN SQL, with the same LIMIT-inside-a-subquery cap as the
+review queue: the library holds every question written for every programme ever
+run, so an unbounded list is the O(lifetime) shape this repo has measured three
+times. Indexed `(subject, createdAt DESC, id DESC)` and `(createdAt DESC, id
+DESC)`.
+// THE SUBJECT PICKER OFFERS ONLY SUBJECTS THE LIBRARY HOLDS, so it can never
+present an empty one.
+// THE READ IS AUDITED — the rows carry answer keys, so who looked and when is
+the question, exactly as the application queue already records.
+// NOT LOADED UNTIL OPENED: an owner who never opens the library pays for no
+query, and a failed read says so rather than rendering as "empty", which would
+invite retyping questions they already have.
+// NOT BUILT, and named so it is not assumed: nothing records WHICH programmes a
+question has been used in. Answering "was this on last year's paper?" needs a
+link table, and inventing a `usedCount` that can drift would be worse than no
+answer.
+// GOTCHA: the test harness's `findMany` ignored `take`/`skip`, so the paging
+assertion passed against a service that had stopped paging. It honours them now
+— the harness trap this file records repeatedly.
+// GOTCHA: a `///` doc comment in the migration SQL is a syntax error; Prisma
+schema comments are not SQL ones.
+// VERIFIED, not assumed: all 226 migrations replay onto a fresh database and
+the deny-all policy is there afterwards. The one RLS file that fails a RAW
+replay loop is `08_attendance_rls.sql`, whose policies the attendance-
+partitioning migration already creates — the entrypoint's sentinel skips it,
+which the raw loop bypasses. Pre-existing and handled.
+// PROBE: three library questions and one programme created and removed.
+Mutation-validated eight ways: store a reference instead of a copy, replace the
+paper instead of appending, copy a duplicate, copy the recognised part of a bad
+selection, check an edit against the old options, load the library on every
+render, drop the copy-semantics wording, and report only what was added.
+
 ### A paper exam whose questions could not be written, or printed
 `renderPaperPdf` (extracted to `cbt/paper-pdf.ts`), `ScholarshipAdminService
 .examPaperPdf`, `GET /scholarships/programs/:id/paper.pdf` and `/answer-key.pdf`.

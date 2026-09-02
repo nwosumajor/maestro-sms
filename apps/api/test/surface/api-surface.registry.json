@@ -2949,6 +2949,26 @@
       "kind": "ui",
       "note": "bulk funnel actions on the selected rows in ScholarshipAdmin.tsx"
     },
+    "GET /scholarships/questions": {
+      "kind": "ui",
+      "note": "the question library panel on ScholarshipAdmin.tsx"
+    },
+    "POST /scholarships/questions": {
+      "kind": "ui",
+      "note": "the library's own composer on ScholarshipAdmin.tsx"
+    },
+    "PUT /scholarships/questions/:p": {
+      "kind": "ui",
+      "note": "editing a library question in place on ScholarshipAdmin.tsx"
+    },
+    "DELETE /scholarships/questions/:p": {
+      "kind": "ui",
+      "note": "removing a library question on ScholarshipAdmin.tsx"
+    },
+    "POST /scholarships/programs/:p/questions/copy": {
+      "kind": "ui",
+      "note": "\"Add to this paper\" on the library panel in ScholarshipAdmin.tsx"
+    },
     "GET /scholarships/programs/:p/answer-key.pdf": {
       "kind": "ui",
       "note": "the per-subject \"Key\" link on the paper panel in ScholarshipAdmin.tsx"
