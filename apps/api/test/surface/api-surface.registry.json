@@ -2357,6 +2357,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "PUT /hr/leave/types/:p": {
+      "kind": "ui",
+      "note": "Edit / Retire on the leave types list in LeaveAdmin.tsx"
+    },
     "POST /hr/leave/types": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

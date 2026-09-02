@@ -1,5 +1,5 @@
 import { isoDay } from "../common/calendar-day";
-import { Body, Controller, Get, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { LeaveBalanceDto, LeavePageDto, LeaveRequestDto, LeaveTypeDto } from "@sms/types";
 import { z } from "zod";
@@ -13,6 +13,12 @@ import { LeaveService } from "./leave.service";
 const typeSchema = z.object({
   name: z.string().min(1).max(80),
   daysPerYear: z.number().int().min(0).max(365),
+  active: z.boolean().optional(),
+});
+/** Every field optional: correcting the entitlement need not restate the name. */
+const typeUpdateSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  daysPerYear: z.number().int().min(0).max(365).optional(),
   active: z.boolean().optional(),
 });
 /** Register filters. `from`/`to` bound the LEAVE DATES, not the request date —
@@ -81,6 +87,17 @@ export class LeaveController {
     @Body(new ZodValidationPipe(typeSchema)) body: z.infer<typeof typeSchema>,
   ): Promise<LeaveTypeDto> {
     return this.leave.createLeaveType(p, body);
+  }
+
+  /** Correct a leave type, or retire one. Same permission as creating it. */
+  @Put("types/:id")
+  @RequirePermission(HR_PERMISSIONS.HR_LEAVE_MANAGE)
+  updateType(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(typeUpdateSchema)) body: z.infer<typeof typeUpdateSchema>,
+  ): Promise<LeaveTypeDto> {
+    return this.leave.updateLeaveType(p, id, body);
   }
 
   /** The school's leave register: filtered, searchable, paged. Every parameter

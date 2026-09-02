@@ -10,6 +10,7 @@
 // Tenant-isolated (RLS); self-service reads are scoped to the caller.
 // =============================================================================
 
+import { asDuplicateConflict } from "../common/unique-violation";
 import { BadRequestException, Inject, Injectable, NotFoundException, type OnModuleInit } from "@nestjs/common";
 import {
   LIST_CAP,
@@ -79,6 +80,79 @@ export class LeaveService implements OnModuleInit {
       });
       await this.audit.record(
         { actorId: p.userId, action: "hr.leave.type.create", entity: "leave_type", entityId: t.id, schoolId: p.schoolId },
+        tx,
+      );
+      return { id: t.id, name: t.name, daysPerYear: t.daysPerYear, active: t.active };
+    });
+  }
+
+  /**
+   * Correct a leave type, or retire one.
+   *
+   * IT COULD BE CREATED AND NOTHING ELSE — no update, no delete — and three
+   * things followed from that:
+   *
+   *   - `daysPerYear` is the ENTITLEMENT, and a typo (200 for 20) could never
+   *     be put right;
+   *   - a typo in the name sat in every staff member's apply picker for ever;
+   *   - `active` exists on the row precisely so a type created in error can be
+   *     retired, and NOTHING ever wrote it — a column read by `balancesFor`
+   *     and written by nobody.
+   *
+   * CORRECTING THE ENTITLEMENT DOES NOT REWRITE BALANCES ALREADY GRANTED, and
+   * that is deliberate rather than an omission. `entitledDays` is pinned onto
+   * a `leave_balance` row the first time somebody uses the type, so a year
+   * already under way is a record of what the school granted; changing it
+   * retrospectively would move a balance a member of staff has already been
+   * booking against. The new figure is what the NEXT balance is opened with,
+   * and the caller is told so.
+   *
+   * RETIRING KEEPS THE HISTORY: an inactive type is still on the balances a
+   * member of staff already holds and on the requests already approved under
+   * it — it simply stops being offered for a new one.
+   */
+  async updateLeaveType(
+    p: Principal,
+    id: string,
+    input: { name?: string; daysPerYear?: number; active?: boolean },
+  ): Promise<LeaveTypeDto> {
+    const name = input.name?.trim();
+    if (name !== undefined && !name) throw new BadRequestException("A leave type needs a name");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const existing = await tx.leaveType.findFirst({ where: { id } });
+      if (!existing) throw new NotFoundException("Leave type not found");
+      // Captured BEFORE the write. Reading a "changed from" value off a row the
+      // update has already touched is fragile however the client behaves.
+      const wasDays = existing.daysPerYear;
+      // `@@unique([schoolId, name])`, so a rename onto another type's name is a
+      // 409 with the sentence a person reads — never a 500.
+      // 409, matching what CREATE already answers for the same collision
+      // through the global P2002 filter. The same conflict answering 400 on one
+      // path and 409 on the other is how a caller learns which path it took.
+      const t = await asDuplicateConflict("A leave type with that name already exists.", () =>
+        tx.leaveType.update({
+          where: { id },
+          data: {
+            ...(name ? { name } : {}),
+            ...(input.daysPerYear !== undefined ? { daysPerYear: input.daysPerYear } : {}),
+            ...(input.active !== undefined ? { active: input.active } : {}),
+          },
+        }),
+      );
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "hr.leave.type.update",
+          entity: "leave_type",
+          entityId: id,
+          schoolId: p.schoolId,
+          metadata: {
+            name: t.name,
+            daysPerYearFrom: input.daysPerYear !== undefined ? wasDays : null,
+            daysPerYearTo: input.daysPerYear !== undefined ? t.daysPerYear : null,
+            activeTo: input.active !== undefined ? t.active : null,
+          },
+        },
         tx,
       );
       return { id: t.id, name: t.name, daysPerYear: t.daysPerYear, active: t.active };

@@ -898,6 +898,56 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A leave entitlement of 200 days, and no way back
+`LeaveService.updateLeaveType` + `PUT /hr/leave/types/:id`, the apply picker's
+`active` filter, and the Edit / Retire controls. The third find off the
+create-with-no-update sweep, and the one where a COLUMN existed for the job and
+nothing could write it.
+**A LEAVE TYPE COULD BE CREATED AND NOTHING ELSE**, and three things followed:
+```
+daysPerYear   the ENTITLEMENT. A typo — 200 for 20 — could never be put right.
+name          a typo sat in every staff member's apply picker for ever.
+active        exists on the row so a type created in error can be RETIRED.
+              Read by `balancesFor`. Written by NOBODY.
+```
+// AND THE THIRD WAS DEAD TWICE OVER: `LeaveSelfService` rendered EVERY type
+with no `active` filter, so even a type that could be retired would have gone
+on being offered. Fixing the column alone would have changed nothing a member
+of staff sees — the "guard on one door" shape, in a screen.
+// **CORRECTING THE ENTITLEMENT DOES NOT REWRITE BALANCES ALREADY GRANTED**,
+and that is a decision rather than an omission. `entitledDays` is pinned onto a
+`leave_balance` row the first time somebody uses the type, so a year already
+under way is a record of what the school granted; moving it retrospectively
+would change a balance a member of staff has been booking against. The new
+figure opens the NEXT balance, and the screen says so.
+// RETIRING KEEPS THE HISTORY — an inactive type stays on the balances already
+granted and the requests already approved under it, and only stops being
+offered. Said on the screen, because an HR clerk who fears otherwise will not
+retire a wrong type at all.
+// **THE SAME COLLISION MUST NOT ANSWER TWO WAYS.** My first version used
+`asDuplicate` (400) while CREATE already answers **409** for the identical
+name clash through the global P2002 filter — this file's own rule is that a
+guard and the race behind it share a status, or the race becomes observable.
+Caught by driving it rather than by a test, and now both are 409.
+Live, one type, driven end to end:
+```
+created with a typo   "PROBE Anual"  200d
+renamed               "PROBE Annual" 200d   entitlement untouched
+entitlement corrected "PROBE Annual"  20d   name untouched
+rename onto "Annual"  409  · create "Annual" 409   the same answer
+retired               active=false · staff are offered: Annual, Sick
+put back in use       active=true
+```
+// GOTCHA in the fixture, and it made the service better: the stub's
+`findFirst` returned the LIVE object the later `update` mutates, so the audit's
+"changed from" read the NEW value. A real client returns a detached row — but
+reading a from-value AFTER the write is fragile whatever the client does, so
+the service captures it first and the stub now copies.
+// PROBE: one leave type removed; the two the school had are unchanged.
+Mutation-validated six ways: make `active` unwritable again, store a blank
+name, throw a raw duplicate, drop what the audit says moved, offer a retired
+type in the picker, and drop the sentence about what retiring keeps.
+
 ### The school held the answer key after all — through the BANK
 `CbtQuestionBank.scholarshipProgramId` (migration `20270202000000`),
 `assertNotAPlatformBank`, and `CbtService.updateBank`. Found by sweeping the

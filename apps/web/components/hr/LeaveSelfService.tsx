@@ -41,7 +41,7 @@ export function LeaveSelfService({
   selfUserId: string;
 }) {
   const router = useRouter();
-  const [leaveTypeId, setLeaveTypeId] = React.useState(types[0]?.id ?? "");
+  const [leaveTypeId, setLeaveTypeId] = React.useState(types.find((t) => t.active !== false)?.id ?? "");
   const [startDate, setStartDate] = React.useState("");
   const [endDate, setEndDate] = React.useState("");
   const [reason, setReason] = React.useState("");
@@ -157,7 +157,12 @@ export function LeaveSelfService({
             <div className="space-y-1.5">
               <Label htmlFor="lv-type">Type</Label>
               <select id="lv-type" value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-                {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                {/* A RETIRED TYPE IS NOT OFFERED. `active` exists on the row so
+                    a type created in error can be taken out of use, and this
+                    picker showed every type regardless — so retiring one would
+                    have changed nothing a member of staff sees. It stays on
+                    the balances and requests already made under it. */}
+                {types.filter((t) => t.active !== false).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
             <div className="space-y-1.5"><Label htmlFor="lv-start">{halfDay ? "Date" : "From"}</Label><Input id="lv-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>

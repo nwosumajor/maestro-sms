@@ -39,6 +39,9 @@ export function LeaveAdmin({
   const [days, setDays] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
+  // Correcting a type. `daysPerYear` is the ENTITLEMENT, so a typo used to be
+  // permanent — and `active` existed on the row with nothing able to write it.
+  const [edit, setEdit] = React.useState<{ id: string; name: string; days: string } | null>(null);
 
   const addType = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +56,21 @@ export function LeaveAdmin({
     setBusy(false);
     if (res.ok) { setName(""); setDays(""); router.refresh(); }
     else setMsg(await readApiError(res));
+  };
+
+  const saveType = async (id: string, patch: Record<string, unknown>, note: string) => {
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch(`/api/sms/hr/leave/types/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    setBusy(false);
+    if (!res.ok) { setMsg(await readApiError(res)); return; }
+    setEdit(null);
+    setMsg(note);
+    router.refresh();
   };
 
   /** Keep the filters when paging — losing them on page 2 makes the register
@@ -76,9 +94,52 @@ export function LeaveAdmin({
           <div className="space-y-1.5"><Label htmlFor="lt-name">New leave type</Label><Input id="lt-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Maternity" /></div>
           <div className="space-y-1.5"><Label htmlFor="lt-days">Days/year</Label><Input id="lt-days" type="number" value={days} onChange={(e) => setDays(e.target.value)} className="w-24" /></div>
           <Button type="submit" disabled={busy}>Add type</Button>
-          <span className="text-sm text-muted-foreground">{types.map((t) => `${t.name} (${t.daysPerYear}d)`).join(" · ")}</span>
           {msg && <span className="text-sm text-destructive">{msg}</span>}
         </form>
+
+        {/* THE TYPES THEMSELVES, correctable. A wrong entitlement used to be
+            permanent and a type created in error stayed in every staff
+            member's apply picker for ever. */}
+        <div className="space-y-1">
+          {types.length === 0 && <p className="text-sm text-muted-foreground">No leave types yet.</p>}
+          {types.map((t) => (
+            <div key={t.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 p-2 text-sm">
+              {edit?.id === t.id ? (
+                <>
+                  <Input aria-label={`Name of ${t.name}`} className="h-8 w-40" value={edit.name}
+                    onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+                  <Input aria-label={`Days per year for ${t.name}`} type="number" className="h-8 w-24" value={edit.days}
+                    onChange={(e) => setEdit({ ...edit, days: e.target.value })} />
+                  <Button size="sm" disabled={busy}
+                    onClick={() => saveType(t.id, { name: edit.name.trim(), daysPerYear: parseInt(edit.days, 10) || 0 },
+                      "Saved. Balances already granted this year keep the entitlement they were opened with.")}>
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>Cancel</Button>
+                </>
+              ) : (
+                <>
+                  <span className={t.active === false ? "text-muted-foreground line-through" : "font-medium"}>{t.name}</span>
+                  <span className="text-xs text-muted-foreground">{t.daysPerYear} days/year</span>
+                  {t.active === false && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs">retired — not offered for new requests</span>
+                  )}
+                  <span className="ml-auto flex gap-1">
+                    <Button size="sm" variant="ghost"
+                      onClick={() => setEdit({ id: t.id, name: t.name, days: String(t.daysPerYear) })}>Edit</Button>
+                    <Button size="sm" variant="ghost" disabled={busy}
+                      onClick={() => saveType(t.id, { active: t.active === false },
+                        t.active === false
+                          ? "Back in use — staff can request it again."
+                          : "Retired. It stays on the balances and requests already made under it; it is simply no longer offered.")}>
+                      {t.active === false ? "Put back in use" : "Retire"}
+                    </Button>
+                  </span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
 
         <div>
           <p className="mb-2 text-sm font-medium">Leave register</p>
