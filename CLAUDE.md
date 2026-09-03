@@ -1804,6 +1804,56 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### The clock and the map were at the top of a paper forty questions long
+`ExamClock` + the sticky navigator (`components/cbt/CbtExamRoom.tsx`). Asked how
+many questions a candidate can see at once and whether they can jump to any
+number. The answers are **all of them, on one page** and **yes** — and checking
+the second one honestly is what found that it was true of the MARKUP and false
+of the EXAM.
+**THE WHOLE PAPER IS ONE PAGE, DELIBERATELY, and the reason is already written
+beside `jumpTo`:** navigating is a SCROLL — no request, no re-render, nothing to
+lose mid-exam. A numbered navigator and "Go to first unanswered" have always been
+there. They sat at the TOP. So from question 30 of 40 a candidate could see
+neither how long was left nor any way to jump, without scrolling all the way
+back up and losing their place — on a timed paper, which is exactly when a
+person will not do it. Measured live on a real 40-question sitting:
+```
+the paper          40 questions in ONE 22 KB payload, 4 options each
+answerIndex        null on every question, before AND after answering
+the navigator      40 numbered buttons, each aria-labelled, at the top only
+the clock          at the top only
+```
+Live after, read out of the rendered HTML: `sticky top-2 z-20`, `role="timer"`
+and `0/40 answered` all inside ONE card that travels with the reader, 40
+numbered buttons, "Go to first unanswered", and answering question 28 mid-paper
+saved in one request with the key still `null`.
+// **THE SECOND DEFECT IS THE ONE NOBODY WOULD REPORT.** `useCountdown` was
+state on `CbtExamRoom` itself — the component that renders every question and
+every option — so a 40-question paper **re-rendered once a second for the whole
+sitting**, on whatever device a school has. Nothing about the paper changes
+between ticks. `ExamClock` is its own component now and reports expiry UP
+through `onExpired`; the auto-submit is unchanged and still fires exactly once
+(`firedRef` in the clock, `submittedRef` in the room). A test pins that the room
+holds no per-second value, because the obvious "tidy-up" is to hoist it back.
+// THE MAP COLLAPSES ON A LONG PAPER and opens on a short one
+(`initial.questions.length <= 12`). Eight numbers are a glance; a hundred are a
+wall in front of the question being answered — and it capped at `max-h-40` with
+its own scroll rather than pushing the paper down. Taking a jump CLOSES it on a
+long paper, so it cannot sit over the question you just asked for.
+// THE PROGRESS COUNT TRAVELS WITH IT, not just the numbers: "31/40 answered ·
+9 left" is the fact a candidate checks before submitting, and it was as far
+from the Submit button as it could be.
+// GOTCHA in my own probe, twice, and the same lesson each time: `sitting.id` is
+not on the start response (the field is named otherwise) and the saved answer is
+in `answers`, keyed by question id, not `selectedIndex` on the question — I read
+two `undefined`s as failures before reading the DTO. A probe that guesses a
+field name reports a fact about itself.
+// PROBE: one bank, 40 questions, one exam, one sitting, one workflow request
+and six audit rows created and removed; the tables are as found.
+Mutation-validated five ways: stop the navigator travelling, hoist the clock
+back into the paper, keep the map open whatever the paper's length, leave it
+open over the question jumped to, and paginate the paper.
+
 ### The notice said EXPIRED; the register said "expires (-823d)"
 `StaffDocumentDto.expiryStage` + `documentDto(..., today)` + the HR document
 row. Found by working the `AWAITING_A_SCREEN` backlog and reading the HR

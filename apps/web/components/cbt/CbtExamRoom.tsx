@@ -38,6 +38,52 @@ function useCountdown(deadline: string): number {
   return Math.max(0, Math.floor((new Date(deadline).getTime() - now) / 1000));
 }
 
+/**
+ * The clock, and ONLY the clock.
+ *
+ * `secondsLeft` used to be state on the exam room itself — the component that
+ * renders every question and every option — so a paper of 40 questions and 160
+ * option buttons re-rendered ONCE A SECOND for the whole sitting, on whatever
+ * machine the school has. Nothing about the paper changes between ticks.
+ *
+ * Isolated here, a tick repaints the digits and nothing else. The expiry is
+ * reported UPWARDS once, so the parent still auto-submits without holding a
+ * per-second value of its own.
+ */
+function ExamClock({
+  deadline,
+  onExpired,
+  className,
+}: {
+  deadline: string;
+  onExpired: () => void;
+  className?: string;
+}) {
+  const secondsLeft = useCountdown(deadline);
+  const firedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (secondsLeft === 0 && !firedRef.current) {
+      firedRef.current = true;
+      onExpired();
+    }
+  }, [secondsLeft, onExpired]);
+  const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
+  const ss = String(secondsLeft % 60).padStart(2, "0");
+  return (
+    <span
+      role="timer"
+      aria-label={`Time remaining: ${mm} minutes ${ss} seconds`}
+      className={cn(
+        "tnum rounded-full px-3 py-1 font-mono text-sm font-semibold",
+        secondsLeft <= 120 ? "bg-destructive/15 text-destructive" : "bg-muted",
+        className,
+      )}
+    >
+      {mm}:{ss}
+    </span>
+  );
+}
+
 export function CbtExamRoom({
   initial,
   basePath = "cbt",
@@ -58,7 +104,6 @@ export function CbtExamRoom({
   const [s, setS] = React.useState<Sitting>(initial);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const secondsLeft = useCountdown(s.deadline);
   const open = s.status === "IN_PROGRESS";
 
   // Which questions are DONE. An objective question counts once a choice is
@@ -84,6 +129,9 @@ export function CbtExamRoom({
   const jumpTo = (questionId: string) => {
     const el = cardRefs.current[questionId];
     if (!el) return;
+    // CLOSE THE MAP ON THE WAY. Leaving a hundred numbers open over the
+    // question you just jumped to defeats the jump.
+    if (s.questions.length > 12) setMapOpen(false);
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     // Focus the first control so a keyboard user lands ON the question.
     el.querySelector<HTMLElement>("input,textarea,button")?.focus({ preventScroll: true });
@@ -141,15 +189,17 @@ export function CbtExamRoom({
     };
   }, [open, flush]);
 
-  // Time's up → submit automatically (the server would refuse late answers anyway).
+  // Time's up → submit automatically (the server would refuse late answers
+  // anyway). Driven by the CLOCK's own callback, so the paper no longer holds a
+  // value that changes every second.
   const submittedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (open && secondsLeft === 0 && !submittedRef.current) {
+  const onExpired = React.useCallback(() => {
+    if (!submittedRef.current) {
       submittedRef.current = true;
       void submit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reason: submit is stable within this component's lifetime.
-  }, [secondsLeft, open]);
+  }, []);
 
   // ANSWERS THE SERVER DOES NOT HOLD.
   //
@@ -167,6 +217,9 @@ export function CbtExamRoom({
   // QUESTIONS ARE UNSAVED rather than only flashing a banner. The choice stays
   // on screen — losing the candidate's intent would be a worse answer than
   // showing it as not yet saved — and submit warns before it closes over one.
+  // The map is OPEN on a short paper and CLOSED on a long one: eight numbers
+  // are a glance, a hundred are a wall in front of the question being answered.
+  const [mapOpen, setMapOpen] = React.useState(() => initial.questions.length <= 12);
   const [unsaved, setUnsaved] = React.useState<Record<string, true>>({});
   const mark = (questionId: string, failed: boolean) =>
     setUnsaved((cur) => {
@@ -251,9 +304,6 @@ export function CbtExamRoom({
     else setMsg(await readApiError(res));
   }
 
-  const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
-  const ss = String(secondsLeft % 60).padStart(2, "0");
-
   return (
     <div className="space-y-4">
       <Card>
@@ -268,14 +318,7 @@ export function CbtExamRoom({
             </p>
           </div>
           {open ? (
-            <span
-              className={cn(
-                "tnum rounded-full px-3 py-1 font-mono text-sm font-semibold",
-                secondsLeft <= 120 ? "bg-destructive/15 text-destructive" : "bg-muted",
-              )}
-            >
-              {mm}:{ss}
-            </span>
+            <ExamClock deadline={s.deadline} onExpired={onExpired} />
           ) : (
             <Badge variant={s.status === "SUBMITTED" ? "secondary" : "destructive"}>{s.status}</Badge>
           )}
@@ -323,16 +366,45 @@ export function CbtExamRoom({
         </div>
       )}
 
-      {/* QUESTION NAVIGATOR — the answered/pending map.
+      {/* QUESTION NAVIGATOR — the answered/pending map, and the only way to move
+          around a paper that is ALL ON ONE PAGE.
           Filled = answered, outlined = still to do. Tap a number to jump straight
           there, so nothing is left unanswered just because it was further down the
-          page. Purely derived state: no request, and it can't disturb the paper. */}
+          page. Purely derived state: no request, and it can't disturb the paper.
+
+          STICKY, because it was not. A forty-question paper is a long page, and
+          from question thirty a candidate could neither see the clock nor jump
+          anywhere without scrolling all the way back to the top — so "you can
+          jump to any question" was true of the markup and false of the exam.
+          The grid COLLAPSES by default beyond a short paper and scrolls inside
+          its own box, so a hundred numbers can never cover the question being
+          answered. */}
       {open && (
-        <Card>
+        <Card className="sticky top-2 z-20 shadow-sm">
           <CardContent className="space-y-2 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
-                Your answers so far — tap a number to jump to that question.
+                {answered}/{s.questions.length} answered
+                {pending > 0 ? ` · ${pending} left` : " · all done"}
+              </p>
+              <div className="flex items-center gap-2">
+                <ExamClock deadline={s.deadline} onExpired={onExpired} className="px-2 py-0.5 text-xs" />
+                {/* The clock travels WITH the navigator, so the two facts a
+                    candidate needs mid-paper — how long is left, and what is
+                    still unanswered — are in one place they can always see. */}
+                <button
+                  type="button"
+                  onClick={() => setMapOpen((v) => !v)}
+                  aria-expanded={mapOpen}
+                  className="rounded-md border px-2 py-0.5 text-xs font-medium hover:bg-muted"
+                >
+                  {mapOpen ? "Hide questions" : "All questions"}
+                </button>
+              </div>
+            </div>
+            <div className={cn("flex flex-wrap items-center justify-between gap-2", !mapOpen && "hidden")}>
+              <p className="text-xs text-muted-foreground">
+                Tap a number to jump to that question.
               </p>
               {firstPending && (
                 <button
@@ -344,7 +416,7 @@ export function CbtExamRoom({
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className={cn("flex max-h-40 flex-wrap gap-1.5 overflow-y-auto", !mapOpen && "hidden")}>
               {s.questions.map((q, i) => {
                 const done = answeredIds.has(q.id);
                 // A THIRD state, and it is the point: an answer the server has
@@ -375,7 +447,7 @@ export function CbtExamRoom({
                 );
               })}
             </div>
-            <p className="text-[0.7rem] text-muted-foreground">
+            <p className={cn("text-[0.7rem] text-muted-foreground", !mapOpen && "hidden")}>
               Filled = answered · outlined = still to do{s.questions.some((q) => q.type === "THEORY") ? " · round = theory (written answer)" : ""}
               {unsavedCount > 0 ? " · red = not saved, choose it again" : ""}
             </p>
