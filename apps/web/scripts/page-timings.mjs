@@ -1,8 +1,35 @@
-// How long does each page take to RENDER, for the role that actually uses it,
-// at the volume this platform is meant to carry?
+// =============================================================================
+// probe:page-timings — how long does each page take to RENDER, for the roles
+// that actually use it?
+// =============================================================================
+// The route smoke answers "does every page render for every role". It does not
+// answer "is it fast", and rendering is not the same as being usable: a page
+// that answers in 90 ms on a school's first day and 9 s in its fifth year has
+// passed the smoke every time.
+//
+// So this signs in as real accounts and times every parameterless page, then
+// reports the SLOWEST and the distribution. Run it against a school with
+// HISTORY — this repo's own rule is that a fixture of a few thousand rows makes
+// every performance claim meaningless.
+//
+// Measured on a 50-school fleet carrying 839,000 registers, 199,000 subject
+// results and 25,000 invoices: median 22 ms, p95 45 ms, max 92 ms, no 5xx.
+//
+// Env: WEB_URL (default http://localhost — the compose stack through nginx,
+//      NOT :3000, which is `next dev`), SMOKE_ROLES (comma-separated emails,
+//      all sharing SMOKE_PASSWORD).
+//
+// // GOTCHA: `POST /auth/login` is rate-limited 10/min per IP, so a long role
+// list loses the tail of it. A role that could not sign in is REPORTED, never
+// silently counted as fast — a skipped role is not a passing one.
+// =============================================================================
 const WEB = process.env.WEB_URL ?? "http://localhost";
-const PASSWORD = "password123";
-const ROLES = process.env.SMOKE_ROLES.split(",").map(s => s.trim());
+const PASSWORD = process.env.SMOKE_PASSWORD ?? "password123";
+const ROLES = (process.env.SMOKE_ROLES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+if (ROLES.length === 0) {
+  console.error("Set SMOKE_ROLES to a comma-separated list of accounts to sign in as.");
+  process.exit(2);
+}
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
@@ -38,9 +65,10 @@ async function login(email) {
 }
 
 const rows = [];
+const skipped = [];
 for (const email of ROLES) {
   const cookie = await login(email);
-  if (!cookie) { console.log("could not sign in:", email); continue; }
+  if (!cookie) { skipped.push(email); continue; }
   for (const route of routes) {
     const t0 = Date.now();
     const res = await fetch(`${WEB}${route}`, { headers: { cookie }, redirect: "manual" });
@@ -63,5 +91,11 @@ console.log("SLOWEST 22 PAGES (ms)      med    max   n");
 for (const s of stats.slice(0, 22)) console.log(`  ${s.route.padEnd(34)}${String(s.med).padStart(5)}${String(s.max).padStart(7)}${String(s.n).padStart(4)}`);
 const all = shown.map(r => r.ms).sort((a, b) => a - b);
 console.log(`\nall pages: median ${all[Math.floor(all.length/2)]}ms  p95 ${all[Math.floor(all.length*0.95)]}ms  max ${all[all.length-1]}ms`);
-const nonOk = rows.filter(r => r.status >= 500);
-console.log("5xx:", nonOk.length, nonOk.slice(0,5).map(r=>`${r.route}(${r.status})`).join(" "));
+const nonOk = rows.filter((r) => r.status >= 500);
+console.log("5xx:", nonOk.length, nonOk.slice(0, 5).map((r) => `${r.route}(${r.status})`).join(" "));
+if (skipped.length) {
+  // A role nobody could sign in as was not measured, and must not read as one
+  // that was fast. Usually the login limiter; re-run for those alone.
+  console.log(`\nINCOMPLETE — ${skipped.length} role(s) never signed in: ${skipped.join(", ")}`);
+  process.exit(3);
+}

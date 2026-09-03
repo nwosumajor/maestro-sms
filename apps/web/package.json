@@ -17,7 +17,8 @@
     "probe:permissions": "node scripts/permission-matrix.mjs",
     "seed:modules": "node scripts/seed-modules.mjs",
     "probe:no-500": "node scripts/no-request-is-a-500.mjs",
-    "probe:no-secrets": "node scripts/no-response-carries-a-secret.mjs"
+    "probe:no-secrets": "node scripts/no-response-carries-a-secret.mjs",
+    "probe:page-timings": "node scripts/page-timings.mjs"
   },
   "dependencies": {
     "@sms/tokens": "workspace:*",

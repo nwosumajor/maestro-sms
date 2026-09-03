@@ -896,6 +896,7 @@ The controls already in place, so you know what you are relying on:
 | Permission matrix | `pnpm --filter @sms/web probe:permissions` | A role served rows from an endpoint whose permission it lacks |
 | No request is a 500 | `pnpm --filter @sms/web probe:no-500` | A route that answers 5xx to an ordinary request, a hostile query string, or a malformed id |
 | No response carries a secret | `pnpm --filter @sms/web probe:no-secrets` | A response body carrying field-encrypted ciphertext (`enc:v1:`) or credential material, to any of the 17 roles |
+| Page render timings | `SMOKE_ROLES=... pnpm --filter @sms/web probe:page-timings` | A page that renders but is SLOW — the route smoke proves it answers, this proves how fast, and it must be run against a school with HISTORY |
 | Restore drill | `infrastructure/scripts/restore-drill.sh` | Backups that don't actually restore |
 | Fail-closed demo seeding | `packages/db/prisma/seed.ts` | Demo credentials reaching production |
 | 12 CloudWatch alarms → SNS | `alarms.tf` | Infrastructure symptoms |

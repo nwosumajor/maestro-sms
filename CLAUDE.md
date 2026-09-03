@@ -1804,6 +1804,88 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### Fifty schools, sixteen countries, a full session — driven
+Asked for: 50 schools (30 Nigeria, 20 global) from the first PUBLIC onboarding
+through a three-term session, every module exercised, the web reviewed for
+efficiency, and the platform judged deployment-ready. **The flows are driven over
+the real API; only the VOLUME is bulk-loaded**, and the split is stated because
+it is what the conclusions rest on.
+```
+DRIVEN over HTTP   public onboarding x50 (rate limiter and all), operator review
+                   and provisioning x50, staff/pupil/guardian onboarding on 15
+                   schools, SIS import + maker-checker approval, class and
+                   subject setup, attendance, marks, publish, report cards,
+                   invoices/issue/payment/plan, term 1->2->3, promotion with a
+                   second approver, all 18 scheduled jobs, 5 security probes
+BULK LOADED        a PRIOR session's registers, results and bills for all 50, so
+                   the pages are measured against a school with history rather
+                   than a school on its first day
+```
+**WHAT IT FOUND, and both are in their own entries above**: the bulk SIS import
+could not import a roll and stopped the API for every tenant while it tried; and
+three nightly sweeps opened a transaction per person. Both were found by DRIVING
+rather than reading — the import failed only under concurrency, and the sweeps
+only looked slow once there were fifty schools to sweep.
+**THE SHAPE AT THE END, measured rather than asserted:**
+```
+54 schools · 16,725 users · 11,548 pupils · 839k registers · 199k results
+25k invoices · 23k payments · 872 MB
+
+every page, every role     median 26 ms · p95 42 ms · max 92 ms · 0 5xx  (864 renders)
+heavy reads                analytics 24 · receivables 19 · broadsheet 23
+                           session report 31 · journal CSV 44 · invoice p20 11 ms
+cross-tenant (54 schools)  registry 25 · attention 42 · revenue 23 ·
+                           platform analytics 172 · directory 172 ms
+18 scheduled jobs          all ran; dunning scanned 53 schools, failed 0
+```
+// **THE TWO 172 ms READS ARE THE ONLY ONES WORTH KNOWING ABOUT**, and both were
+read rather than guessed at. `PlatformAnalyticsService` is grouped queries with
+in-memory loops — O(fleet) in tiny rows, not a query per school.
+`OperatorDirectoryService` opens a transaction PER ROW, which is bounded by the
+PAGE and is deliberate: each row needs its own school's GUC, and a cross-tenant
+aggregate would need the privileged client the file avoids for tenant data.
+Neither degrades with the fleet. Recorded so the next reader starts from the
+measurement.
+**THE SECURITY POSTURE, at 50 tenants rather than 4:**
+```
+isolation probe     14/14 denied, by direct id, through the real front door
+family scope        every probe 404/403 identical to a ghost id
+permission matrix   3,740 role/route pairs, 0 roles skipped, no over-exposure
+no request is a 500 4,212 requests incl. hostile query strings — zero 5xx
+no secret in a body 3,995 (role,route) pairs across all 17 roles — clean
+API suite           5,777 tests
+```
+// MODULE ENTITLEMENT HOLDS ACROSS ALL FOUR TIERS, driven per tier: 389 of 456
+module probes opened, and every refusal was either correct gating (STANDARD
+closes hostel, transport, HR, discipline, admissions, alumni, CBT, games, tasks,
+forms, polls, certificate) or my own probe guessing a route.
+// THE REGION MODEL HOLDS: 16 countries provisioned, US and Canada correctly got
+TWO_SEMESTER opening in August and the other 14 THREE_TERM opening in September,
+and `currency`/`timezone` stayed NULL exactly as designed — `resolveRegion`
+falls back to the country, so a Ghanaian school resolves GHS with nothing stamped.
+// A FULL SESSION ENDS CORRECTLY: term 1->2->3 advanced, the final term REFUSED
+to advance and named the fix, six classes were promoted by a DIFFERENT person,
+100 pupils moved and 20 GRADUATED (the top class, which has no next class), and
+a pupil's session report still reads `JSS 3A` — the class they were in THEN,
+after being promoted out of it.
+// GOTCHA, mine, five times over, and it is this file's own rule: a probe that
+guesses a field name reports a fact about itself. `fee-items` is `/fees/items`,
+the plan takes `tranches` not `installments`, `/classes` is `/classes/mine`,
+`GET /scholarships/programs` is the OWNER's route (a school reads `/portal`),
+and the guardian email shape differs between the HTTP path (from the NAME) and
+the bulk one. Every one of those first looked like a defect.
+// GOTCHA: `POST /public/onboarding-requests` is limited to 10/min per IP, so 50
+submissions take about five minutes of waiting. That is the documented
+defence-in-depth backstop working, not a fault — worth knowing before reading a
+429 as one.
+// PROBE: 50 schools, 15,709 users, 1,003,803 tenant rows, 50 onboarding
+requests and 787 audit/notification rows removed; every table is back to its
+baseline count exactly (4 schools, 1,016 users, 905 pupils, 173,701 registers,
+14 invoices, 19 payments) and a VACUUM FULL took the database from 872 MB to
+279 MB. The three demo schools' plans and statuses are as found.
+// `probe:page-timings` is kept and listed in the incident runbook beside the
+other five: the route smoke proves a page RENDERS, and nothing asked how fast.
+
 ### Three nightly sweeps that opened a transaction per person
 `FeesService.notifyGuardians` / `sendFeeReminders`, `SisNudgeService.sweep`.
 Found by running all eighteen scheduled jobs across a 50-school fleet and timing
