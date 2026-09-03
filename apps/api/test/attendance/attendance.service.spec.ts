@@ -2,9 +2,12 @@
 // AttendanceService — relationship-scoping unit tests (in-memory fakes, no DB)
 // =============================================================================
 
-import { schoolToday } from "@sms/types";
+import { schoolDateString, schoolToday } from "@sms/types";
 import { AttendanceService } from "../../src/attendance/attendance.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
+
+/** The fixture school's timezone. Every "today" in this file resolves through it. */
+const DEFAULT_TZ = "Africa/Lagos";
 
 // Bcrypt at cost factor 10 dominates this suite's runtime — that is the security
 // parameter doing its job, not slow code, so the timeout moves rather than the
@@ -85,9 +88,9 @@ function makeService(f: Fakes) {
   // The school's region decides what day it is. `f.timezone` lets a test put the
   // school somewhere other than West Africa, which is the whole point of the fix.
   const region = {
-    forSchool: jest.fn().mockResolvedValue({ timezone: f.timezone ?? "Africa/Lagos" }),
-    inTx: jest.fn().mockResolvedValue({ timezone: f.timezone ?? "Africa/Lagos" }),
-    todayInTx: jest.fn(async () => schoolToday(f.timezone ?? "Africa/Lagos")),
+    forSchool: jest.fn().mockResolvedValue({ timezone: f.timezone ?? DEFAULT_TZ }),
+    inTx: jest.fn().mockResolvedValue({ timezone: f.timezone ?? DEFAULT_TZ }),
+    todayInTx: jest.fn(async () => schoolToday(f.timezone ?? DEFAULT_TZ)),
   };
   const service = new AttendanceService(
     db as never, audit as never, notifications as never, workflow as never, region as never, hooks as never,
@@ -102,7 +105,15 @@ const principal = (roles: string[], userId = "u-1"): Principal => ({
   permissions: [],
 });
 
-const recent = () => new Date().toISOString().slice(0, 10);
+// THE SCHOOL'S DAY, NOT THE SERVER'S — the distinction this module is built on,
+// and the fixture was on the wrong side of it. `new Date().toISOString()` is the
+// UTC day; the service asks `schoolToday(timezone)`, and the fixture's school is
+// on Africa/Lagos. So in the hour before UTC midnight the two disagree, "today"
+// became the school's YESTERDAY, and `assertAllEnrolled` correctly answered with
+// its PAST-tense refusal ("was not in this class on that date") while the test
+// demanded the present-tense one. It failed in CI at 23:05 UTC — every night in
+// that window, and never in the daytime.
+const recent = (tz: string = DEFAULT_TZ) => schoolDateString(tz);
 
 describe("AttendanceService scoping", () => {
   it("the class SUPERVISOR can mark enrolled students", async () => {
@@ -478,7 +489,9 @@ describe("AttendanceService — school-local dates", () => {
       timezone: "America/Toronto",
     });
     await service.markAttendance(principal(["teacher"]), "c-1", {
-      date: recent(),
+      // THIS school's today — the whole point of the test is that the two clocks
+      // differ, so taking the fixture default here would be the same mistake.
+      date: recent("America/Toronto"),
       records: [{ studentId: "stu-1", status: "PRESENT" }],
     });
     expect(region.forSchool).toHaveBeenCalledWith("school-A");

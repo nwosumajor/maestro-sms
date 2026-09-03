@@ -1804,6 +1804,41 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### A test that asked the server what day it was, in a suite about not doing that
+`recent()` in `attendance.service.spec.ts`. CI went red on a docs-only commit,
+which is the tell: nothing in the change could have caused it.
+```
+● marking a non-enrolled student is rejected (400)
+    Expected pattern: /not enrolled/i
+    Received message: "Student intruder was not in this class on that date"
+```
+**THE PRODUCT WAS RIGHT AND THE FIXTURE WAS WRONG, in exactly the way this
+module exists to prevent.** `assertAllEnrolled` words its refusal from `isPast`,
+which compares the register's date against `schoolToday(timezone)` — and the
+helper feeding it the date was `new Date().toISOString().slice(0, 10)`, the
+SERVER's UTC day. The fixture school is on `Africa/Lagos`. So for the hour before
+UTC midnight the school's day is already tomorrow, "today" is the school's
+YESTERDAY, and the service correctly answers in the PAST tense while the test
+demands the present one.
+// THE FAILURE IS NIGHTLY AND INVISIBLE BY DAY. CI ran at **23:05 UTC**. Every
+run between 23:00 and midnight fails; every other run passes. A test that only
+breaks in one hour reads as flake, and flake is what gets muted.
+// AND IT IS THE FILE'S OWN SUBJECT. Its header says so: *"This is the defect
+that made the product unusable outside West Africa without anyone noticing: the
+day a register belongs to was decided in UTC."* The fixture then decided its own
+day in UTC. Sibling asymmetry inside one file, between the code under test and
+the harness testing it.
+// `recent(tz)` TAKES THE ZONE, defaulting to the fixture school's — and the one
+test that puts its school in `America/Toronto` passes its own, because the whole
+point of that case is that the two clocks differ. Taking the default there would
+have been the same mistake one layer down.
+// REPRODUCED, not reasoned about: the mutation was run at 23:14 UTC, which is
+inside the window, so restoring the UTC helper fails the exact test CI failed and
+restoring the fix turns it green — no clock trickery needed.
+// GOTCHA in my own first attempt: pinning `global.Date` inside the spec did not
+COMPILE, and jest reported `Tests: 0 total`, which is not a pass. This file
+already records that trap; waiting for the real hour was simpler and truer.
+
 ### Sixty schools, eighteen countries, and every module driven with WRITES
 The second exercise, asked for explicitly as "ensure all modules and processes
 are used and engaged" — so unlike the first, which mostly READ each module, this
