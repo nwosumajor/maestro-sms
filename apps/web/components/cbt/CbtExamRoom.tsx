@@ -15,6 +15,20 @@ import { readApiError } from "@/lib/api-error";
 
 type Sitting = Serialized<CbtSittingViewDto>;
 
+/**
+ * Is this a question whose options fit two to a row?
+ *
+ * A CANDIDATE MUST BE ABLE TO READ THE WHOLE OPTION. Two columns are right for
+ * "3 / 4 / 5" and wrong for a sentence: at half width a long option had nowhere
+ * to go, and the text span carried no `min-w-0`, so it overflowed its own button
+ * instead of wrapping. So the PAPER decides the layout — one column the moment
+ * any option is long — rather than the layout deciding what a paper may say.
+ */
+const SHORT_OPTION_CHARS = 40;
+export function shortOptions(choices: string[]): boolean {
+  return choices.every((c) => c.length <= SHORT_OPTION_CHARS);
+}
+
 function useCountdown(deadline: string): number {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -428,7 +442,7 @@ export function CbtExamRoom({
                   </p>
                 </div>
               ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className={cn("grid gap-2", shortOptions(q.choices) && "sm:grid-cols-2")}>
                 {q.choices.map((choice, ci) => {
                   const picked = mine === ci;
                   const revealed = q.answerIndex != null;
@@ -441,7 +455,7 @@ export function CbtExamRoom({
                       disabled={!open}
                       onClick={() => pick(q.id, ci)}
                       className={cn(
-                        "flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                        "flex items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors",
                         open && "hover:border-primary hover:bg-primary/5",
                         picked && !revealed && "border-primary bg-primary/10 font-medium",
                         correct && "border-brand2/60 bg-brand2/10 font-medium",
@@ -453,7 +467,7 @@ export function CbtExamRoom({
                       <span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-muted text-xs font-semibold">
                         {"ABCDEF"[ci]}
                       </span>
-                      <span>{choice}</span>
+                      <span className="min-w-0 break-words">{choice}</span>
                       {correct && <span className="ml-auto text-brand2">✓</span>}
                       {wrongPick && <span className="ml-auto text-destructive">✗</span>}
                     </button>

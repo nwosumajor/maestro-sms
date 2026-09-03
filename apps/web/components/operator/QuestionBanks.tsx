@@ -20,7 +20,7 @@ import type {
   ScholarshipSubjectOption,
   Serialized,
 } from "@sms/types";
-import { SCHOLARSHIP_BANK_TARGET_MIN, SCHOLARSHIP_BANK_TARGET_MAX } from "@sms/types";
+import { SCHOLARSHIP_BANK_TARGET_MIN, SCHOLARSHIP_BANK_TARGET_MAX, SCHOLARSHIP_OPTION_COUNT } from "@sms/types";
 import { sendWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,11 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const sel = "h-9 rounded-md border border-input bg-background px-2 text-sm";
-const EMPTY = { text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" };
+// FOUR OPTIONS, A TO D — the shared constant, so this page and the programme
+// console cannot drift on how many a question is written with.
+const OPTION_COUNT = SCHOLARSHIP_OPTION_COUNT;
+const EMPTY = { text: "", options: Array(OPTION_COUNT).fill("") as string[], answer: 0, note: "" };
+const letter = (i: number) => String.fromCharCode(65 + i);
 
 export function QuestionBanks() {
   const [subjects, setSubjects] = React.useState<ScholarshipSubjectOption[] | null>(null);
@@ -100,7 +104,7 @@ export function QuestionBanks() {
 
   const saveQuestion = async () => {
     if (!open) return;
-    const options = [draft.a, draft.b, draft.c, draft.d, draft.e].map((o) => o.trim()).filter(Boolean);
+    const options = draft.options.map((o) => o.trim()).filter(Boolean);
     if (!draft.text.trim() || options.length < 2) {
       setMsg({ ok: false, text: "A question needs its text and at least two options." });
       return;
@@ -304,21 +308,42 @@ export function QuestionBanks() {
                   <Input id="q-text" placeholder="Type the question" value={draft.text}
                     onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))} />
                 </div>
-                <div className="flex flex-wrap items-end gap-2">
-                  {(["a", "b", "c", "d", "e"] as const).map((k, i) => (
-                    <div key={k} className="space-y-1">
-                      <Label className="flex items-center gap-1 text-xs" htmlFor={`opt-${k}`}>
-                        <input type="radio" aria-label={`${String.fromCharCode(65 + i)} is the correct answer`}
-                          checked={draft.answer === i} onChange={() => setDraft((d) => ({ ...d, answer: i }))} />
-                        {String.fromCharCode(65 + i)}{i < 2 ? " *" : ""}
-                      </Label>
-                      <Input id={`opt-${k}`} className="w-32" value={draft[k]}
-                        onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} />
+                {/* ONE OPTION PER ROW, FULL WIDTH — the layout the school's own
+                    CBT editor already uses. Five boxes at `w-32` in a wrapping
+                    row showed about a dozen characters each, so an owner could
+                    not read back what they had typed, and an option too long
+                    for the box is exactly the one a candidate needs to read in
+                    full. */}
+                <div className="space-y-1.5">
+                  {draft.options.map((value, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="correct-option"
+                        aria-label={`${letter(i)} is the correct answer`}
+                        checked={draft.answer === i}
+                        onChange={() => setDraft((d) => ({ ...d, answer: i }))}
+                      />
+                      <span className="w-4 text-xs font-semibold text-muted-foreground">{letter(i)}</span>
+                      <Input
+                        className="flex-1"
+                        aria-label={`Option ${letter(i)}`}
+                        placeholder={i < 2 ? `Option ${letter(i)} (required)` : `Option ${letter(i)}`}
+                        value={value}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            options: d.options.map((x, xi) => (xi === i ? e.target.value : x)),
+                          }))
+                        }
+                      />
                     </div>
                   ))}
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
                   <div className="space-y-1">
                     <Label className="text-xs" htmlFor="q-note">Note (never printed)</Label>
-                    <Input id="q-note" className="w-40" value={draft.note}
+                    <Input id="q-note" className="w-56" value={draft.note}
                       onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
                   </div>
                   <Button disabled={busy === "q"} onClick={saveQuestion}>
@@ -354,8 +379,13 @@ export function QuestionBanks() {
                       <>
                         <Button size="sm" variant="ghost" aria-label={`Edit question ${i + 1}`}
                           onClick={() => {
-                            const [a = "", b = "", c = "", d = "", e = ""] = q.options;
-                            setDraft({ text: q.text, a, b, c, d, e, answer: q.answerIndex, note: q.note ?? "" });
+                            // A QUESTION WRITTEN BEFORE THIS KEEPS EVERY OPTION
+                            // IT HAS. Rendering a fixed four would silently drop
+                            // a fifth on the next save — the edit-drops-a-field
+                            // defect this module has already had twice.
+                            const opts = [...q.options];
+                            while (opts.length < OPTION_COUNT) opts.push("");
+                            setDraft({ text: q.text, options: opts, answer: q.answerIndex, note: q.note ?? "" });
                             setEditing(q.id);
                           }}>
                           Edit

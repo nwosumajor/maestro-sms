@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
-import { CURRENCIES, SCHOLARSHIP_SCHOOL_PRIZE_MONTHS, SCHOLARSHIP_SCHOOL_PRIZE_PLAN, toMinor } from "@sms/types";
+import { CURRENCIES, SCHOLARSHIP_SCHOOL_PRIZE_MONTHS, SCHOLARSHIP_SCHOOL_PRIZE_PLAN, toMinor, SCHOLARSHIP_OPTION_COUNT } from "@sms/types";
 
 type Program = Serialized<ScholarshipProgramDto>;
 type Application = Serialized<ScholarshipApplicationDto>;
@@ -1079,7 +1079,12 @@ function ProgramRow({
   // A TO E. The API has always accepted up to six options and this form offered
   // FOUR, so an owner writing a five-option question simply could not — the
   // familiar shape of a control the server would have taken.
-  const [q, setQ] = React.useState({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
+  // FOUR OPTIONS, A TO D — a scholarship paper is set A–D, so the fifth box was
+  // one nobody wanted. An ARRAY rather than five named fields, because a
+  // question written when there were five must keep all five when it is edited.
+  const [q, setQ] = React.useState<{ text: string; options: string[]; answer: number }>({
+    text: "", options: Array(SCHOLARSHIP_OPTION_COUNT).fill(""), answer: 0,
+  });
   // WHICH PAPER this question goes on. A scholarship may be examined in several
   // subjects, and the subjects ARE whichever ones the questions carry — there
   // is no separate list of papers to fall out of step with. Blank means the
@@ -1096,7 +1101,7 @@ function ProgramRow({
   const [marks, setMarks] = React.useState<Record<string, string>>({});
 
   const addQ = () => {
-    const options = [q.a, q.b, q.c, q.d, q.e].map((o) => o.trim()).filter(Boolean);
+    const options = q.options.map((o) => o.trim()).filter(Boolean);
     if (!q.text.trim() || options.length < 2) return;
     const next = {
       text: q.text.trim(),
@@ -1108,13 +1113,13 @@ function ProgramRow({
       void onEditQuestion(editing, next).then((okDone) => {
         if (!okDone) return;
         setEditing(null);
-        setQ({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
+        setQ({ text: "", options: Array(SCHOLARSHIP_OPTION_COUNT).fill(""), answer: 0 });
         void loadPaper();
       });
       return;
     }
     onAddQuestion(next);
-    setQ({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
+    setQ({ text: "", options: Array(SCHOLARSHIP_OPTION_COUNT).fill(""), answer: 0 });
   };
 
   return (
@@ -1446,8 +1451,12 @@ function ProgramRow({
                     onClick={() => {
                       // Load it into the composer so a correction is made in
                       // the same form that wrote it, rather than a second one.
-                      const [a = "", b = "", c = "", d = "", e = ""] = question.options;
-                      setQ({ text: question.text, a, b, c, d, e, answer: question.answerIndex });
+                      // KEEPS EVERY OPTION IT HAS. Destructuring into a fixed
+                      // set would silently drop a fifth on the next save — the
+                      // edit-drops-a-field defect this module has already had.
+                      const opts = [...question.options];
+                      while (opts.length < SCHOLARSHIP_OPTION_COUNT) opts.push("");
+                      setQ({ text: question.text, options: opts, answer: question.answerIndex });
                       setSubject(question.subject ?? "");
                       setEditing(question.index);
                     }}
@@ -1518,11 +1527,23 @@ function ProgramRow({
             </div>
           )}
           <Input placeholder="Question text" value={q.text} onChange={(e) => setQ({ ...q, text: e.target.value })} />
-          <div className="grid grid-cols-2 gap-2">
-            {(["a", "b", "c", "d", "e"] as const).map((k, i) => (
-              <label key={k} className="flex items-center gap-1.5">
+          {/* ONE OPTION PER ROW, FULL WIDTH. Two narrow columns showed about a
+              dozen characters, so an owner could not read back what they had
+              typed — and an option too long for the box is exactly the one a
+              candidate needs to read in full. Same layout as the school's own
+              CBT editor, which had it right. */}
+          <div className="space-y-1.5">
+            {q.options.map((value, i) => (
+              <label key={i} className="flex items-center gap-2">
                 <input type="radio" name={`ans-${pr.id}`} checked={q.answer === i} onChange={() => setQ({ ...q, answer: i })} />
-                <Input placeholder={`${String.fromCharCode(65 + i)}${i < 2 ? " *" : ""}`} value={q[k]} onChange={(e) => setQ({ ...q, [k]: e.target.value })} />
+                <span className="w-4 text-xs font-semibold text-muted-foreground">{String.fromCharCode(65 + i)}</span>
+                <Input
+                  className="flex-1"
+                  aria-label={`Option ${String.fromCharCode(65 + i)}`}
+                  placeholder={`Option ${String.fromCharCode(65 + i)}${i < 2 ? " (required)" : ""}`}
+                  value={value}
+                  onChange={(e) => setQ({ ...q, options: q.options.map((x, xi) => (xi === i ? e.target.value : x)) })}
+                />
               </label>
             ))}
           </div>
@@ -1548,7 +1569,7 @@ function ProgramRow({
                 variant="ghost"
                 onClick={() => {
                   setEditing(null);
-                  setQ({ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 });
+                  setQ({ text: "", options: Array(SCHOLARSHIP_OPTION_COUNT).fill(""), answer: 0 });
                 }}
               >
                 Cancel

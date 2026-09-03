@@ -17,16 +17,21 @@ const banks = readFileSync(BANKS, "utf8");
 describe("scholarship exam authoring", () => {
   // The API allows up to six options; the form offered FOUR, so an owner
   // writing a five-option question simply could not.
-  it("offers options A to E", () => {
-    expect(src).toContain('["a", "b", "c", "d", "e"] as const');
-    expect(src).toContain("[q.a, q.b, q.c, q.d, q.e]");
+  // RE-ANCHORED, on the owner's decision: a scholarship paper is set A to D, so
+  // the composer offers FOUR. The property this test was written for — that the
+  // form can reach every option the paper uses — is unchanged; only the number
+  // moved, and it now comes from the shared constant rather than a literal.
+  it("offers as many options as a scholarship paper is set with", () => {
+    expect(src).toMatch(/SCHOLARSHIP_OPTION_COUNT/);
+    expect(src).not.toContain('["a", "b", "c", "d", "e"] as const');
   });
 
-  it("clears every option when a question is added, so E cannot carry over", () => {
-    const resets = src.match(/setQ\(\{ text: "", a: "", b: "", c: "", d: "", e: "", answer: 0 \}\)/g) ?? [];
+  it("clears every option when a question is added, so none can carry over", () => {
+    const resets = src.match(/setQ\(\{ text: "", options: Array\(SCHOLARSHIP_OPTION_COUNT\)\.fill\(""\), answer: 0 \}\)/g) ?? [];
     expect(resets.length).toBeGreaterThan(0);
-    // No reset may leave an option behind — a stale E is a wrong question.
-    expect(src).not.toMatch(/setQ\(\{ text: "", a: "", b: "", c: "", d: "", answer: 0 \}\)/);
+    // A reset REPLACES the whole array, so no option can survive it — which is
+    // stronger than the old per-field list, where a forgotten field was the bug.
+    expect(src).not.toMatch(/setQ\(\{ text: "", a: ""/);
   });
 
   // Correcting a typo, or a wrong correct-option, used to mean deleting the
@@ -188,15 +193,16 @@ describe("the scholarship question bank page", () => {
   });
 
   // The CBT composer's shape: five options, a radio marking the correct one.
-  it("takes options A to E and marks which is correct", () => {
-    expect(banks).toContain('["a", "b", "c", "d", "e"] as const');
+  it("takes as many options as a paper is set with, and marks which is correct", () => {
+    expect(banks).toMatch(/SCHOLARSHIP_OPTION_COUNT/);
+    expect(banks).not.toContain('["a", "b", "c", "d", "e"] as const');
     expect(banks).toMatch(/is the correct answer/);
   });
 
   // Sixty questions means sixty uses of one form. Re-opening it each time is
   // the difference between a usable screen and an unusable one.
   it("clears and stays open after a question is saved", () => {
-    expect(banks).toContain('const EMPTY = { text: "", a: "", b: "", c: "", d: "", e: "", answer: 0, note: "" }');
+    expect(banks).toMatch(/const EMPTY = \{ text: "", options: Array\(OPTION_COUNT\)\.fill\(""\)/);
     // BOUNDED TO THE SAVE HANDLER. A bare search for `setDraft(EMPTY)` matches
     // the Cancel button and the bank-open reset, so deleting the one that
     // matters left it green — the match-by-accident class, caught by mutation.

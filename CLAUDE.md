@@ -898,6 +898,53 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Four options, and a box too narrow to read one
+`SCHOLARSHIP_OPTION_COUNT` (`@sms/types`), both scholarship composers, and
+`shortOptions` in `CbtExamRoom`. Asked for: a scholarship question is set A to
+D, not A to E — and the field must be wide enough that what is written can be
+read in full.
+**THE SECOND HALF WAS THE REAL DEFECT.** Five boxes at `w-32` on the bank page,
+and two columns of `w-24` on the programme console — about a dozen characters
+each — so an owner could not read back what they had typed. And the option too
+long for the box is exactly the one a candidate needs to read in full.
+// **THE SCHOOL'S OWN CBT EDITOR ALREADY HAD IT RIGHT**: one option per ROW,
+full-width `Input`, radio beside it. The scholarship composers are supposed to
+MIRROR that module and used cramped boxes in a wrapping row instead. Both now
+use the sibling's layout.
+// A QUESTION WRITTEN WHEN FIVE WERE OFFERED KEEPS ALL FIVE. The state is an
+ARRAY rather than five named fields, and the edit loader PADS rather than
+truncating — rendering a fixed four would drop the fifth on the next save,
+which is the edit-drops-a-field defect this module has already had twice. Two
+such questions exist today, so this is live rather than hypothetical.
+// A COMPOSER DEFAULT, NOT A BOUNDARY RULE: the API still accepts 2–6, and a
+`max(4)` would have made those two stored questions un-editable — a control
+that refuses what is already written. Verified live: a four-option question
+saves, and a five-option one still does.
+// ONE CONSTANT for both composers, because two spellings of one number is how
+they drift.
+**AND THE CANDIDATE'S SIDE, which is what the ask is ultimately about.** The
+exam room laid options out `sm:grid-cols-2` unconditionally and the text span
+had no `min-w-0`, so at half width a long option overflowed its own button
+rather than wrapping. **THE PAPER DECIDES THE LAYOUT NOW, not the other way
+round**: two columns while every option is short, one the moment any is long,
+`break-words` on the text, and `items-start` so the letter badge stays beside
+the first line once it wraps.
+// GOTCHA, and it is the fixed-text failure for the ninth time: FIVE existing
+tests pinned A–E. Four were re-anchored to the property (the form reaches every
+option the paper uses; a reset clears them ALL). The fifth —
+`keeps the subject between questions` — has now gone red THREE times: it pinned
+a literal four-option reset, was "fixed" to name the fields `[a-e]`, and broke
+again when they became an array. It asserts only that the question is cleared
+and the subject is not, however the options are held.
+// GOTCHA in my own new gate, caught by mutation: a bare search for `flex-1`
+matched something else in the same file, so swapping a narrow class back onto
+the option input left it green. Bounded to the input that carries the option
+label.
+// PROBE: one bank and two questions removed.
+Mutation-validated five ways: five options again, truncate a stored question on
+edit, narrow boxes back on both composers, two columns whatever the option
+says, and the option text overflowing again.
+
 ### The sixth full run: 5,000 applicants, and one refusal that described the paper
 The whole exercise again with this session's fixes in it — banks written and
 CORRECTED, papers assembled from them, 5,000 applicants across three tenants,

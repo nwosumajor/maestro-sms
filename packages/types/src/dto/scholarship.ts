@@ -294,6 +294,19 @@ export type ScholarshipBankStatus = (typeof SCHOLARSHIP_BANK_STATUSES)[number];
  * refusing to save at 59 would be inventing a rule nobody set. An EMPTY bank
  * cannot be saved, because that is not a paper.
  */
+/**
+ * How many options a scholarship question is written with: A to D.
+ *
+ * ONE constant, because both composers offer them — the programme console and
+ * the question-bank page — and two spellings of one number is how they drift.
+ *
+ * It is a COMPOSER default, not a boundary rule: the API still accepts 2–6, so
+ * a question written when five were offered keeps all five and stays editable.
+ * A form that rendered a fixed four would silently drop the fifth on the next
+ * save, which is the edit-drops-a-field defect this module has already had.
+ */
+export const SCHOLARSHIP_OPTION_COUNT = 4;
+
 export const SCHOLARSHIP_BANK_TARGET_MIN = 60;
 export const SCHOLARSHIP_BANK_TARGET_MAX = 100;
 
