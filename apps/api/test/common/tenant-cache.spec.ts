@@ -5,7 +5,20 @@
 import { TenantCache } from "../../src/common/tenant-cache";
 
 describe("TenantCache", () => {
-  afterEach(() => jest.useRealTimers());
+  // FAKE TIMERS ARE CLEARED, NOT JUST SWITCHED OFF.
+  //
+  // `useRealTimers()` alone left this worker holding a handle, so jest
+  // force-exited it — and only when ANOTHER file ran after this one in the same
+  // worker, which is why it was intermittent and invisible under `--runInBand`.
+  // This repo already records that an undisconnected handle HANGS the CI test
+  // step; a force-exit is the same condition one step short of it.
+  //
+  // Reproduced minimally: this file plus `audit-cursor.spec.ts` warns, either
+  // alone does not, and disabling `useFakeTimers` here makes it stop.
+  afterEach(() => {
+    if (jest.isMockFunction(setTimeout)) jest.clearAllTimers();
+    jest.useRealTimers();
+  });
 
   it("loads on miss and serves the cached value on a hit (no reload)", async () => {
     const cache = new TenantCache<number>("t", 60_000);

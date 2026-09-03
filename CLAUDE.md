@@ -11390,6 +11390,20 @@ The forged-token path still gets the vague message — verified live alongside.
   will otherwise SKIP the suite. // GOTCHA: on main the DEPLOY workflow fails on
   every push and always has (no AWS credentials), so "a red run" is ambiguous —
   check WHICH workflow with `gh run list --workflow=ci.yml`.
+- **Fake timers must be CLEARED, not just switched off.** `jest.useRealTimers()`
+  alone left the worker holding a handle, so jest force-exited it — and only
+  when ANOTHER file ran after it in the same worker, which is why it was
+  intermittent and invisible under `--runInBand`. Reproduced minimally:
+  `tenant-cache.spec` plus `audit-cursor.spec` warned, either alone did not, and
+  disabling `useFakeTimers` stopped it. Both sites now `jest.clearAllTimers()`
+  first. // GOTCHA: `--detectOpenHandles` cannot diagnose this — on the full
+  suite it OOMs the Node heap under its implied serial run (the trap this file
+  already records), and on a subset it serialises enough that the warning
+  disappears and it reports no handles at all. Bisecting by file is what found
+  it. A residual warning still appears on the whole suite under parallel
+  workers with no handle reported; it exits 0 and everything passes, but the
+  same condition one step further is what HANGS the CI test step, so it is
+  worth chasing rather than muting with `forceExit`.
 - EVERY DB-gated e2e suite must `await prisma.$disconnect()` (the `@sms/db`
   singleton) in `afterAll`, even if it only touched the DB via a service — an
   undisconnected pool keeps the jest worker alive and HANGS the CI test step

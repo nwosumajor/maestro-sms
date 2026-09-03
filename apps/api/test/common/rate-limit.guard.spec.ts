@@ -96,6 +96,10 @@ describe("RateLimitGuard", () => {
       jest.advanceTimersByTime(70);
       expect(guard.canActivate(ctx)).toBe(true); // window elapsed
     } finally {
+      // CLEARED, then switched off — see `tenant-cache.spec.ts` for the same
+      // fix and the measurement. `useRealTimers()` alone leaves the worker
+      // holding a handle, which jest force-exits and CI can hang on.
+      jest.clearAllTimers();
       jest.useRealTimers();
     }
   });
