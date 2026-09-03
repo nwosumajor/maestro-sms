@@ -100,54 +100,66 @@ export class SisNudgeService {
       guardiansOf.set(l.studentId, [...(guardiansOf.get(l.studentId) ?? []), l.parentId]);
     }
 
-    let nudged = 0;
+    // GROUPED BY MESSAGE, then one write per group. This sent a notification
+    // PER RECIPIENT — a tenant transaction and a queue round trip each — plus a
+    // profile UPDATE per pupil, on a sweep that runs nightly for every school
+    // and is bounded by the ROLL. Measured before: 120 pupils, 7.6 s. The
+    // messages repeat (there are three shapes, and pupils share the missing
+    // fields), so grouping collapses a whole school into a handful of writes.
+    const groups = new Map<string, { title: string; body: string; to: Set<string>; actor: string }>();
+    const nudgedIds: string[] = [];
     for (const row of due) {
-      try {
+      const missing = missingProfileFields(row);
+      let title: string;
+      let body: string;
+      if (missing.length === 0 && row.profileStatus === "INCOMPLETE") {
+        title = "Submit your school profile";
+        body = "Your profile looks complete — open it and press Submit so your class supervisor can check it.";
+      } else if (row.profileStatus === "CHANGES_REQUESTED") {
+        title = "Your school profile needs a change";
+        body = `${row.reviewNote ?? "Your class supervisor asked for a change."} Please update it and submit again.`;
+      } else {
+        title = "Finish your school profile";
         // Recompute from the SAME pure helper the prompt and submit guard use, so
         // the reminder can never name a field the form does not ask for.
-        const missing = missingProfileFields(row);
-        if (missing.length === 0 && row.profileStatus === "INCOMPLETE") {
-          // Complete but never submitted — nudge to SUBMIT, not to fill in.
-          await this.notify(
-            row,
-            guardiansOf.get(row.studentId) ?? [],
-            "Submit your school profile",
-            "Your profile looks complete — open it and press Submit so your class supervisor can check it.",
-          );
-        } else if (row.profileStatus === "CHANGES_REQUESTED") {
-          await this.notify(
-            row,
-            guardiansOf.get(row.studentId) ?? [],
-            "Your school profile needs a change",
-            `${row.reviewNote ?? "Your class supervisor asked for a change."} Please update it and submit again.`,
-          );
-        } else {
-          await this.notify(
-            row,
-            guardiansOf.get(row.studentId) ?? [],
-            "Finish your school profile",
-            `Your school record is incomplete. Still needed: ${missing.join(", ")}.`,
-          );
-        }
-        await client.studentProfile.update({ where: { id: row.id }, data: { lastNudgedAt: new Date() } });
-        nudged += 1;
+        body = `Your school record is incomplete. Still needed: ${missing.join(", ")}.`;
+      }
+      const key = `${row.schoolId}\u0000${title}\u0000${body}`;
+      const g = groups.get(key) ?? { title, body, to: new Set<string>(), actor: row.studentId };
+      g.to.add(row.studentId);
+      for (const gid of guardiansOf.get(row.studentId) ?? []) g.to.add(gid);
+      groups.set(key, g);
+      nudgedIds.push(row.id);
+    }
+    let nudged = 0;
+    for (const [key, g] of groups) {
+      const schoolId = key.split("\u0000")[0]!;
+      try {
+        await this.notifications.enqueueMany(
+          { schoolId, userId: g.actor },
+          [...g.to],
+          { type: "SIS_PROFILE", title: g.title, body: g.body, channels: ["EMAIL"] },
+        );
       } catch (e) {
-        // One pupil (or one school) failing must not abort the sweep.
-        this.logger.warn(`nudge failed for profile ${row.id}: ${(e as Error).message}`);
+        // One group (or one school) failing must not abort the sweep.
+        this.logger.warn(`nudge group failed: ${(e as Error).message}`);
+      }
+    }
+    // One statement per CHUNK, not one per pupil — and chunked rather than one
+    // statement for the whole fleet so a failure re-nudges a few hundred pupils
+    // at worst rather than every school. The stamp is what makes a DAILY job
+    // idempotent, so losing it costs a duplicate notice, never a missing one.
+    const STAMP_CHUNK = 500;
+    for (let i = 0; i < nudgedIds.length; i += STAMP_CHUNK) {
+      const batch = nudgedIds.slice(i, i + STAMP_CHUNK);
+      try {
+        await client.studentProfile.updateMany({ where: { id: { in: batch } }, data: { lastNudgedAt: new Date() } });
+        nudged += batch.length;
+      } catch (e) {
+        this.logger.warn(`nudge stamp failed for ${batch.length} profile(s): ${(e as Error).message}`);
       }
     }
     return { nudged, scanned: due.length };
   }
 
-  /** Notify the pupil and their guardians. In-app always; email per preference. */
-  private async notify(row: ProfileRow, guardianIds: string[], title: string, body: string): Promise<void> {
-    for (const recipientId of [row.studentId, ...guardianIds]) {
-      await this.notifications
-        .enqueue(
-          { schoolId: row.schoolId, userId: row.studentId },
-          { recipientId, type: "SIS_PROFILE", title, body, channels: ["EMAIL"] },
-        )
-        .catch(() => undefined);
-    }
-  }
 }

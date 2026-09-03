@@ -1804,6 +1804,75 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### Three nightly sweeps that opened a transaction per person
+`FeesService.notifyGuardians` / `sendFeeReminders`, `SisNudgeService.sweep`.
+Found by running all eighteen scheduled jobs across a 50-school fleet and timing
+them — the two that are bounded by a school's ROLL were the two that were slow.
+```
+admin/sis/nudge/run      120 pupils   7,610 ms   63 ms a pupil
+fees/reminders/run        91 bills    2,642 ms   29 ms a bill
+```
+A 900-pupil school is about a minute EACH, on jobs that run for every school on
+the platform every night.
+**THIS IS THE SCHOLARSHIP ANNOUNCE AGAIN.** That entry is in this file: *"THE
+ANNOUNCE WAS ONE TRANSACTION PER CANDIDATE … `enqueueMany` ALREADY EXISTED FOR
+EXACTLY THIS."* It was fixed where it hurt and the two sweeps bounded by the same
+quantity — every pupil, every overdue bill — never reached for it. `enqueue`
+opens a tenant transaction AND a queue round trip per recipient.
+// THE FEE SWEEP ASKED WHO TO WRITE TO ONE INVOICE AT A TIME. `notifyGuardians`
+opened a transaction per invoice purely to look up the family, then one more per
+guardian — so 900 overdue bills was 2,700 transactions for a weekly reminder.
+Every family is now resolved in ONE query before the loop, and the family gets
+ONE write instead of one per guardian.
+// THE NUDGE GROUPS BY MESSAGE, which is what makes it collapse: there are three
+shapes ("submit it", "a change was asked for", "still needed: …") and pupils
+share the missing fields, so a whole school becomes a handful of writes rather
+than one per pupil plus one per guardian. A test asserts the messages still
+DIFFER when the pupils need different things — grouping must not flatten three
+sentences into one.
+// AND THE STAMP IS CHUNKED, NOT SINGLE. `lastNudgedAt` was written per pupil;
+one `updateMany` for the fleet would have been faster still and would mean a
+single failed write re-chases EVERY school tomorrow. Chunked at 500, a failure
+costs a few hundred duplicate notices — the old per-pupil blast radius, at 1/500
+the number of statements. The stamp is what makes a daily job idempotent, so
+losing it costs a duplicate notice and never a pupil who is never chased.
+Live, after, same fleet:
+```
+sis nudge      7,610 ms -> 1,225 ms   (120 pupils)
+fee reminders  2,642 ms -> 1,055 ms   (91 bills)
+```
+// **THE REMAINING FLOOR IS STATED RATHER THAN CLAIMED AWAY**: ~12 ms per
+NOTIFICATION, which is one `persist` plus one queue add. `enqueueMany` has a
+single-INSERT fast path and it is deliberately only taken when nothing varies
+per recipient — no `key` to localise and no external channel to decide — and a
+fee reminder asks for EMAIL. Making that path cover a channelled send means
+bulk-inserting delivery rows too, which is the notification module's design
+rather than these sweeps'.
+// GOTCHA, and it is the fixture trap this file records over and over: NINE
+fees fixtures and the nudge fixture had `enqueue` and no `enqueueMany`, which
+every real `NotificationService` has. The service threw
+`enqueueMany is not a function` INTO ITS OWN best-effort catch, so the sweeps
+silently sent nothing and the suites stayed green. `test/support/notifications-
+stub.ts` now has both, and the bulk one FANS into the same per-recipient spy so
+every existing assertion still asks what a family was TOLD rather than which
+call told them.
+// GOTCHA in my own stub: the real `enqueueMany` ISOLATES per-recipient
+failures, and a fan that let a rejection escape crashed the jest worker outright
+on the test that mocks "smtp down". A double has to model the contract, not just
+the signature.
+// GOTCHA: two nudge tests pinned the MECHANISM — `update` called per pupil, and
+a per-pupil failure leaving the others nudged. Both were re-anchored to the
+property (a nudged pupil is stamped; a failed write still leaves everyone told),
+and the second one's ANSWER legitimately changed, which is recorded in the test
+rather than smoothed over.
+// **THE OTHER 36 SITES WERE SWEPT AND LEFT**, and saying so is the point: a
+loop over the two guardians of one pupil, or over the finance staff of one
+school, is bounded by something that does not grow. Only these two were bounded
+by the roll.
+Mutation-validated five ways: a guardian lookup per invoice, an enqueue per
+guardian, a send per recipient in the nudge, a stamp per pupil, and one stamp
+for the whole fleet.
+
 ### A school could not import its own roll, and the API stopped for everyone
 `StudentImportService.approve`, `foundation/bulk-hash.ts`, `BULK_IMPORT_MAX_ROWS`.
 Found by running the 50-school exercise: four schools onboarding at once, and the

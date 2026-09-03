@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { FeesService } from "../../src/fees/fees.service";
+import { notificationsStub } from "../support/notifications-stub";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
 interface Fakes {
@@ -73,7 +74,7 @@ function makeService(f: Fakes) {
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
+  const notifications = notificationsStub();
   const paystack = { isConfigured: () => false, refund: jest.fn() };
   const service = new FeesService(db as never, audit as never, notifications as never, paystack as never, { todayInTx: async () => new Date(new Date().toISOString().slice(0, 10)) } as never);
   return { service, tx, audit, notifications, paystack };

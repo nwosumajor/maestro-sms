@@ -255,6 +255,20 @@ export class FeesService {
         .filter((inv: { outstanding: number }) => inv.outstanding > 0);
     });
 
+    // EVERY family in ONE query. This opened a transaction PER INVOICE just to
+    // find out who to write to, then another per guardian — so a school with
+    // 900 overdue bills spent 2,700 transactions on a weekly reminder, and the
+    // sweep runs for every school on the platform.
+    const guardiansBy = new Map<string, string[]>();
+    if (targets.length) {
+      const links = (await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.parentChild.findMany({
+          where: { studentId: { in: [...new Set(targets.map((t) => t.studentId))] } },
+          select: { studentId: true, parentId: true },
+        }),
+      )) as Array<{ studentId: string; parentId: string }>;
+      for (const l of links) guardiansBy.set(l.studentId, [...(guardiansBy.get(l.studentId) ?? []), l.parentId]);
+    }
     let reminded = 0;
     for (const inv of targets) {
       const overdue = inv.dueDate < today;
@@ -267,7 +281,7 @@ export class FeesService {
         // a HUNDREDTH of what they owe — in a message asking them to pay it.
         body: `Invoice ${inv.reference} has an outstanding balance of ${this.money(inv.outstanding, inv.currency)}${overdue ? ` (due ${inv.dueDate.toISOString().slice(0, 10)})` : ""}.`,
         data: { invoiceId: inv.id, outstandingMinor: inv.outstanding },
-      });
+      }, [], guardiansBy.get(inv.studentId) ?? []);
       reminded++;
     }
     return { reminded, invoices: targets.length };
@@ -1311,24 +1325,27 @@ export class FeesService {
     studentId: string,
     msg: { type: string; title: string; body: string; data?: Record<string, unknown> },
     extraRecipientIds: string[] = [],
+    /** Pre-resolved guardians, for a sweep that looked them all up at once. */
+    knownGuardianIds?: string[],
   ) {
     try {
-      const guardians = await this.db.runAsTenant(this.ctx(p), (tx) =>
-        tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
-      );
-      const recipients = [
-        ...new Set([...(guardians as { parentId: string }[]).map((g) => g.parentId), ...extraRecipientIds]),
-      ];
-      for (const recipientId of recipients) {
-        await this.notifications.enqueue(this.ctx(p), {
-          recipientId,
-          type: msg.type,
-          title: msg.title,
-          body: msg.body,
-          data: msg.data,
-          channels: ["EMAIL"],
-        });
-      }
+      const guardians =
+        knownGuardianIds ??
+        ((await this.db.runAsTenant(this.ctx(p), (tx) =>
+          tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
+        )) as { parentId: string }[]).map((g) => g.parentId);
+      const recipients = [...new Set([...guardians, ...extraRecipientIds])];
+      // ONE transaction for the whole family, not one per guardian. `enqueue`
+      // opens a tenant transaction and a queue round trip EACH — the shape the
+      // scholarship announce already had to be fixed for, and this is on the
+      // weekly sweep that asks families for money.
+      await this.notifications.enqueueMany(this.ctx(p), recipients, {
+        type: msg.type,
+        title: msg.title,
+        body: msg.body,
+        data: msg.data,
+        channels: ["EMAIL"],
+      });
     } catch (err) {
       // Best-effort: a notification failure never fails the financial action.
       this.logger.error(`Fees notification failed for student ${studentId}: ${String(err)}`);

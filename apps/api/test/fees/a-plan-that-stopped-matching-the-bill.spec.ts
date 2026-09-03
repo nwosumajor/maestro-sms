@@ -32,6 +32,7 @@
 // =============================================================================
 
 import { PaymentPlansService } from "../../src/fees/payment-plans.service";
+import { notificationsStub } from "../support/notifications-stub";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
 function make(opts: {
@@ -70,7 +71,7 @@ function make(opts: {
   // paystack, region. A fixture that guesses it wires the region into the
   // notifier and every call throws — the same trap this repo records for the
   // transport service's six arguments.
-  const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
+  const notifications = notificationsStub();
   const paystack = {};
   return new PaymentPlansService(
     db as never, audit as never, notifications as never, paystack as never, region as never,

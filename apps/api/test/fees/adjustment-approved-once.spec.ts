@@ -31,6 +31,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { notificationsStub } from "../support/notifications-stub";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FeeOpsService } from "../../src/fees/fee-ops.service";
@@ -82,7 +83,7 @@ function makeService(adj: { status: string; requestedById: string; amountMinor: 
   const svc = new FeeOpsService(
     db as never,
     { record: jest.fn() } as never,
-    { enqueue: jest.fn() } as never,
+    notificationsStub() as never,
     {} as never, // privileged client — unused on this path
     {} as never, // FeesService — unused on this path
   );

@@ -57,12 +57,24 @@ function makeService(invoices: Array<{ id: string; status: string; studentId?: s
     auditLog: { create: jest.fn() },
   } as unknown as TenantTx;
   const enqueue = jest.fn().mockResolvedValue(undefined);
+  // `enqueueMany` is on every real NotificationService; it fans into the same
+  // spy so the assertions below still ask what the family was TOLD.
+  const enqueueMany = jest.fn((actor: unknown, to: string[], input: Record<string, unknown>) => {
+    // The real enqueueMany ISOLATES per-recipient failures and reports counts;
+    // a fan that let one rejection escape would crash the worker instead.
+    let failed = 0;
+    for (const recipientId of to) {
+      try { const r = enqueue(actor, { ...input, recipientId }); if (r?.catch) r.catch(() => { failed += 1; }); }
+      catch { failed += 1; }
+    }
+    return Promise.resolve({ created: to.length - failed, failed });
+  });
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const svc = Object.create(FeesService.prototype) as FeesService;
   Object.assign(svc, {
     db,
     audit: { record: jest.fn() },
-    notifications: { enqueue },
+    notifications: { enqueue, enqueueMany },
     logger: { error: jest.fn(), log: jest.fn(), warn: jest.fn() },
   });
   return { svc, updateMany, enqueue, state };

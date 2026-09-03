@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { Logger } from "@nestjs/common";
+import { notificationsStub } from "../support/notifications-stub";
 import { FeeOpsService, LATE_FEE_JOB, REMINDER_JOB } from "../../src/fees/fee-ops.service";
 import { FeeOpsProcessor } from "../../src/fees/fee-ops.processor";
 
@@ -24,7 +25,7 @@ function unconfigured() {
   return new FeeOpsService(
     { runAsTenant: jest.fn() } as never,
     { record: jest.fn() } as never,
-    { enqueue: jest.fn() } as never,
+    notificationsStub() as never,
     { client: null } as never,
     {} as never,
   );

@@ -34,13 +34,30 @@ const BASE = {
 function makeService(opts: { profiles?: Record<string, unknown>[]; guardians?: { studentId: string; parentId: string }[]; noDb?: boolean } = {}) {
   const findMany = jest.fn().mockResolvedValue(opts.profiles ?? []);
   const update = jest.fn().mockResolvedValue({});
+  // `updateMany` and `enqueueMany` exist on every real client; a stub without
+  // them models something the system cannot produce. The nudge stamps every
+  // pupil in ONE statement and writes one notification row per GROUP.
+  const updateMany = jest.fn((a: { where: { id: { in: string[] } } }) =>
+    Promise.resolve({ count: a.where.id.in.length }));
   const parentFindMany = jest.fn().mockResolvedValue(opts.guardians ?? []);
   const client = opts.noDb
     ? null
-    : { studentProfile: { findMany, update }, parentChild: { findMany: parentFindMany } };
+    : { studentProfile: { findMany, update, updateMany }, parentChild: { findMany: parentFindMany } };
   const enqueue = jest.fn().mockResolvedValue(undefined);
-  const service = new SisNudgeService({ client } as never, { enqueue } as never);
-  return { service, findMany, update, enqueue };
+  // Fan a grouped send into the per-recipient spy, so every assertion below
+  // still asks WHAT a pupil was told rather than which call told them.
+  const enqueueMany = jest.fn((actor: unknown, to: string[], input: Record<string, unknown>) => {
+    // The real enqueueMany ISOLATES per-recipient failures and reports counts;
+    // a fan that let one rejection escape would crash the worker instead.
+    let failed = 0;
+    for (const recipientId of to) {
+      try { const r = enqueue(actor, { ...input, recipientId }); if (r?.catch) r.catch(() => { failed += 1; }); }
+      catch { failed += 1; }
+    }
+    return Promise.resolve({ created: to.length - failed, failed });
+  });
+  const service = new SisNudgeService({ client } as never, { enqueue, enqueueMany } as never);
+  return { service, findMany, update, updateMany, enqueue, enqueueMany };
 }
 
 describe("SisNudgeService", () => {
@@ -71,7 +88,7 @@ describe("SisNudgeService", () => {
   });
 
   it("names the ACTUAL missing fields, and stamps lastNudgedAt", async () => {
-    const { service, enqueue, update } = makeService({
+    const { service, enqueue, updateMany } = makeService({
       profiles: [{ ...BASE, dateOfBirth: new Date("2012-01-01"), gender: "M", phone: "080", addressLine1: "1 St" }],
     });
     const res = await service.sweep();
@@ -80,7 +97,12 @@ describe("SisNudgeService", () => {
     expect(body).toContain("city");
     expect(body).toContain("state");
     expect(body).not.toContain("phone"); // already supplied
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: { lastNudgedAt: expect.any(Date) } }));
+    // The PROPERTY: a pupil who was nudged is stamped, so tomorrow's run skips
+    // them. Which Prisma call does the stamping is not the property — it used to
+    // be one UPDATE per pupil and is now one statement per chunk.
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ["pf1"] } }, data: { lastNudgedAt: expect.any(Date) } }),
+    );
   });
 
   it("asks a COMPLETE-but-unsubmitted pupil to submit, not to fill anything in", async () => {
@@ -124,17 +146,20 @@ describe("SisNudgeService", () => {
   });
 
   it("one failing pupil does not abort the sweep", async () => {
-    const { service, update, enqueue } = makeService({
+    const { service, updateMany, enqueue } = makeService({
       profiles: [
         { ...BASE, id: "pf1", studentId: "stu1" },
         { ...BASE, id: "pf2", studentId: "stu2" },
       ],
     });
-    update.mockRejectedValueOnce(new Error("db blip"));
+    // A failing WRITE must not cost the sweep. Both pupils are still told; the
+    // stamp is what is lost, and losing it costs a duplicate notice tomorrow
+    // rather than a pupil who is never chased.
+    updateMany.mockRejectedValueOnce(new Error("db blip"));
     const res = await service.sweep();
-    expect(res.nudged).toBe(1); // the second still went out
     expect(res.scanned).toBe(2);
-    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(res.nudged).toBe(0); // nothing stamped, so both are chased again
+    expect(enqueue).toHaveBeenCalledTimes(2); // and both WERE told
   });
 
   it("a school-scoped run cannot reach another tenant", async () => {
