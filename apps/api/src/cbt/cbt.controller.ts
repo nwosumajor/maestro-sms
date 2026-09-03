@@ -16,6 +16,17 @@ import { CbtService } from "./cbt.service";
 import type { Response } from "express";
 import { safeFilename } from "../documents/safe-content-type";
 
+// A bank can be RENAMED and MOVED. The subject is not a label here: it is the
+// access key (`canTouchBank`) and the GRADEBOOK COLUMN — `recordExamGrades`
+// reads `bank.subjectId` to decide which subject an exam's marks land under.
+// So a bank filed under the wrong subject means, permanently, that the wrong
+// subject's teachers can edit it and the right one cannot, and that every exam
+// drawn from it writes its marks onto the wrong column of a pupil's report
+// card. The service has enforced all of that since it was written; there was no
+// route to reach it, so a school could not put a mis-filed bank right.
+const bankUpdateSchema = z
+  .object({ name: z.string().min(1).max(160).optional(), subjectId: z.string().uuid().optional() })
+  .refine((v) => v.name !== undefined || v.subjectId !== undefined, { message: "Nothing to change" });
 const bankSchema = z.object({
   name: z.string().min(1).max(160),
   subject: z.string().max(80).nullish(),
@@ -112,6 +123,26 @@ export class CbtController {
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
   createBank(@CurrentPrincipal() p: Principal, @Body(new ZodValidationPipe(bankSchema)) body: z.infer<typeof bankSchema>) {
     return this.cbt.createBank(p, body);
+  }
+
+  /** Rename a bank, or move it to another subject (its questions go with it).
+   *
+   *  NO step-up, deliberately, and the consistency gate is what settled it: the
+   *  other twelve `cbt.manage` routes — creating a bank, adding questions,
+   *  assembling a paper — are a teacher's ordinary daily work and none of them
+   *  re-authenticates. Correcting a mis-filed bank is the same tier of act, it
+   *  is audited, and it is reversible by doing it again. The scholarship
+   *  sibling IS step-up gated because every route on that surface is: it
+   *  belongs to the platform owner, not to a teacher.
+   */
+  @Put("banks/:id")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  updateBank(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(bankUpdateSchema)) body: z.infer<typeof bankUpdateSchema>,
+  ): Promise<CbtBankDto> {
+    return this.cbt.updateBank(p, id, body);
   }
 
   /**

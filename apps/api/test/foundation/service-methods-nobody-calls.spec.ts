@@ -61,6 +61,39 @@ const LIFECYCLE = new Set([
   "beforeApplicationShutdown",
 ]);
 
+/** The exported class a service file declares, if it declares one. */
+function className(src: string): string | null {
+  return src.match(/^export class (\w+)/m)?.[1] ?? null;
+}
+
+/** The exported class's BODY, brace-matched.
+ *
+ *  Scanning the whole file also picked up members of an INTERFACE declared
+ *  beside the class — `directory.service.ts` structurally types the user
+ *  delegate with `findMany(args): Promise<unknown>`, which is not a service
+ *  method anybody could call. A gate that reports something nobody can act on
+ *  is one whose next reader adds an exemption. */
+function classBody(src: string): string {
+  const m = src.match(/^export class \w+[^{]*\{/m);
+  if (!m || m.index === undefined) return "";
+  let depth = 0;
+  for (let i = m.index + m[0].length - 1; i < src.length; i++) {
+    if (src[i] === "{") depth += 1;
+    else if (src[i] === "}") { depth -= 1; if (depth === 0) return src.slice(m.index, i + 1); }
+  }
+  return src.slice(m.index);
+}
+
+/** Every `x: TheClass` constructor property, and the file that holds it — the
+ *  handle a caller actually reaches this service through. */
+function propertiesTyped(cls: string, sources: Map<string, string>): { file: string; prop: string }[] {
+  const out: { file: string; prop: string }[] = [];
+  for (const [file, src] of sources) {
+    for (const m of src.matchAll(new RegExp(`(\\w+)\\s*:\\s*${cls}\\b`, "g"))) out.push({ file, prop: m[1] });
+  }
+  return out;
+}
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
     const f = join(dir, e);
@@ -77,18 +110,41 @@ describe("every public service method has a caller", () => {
 
   for (const file of srcFiles.filter((f) => f.endsWith(".service.ts"))) {
     const src = sources.get(file)!;
+    const body = classBody(src);
     const rel = file.slice(SRC.length + 1);
     const re = /^ {2}(?:async\s+)?([a-zA-Z][a-zA-Z0-9_]*)\s*\(/gm;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(src))) {
+    while ((m = re.exec(body))) {
       const name = m[1];
       if (KEYWORDS.has(name) || LIFECYCLE.has(name) || name === "constructor") continue;
-      const decl = src.slice(src.lastIndexOf("\n", m.index) + 1, m.index + m[0].length);
+      const decl = body.slice(body.lastIndexOf("\n", m.index) + 1, m.index + m[0].length);
       if (/\b(private|protected)\b/.test(decl)) continue;
-      const calledElsewhere = [...sources].some(
-        ([f, s]) => f !== file && new RegExp(`\\.${name}\\s*\\(`).test(s),
-      );
-      const calledHere = new RegExp(`this\\.${name}\\s*\\(`).test(src);
+      // A CALLER IS A CALLER OF *THIS* SERVICE, NOT OF THAT NAME.
+      //
+      // This matched `.<name>(` in any other file, so a same-named method on a
+      // DIFFERENT service counted as a caller and the real one was invisible.
+      // Found by driving the API: `CbtService.updateBank` had been written,
+      // guarded and tested, and no controller reached it — while
+      // `ScholarshipAdminService.updateBank` was wired, so `.updateBank(`
+      // appeared in `src` and this gate went green. A school's own question
+      // bank still could not be renamed or moved between subjects.
+      //
+      // The same trap `every-mutation-leaves-a-trail` already records: resolving
+      // a call by METHOD NAME across files makes every service with that name
+      // vouch for every other. A caller now has to reach it through a property
+      // whose type is THIS class.
+      const cls = className(src);
+      const holders = cls ? propertiesTyped(cls, sources) : [];
+      const calledElsewhere = [...sources].some(([f, s]) => {
+        if (f === file) return false;
+        if (!new RegExp(`\\.${name}\\s*\\(`).test(s)) return false;
+        // Named injection: `private readonly cbt: CbtService` -> `this.cbt.name(`
+        const props = holders.filter((h) => h.file === f).map((h) => h.prop);
+        if (props.some((prop) => new RegExp(`\\b${prop}\\.${name}\\s*\\(`).test(s))) return true;
+        // A file that never names this class cannot be calling this class.
+        return cls ? new RegExp(`\\b${cls}\\b`).test(s) : true;
+      });
+      const calledHere = new RegExp(`this\\.${name}\\s*\\(`).test(body);
       if (calledElsewhere || calledHere) continue;
       const key = `${rel}::${name}`;
       if (!(key in KEPT_WITHOUT_CALLERS)) orphans.push(key);

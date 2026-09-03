@@ -1829,6 +1829,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "PUT /cbt/banks/:p": {
+      "kind": "ui",
+      "note": "Rename / move on each bank row in CbtStaffPanel.tsx (the path is built from the bank id)"
+    },
     "POST /cbt/banks/:p/questions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

@@ -119,8 +119,11 @@ export function CbtStaffPanel({
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
-  // Bank create
+  // Bank create, and correcting one already made
   const [bankName, setBankName] = React.useState("");
+  const [renaming, setRenaming] = React.useState<string | null>(null);
+  const [renameTo, setRenameTo] = React.useState("");
+  const [moveTo, setMoveTo] = React.useState("");
   const [bankSubjectId, setBankSubjectId] = React.useState(options.subjects[0]?.id ?? "");
 
   // Question authoring
@@ -287,8 +290,67 @@ export function CbtStaffPanel({
                       <span className="font-medium">{b.name}</span>
                       {b.subject && <span className="text-muted-foreground"> · {b.subject}</span>}
                     </span>
-                    <Badge variant="secondary">{b.questionCount} questions</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">{b.questionCount} questions</Badge>
+                      <button
+                        type="button"
+                        onClick={() => setRenaming(renaming === b.id ? null : b.id)}
+                        aria-expanded={renaming === b.id}
+                        className="rounded-md border border-input px-2 py-0.5 text-xs font-medium hover:bg-muted"
+                      >
+                        Rename / move
+                      </button>
+                    </div>
                   </div>
+                  {renaming === b.id && (
+                    <div className="mt-2 space-y-2 rounded-md border border-dashed border-border p-2">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Input
+                          className="w-56"
+                          aria-label={`New name for ${b.name}`}
+                          placeholder={b.name}
+                          value={renameTo}
+                          onChange={(e) => setRenameTo(e.target.value)}
+                        />
+                        <select
+                          aria-label={`Subject for ${b.name}`}
+                          value={moveTo}
+                          onChange={(e) => setMoveTo(e.target.value)}
+                          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="">Leave the subject as it is</option>
+                          {options.subjects.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                        <Button
+                          size="sm"
+                          disabled={busy || (!renameTo.trim() && !moveTo)}
+                          onClick={() =>
+                            act(
+                              () =>
+                                post(`cbt/banks/${b.id}`, {
+                                  ...(renameTo.trim() ? { name: renameTo.trim() } : {}),
+                                  ...(moveTo ? { subjectId: moveTo } : {}),
+                                }, "PUT"),
+                              "Bank updated.",
+                            ).then(() => { setRenaming(null); setRenameTo(""); setMoveTo(""); })
+                          }
+                        >
+                          Save
+                        </Button>
+                      </div>
+                      {/* THE SUBJECT IS NOT A LABEL. It decides which teachers can
+                          reach the bank, and which column of a report card the
+                          marks from its papers land in — so a reader has to know
+                          what moving it does, and what it leaves alone. */}
+                      <p className="text-xs text-muted-foreground">
+                        The subject decides who can edit this bank and which subject its exams are
+                        marked under. Its questions move with it. Marks already recorded are not
+                        changed — correcting the bank fixes where the next exam lands.
+                      </p>
+                    </div>
+                  )}
                   {/* Read the bank back, correct a question, remove one. */}
                   <CbtBankEditor bankId={b.id} bankName={b.name} onChanged={() => router.refresh()} />
                 </li>

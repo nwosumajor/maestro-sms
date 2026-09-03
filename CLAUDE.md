@@ -1804,6 +1804,62 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### A fix that shipped with no door, and the gate that vouched for it
+`PUT /cbt/banks/:id` + the "Rename / move" control on `CbtStaffPanel`, and
+`service-methods-nobody-calls` tightened. Found by driving the CBT module in the
+60-school exercise — the route was simply not there.
+**THE SERVICE METHOD WAS WRITTEN, GUARDED, TESTED AND UNREACHABLE.** This file
+records `CbtService.updateBank` as shipped, with `assertNotAPlatformBank` on it
+and the reasoning in full: *"a bank filed under the wrong subject meant,
+permanently: the wrong subject's teachers could edit it and the right one could
+not … and every exam drawn from it wrote its marks into the wrong subject's
+column, onto pupils' report cards."* All of that was true and **no controller
+reached the method**, so the defect it describes was still live for every
+school. The SCHOLARSHIP sibling got its route (`PUT /scholarships/banks/:id`) in
+the same round; the school's own did not. Sibling asymmetry, mine, one commit
+apart.
+**AND THE GATE FOR EXACTLY THIS PASSED.** `service-methods-nobody-calls` asked
+whether `.updateBank(` appears anywhere else in `src`. It does —
+`ScholarshipAdminService.updateBank`, wired from its own controller. **So a
+same-named method on a DIFFERENT service vouched for the dead one.** That is the
+trap this file already records for `every-mutation-leaves-a-trail`: *"following
+delegation by method NAME across files made `this.db.runAsTenant(...)` match
+every `runAsTenant` in the codebase, so the gate went green for the wrong
+reason."* Same mistake, a second gate.
+// A CALLER IS NOW A CALLER OF *THIS* SERVICE: the scan resolves the exported
+class, finds the constructor properties typed as it, and requires the call to
+come through one of those handles — or at least from a file that names the class
+at all. Proved by mutation BOTH ways: with the route removed the tightened gate
+names `cbt/cbt.service.ts::updateBank`, and with the gate reverted to
+name-matching the very same missing route goes green.
+// AND THE SCAN IS BOUNDED TO THE CLASS BODY. Tightening it first reported
+`directory.service.ts::findMany`, which is a member of an INTERFACE declared
+beside the class — a structural type for the user delegate, not a method anybody
+could call. A gate that reports something nobody can act on is one whose next
+reader adds an exemption, so it brace-matches the exported class instead.
+// **NO STEP-UP, and the consistency gate is what settled it.** My first version
+had one, and `step-up-is-consistent-within-a-permission` immediately named the
+other twelve `cbt.manage` routes — creating a bank, adding questions, assembling
+a paper — none of which re-authenticates. Correcting a mis-filed bank is the same
+tier of daily work, it is audited, and doing it again undoes it. The scholarship
+sibling IS gated because every route on that surface is: it belongs to the
+platform owner, not to a teacher.
+// THE SCREEN SAYS WHAT THE SUBJECT IS FOR, because the field is not a label:
+"The subject decides who can edit this bank and which subject its exams are
+marked under. Its questions move with it. Marks already recorded are not
+changed." Without that a teacher either fears the move or misunderstands it.
+Live, on a real ENTERPRISE tenant:
+```
+created  201  "Mathmatics pool" · Physics
+renamed  200  "Mathematics pool" · Physics          the typo, correctable at last
+moved    200  "Mathematics pool" · English Language its questions moved with it
+{}       400  "Nothing to change"
+a teacher of another subject        404 "Bank not found"
+```
+Mutation-validated three ways: remove the route again (the gate names it), revert
+the gate to name-matching (it goes green — the blind spot, demonstrated), and put
+the step-up back (the consistency gate names the twelve siblings).
+
 ### Fifty schools, sixteen countries, a full session — driven
 Asked for: 50 schools (30 Nigeria, 20 global) from the first PUBLIC onboarding
 through a three-term session, every module exercised, the web reviewed for
