@@ -1,3 +1,4 @@
+import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge } from "@sms/types";
 import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Delete, Get, Header, Param, Post, Put } from "@nestjs/common";
 import { z } from "zod";
@@ -44,7 +45,16 @@ const sisRowSchema = z.object({
   class: z.string().max(120).nullish(),
   classId: z.string().uuid().nullish(),
 });
-const sisImportSchema = z.object({ rows: z.array(sisRowSchema).min(1).max(1000) });
+// See BULK_IMPORT_MAX_ROWS: one upload must finish inside a request, because the
+// sign-in slips ride only on the approval response. The outer .max is the DoS
+// bound; the refine is what the uploader READS — "at most 200 element(s)" tells
+// a school administrator nothing they can act on.
+const sisImportSchema = z
+  .object({ rows: z.array(sisRowSchema).min(1).max(2000) })
+  .superRefine((v, ctx) => {
+    if (v.rows.length > BULK_IMPORT_MAX_ROWS)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["rows"], message: bulkImportTooLarge("student", v.rows.length) });
+  });
 const rejectSchema = z.object({ note: z.string().max(1000).optional() });
 
 @Controller("admin")

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, Param, Post } from "@nestjs/common";
-import { MODULES, SIS_PERMISSIONS } from "@sms/types";
+import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge, MODULES, SIS_PERMISSIONS } from "@sms/types";
 import type { CreateParentResultDto, ParentImportBatchDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -25,7 +25,13 @@ const rowSchema = z.object({
   studentEmails: z.string().max(1000).nullish(),
   relationship: z.string().max(60).nullish(),
 });
-const stageSchema = z.object({ rows: z.array(rowSchema).min(1).max(1000) });
+// Same bound, same reason, same sentence as the student import.
+const stageSchema = z
+  .object({ rows: z.array(rowSchema).min(1).max(2000) })
+  .superRefine((v, ctx) => {
+    if (v.rows.length > BULK_IMPORT_MAX_ROWS)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["rows"], message: bulkImportTooLarge("parent", v.rows.length) });
+  });
 const rejectSchema = z.object({ note: z.string().max(1000).optional() });
 
 // Parent onboarding. Single create + bulk upload both gate on parent.import and

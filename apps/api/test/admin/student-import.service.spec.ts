@@ -29,17 +29,39 @@ function makeService(opts: { batch?: Row | null; existingEmails?: string[] }) {
     state.batch = { ...(state.batch ?? {}), ...a.data };
     return Promise.resolve(state.batch);
   });
+  // The bulk inserts fan into the SAME per-row spies, so every assertion below
+  // still asks what was WRITTEN about a pupil rather than which Prisma call
+  // wrote it. `createMany` and `groupBy` exist on every real client; a stub
+  // without them models a database that cannot exist.
+  const fan = (spy: jest.Mock) =>
+    jest.fn((a: { data: Row[] }) => {
+      for (const row of a.data) spy({ data: row });
+      return Promise.resolve({ count: a.data.length });
+    });
   const tx = {
     user: {
-      findMany: jest.fn().mockResolvedValue([...existing].map((email) => ({ email }))),
+      // HONOURS the filter: a stub that answers every query with the same list
+      // is how a deleted check keeps passing.
+      findMany: jest.fn((a?: { where?: { email?: { in?: string[] } } }) => {
+        const want = a?.where?.email?.in;
+        const all = [...existing];
+        return Promise.resolve((want ? all.filter((e) => want.includes(e)) : all).map((email) => ({ email })));
+      }),
       findFirst: jest.fn((a: { where: { email: string } }) =>
         Promise.resolve(existing.has(a.where.email.toLowerCase()) ? { id: "exists" } : null),
       ),
       create: userCreate,
+      createMany: fan(userCreate),
     },
-    userRole: { create: userRoleCreate },
-    studentProfile: { create: profileCreate, findMany: jest.fn().mockResolvedValue([]) },
-    enrollment: { create: enrollCreate, count: jest.fn().mockResolvedValue(0) },
+    userRole: { create: userRoleCreate, createMany: fan(userRoleCreate) },
+    studentProfile: { create: profileCreate, createMany: fan(profileCreate), findMany: jest.fn().mockResolvedValue([]) },
+    enrollment: {
+      create: enrollCreate,
+      createMany: fan(enrollCreate),
+      count: jest.fn().mockResolvedValue(0),
+      groupBy: jest.fn().mockResolvedValue([]),
+    },
+    class: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
     role: { findFirst: jest.fn().mockResolvedValue({ id: "student-role" }) },
     // Both stage() and approve() now resolve the school's slug: it is the domain
     // of every generated sign-in identifier.

@@ -1804,6 +1804,88 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### A school could not import its own roll, and the API stopped for everyone
+`StudentImportService.approve`, `foundation/bulk-hash.ts`, `BULK_IMPORT_MAX_ROWS`.
+Found by running the 50-school exercise: four schools onboarding at once, and the
+bulk SIS import — **the path a school uses on its first day** — answered
+**HTTP 500** for six of the eight. Two independent defects under one symptom.
+**1. PHASE 3 WAS O(ROWS) OF SEQUENTIAL ROUND TRIPS INSIDE ONE 5-SECOND
+TRANSACTION.** Per pupil: a `user.findFirst` for the identifier, `class.findFirst`
++ `enrollment.count` for capacity, then four creates. Prisma caps an interactive
+transaction at 5,000 ms. Measured live on ONE school with nothing else running:
+```
+ 25 rows   2.2 s      200 rows  37.1 s
+ 50 rows   4.6 s      300 rows  HTTP 500 — batch left PENDING, 0 pupils created
+```
+and with four schools importing at once even a **20-row** batch failed. The
+boundary accepted 1,000. So whether a school could onboard depended on how many
+pupils it had and how busy the task was, and "Internal server error" told it
+nothing.
+// **THE COMMENTS SAID THE WORK WAS ALREADY OUT OF THE TRANSACTION**, and half of
+it was: bcrypt had been moved to PHASE 2 with the reason written down
+("bcrypt×N would blow the 5s interactive-tx cap"). Somebody found this exact cap,
+moved the hashing, and left the SIX ROUND TRIPS PER ROW where they were. Third
+instance of the class this file already records for the timetable solver and the
+scholarship announce.
+// THE READS ARE BATCHED and the row loop now touches no database at all: one
+`user.findMany` over the whole candidate window (the identifiers come from a PURE
+generator, so every candidate can be asked at once), one `class.findMany`, one
+`enrollment.groupBy`. The writes are four `createMany`s. **The same query count
+for 60 pupils as for 5**, and a test asserts exactly that.
+// A RACE IS A 409 NAMING THE FIX, never a 500: a pre-check cannot beat a
+concurrent import and P2002 is the final guarantee — the reasoning `login-email.ts`
+already records. Nothing is written, and the approver is told to approve again.
+**2. `Promise.all` OVER bcryptjs STARVED THE EVENT LOOP FOR THE WHOLE BATCH.**
+bcryptjs is pure JavaScript and one hash is ~80 ms of uninterruptible CPU on the
+single thread that serves every tenant. Measured, 20 hashes:
+```
+promise form, all at once   1,573 ms   event loop ticked   1 time  (~157 due)
+callback form, all at once  1,577 ms                       1 time
+sequential, one at a time   1,566 ms                      20 times
+```
+So a 500-pupil import froze **every other school's requests**, health checks
+included, for about fifty seconds. Same CPU either way; the shape was the whole
+problem. `hashEachWithoutBlocking` is sequential with a `setImmediate` between —
+// GOTCHA: awaiting a resolved promise drains only MICROTASKS, and it is the
+macrotask queue that holds another tenant's request.
+// BOTH bulk importers had it. The guardian import is the same three lines.
+Live, before and after, a 300-pupil roll with an unrelated tenant reading its
+dashboard throughout:
+```
+before   HTTP 500, 0 created, batch PENDING — and the API dropped connections
+after    HTTP 201, 300 created, 300 slips, 47 s
+         that tenant's dashboard: idle 5 ms · DURING the import 57 ms · after 3 ms
+```
+**3. AND THE BOUND IS NOW STATED RATHER THAN DISCOVERED.** With both fixed, 1,000
+rows SUCCEEDS — in 132 s, and the proxy in front of the app gives up at sixty.
+That matters more than a slow page because **the login slips ride only on that
+response**: they are shown once and never stored, so a response the client never
+receives creates a thousand pupils nobody can sign in as, recoverable only by
+resetting a thousand passwords by hand. `BULK_IMPORT_MAX_ROWS` is 200 (~29 s at
+the measured 145 ms a head) and the refusal names the count and the remedy:
+*"This file has 400 pupils, and one upload carries at most 200. Split it into
+files of 200 or fewer … each one issues its own sign-in slips, and those are
+shown only once."*
+// THE ZOD `.max` ALONE WAS NOT ENOUGH and driving it is what showed that: it
+answered *"Array must contain at most 200 element(s)"*, which tells a school
+administrator nothing. The outer `.max(2000)` stays as the DoS bound and a
+`superRefine` carries the sentence, which can name the real count.
+// BOTH DOORS AND BOTH SCREENS: the service re-checks, and the two upload pages
+say it BEFORE the upload rather than letting a school meet it after choosing a
+file. One shared sentence, because two spellings of a limit is how a pair drifts.
+// **THE BETTER ANSWER IS NAMED AND DELIBERATELY NOT TAKEN**: approve at once,
+hash in a background job, let the approver fetch the slips once from the batch.
+That keeps any size — and it means holding credentials at rest for a window,
+which is the platform owner's decision, not a tidy-up.
+// GOTCHA in the fixtures, the trap this file records repeatedly: the harness had
+no `createMany` and no `groupBy`, which every real client has, and its
+`user.findMany` answered every query with the same list. It honours the filter
+now, and the bulk inserts fan into the SAME per-row spies so all 14 existing
+assertions still ask what was WRITTEN about a pupil rather than which call wrote it.
+Mutation-validated five ways: a query per row for the identifier, a create per
+row, capacity asked per row, `Promise.all` over bcrypt again, and the race back
+to a 500.
+
 ### The clock and the map were at the top of a paper forty questions long
 `ExamClock` + the sticky navigator (`components/cbt/CbtExamRoom.tsx`). Asked how
 many questions a candidate can see at once and whether they can jump to any

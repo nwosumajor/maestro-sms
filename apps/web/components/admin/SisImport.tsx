@@ -1,5 +1,6 @@
 "use client";
 
+import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge } from "@sms/types";
 import type { StudentImportBatchDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -84,6 +85,10 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         classId: r.classId || null,
       }));
     if (rows.length === 0) { setMsg("No valid rows — every row needs at least a name."); return; }
+    // Say it BEFORE the upload. The server refuses the same file with the same
+    // sentence; meeting that after choosing a file teaches nothing the picker
+    // could have said first.
+    if (rows.length > BULK_IMPORT_MAX_ROWS) { setMsg(bulkImportTooLarge("student", rows.length)); return; }
     setBusy(true); setMsg(null);
     const res = await fetch("/api/sms/admin/students/import", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }),

@@ -19,10 +19,11 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import crypto from "node:crypto";
-import bcrypt from "bcryptjs";
+import { hashEachWithoutBlocking } from "../foundation/bulk-hash";
 import { Prisma } from "@sms/db";
-import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
+import { schoolSlugOf } from "../foundation/login-email";
 import { allocateAdmissionNumber } from "../foundation/admission-number";
+import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge, generateLoginEmail } from "@sms/types";
 import type {
   StudentImportBatchDto,
   StudentImportRow,
@@ -74,6 +75,14 @@ interface BatchRow {
   summary: unknown;
   reviewNote: string | null;
   createdAt: Date;
+}
+
+/** Bulk inserts are chunked so one enormous batch cannot exceed Postgres's
+ *  parameter limit for a single statement. */
+function chunked<T>(rows: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
+  return out;
 }
 
 @Injectable()
@@ -129,7 +138,9 @@ export class StudentImportService {
 
   /** Stage a PENDING batch and compute a dry-run summary (new vs duplicate email). */
   async stage(p: Principal, inputRows: StudentImportRow[]) {
+
     let rows = inputRows;
+    if (rows.length > BULK_IMPORT_MAX_ROWS) throw new BadRequestException(bulkImportTooLarge("student", rows.length));
     if (!rows.length) throw new BadRequestException("No rows to import");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Only a SUPPLIED address can be a true duplicate now: a generated
@@ -227,137 +238,203 @@ export class StudentImportService {
     // portal until they all rotated. Now each account gets its own secret,
     // returned ONCE to the approver (never stored in plaintext), and
     // passwordChangedAt=null forces the student to set their own on first login.
-    const prepared = await Promise.all(
-      rows.map(async (row) => {
-        const tempPassword = crypto.randomBytes(9).toString("base64url");
-        return { row, tempPassword, passwordHash: await bcrypt.hash(tempPassword, 10) };
-      }),
+    // SEQUENTIAL, yielding between hashes. `Promise.all` over bcryptjs starves
+    // the event loop for the WHOLE batch — see foundation/bulk-hash.ts.
+    const prepared = await hashEachWithoutBlocking(
+      rows,
+      () => crypto.randomBytes(9).toString("base64url"),
+      (row, tempPassword, passwordHash) => ({ row, tempPassword, passwordHash }),
     );
     const credentials: { name: string; email: string; tempPassword: string; admissionNumber: string }[] = [];
 
-    // PHASE 3 (write tx): CLAIM the batch (guarded flip — a concurrent approver
-    // matches 0 rows), then create accounts with the precomputed hashes.
+    // PHASE 3a (batched reads): everything the row loop used to ask the database
+    // for, asked ONCE. It used to run 5-6 sequential round trips PER ROW inside
+    // ONE interactive transaction, which Prisma caps at 5 SECONDS — so a school
+    // importing its roll on day one got "Internal server error", and whether it
+    // worked depended on how many pupils and how busy the task was. Measured:
+    // 25 rows 2.2 s, 50 rows 4.6 s, 200 rows 37 s on an IDLE stack, and 20 rows
+    // FAILED with four schools importing at once. The schema permits 1,000.
+    const ctxRead = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const studentRole = await tx.role.findFirst({ where: { name: "student" }, select: { id: true } });
+      if (!studentRole) throw new NotFoundException("student role missing");
+      const slug = await schoolSlugOf(tx, p.schoolId);
+      const existingProfiles = await tx.studentProfile.findMany({
+        where: { admissionNumber: { not: null } },
+        select: { admissionNumber: true },
+      });
+      // Capacity headroom for every class named in the batch: two queries, not
+      // two PER CLASS.
+      const classIds = [...new Set(prepared.map((x) => x.row.classId).filter(Boolean) as string[])];
+      const classes = classIds.length
+        ? await tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, capacity: true } })
+        : [];
+      const counts = classIds.length
+        ? await tx.enrollment.groupBy({ by: ["classId"], where: { classId: { in: classIds }, status: "ACTIVE" }, _count: { _all: true } })
+        : [];
+      return { studentRole, slug, existingProfiles, classes, counts };
+    });
+    const usedAdmNo = new Set(
+      ctxRead.existingProfiles.map((pr) => pr.admissionNumber).filter(Boolean) as string[],
+    );
+    const activeBy = new Map(ctxRead.counts.map((c) => [c.classId, c._count._all]));
+    const headroom = new Map<string, number | null>(
+      ctxRead.classes.map((c) => [c.id, c.capacity == null ? null : c.capacity - (activeBy.get(c.id) ?? 0)]),
+    );
+
+    // Which sign-in identifiers are already taken. The auto-suffix allocator used
+    // to ask the database once PER CANDIDATE; the candidates are generated by a
+    // PURE function, so the whole window can be asked in ONE query. The window is
+    // widened and re-asked only if a name genuinely exhausts it — which needs more
+    // identically-named pupils than the batch itself contains.
+    const takenEmails = new Set<string>();
+    const supplied = prepared
+      .map((x) => x.row.email?.trim().toLowerCase())
+      .filter(Boolean) as string[];
+    // base identifier -> how many rows in THIS batch want it, and one sample
+    // name so the pure generator can be re-run for any suffix.
+    const perBase = new Map<string, { need: number; name: string }>();
+    for (const { row } of prepared) {
+      if (row.email?.trim()) continue;
+      const base = generateLoginEmail(row.name, ctxRead.slug, 0);
+      const e = perBase.get(base);
+      if (e) e.need += 1;
+      else perBase.set(base, { need: 1, name: row.name });
+    }
+    let window = 8;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const candidates = new Set<string>(supplied);
+      for (const { need, name } of perBase.values())
+        for (let sfx = 0; sfx <= need + window; sfx++)
+          candidates.add(generateLoginEmail(name, ctxRead.slug, sfx));
+      const found = candidates.size
+        ? await this.db.runAsTenant(this.ctx(p), (tx) =>
+            tx.user.findMany({ where: { email: { in: [...candidates] } }, select: { email: true } }),
+          )
+        : [];
+      takenEmails.clear();
+      for (const u of found) takenEmails.add(u.email);
+      // Widen only if a name genuinely cannot be allocated inside its window —
+      // which needs MORE identically-named pupils already on roll than this batch
+      // contains. Bounded, so a pathological roll cannot loop for ever.
+      const short = [...perBase.values()].some(({ need, name }) => {
+        let free = 0;
+        for (let sfx = 0; sfx <= need + window && free < need; sfx++)
+          if (!takenEmails.has(generateLoginEmail(name, ctxRead.slug, sfx))) free += 1;
+        return free < need;
+      });
+      if (!short) break;
+      window *= 4;
+    }
+
+    // PHASE 3b (pure): decide every row IN MEMORY. No database call in this loop,
+    // which is the whole point — the rules are unchanged, the round trips are gone.
+    const admissionYear = new Date().getFullYear();
+    const issued = new Set<string>(takenEmails);
+    const newUsers: Prisma.UserCreateManyInput[] = [];
+    const newRoles: Prisma.UserRoleCreateManyInput[] = [];
+    const newProfiles: Prisma.StudentProfileCreateManyInput[] = [];
+    const newEnrolments: Prisma.EnrollmentCreateManyInput[] = [];
+    let created = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    for (const { row, tempPassword, passwordHash } of prepared) {
+      const generated = !row.email?.trim();
+      let loginEmail: string;
+      if (generated) {
+        // Students auto-suffix a shared name (adams.james, adams.james2, ...),
+        // against BOTH what the school already holds and what this batch has
+        // issued, so two "Adams James" in one file both import.
+        let allocated: string | null = null;
+        for (let sfx = 0; sfx <= 500; sfx++) {
+          const candidate = generateLoginEmail(row.name, ctxRead.slug, sfx);
+          if (!issued.has(candidate)) { allocated = candidate; break; }
+        }
+        if (!allocated) {
+          errors.push(`${row.name}: could not allocate a sign-in identifier`);
+          skipped++;
+          continue;
+        }
+        loginEmail = allocated;
+      } else {
+        loginEmail = row.email!.trim().toLowerCase();
+        if (issued.has(loginEmail)) {
+          if (takenEmails.has(loginEmail)) { skipped++; continue; }
+          errors.push(`${row.name}: another row in this file already uses ${loginEmail}`);
+          skipped++;
+          continue;
+        }
+      }
+      issued.add(loginEmail);
+      const providedAdm = row.admissionNumber?.trim() || null;
+      if (providedAdm && usedAdmNo.has(providedAdm)) {
+        skipped++; // a SUPPLIED admission number that is already taken
+        continue;
+      }
+      const admissionNumber = providedAdm ?? allocateAdmissionNumber(usedAdmNo, admissionYear);
+      usedAdmNo.add(admissionNumber);
+      if (row.classId) {
+        const left = headroom.get(row.classId);
+        if (left != null && left <= 0) { skipped++; continue; } // class full
+      }
+      const userId = crypto.randomUUID();
+      newUsers.push({
+        id: userId,
+        schoolId: p.schoolId,
+        email: loginEmail,
+        // Students are exempt from a contact address — guardians are notified.
+        loginEmailGenerated: generated,
+        name: row.name,
+        passwordHash,
+        // passwordChangedAt: null => the login flow treats the password as
+        // expired, forcing the student to set their own at first sign-in.
+        passwordChangedAt: null,
+      });
+      newRoles.push({ schoolId: p.schoolId, userId, roleId: ctxRead.studentRole.id });
+      newProfiles.push({
+        schoolId: p.schoolId,
+        studentId: userId,
+        admissionNumber,
+        dateOfBirth: row.dateOfBirth ? new Date(row.dateOfBirth) : null,
+        gender: row.gender ?? null,
+        phone: row.phone ?? null,
+        addressLine1: row.address ?? null,
+      });
+      if (row.classId) {
+        newEnrolments.push({ schoolId: p.schoolId, classId: row.classId, studentId: userId });
+        const left = headroom.get(row.classId);
+        if (left != null) headroom.set(row.classId, left - 1);
+      }
+      // The login slip must carry the identifier ACTUALLY issued, or the student
+      // cannot sign in with what they were handed.
+      credentials.push({ name: row.name, email: loginEmail, tempPassword, admissionNumber });
+      created++;
+    }
+
+    // PHASE 3c (write tx): CLAIM the batch (guarded flip — a concurrent approver
+    // matches 0 rows), then four bulk inserts. Milliseconds, whatever the size.
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const claimed = await tx.studentImportBatch.updateMany({
         where: { id, status: "PENDING" },
         data: { reviewedById: p.userId },
       });
       if (claimed.count === 0) throw new ConflictException("Batch already decided");
-      const studentRole = await tx.role.findFirst({ where: { name: "student" }, select: { id: true } });
-      if (!studentRole) throw new NotFoundException("student role missing");
-      // Existing admission numbers in this tenant + ones seen earlier in the batch:
-      // a duplicate admission number is skipped (it must be unique per school).
-      const existingProfiles = await tx.studentProfile.findMany({
-        where: { admissionNumber: { not: null } },
-        select: { admissionNumber: true },
-      });
-      const usedAdmNo = new Set(existingProfiles.map((pr) => pr.admissionNumber).filter(Boolean) as string[]);
-      // AUTO-GENERATE for any blank row, via the SHARED allocator that manual
-      // single-student creation also uses — so the two paths cannot diverge.
-      const admissionYear = new Date().getFullYear();
-      // Per-target-class capacity headroom, computed lazily.
-      const headroom = new Map<string, number | null>(); // classId -> remaining (null = unlimited)
-      let created = 0;
-      let skipped = 0;
-      const errors: string[] = [];
-      // The school's domain, resolved once for the whole batch.
-      const slug = await schoolSlugOf(tx, p.schoolId);
-      // Identifiers issued EARLIER IN THIS TRANSACTION but not yet committed —
-      // without this, one CSV containing two pupils called Adams James would
-      // hand both the same identifier and the second INSERT would fail.
-      const issued = new Set<string>();
-
-      for (const { row, tempPassword, passwordHash } of prepared) {
-        try {
-          const generated = !row.email?.trim();
-          let loginEmail: string;
-          if (generated) {
-            // Students auto-suffix a shared name (adams.james, adams.james2, ...),
-            // checking BOTH the DB and identifiers issued earlier in this same tx,
-            // so two "Adams James" in one file both import.
-            loginEmail = await allocateLoginEmail(tx, row.name, slug, { taken: issued, autoSuffix: true });
-          } else {
-            loginEmail = row.email!.trim().toLowerCase();
-            if (issued.has(loginEmail)) {
-              errors.push(`${row.name}: another row in this file already uses ${loginEmail}`);
-              skipped++;
-              continue;
-            }
-            const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
-            if (existing) {
-              skipped++;
-              continue;
-            }
-            issued.add(loginEmail);
-          }
-          const providedAdm = row.admissionNumber?.trim() || null;
-          if (providedAdm && usedAdmNo.has(providedAdm)) {
-            skipped++; // a SUPPLIED admission number that is already taken
-            continue;
-          }
-          // Blank => generate; supplied => honour it. Either way, reserve it.
-          const admissionNumber = providedAdm ?? allocateAdmissionNumber(usedAdmNo, admissionYear);
-          usedAdmNo.add(admissionNumber);
-          // Capacity guard for an enrolled row.
-          if (row.classId) {
-            if (!headroom.has(row.classId)) {
-              const cls = await tx.class.findFirst({ where: { id: row.classId }, select: { capacity: true } });
-              if (cls?.capacity == null) headroom.set(row.classId, null);
-              else {
-                const active = await tx.enrollment.count({ where: { classId: row.classId, status: "ACTIVE" } });
-                headroom.set(row.classId, cls.capacity - active);
-              }
-            }
-            const left = headroom.get(row.classId);
-            if (left != null && left <= 0) {
-              skipped++; // class full
-              continue;
-            }
-          }
-          const u = await tx.user.create({
-            // passwordChangedAt: null => the login flow treats the password as
-            // expired, forcing the student to set their own at first sign-in.
-            data: {
-              schoolId: p.schoolId,
-              email: loginEmail,
-              // Students are exempt from a contact address — guardians are notified.
-              loginEmailGenerated: generated,
-              name: row.name,
-              passwordHash,
-              passwordChangedAt: null,
-            },
-          });
-          // The login slip must carry the identifier ACTUALLY issued, or the
-          // student cannot sign in with what they were handed.
-          credentials.push({ name: row.name, email: loginEmail, tempPassword, admissionNumber });
-          await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
-          await tx.studentProfile.create({
-            data: {
-              schoolId: p.schoolId,
-              studentId: u.id,
-              admissionNumber,
-              dateOfBirth: row.dateOfBirth ? new Date(row.dateOfBirth) : null,
-              gender: row.gender ?? null,
-              phone: row.phone ?? null,
-              addressLine1: row.address ?? null,
-            },
-          });
-          if (row.classId) {
-            await tx.enrollment.create({ data: { schoolId: p.schoolId, classId: row.classId, studentId: u.id } });
-            const left = headroom.get(row.classId);
-            if (left != null) headroom.set(row.classId, left - 1);
-          }
-          created++;
-        } catch (err) {
-          // A cross-school email collision surfaces here as a raw P2002. Translate
-          // it — "Unique constraint failed on the fields: (`email`)" tells the
-          // school administrator nothing they can act on.
-          const msg =
-            err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
-              ? "that sign-in identifier is already taken — give this person a fuller name"
-              : String(err).slice(0, 80);
-          errors.push(`${row.name}: ${msg}`);
+      try {
+        for (const chunk of chunked(newUsers, 500)) await tx.user.createMany({ data: chunk });
+        for (const chunk of chunked(newRoles, 500)) await tx.userRole.createMany({ data: chunk });
+        for (const chunk of chunked(newProfiles, 500)) await tx.studentProfile.createMany({ data: chunk });
+        for (const chunk of chunked(newEnrolments, 500)) await tx.enrollment.createMany({ data: chunk });
+      } catch (err) {
+        // A pre-check cannot beat a concurrent import, and P2002 is the final
+        // guarantee — the same reasoning login-email.ts records. Nothing is
+        // written (the tx rolls back), and the approver is told what to do
+        // rather than being handed "Internal server error".
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+          throw new ConflictException(
+            "Somebody else created a student with one of these sign-in identifiers while this import was being approved. " +
+              "Nothing was imported — approve it again.",
+          );
         }
+        throw err as Error;
       }
       const summary: StudentImportSummary = {
         total: prepared.length,

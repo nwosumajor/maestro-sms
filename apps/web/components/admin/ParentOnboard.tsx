@@ -4,6 +4,7 @@
 // parent accounts get a one-time password (shown ONCE) and are linked to their
 // children, referenced by admission number / student email. Mirrors SisImport.
 
+import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge } from "@sms/types";
 import type { ParentImportBatchDto, IdNameDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -106,6 +107,8 @@ export function ParentOnboard({ batches, students, currentUserId }: { batches: B
       relationship: r.relationship || null,
     }));
     if (rows.length === 0) { setMsg("No valid rows — each guardian needs a name and a contact email."); return; }
+    // Same bound and the same sentence as the pupil import — see BULK_IMPORT_MAX_ROWS.
+    if (rows.length > BULK_IMPORT_MAX_ROWS) { setMsg(bulkImportTooLarge("parent", rows.length)); return; }
     setBusy(true); setMsg(null);
     const res = await sendSms("POST", "admin/parents/import", { rows });
     setBusy(false);

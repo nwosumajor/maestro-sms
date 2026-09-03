@@ -21,6 +21,8 @@ import {
 } from "@nestjs/common";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge } from "@sms/types";
+import { hashEachWithoutBlocking } from "../foundation/bulk-hash";
 import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
 import { IS_STUDENT_ROLE_ROW } from "../common/student-scope";
 import { Prisma } from "@sms/db";
@@ -336,6 +338,7 @@ export class ParentImportService {
   }
 
   async stage(p: Principal, rows: ParentImportRow[]): Promise<ParentImportBatchDto> {
+    if (rows.length > BULK_IMPORT_MAX_ROWS) throw new BadRequestException(bulkImportTooLarge("parent", rows.length));
     if (!rows.length) throw new BadRequestException("No rows to import");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const addresses = rows.map((r) => r.contactEmail.toLowerCase());
@@ -417,11 +420,13 @@ export class ParentImportService {
     });
 
     // PHASE 2 (outside tx — bcrypt is slow): a UNIQUE password per row.
-    const prepared = await Promise.all(
-      rows.map(async (row) => {
-        const tempPassword = this.newSecret();
-        return { row, tempPassword, passwordHash: await bcrypt.hash(tempPassword, 10) };
-      }),
+    // SEQUENTIAL, yielding between hashes — the sibling of the student import,
+    // and the same reason: `Promise.all` over bcryptjs starves the event loop
+    // for the whole batch. See foundation/bulk-hash.ts.
+    const prepared = await hashEachWithoutBlocking(
+      rows,
+      () => this.newSecret(),
+      (row, tempPassword, passwordHash) => ({ row, tempPassword, passwordHash }),
     );
     const credentials: ParentCredential[] = [];
 
