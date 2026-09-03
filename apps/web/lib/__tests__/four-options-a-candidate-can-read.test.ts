@@ -18,6 +18,8 @@ const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
 const BANKS = read("components/operator/QuestionBanks.tsx");
 const ADMIN = read("components/operator/ScholarshipAdmin.tsx");
 const ROOM = read("components/cbt/CbtExamRoom.tsx");
+const STAFF = read("components/cbt/CbtStaffPanel.tsx");
+const EDITOR = read("components/cbt/CbtBankEditor.tsx");
 
 describe("a scholarship question is set A to D", () => {
   it("is four, in one shared constant", () => {
@@ -89,5 +91,49 @@ describe("a candidate can read the whole option", () => {
     expect(ROOM).toMatch(/className="min-w-0 break-words">\{choice\}/);
     // and the letter badge stays beside the FIRST line once it wraps
     expect(ROOM).toMatch(/"flex items-start gap-2 rounded-md border/);
+  });
+});
+
+describe("the school's own CBT module too", () => {
+  // SIBLING ASYMMETRY INSIDE ONE MODULE, and I asserted the module was fine
+  // having looked at only one of its two forms. `CbtBankEditor` — which
+  // CORRECTS an existing question — has always used full-width rows;
+  // `CbtStaffPanel`, which WRITES them, used `sm:grid-cols-2`, giving each
+  // option half the panel. Fine for "3 / 4 / 5", far too narrow for a sentence.
+  it("the composer gives each option a full-width field", () => {
+    const field = /<Input\s+className="([^"]+)"\s+aria-label=\{`Option \$\{"ABCDEF"\[k\]\} of question/;
+    const m = field.exec(STAFF);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe("flex-1");
+    expect(STAFF).not.toMatch(/grid gap-2 sm:grid-cols-2">\s*\n\s*\{q\.choices\.map/);
+  });
+
+  // The two forms must not show a teacher different things about one question.
+  it("matches the editor that corrects the same question", () => {
+    for (const src of [STAFF, EDITOR]) {
+      expect(src).toMatch(/q\.choices\.map|choices\.map/);
+      expect(src).not.toMatch(/className="w-2[0-9]"[^>]*(choice|Option)/);
+    }
+  });
+
+  // Every option field is named, not just placeholder-labelled — a placeholder
+  // vanishes the moment somebody types.
+  it("names each option field and its correct-answer radio", () => {
+    expect(STAFF).toMatch(/aria-label=\{`Option \$\{"ABCDEF"\[k\]\} of question \$\{i \+ 1\}`\}/);
+    expect(STAFF).toMatch(/is the correct answer`\}/);
+  });
+
+  // ONE EXAM ROOM, TWO DOORS — the school's own candidates get the wrapping fix
+  // for free, and a test says so rather than leaving it to be assumed.
+  it("the school's candidates read options through the same exam room", () => {
+    expect(ROOM).toMatch(/basePath = "cbt"/);
+    expect(ROOM).toMatch(/shortOptions\(q\.choices\)/);
+  });
+
+  // The school's own paper may still carry up to six options — that is their
+  // business and was not what was asked. Only the WIDTH changed here.
+  it("does not change how many options a school's own paper may have", () => {
+    expect(STAFF).toMatch(/q\.choices\.length < 6/);
+    expect(STAFF).toMatch(/\+ option/);
   });
 });

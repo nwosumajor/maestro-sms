@@ -907,10 +907,20 @@ read in full.
 and two columns of `w-24` on the programme console — about a dozen characters
 each — so an owner could not read back what they had typed. And the option too
 long for the box is exactly the one a candidate needs to read in full.
-// **THE SCHOOL'S OWN CBT EDITOR ALREADY HAD IT RIGHT**: one option per ROW,
-full-width `Input`, radio beside it. The scholarship composers are supposed to
-MIRROR that module and used cramped boxes in a wrapping row instead. Both now
-use the sibling's layout.
+// **AND THE CLAIM I MADE ABOUT THE SCHOOL'S OWN MODULE WAS HALF WRONG**, which
+the owner caught by asking. I wrote that "the school's own CBT editor already
+had it right" having looked at ONE of its two forms: `CbtBankEditor`, which
+CORRECTS an existing question, does use full-width rows — and `CbtStaffPanel`,
+which WRITES them, laid options out `sm:grid-cols-2`, giving each option half
+the panel. Sibling asymmetry INSIDE one module, asserted as sound because I
+read the careful half. Both scholarship composers and the school's own now use
+the same layout, so no two forms show a teacher different things about one
+question.
+// THE SCHOOL'S OPTION COUNT IS UNTOUCHED — its papers may still carry up to
+six, which is their business and was not what was asked. Only the width moved,
+and a test pins the `+ option` control so a later tidy-up cannot take it.
+// ONE EXAM ROOM, TWO DOORS: the school's own candidates get the wrapping fix
+for free, and a test says so rather than leaving it to be assumed.
 // A QUESTION WRITTEN WHEN FIVE WERE OFFERED KEEPS ALL FIVE. The state is an
 ARRAY rather than five named fields, and the edit loader PADS rather than
 truncating — rendering a fixed four would drop the fifth on the next save,

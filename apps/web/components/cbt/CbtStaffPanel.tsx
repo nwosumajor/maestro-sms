@@ -422,7 +422,18 @@ export function CbtStaffPanel({
                       </div>
                       {q.type === "OBJECTIVE" && (
                         <>
-                      <div className="grid gap-2 sm:grid-cols-2">
+                      {/* ONE OPTION PER ROW, FULL WIDTH.
+                          Two columns gave each option half the panel, which is
+                          fine for "3 / 4 / 5" and far too narrow for a sentence
+                          — a teacher could not read back what they had typed,
+                          and the option too long for the box is exactly the one
+                          a candidate needs to read in full.
+                          SIBLING ASYMMETRY INSIDE ONE MODULE: `CbtBankEditor`,
+                          which CORRECTS an existing question, has always used
+                          full-width rows; this form, which WRITES them, did
+                          not. Same layout now, so the two cannot show a teacher
+                          different things about one question. */}
+                      <div className="space-y-1.5">
                         {q.choices.map((c, k) => (
                           <label key={k} className="flex items-center gap-2">
                             <input
@@ -431,8 +442,12 @@ export function CbtStaffPanel({
                               checked={q.answerIndex === k}
                               onChange={() => setQ(i, { answerIndex: k })}
                               title="Mark correct"
+                              aria-label={`Option ${"ABCDEF"[k]} of question ${i + 1} is the correct answer`}
                             />
+                            <span className="w-4 text-xs font-semibold text-muted-foreground">{"ABCDEF"[k]}</span>
                             <Input
+                              className="flex-1"
+                              aria-label={`Option ${"ABCDEF"[k]} of question ${i + 1}`}
                               value={c}
                               onChange={(e) => setChoice(i, k, e.target.value)}
                               placeholder={`Option ${"ABCDEF"[k]}${k < 2 ? " (required)" : ""}`}
