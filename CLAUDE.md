@@ -1804,6 +1804,67 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### Sixty schools, eighteen countries, and every module driven with WRITES
+The second exercise, asked for explicitly as "ensure all modules and processes
+are used and engaged" — so unlike the first, which mostly READ each module, this
+one performs the ACTUAL WORK of each: take a register and correct it, enter
+marks and publish them through maker-checker, raise and settle a bill, issue and
+return a library book, allocate a bed and sign a boarder out, roster a bus,
+run payroll, file a complaint and resolve it, author and approve content, sit a
+CBT paper, admit a pupil, record a breach, lend a privilege.
+**THE DRIVER IS BUILT FROM THE API's OWN SURFACE, not from memory.** The first
+run cost five wrong field names, each of which first looked like a defect — so
+this one extracts every mutating route with the zod schema it validates against
+(505 routes, 41 controller modules) and builds the payloads from that.
+**RESULT, ten untouched schools across all four tiers and eight countries:**
+```
+1,707 operations succeeded
+  251 correctly closed by the plan (the entitlement gate)
+    2 refused — BOTH the country-pack fail-safe, working
+```
+The two are `Statutory payroll is not available for US / UG yet`, which is the
+rule this file already records: a payslip wrong about tax is a filing somebody
+hands to a revenue authority, so a country with no pack REFUSES rather than
+computing. Every one of the 41 modules was reached.
+// **THE ENTITLEMENT GATE IS THE OTHER HALF OF THE ANSWER, and it is why the
+report separates "gated" from "failed".** 251 refusals across the ten schools
+are STANDARD and PREMIUM correctly closing hostel, transport, HR, discipline,
+admissions, alumni, CBT, certificate, games, tasks, forms and polls. Counting
+those as failures — which the first version did — makes the whole report
+unreadable and hides the two that matter.
+**WHAT IT FOUND: a fix that shipped with no door**, written up separately —
+`CbtService.updateBank` guarded, tested and unreachable, with the gate for
+exactly that vouching for it because a same-named method on another service
+counted as a caller.
+**AND WHAT HELD, at 64 tenants and 20,010 users:**
+```
+route smoke        110 routes x 5 roles, all rendered
+page timings       median 39 ms · p95 57 ms · max 119 ms · 0 5xx
+isolation probe    14/14 denied by direct id through the real front door
+family scope       every probe identical to a ghost id
+permission matrix  3,740 role/route pairs, 0 roles skipped
+no request is 500  4,212 requests incl. hostile query strings — zero 5xx
+no secret in a body 3,995 (role,route) pairs across 17 roles — clean
+API suite          5,777 tests in 570 suites
+```
+// EVERY MAKER-CHECKER PAIR WAS DRIVEN WITH TWO REAL PEOPLE and each refused the
+same person twice: the SIS import, grade publish, fee adjustment, salary change,
+payroll finalize, exeat approval, guardian import, content publish, admissions
+review and the staged staff-request chain — including a REQUEST_REVISION and the
+initiator's resubmission.
+// GOTCHA, mine, and the same lesson as last time in a new place: an engagement
+driver that is not idempotent reports the product's own controls as failures on
+a second run. The first full pass showed 38 "failures" and every one was a
+control refusing a repeat — an exam hall already booked, a payroll period
+already run, a pupil already in a bed, a class already taught that period. Run
+the drivers on schools that have never been engaged, or the report measures the
+driver.
+// PROBE: 60 schools, 18,994 users, 60 onboarding requests, 3 promo codes, 3
+agents, 3 school groups and 276 platform notification/audit rows removed; every
+table is back to its baseline count exactly (4 schools, 1,016 users, 905 pupils,
+31 classes, 173,701 registers, 14 invoices, 19 payments) and a VACUUM FULL left
+the database at 281 MB.
+
 ### A fix that shipped with no door, and the gate that vouched for it
 `PUT /cbt/banks/:id` + the "Rename / move" control on `CbtStaffPanel`, and
 `service-methods-nobody-calls` tightened. Found by driving the CBT module in the
