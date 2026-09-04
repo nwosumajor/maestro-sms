@@ -1888,6 +1888,21 @@ includes `prisma/seed.ts` now — proved by putting the call back and watching
 build instead of breaking a fresh install quietly.
 // A DROPPED TABLE MEANS AUDITING THE SEED, the same way this file already says
 it means auditing the RLS files.
+**4. AND THE PERMISSION'S OTHER HALF, which granting the first half exposed.**
+`timetable.read` let the head of teaching call `/timetable/unstaffed` — and the
+service's own `STAFF_WIDE_ROLES` then answered **404**, because that set listed
+`board`, a read-only oversight tier, and not the head of teaching. The route gate
+says whether you may read a timetable at all; the set says whose. They are in
+different files and they disagreed, which is the two-halves shape this file has
+already had to correct in twenty-six other wide-role sets.
+// IT GRANTS NO WRITE, and a test pins that: every mutating timetable route is
+gated on `timetable.write`, which neither head role holds, so the door refuses
+them before the set is ever consulted. Seeing that Tuesday period 3 is unstaffed
+is not the same act as rewriting the grid.
+// **AND THIS IS WHY A GRANT IS NOT FINISHED WHEN THE ROUTE OPENS.** Adding the
+permission made the read REACHABLE and left it out of SCOPE — a 404 on a page the
+nav now offers. Driving the role's day is what caught it; the permission map
+alone says the grant is there.
 Mutation-validated five ways: take the content key off head_admin, take the
 timetable off the head teacher, put the calendar back behind HR only, and both
 over-corrections — hand the approver HR's register, and let them rewrite the

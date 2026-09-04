@@ -79,3 +79,27 @@ describe("every approver of a leave request can see what they are deciding", () 
     expect(holdersOf(HR_PERMISSIONS.HR_LEAVE_MANAGE)).toEqual(["hr_manager"]);
   });
 });
+
+// -----------------------------------------------------------------------------
+// The permission's OTHER half
+// -----------------------------------------------------------------------------
+// Reaching the door is not the same as being in scope once through it. Granting
+// `timetable.read` let the head of teaching call `/timetable/unstaffed`, and the
+// service's own wide-role set then answered 404 — the two halves of one
+// permission disagreeing, in a set that listed `board` and not the head of
+// teaching.
+describe("the head of teaching is in scope for what they can reach", () => {
+  it("is whole-school staff for the timetable, like the other oversight roles", () => {
+    const src = readFileSync(join(__dirname, "../../src/timetable/timetable.service.ts"), "utf8");
+    const set = src.slice(src.indexOf("const STAFF_WIDE_ROLES"), src.indexOf("]);", src.indexOf("const STAFF_WIDE_ROLES")));
+    for (const role of holdersOf("workflow.review.head")) expect(set).toContain(`"${role}"`);
+    // and the roles it already had are untouched
+    for (const role of ["school_admin", "principal", "board", "junior_admin"]) expect(set).toContain(`"${role}"`);
+  });
+
+  it("and STILL cannot write a timetable — the door is the control", () => {
+    for (const role of holdersOf("workflow.review.head")) {
+      expect((ROLE_PERMISSIONS as Record<string, string[]>)[role]).not.toContain("timetable.write");
+    }
+  });
+});

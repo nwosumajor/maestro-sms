@@ -60,11 +60,27 @@ import { createPdfDocument } from "../common/pdf-document";
 // the auto-generator (generate) and teacher-availability (setUnavailability)
 // gate on staff-wide — so those were dead for it. Add it for consistency.
 // Mirrors the SIS fix.
+// WHO SEES THE WHOLE SCHOOL'S TIMETABLE.
+//
+// The route gate says whether you may read a timetable at all; this says whose.
+// The two are set in different files, and this one had `board` — a read-only
+// oversight tier — and not the HEAD OF TEACHING, who is the obvious reader of
+// "which lessons have no teacher" and is stage 1 of the leave chain that
+// creates them. `/timetable/unstaffed` answered them 404 while the door let
+// them in: the permission's two halves disagreeing, which this codebase has
+// already had to correct in twenty-six other wide-role sets.
+//
+// This grants NO write. Every mutating timetable route is gated on
+// `timetable.write`, which neither head role holds, so the door stops them
+// before this set is consulted — seeing that Tuesday period 3 is unstaffed is
+// not the same act as rewriting the grid.
 const STAFF_WIDE_ROLES = new Set([
   "school_admin",
   "principal",
   "board",
   "junior_admin",
+  "head_teacher",
+  "head_admin",
 ]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const WEEKDAYS: DayOfWeekValue[] = [
