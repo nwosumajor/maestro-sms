@@ -332,6 +332,23 @@ export default async function HelpPage() {
           />
         )}
 
+        {/* The alumni register had NO guide at all, in either document — a
+            shipped module, a permission three roles hold, and a broadcast that
+            emails former pupils, explained nowhere. The thing that most needs
+            saying is who a broadcast actually reaches. */}
+        {can("alumni.manage") && mod("alumni") && (
+          <Guide
+            title="Alumni — the register and the broadcast"
+            description="Former pupils stay reachable after their account is closed."
+            steps={[
+              { title: "Record them as they leave", body: "Alumni: add a former pupil with the year they left, a contact email and what they went on to do. A pupil who is exited properly keeps their records, but their SIGN-IN is closed — which is exactly why this register holds a contact address of its own." },
+              { title: "The email address IS the audience", body: "A broadcast is sent to the addresses on these records, directly — not into the app. An alumnus cannot sign in, so a message put in an inbox would reach nobody. A record with no email address is not written to." },
+              { title: "Check the two counts before you rely on it", body: "Sending reports how many were queued AND how many were unreachable for want of an address. \u201cSent to 40\u201d out of a register of 200 is the honest answer, not a failure — add the missing addresses on this page and send again." },
+              { title: "Filter by year", body: "Send to one leaving cohort rather than the whole register — a reunion for the class of 2015 need not reach everybody." },
+            ]}
+          />
+        )}
+
         {/* Three guides, not one. A librarian was being shown hostel roll-call
             and fleet scheduling because all three shared a gate — and none of
             these roles can act on the other two: a warden holds hostel.manage
@@ -430,7 +447,8 @@ export default async function HelpPage() {
             description="How your school pays for the platform — and earns from it."
             steps={[
               { title: "Per-seat pricing", body: "You pay per active student per month. Choose monthly, per-term (3 months, 5% off) or per-year (9 months, 15% off) billing. Adding students mid-period accrues a small seat top-up you can settle any time — it's added to your next renewal otherwise." },
-              { title: "Currencies & auto-renew", body: "Pay in naira (Paystack) or US dollars (Stripe); the Enterprise plan is billed in dollars only. After a card payment you can switch on auto-renew — the saved card is charged just before your period lapses." },
+              { title: "Currencies & auto-renew", body: "The Billing page lists the currencies your school can be charged in and says plainly which of them the payment provider can settle today — pick one it can, and it will offer an alternative when your own is not yet enabled. Every tier is sold in every currency we price; none is restricted to one. After a card payment you can switch on auto-renew — the saved card is charged just before your period lapses." },
+              { title: "Buy one module instead of a whole tier", body: "Billing: the add-on shop lists the modules your plan does not include, priced per active student and PRORATED to the time left in your cycle — so buying three weeks before renewal costs three weeks. It bills in full at each renewal and is shown in the quote beforehand. You can cancel it yourself: billing stops at once and the module stays until the period you paid for ends. Upgrading to a tier that includes it absorbs the add-on rather than charging twice." },
               { title: "Renewal & grace", body: "You'll see a renewal banner from 14 days out. If a payment lapses, you keep full access for a grace window (7 days by default); after that the school runs on the Standard core until payment — nothing is ever deleted, and paying restores your plan instantly." },
               { title: "Refer a school, earn a term", body: "Billing → Refer a school: share your referral code or link. When the school you referred makes its first paid subscription, BOTH schools automatically get one term (3 months) free — no cap, and every reward shows in your billing history." },
               { title: "Message credits", body: "To reach parents by SMS or WhatsApp (not just in-app/email), buy a message-credit bundle on the Billing page — each SMS/WhatsApp delivery uses one credit, and credits never expire while you're subscribed." },

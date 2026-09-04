@@ -2,8 +2,16 @@
 // AlumniService — alumni records + broadcast
 // =============================================================================
 // Tenant-scoped (RLS). Staff (alumni.manage) record former students (contact +
-// occupation), filter by graduation year, and broadcast a message to alumni who
-// have a linked User account (via Notifications). Mutations audited.
+// occupation), filter by graduation year, and broadcast a message to the
+// register's OWN EMAIL addresses, sent directly (EmailService) — NOT through
+// the notification funnel, because an alumnus has left by definition and a
+// notification is addressed to an account they can no longer open. `broadcast`
+// below carries the full reasoning.
+//
+// This header said "alumni who have a linked User account (via Notifications)"
+// for as long as that was false: the audience changed and the description one
+// hundred lines above it did not. A file header is the first thing a reader
+// trusts, and it contradicted the method's own comment.
 // =============================================================================
 
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
@@ -183,7 +191,6 @@ export class AlumniService {
         where: { ...audience, email: null },
       });
       const active = emailable;
-      const closed = 0;
       // The screen is read once; the audit row is what answers "why did the
       // class of 2015 never hear from us" a year later — and it now records the
       // reason, not just the shortfall.

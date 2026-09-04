@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Ninety schools, every module written to, and a guide that sold one tier in one currency](#ninety-schools-every-module-written-to-and-a-guide-that-sold-one-tier-in-one-currency)
 - [Seventy schools, four tiers, both payment rails — and a bill in the wrong money](#seventy-schools-four-tiers-both-payment-rails--and-a-bill-in-the-wrong-money)
 - [A reference documenting 351 of 901 routes, under a footer saying it was generated](#a-reference-documenting-351-of-901-routes-under-a-footer-saying-it-was-generated)
 - [Four options, and a box too narrow to read one](#four-options-and-a-box-too-narrow-to-read-one)
@@ -280,6 +281,144 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Ninety schools, every module written to, and a guide that sold one tier in one currency
+Asked for before the AWS deployment: 90 schools, every tier, every module, both
+payment systems, and the in-app help plus the manual made accurate,
+comprehensive and detailed. Driven over the real front door with signed gateway
+callbacks; nothing reads the database except to verify.
+```
+90 public onboarding requests   90/90   (24 waits on the 10/min limiter — the defence working)
+provisioned with region + tier  90/90   17 countries, 4 tiers
+paid subscriptions              90/90   every tier x every billing cycle (12 combinations)
+module WRITES                   26/26   a real row in every module
+mobile money + chargebacks      13/13   both tables held ZERO rows before this
+```
+**THE DOCUMENTATION DEFECTS, and the sharpest is a commercial one.** `/help`
+told every school administrator:
+> *"Pay in naira (Paystack) or US dollars (Stripe); the Enterprise plan is
+> billed in dollars only."*
+**Both halves are false.** `planCurrencies(ENTERPRISE)` is `[NGN, USD, GHS]` —
+three currencies, and no tier is restricted to any of them. And CLAUDE.md
+already records that exact sentence being deleted from the OPERATOR console as a
+stale claim, in the same round that found `planCurrencies` returning a hard-coded
+literal. **It was corrected where an operator reads it and left where a CUSTOMER
+reads it** — sibling asymmetry, on the page that tells a school what it can pay
+in. The guide now points at the Billing page, which reads the real list and says
+which currencies the provider can settle today.
+// GOTCHA in my own gate, and it is the class this repo has a whole spec for:
+`expect(help).toContain("5% off")` PASSED while the figure had been changed to
+8%, because **"5% off" is a substring of "15% off"** — the per-year discount two
+lines below. Caught only by mutating the number. Anchored with a negative
+lookbehind.
+**A SECOND ONE THAT COSTS REVENUE:** the manual said *"If you need a single
+module from a higher tier, ask support to enable it individually."* The add-on
+shop, its checkout and its **cancel** have all shipped and are self-serve — I
+drove all three last round. Telling an owner to email support for a two-click
+purchase loses the sale, and `/help` mentioned add-ons **nowhere at all**. Both
+documents now describe buying one, the PRORATING (a module bought three weeks
+before renewal costs three weeks, so the small first charge does not read as a
+mistake), that an upgrade ABSORBS it rather than double-charging, and that it can
+be cancelled without losing the period already paid for.
+**AND A MODULE NEITHER DOCUMENT EXPLAINED.** Coverage was measured rather than
+eyeballed — every key in `MODULES` and every role in `ROLE_PERMISSIONS` against
+both documents — and **ALUMNI was the only hole**: a shipped module,
+`alumni.manage` held by principal, school_admin and teacher, a page, and a
+broadcast that emails former pupils, with no guidance anywhere.
+// THE THING THAT MOST NEEDED SAYING is what the service went to trouble to get
+right: **an alumnus has LEFT, so the audience is the register's own EMAIL, not an
+app inbox**, and a record with no address is not written to. Driven live while
+writing it: `queued 1, unreachable 1`.
+// AND THE SERVICE'S OWN HEADER STILL DESCRIBED THE BEHAVIOUR IT REPLACED —
+"broadcast a message to alumni who have a linked User account (via
+Notifications)" — one hundred lines above the comment that replaced it. A file
+header is the first thing a reader trusts. Corrected, along with a local
+(`const closed = 0`) left over from the field that was removed.
+// ROLE COVERAGE WAS A FALSE ALARM, and worth recording so it is not re-chased:
+searching for role NAMES said hr_clerk, head_admin and head_driver were missing.
+`/help` gates by PERMISSION, so that measured my search. Rendering the page as
+all 17 accounts shows the thinnest role (driver) still gets 3 cards and 16
+guidance steps; nobody is left with nothing.
+// EVERY NUMBER THE GUIDE QUOTES WAS CHECKED against its constant — trial 30d,
+grace 7d, stale register 7d, import 200 rows, term 3 months / 5% off, year 9
+months / 15% off, referral one term — **all correct**, and now read from
+`@sms/types` by the gate rather than verified once by hand.
+// THE MOBILE-MONEY SENTENCE WAS SOFTENED TO THE TRUTH: the manual promised
+"mobile money across most of the continent" while the product answers *"Mobile
+money is coming soon"* for a rail the operator has not switched on. Both are
+right — there is a channel switchboard, and an unswitched rail deliberately shows
+"coming soon" rather than failing at the moment of payment — so the manual now
+says the routes depend on the country AND on our having enabled them. `/help`
+was already correctly hedged ("where your country has it"); the manual was the
+careless half.
+**THE TWO PAYMENT PATHS THAT HAD NEVER EXECUTED.** `mobile_money_intent` and
+`payment_dispute` both held zero rows. Neither needs provider credentials to be
+worth driving:
+```
+KE offers MPESA + AIRTEL · GH and RW offer MTN_MOMO · NG offers none
+                                   — straight from MOBILE_MONEY_COVERAGE, a table not a branch
+a charge with no rail configured   503 "Mobile money is coming soon."  (fails CLOSED)
+mpesa / mtn / airtel callback for
+an unknown reference               201 each — a non-2xx would LOSE the payment,
+                                   because these rails deliver once and do not retry
+recovery sweep                     runs clean
+a signed chargeback                opens ONE case against the right school, with the
+                                   evidence deadline
+the same event again               still one case
+resolve                            closes it (LOST), does not open another
+a dispute resolving to no school   DROPPED — a wrong tenant is worse than none
+```
+// `mobile_money_intent` IS STILL ZERO AND THAT IS CORRECT: the intent is written
+BEFORE the prompt goes out, and the charge refuses before that. Nothing is
+half-written.
+**THE FEE RAIL, on one school of every tier** (FEES is in the STANDARD floor, so
+it must behave identically whatever a school pays us): raise, issue, a PARTIAL
+online settlement to `PARTIALLY_PAID`, the balance by hand to `PAID`, a real PDF
+receipt, the finance report and the journal CSV — all four tiers.
+**SUBSCRIPTIONS, 90/90 and every combination:** 26 STANDARD, 26 PREMIUM, 20
+ULTIMATE, 18 ENTERPRISE, each spread across MONTH / TERM / YEAR. 89 refused
+checkouts (Paystack's own limiter) left **89 voided `FAILED` intents and zero
+stranded `PENDING` rows** — `voidIntent` holding at scale for the second run
+running.
+// THE REGION MODEL HELD at 17 countries: India opens in April, ZA/ZM/ZW in
+January, US and Canada TWO_SEMESTER in August, the other eleven in September.
+// GOTCHA, MINE, AND IT COST HALF AN HOUR: my wait loop was
+`until ! pgrep -f 90-03-subs`, and **the loop's own command line contains that
+string**, so it waited for itself for ever while the driver had long finished.
+A self-matching `pgrep` is the shell equivalent of a probe that reports a fact
+about itself.
+// GOTCHA, five more wrong field names, and I keep committing this: a period's
+ordinal is `sequence` not `orderIndex`; a loan is issued at `/library/loans/issue`
+not on the book; an employment record needs `startDate`; a broadsheet needs
+`termId`; and a question bank needs a REAL subject — "Pick the subject this bank
+is for" was the product being right about a school that had none yet.
+// GOTCHA: the meta-gate `a-gate-must-not-pass-by-finding-nothing` failed my own
+new documentation gate, correctly. Nearly every assertion in it is a
+`not.toMatch`, which an EMPTY string satisfies — so if either document ever
+failed to read, the file would go green while checking nothing. It now asserts
+both documents are present and substantial.
+**FLEET POSTURE AT 94 TENANTS:**
+```
+isolation probe     14/14 denied by direct id through the real front door
+family scope        every probe identical to a ghost id
+permission matrix   3,723 role/route pairs, 0 roles skipped
+no request is a 500 4,212 requests incl. hostile query strings — zero 5xx
+no secret in a body 3,995 (role,route) pairs across 17 roles — clean
+route smoke         110 routes x 18 roles, all rendered
+page timings        median 16 ms · p95 26 ms · max 56 ms · 0 5xx
+fee rail per tier   STANDARD/PREMIUM/ULTIMATE/ENTERPRISE all: issue -> partial
+                    online settlement -> PARTIALLY_PAID -> paid off -> PAID,
+                    PDF receipt, finance report, journal CSV
+```
+// BOTH DOCUMENTS WERE VERIFIED BY RENDERING, not by grepping the source: the
+new alumni and add-on guides appear on a real signed-in `/help`, and `/manual`
+serves the alumni section, the add-on section and the trial.
+// PROBE: 90 schools, their users, 90 onboarding requests, 90 subscriptions, 224
+platform payments, every invoice, loan, bank, alumnus and the one dispute
+removed; every table is back to its baseline count and the three demo
+subscriptions are byte-identical. `audit_log` keeps 632 rows — the truthful
+append-only trail of the probe runs against demo data.
+
 
 ### Seventy schools, four tiers, both payment rails — and a bill in the wrong money
 Asked for before an AWS deployment: 70 schools, every subscription tier, every
