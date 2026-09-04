@@ -1,9 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src"]
+  // `prisma/seed.ts` IS typechecked. It was not, and the seed went on writing to
+  // `class_teacher` for weeks after that table was dropped — `pnpm typecheck`
+  // passed the whole time. Because `.env.example` ships SEED_DEMO_DATA=true and
+  // the entrypoint calls a failed seed non-fatal, a fresh `docker compose up`
+  // came up with no demo data and one line of log. The compiler is the right
+  // place to catch a model that no longer exists.
+  "include": ["src", "prisma/seed.ts"]
 }

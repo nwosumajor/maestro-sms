@@ -1,6 +1,6 @@
 import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
-import { MODULES, HR_PERMISSIONS } from "@sms/types";
+import { MODULES, HR_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import type { LeaveBalanceDto, LeavePageDto, LeaveRequestDto, LeaveTypeDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -112,8 +112,34 @@ export class LeaveController {
     return this.leave.listRegister(p, query);
   }
 
+  /**
+   * WHO ELSE IS ALREADY OUT — and therefore reachable by the people who DECIDE
+   * leave, not only by the one who administers it.
+   *
+   * `STAFF_REQUEST_CHAIN` routes every leave request through head of teaching ->
+   * HR manager -> principal, and only the middle one held `hr.leave.manage`. So
+   * two of the three approvers could not see who else was off on the dates in
+   * front of them. Measured, three staff off the same week:
+   *
+   *     head teacher   who else is out 403 · lessons uncovered 403
+   *     HR manager                     200 ·                   403
+   *     principal                      403 ·                   200
+   *
+   * and the head teacher could APPROVE regardless. A decision the platform asks
+   * somebody to make, with the fact it turns on withheld from them.
+   *
+   * // The REGISTER above stays `hr.leave.manage` deliberately: it is HR's
+   * administrative list of everybody's leave including what is already
+   * finalised. An approver needs the CALENDAR — who is out on these dates —
+   * which is what they would otherwise have to ask HR for by email.
+   */
   @Get("calendar")
-  @RequirePermission(HR_PERMISSIONS.HR_LEAVE_MANAGE)
+  @RequirePermission(
+    HR_PERMISSIONS.HR_LEAVE_MANAGE,
+    WORKFLOW_PERMISSIONS.REVIEW_HEAD,
+    WORKFLOW_PERMISSIONS.REVIEW_HR,
+    WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL,
+  )
   calendar(
     @CurrentPrincipal() p: Principal,
     @Query("from") from?: string,

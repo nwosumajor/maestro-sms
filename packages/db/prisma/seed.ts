@@ -453,20 +453,24 @@ async function main() {
 
   // --- LMS: a class with the teacher assigned, the student enrolled, and the
   //     parent linked to the student (drives relationship scoping) ---
+  // THE CLASS TEACHER IS `supervisorId`, not a join row. `class_teacher` was
+  // retired in `20270118000000` — a class teacher IS the class supervisor, ONE
+  // column — and this seed was still writing to the dropped table. Since
+  // `.env.example` ships SEED_DEMO_DATA=true and the entrypoint treats a failed
+  // seed as non-fatal, a fresh `docker compose up` started with NO demo data at
+  // all and one line of log saying so: the documented demo logins simply did
+  // not exist. Production was unaffected — without SEED_DEMO_DATA the seed
+  // returns after the RBAC registry, above — which is exactly why nobody met it.
   const klass = await prisma.class.upsert({
     where: { id: "55555555-5555-5555-5555-555555555555" },
-    update: {},
+    update: { supervisorId: teacher.id },
     create: {
       id: "55555555-5555-5555-5555-555555555555",
       schoolId: school.id,
       name: "History 101",
       code: "HISTORY1", // matches the identity backfill's derivation
+      supervisorId: teacher.id,
     },
-  });
-  await prisma.classTeacher.upsert({
-    where: { classId_teacherId: { classId: klass.id, teacherId: teacher.id } },
-    update: {},
-    create: { schoolId: school.id, classId: klass.id, teacherId: teacher.id },
   });
   await prisma.enrollment.upsert({
     where: { classId_studentId: { classId: klass.id, studentId: student.id } },

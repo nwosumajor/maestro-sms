@@ -1804,6 +1804,95 @@ subject string, load questions instead of counting) and four on the screen
 (offer Save bank on an empty bank, stop clearing the composer, drop the
 what-is-not-affected wording, send a write without step-up).
 
+### Named as the approver, and shown none of what the decision turns on
+`STAFF_REQUEST_CHAIN` stage 1, `head_admin`, and `packages/db/tsconfig.json`.
+Found by simulating each ROLE's working day rather than each module's — which is
+a different question, and it is the one that surfaces a person who is asked to
+decide something they cannot see.
+**1. TWO OF THE THREE LEAVE APPROVERS COULD NOT SEE WHO ELSE WAS OFF.** The chain
+is head of teaching -> HR manager -> principal. Only the middle one held
+`hr.leave.manage`, and only the principal held `timetable.read`. Measured live,
+three staff already booked off the same week:
+```
+                who else is out   lessons uncovered   the leave register
+head teacher         403                403                403
+HR manager           200                403                200
+principal            403                200                403
+head teacher approves anyway ->  201
+```
+So the person the platform asks FIRST whether a teacher may be away could see
+neither who else was already out nor which of that teacher's lessons the absence
+would leave unattended — and could approve regardless. The cover feature exists,
+in this file's own words, so that "a class is not left unattended".
+// `/hr/leave/calendar` now admits the CHAIN's own review permissions beside
+`hr.leave.manage`, which is the pattern this codebase already uses and documents
+("two DIFFERENT permissions may reach it, and `@RequirePermission` takes one").
+// **THE REGISTER IS DELIBERATELY NOT WIDENED**, and a test pins that: it is HR's
+administrative list of everybody's leave including what is already finalised. The
+CALENDAR — who is out on THESE dates — is the fact the decision turns on. Narrower
+is the right default and the wider list answers a question nobody asked.
+// `timetable.read` for `head_teacher` and `head_admin`. They already hold the
+whole academic read set — class, enrolment, grade, attendance — and the timetable
+was the one missing, which is what makes it an omission rather than a decision.
+// **SEEING IS NOT WRITING, and a test pins that too**: `timetable.write` stays
+with the administrators. An approver who can see that Tuesday period 3 will be
+empty and must ask somebody to cover it is a working arrangement; an approver who
+cannot see it is not.
+**2. THE SAME BUG, ONE ROLE OVER, IN A CHAIN THIS FILE HAD ALREADY FIXED.**
+`role-map.ts` carries the reasoning verbatim: *"Stage 1 of
+LMS_CONTENT_PUBLISH_CHAIN is the HEAD TEACHER, but the review route gates on
+lms.content.approve, which only the principal held — so stage 1 was refused at
+the door and the chain could never complete."* `head_admin` holds the SAME
+`workflow.review.head` and was left without the key. Measured, the identical
+request:
+```
+head TEACHER decides stage 1 : 201
+head ADMIN   decides stage 1 : 403
+```
+So in a school where the head admin is the one on duty, lesson notes could be
+submitted and never published — the exact sentence already in the file, for the
+sibling nobody checked.
+// A GATE, because this is now the third instance:
+`a-stage-holder-can-open-its-own-door` walks EVERY chain, resolves the route each
+is decided through, and fails if any role named at a stage lacks the permission
+that route requires. Most chains go through the engine (`workflow.review`); the
+two with a door of their own are NAMED, because a chain whose door moved would
+otherwise be checked against the wrong gate.
+// AND THE OTHER HALF IS ITS OWN TEST: being able to press the button is not the
+same as being able to answer the question. `an-approver-can-see-what-they-are-
+deciding` asserts every stage of the leave chain can reach the calendar.
+// A CLEAN NEGATIVE from the same sweep, recorded so it is not re-chased:
+`junior_admin` holds `admission.review` and NOT `workflow.review`, which looks
+like the same defect and is not — admissions has its own door
+(`POST /admissions/:id/review`) gated on the permission it holds. My first
+mapping defaulted every chain to the engine and reported it; checking the route
+is what settled it.
+**3. AND THE SEED HAD BEEN BROKEN FOR WEEKS, IN SILENCE.** Re-running it to pick
+up the role change is what found it: `prisma.classTeacher.upsert` — a table
+RETIRED in `20270118000000`, whose retirement this file records as DONE.
+```
+TypeError: Cannot read properties of undefined (reading 'upsert')
+```
+// PRODUCTION WAS NEVER AFFECTED, and that is exactly why it survived: without
+`SEED_DEMO_DATA` the seed returns after the RBAC registry, above the demo block.
+What broke is the documented way to START — `.env.example` ships
+`SEED_DEMO_DATA=true`, and the entrypoint calls a failed seed *non-fatal*. So a
+fresh `docker compose up` came up with no demo school, no demo logins and one
+line of log, and every credential this file and `/help` list simply did not
+exist.
+// **THE ROOT CAUSE IS THAT THE SEED WAS NEVER TYPECHECKED.**
+`packages/db/tsconfig.json` said `"include": ["src"]`, so `pnpm typecheck` passed
+all 13 tasks while the seed referenced a model the client does not have. It
+includes `prisma/seed.ts` now — proved by putting the call back and watching
+`Property 'classTeacher' does not exist` — so the next model removal breaks the
+build instead of breaking a fresh install quietly.
+// A DROPPED TABLE MEANS AUDITING THE SEED, the same way this file already says
+it means auditing the RLS files.
+Mutation-validated five ways: take the content key off head_admin, take the
+timetable off the head teacher, put the calendar back behind HR only, and both
+over-corrections — hand the approver HR's register, and let them rewrite the
+timetable.
+
 ### A test that asked the server what day it was, in a suite about not doing that
 `recent()` in `attendance.service.spec.ts`. CI went red on a docs-only commit,
 which is the tell: nothing in the change could have caused it.

@@ -243,6 +243,18 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     // The route gate says "you may act on content approvals"; the ENGINE
     // decides which stage you may act on, and enforces a different person each.
     "lms.content.approve", "lms.content.read",
+    // AND THE SAME SHAPE FOR LEAVE, found by driving a head teacher's day.
+    // Stage 1 of STAFF_REQUEST_CHAIN is the head of teaching, and they held
+    // neither the leave picture nor the timetable — so the person the platform
+    // asks FIRST whether a teacher may be away could not see which lessons the
+    // absence leaves uncovered. Measured, three staff off one week: who else is
+    // out 403, lessons uncovered 403 — and they could approve regardless.
+    // `timetable.read` is the rest of the academic read set they already hold
+    // (class, enrolment, grade, attendance); the timetable was the one missing.
+    // ASSIGNING the reliever stays with the administrators who hold
+    // timetable.write — seeing the consequence is not the same act as
+    // rewriting the grid.
+    "timetable.read",
     "attendance.amend.review", "member.scan", "hr.self", "cbt.review", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "exam.release",
     // A head teacher sits in parent meetings as a matter of course — usually
     // alongside the form teacher. Without this they could be ADDED to one and
@@ -253,7 +265,18 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read", "announcement.read", "document.read",],
   // Head of administration: stage-1 approver for non-teaching staff requests.
-  head_admin: ["directory.people.read", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
+  head_admin: [
+    // The other holder of workflow.review.head: same stage, same need to see
+    // what an absence leaves uncovered. See head_teacher above.
+    "timetable.read",
+    // AND THE SAME DOOR. head_admin is named stage 1 of the content publish
+    // chain by the very permission above, and could not open the route that
+    // decides it — measured: head teacher 201, head admin 403 on the identical
+    // request. So with the head teacher away the chain simply stalled. The role
+    // map already records this exact defect for head_teacher and left the
+    // sibling holding the stage without the key.
+    "lms.content.approve", "lms.content.read",
+    "directory.people.read", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "document.read", "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read", "announcement.read",
