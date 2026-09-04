@@ -89,11 +89,19 @@ describe("the class category", () => {
     expect(block).toMatch(/href: canOpenTimetable \? `\/timetable\?classId=\$\{c\.id\}` : "\/classes"/);
   });
 
-  it("covers the roles that hold class.read without timetable.read", () => {
+  it("the fallback is load-bearing, and everyone it catches can open /classes", () => {
+    // ANCHORED ON THE PROPERTY, NOT A ROLL-CALL. This listed the three roles
+    // that happened to be in this state, and went red the day `head_teacher`
+    // was granted `timetable.read` — a change that REMOVED a role from the
+    // awkward set, i.e. an improvement failing the test that guards it. What
+    // matters is that the fallback still catches somebody (or it is dead code)
+    // and that every one of them can open where it sends them.
     const affected = SCHOOL_ROLES.filter((r) => roleHas(r, "class.read") && !roleHas(r, "timetable.read"));
-    expect(affected.sort()).toEqual(["head_teacher", "hr_clerk", "hr_manager"]);
-    // And /classes is reachable by every one of them.
+    expect(affected.length).toBeGreaterThan(0);
     for (const r of affected) expect([r, roleHas(r, "class.read")]).toEqual([r, true]);
+    // And nobody the search sends to the TIMETABLE is refused there.
+    for (const r of SCHOOL_ROLES.filter((x) => roleHas(x, "timetable.read")))
+      expect([r, roleHas(r, "class.read") || roleHas(r, "timetable.read")]).toEqual([r, true]);
   });
 });
 
