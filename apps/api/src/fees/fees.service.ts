@@ -176,13 +176,35 @@ export class FeesService {
       });
       if (!student) throw new NotFoundException("Student not found");
 
+      // THE SCHOOL'S OWN CURRENCY, not the platform's.
+      //
+      // This read `input.currency ?? "NGN"`, so a school that had explicitly set
+      // its fee currency still had every bill it raised denominated in naira.
+      // Measured on a US school with `currency = 'USD'`: the invoice came back
+      // NGN. The three OTHER paths that raise a charge — library fines, hostel
+      // rent, transport fares — all resolve `school.currency` and say why; this
+      // is the one a bursar actually uses to bill tuition, and it was the one
+      // left. Sibling asymmetry with the careful halves written first.
+      //
+      // It is not only a wrong label. `initInvoicePayment` branches on
+      // `invoice.currency` to pick the rail, settlement REFUSES a charge whose
+      // currency differs from the invoice, and the student CREDIT ledger is
+      // denominated in the SCHOOL's currency — so an overpayment credit could
+      // never be spent against these invoices. Observed live: credit ledger
+      // USD, `balances: []`, invoice NGN.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { currency: true },
+      });
       const invoice = await tx.invoice.create({
         data: {
           schoolId: p.schoolId,
           studentId: input.studentId,
           reference: input.reference?.trim() || this.genReference(),
           status: "DRAFT",
-          currency: input.currency ?? "NGN",
+          // An explicit currency still wins — a school may raise a bill in a
+          // currency other than its own, and invoices carry their own per row.
+          currency: input.currency ?? school?.currency ?? "NGN",
           totalMinor: total,
           dueDate: new Date(input.dueDate),
           notes: input.notes ?? null,

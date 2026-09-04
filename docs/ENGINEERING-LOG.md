@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Seventy schools, four tiers, both payment rails — and a bill in the wrong money](#seventy-schools-four-tiers-both-payment-rails--and-a-bill-in-the-wrong-money)
 - [A reference documenting 351 of 901 routes, under a footer saying it was generated](#a-reference-documenting-351-of-901-routes-under-a-footer-saying-it-was-generated)
 - [Four options, and a box too narrow to read one](#four-options-and-a-box-too-narrow-to-read-one)
 - [The sixth full run: 5,000 applicants, and one refusal that described the paper](#the-sixth-full-run-5000-applicants-and-one-refusal-that-described-the-paper)
@@ -279,6 +280,147 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Seventy schools, four tiers, both payment rails — and a bill in the wrong money
+Asked for before an AWS deployment: 70 schools, every subscription tier, every
+module, and both payment systems — the school's subscription to the platform,
+and the family's fees to the school — proved to work. Driven over the real front
+door (Auth.js sign-in -> BFF -> API) with REAL HMAC-signed gateway callbacks.
+Nothing here reads the database except to verify.
+```
+70 public onboarding requests    70/70   (21 waits on the 10/min limiter — the defence working)
+provisioned with region + tier   70/70
+paid subscriptions               71/71   real Paystack checkouts, real signed webhooks
+tier x module matrix             104 cells: 77 open, 26 correctly gated, 1 directorship 404
+```
+**THE DEFECT: `createInvoice` HARD-CODED THE CURRENCY.** `currency: input.currency
+?? "NGN"` — so **a school that had explicitly set its fee currency still had
+every bill it raised denominated in naira.** Measured on a US school with
+`school.currency = 'USD'` set: the invoice came back **NGN**. Fixed, and verified
+live on the rebuilt image: **USD**.
+// **THE THREE OTHER PATHS THAT RAISE A CHARGE ALL GOT IT RIGHT** — library
+fines, hostel rent and transport fares each resolve `school.currency`, and the
+library's says why in a comment: *"settlement refuses a charge whose currency
+differs from the invoice, so a fine raised in the column default could never be
+paid online by a school billing in anything else."* The one left was the one a
+bursar uses to bill TUITION, which is nearly all of the money. Sibling
+asymmetry, careful halves first, central path last — for the umpteenth time.
+// **AND CLAUDE.md ASSERTED THE OPPOSITE**: *"only NEW invoices default to the
+school's"*. A claim nothing enforced, and false.
+// IT IS NOT A LABEL. `initInvoicePayment` branches on `invoice.currency` to pick
+the rail; `applyOnlinePayment` REFUSES a charge whose currency differs from the
+invoice; and the student CREDIT ledger is denominated in the SCHOOL's currency —
+so an overpayment credit could never be spent against these invoices. Observed
+live before the fix: invoice NGN beside a credit ledger reading `USD`,
+`balances: []`.
+// AN EXPLICIT CURRENCY STILL WINS, and a test pins it: invoices carry their own
+currency per row on purpose, so an NGN invoice keeps printing in naira whatever
+the school later switches to.
+// Gate `a-bill-in-the-schools-own-money.spec.ts` reads all four writers,
+brace-matching each `invoice.create(` call rather than a fixed window.
+Mutation-validated four ways: restore the literal, drop the school read from
+`createInvoice` alone, name a writer that does not exist, and drift a SIBLING
+back to a literal.
+// GOTCHA in my own gate, caught by mutation: the "resolves the school's
+currency" assertion first read the whole FILE, and `fees.service.ts` resolves it
+elsewhere too (the late-fee policy), so deleting the read from `createInvoice`
+left it green. **A gate one scope too WIDE fails exactly like one too narrow.**
+Bounded to the method.
+**THE SECOND DEFECT: THE RUNBOOK'S PAGE-LATENCY COMMAND HAD NEVER WORKED.**
+`page-timings.mjs` did `path.resolve("apps/web/app")` — relative to the CWD —
+while the incident runbook prescribes `pnpm --filter @sms/web probe:page-timings`,
+which runs from `apps/web`. So it looked for `apps/web/apps/web/app` and died
+`ENOENT`. **The one probe that measures how FAST a page renders, which is what
+you most want before a deployment, could not be run the documented way.**
+// EXACTLY the failure this file already records for these four scripts —
+*"the runbook's most important command, pointed at the wrong port"* — where the
+WEB_URL default was corrected in all four and this one's path resolution was
+left. Sibling asymmetry inside the fix for sibling asymmetry. Resolved from
+`import.meta.url` now, so it works from any directory. Live after: **median
+16 ms, p95 28 ms, max 70 ms, 0 5xx** across every page and four roles.
+**THE SUBSCRIPTION RAIL, every case driven with signed webhooks:**
+```
+checkout -> webhook -> ACTIVE, period extended     71/71 schools, all four tiers
+a retried charge.success                            period unmoved, ONE payment row
+UPGRADE                                             tier changes, period NEVER shrinks
+TRUEUP with nothing owed                            400 "No seat top-up is due right now"
+ADD-ON on a tier without the module                 /hostels 404 -> 200, period unmoved,
+                                                    priceMinor unmoved, replay leaves ONE override
+add-on CANCEL                                       billing stops, module stays to period end
+dunning: lapse -> sweep -> PAST_DUE                 74 scanned, purchased plan NEVER overwritten
+past grace                                          effective STANDARD, 27 modules -> 10, /hr 404
+                                                    /fees stays 200 — a school cut off cannot pay
+pay again                                           ACTIVE, ENTERPRISE, /hr 200, no repair step
+```
+// **MY UPGRADE EXPECTATION WAS WRONG AND THE CODE WAS RIGHT.** I asserted the
+period RESTARTS. It restarts from now and then takes the LATER of that and the
+period already paid for, under a comment recording a real incident: a school
+bought five years and a term charge 67 ms later, also flagged UPGRADE, cut them
+back to three months. The property is *never shortens paid-for access*.
+// **52 REFUSED CHECKOUTS LEFT 52 `FAILED` INTENTS AND ZERO STRANDED `PENDING`
+ROWS** — `voidIntent` doing exactly what its comment promises, at scale.
+**THE SCHOOL'S OWN RAIL:**
+```
+a DRAFT invoice                     400 "This invoice has not been issued yet"
+wrong-currency callback             refused, invoice still ISSUED, 0 payments
+correct callback (same reference)   settles — the refusal did not poison it
+retried callback                    1 payment, not 2
+receipt                             200, real PDF
+payment >= threshold                PENDING_APPROVAL, balance unmoved
+the recorder approving it           403 "You cannot approve a payment you recorded"
+a DIFFERENT approver                PAID
+approved REFUND                     balance back up by exactly the refund
+instalments 100+100 of 300          400 "Tranches must sum exactly to the invoice total"
+journal.csv with no window          400, with one -> 5 lines
+```
+**AND THE PRODUCTION DELIVERY PATH, which is the AWS question.** Everything above
+posted the callback from inside the container; Paystack cannot. The only route
+from the internet is the Next passthrough `/api/webhooks/<provider>` — already
+built, and now driven: a **forged signature is 401** through the proxy, a genuine
+one **settles** (so the raw bytes and the signature header survive the hop), and
+`/api/webhooks/paystack/anything` and `/api/webhooks/nobody` are **404** — an
+allowlist, not an opening.
+**WHAT THE CURRENCY COVERAGE ACTUALLY IS, measured rather than assumed:** the
+Paystack test account settles **NGN only**, so 12 schools were correctly refused
+in their own currency — *"The PAYSTACK account is not enabled for GHS — it
+settles NGN"* — and `currencyAvailability` named the chargeable alternative,
+which all 12 then paid in. **An operational checklist item for the live account,
+not a code defect.** Stripe is unset, so the USD rail is off and says so.
+// GOTCHA, and it nearly became a false report: 23 checkouts failed with
+*"Payment provider error: Rate limit exceeded!"* — **PAYSTACK'S** limiter, not
+ours, surfaced honestly as a 503 with the gateway's own message. All 23 settled
+when paced at ~1/sec. Worth knowing before a bulk migration.
+// GOTCHA, SIX WRONG FIELD NAMES, all mine, and the class this file names most
+often: the intake needs `schoolType/address/city/state`; the slug caps at 12
+chars in the SERVICE though the schema allows 40; provisioning returns
+`{school:{id}}`; a quote must be matched on plan AND cycle; the add-on price is
+`priceNowMinor`, not `priceMinor`; and the invoice callback metadata is
+`{kind:"invoice", invoiceId, schoolId, payerId, invoiceAmountMinor}`.
+// **THE SIXTH ONE PRODUCED A VACUOUS PASS, which is the dangerous direction.**
+With no `kind`, `isDedicatedAccountCredit` correctly routed my callback to the
+NUBAN handler, which dropped it as an unknown customer — so settlement never
+ran, AND my "a wrong-currency callback does not post" check passed having
+refused nothing. It only surfaced because the SETTLE case beside it failed.
+// GOTCHA: step-up is FIVE MINUTES and the public onboarding phase takes seven,
+so the token expired between the two halves of the first run — the control
+working. Re-minted on `STEPUP_REQUIRED`.
+**FLEET POSTURE AT 74 TENANTS:**
+```
+isolation probe        14/14 denied by direct id through the real front door
+family scope           every probe identical to a ghost id
+permission matrix      3,723 role/route pairs, 0 roles skipped
+no request is a 500    4,212 requests incl. hostile query strings — zero 5xx
+no secret in a body    3,995 (role,route) pairs across 17 roles — clean
+route smoke            110 routes x 18 roles, all rendered
+operator fleet reads   registry 69ms · attention 58 · revenue 60 · analytics 58 · directory 158
+revenue ledger         NGN and USD reported SEPARATELY, take-rate per currency
+```
+// PROBE: 71 schools, 144 users, 71 onboarding requests, 71 subscriptions, 132
+platform payments, 8 invoices, 5 payments and 72 notifications removed; every
+table is back to its baseline count EXACTLY and the three demo subscriptions are
+byte-identical to what was found. `audit_log` keeps 435 rows — the truthful
+trail of the probe runs against demo data, append-only by design, and deleting
+it would falsify the record.
 
 ### A reference documenting 351 of 901 routes, under a footer saying it was generated
 `API.md` (regenerated), `scripts/build-api-doc.mjs`, `scripts/api-doc.gen.spec.ts`,

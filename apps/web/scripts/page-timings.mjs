@@ -32,6 +32,25 @@ if (ROLES.length === 0) {
 }
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * Where `app/` is, resolved from THIS FILE rather than from the working
+ * directory.
+ *
+ * It was `path.resolve("apps/web/app")`, which is relative to the CWD — and the
+ * command the incident runbook prescribes is
+ * `pnpm --filter @sms/web probe:page-timings`, which runs from `apps/web`. So
+ * it looked for `apps/web/apps/web/app` and died with ENOENT. The one probe
+ * that measures how FAST a page renders could never be run the documented way.
+ *
+ * Exactly the failure already recorded for these four scripts' WEB_URL default
+ * — "the runbook's most important command, pointed at the wrong port" — fixed
+ * there and left here, one file over. Resolving from `import.meta.url` works
+ * from any directory, so neither the runbook's form nor `node
+ * apps/web/scripts/page-timings.mjs` from the repo root can break it again.
+ */
+const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "app");
 
 function discover(dir, base = "") {
   const out = [];
@@ -44,7 +63,7 @@ function discover(dir, base = "") {
   }
   return out;
 }
-const routes = [...new Set(discover(path.resolve("apps/web/app")))]
+const routes = [...new Set(discover(APP_DIR))]
   .filter(r => !r.includes("[") && !r.startsWith("/api"))
   .sort();
 
