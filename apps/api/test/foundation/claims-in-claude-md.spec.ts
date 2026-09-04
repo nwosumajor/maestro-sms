@@ -26,7 +26,7 @@
 // moves; a number a test reads cannot.
 // =============================================================================
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROLE_PERMISSIONS } from "@sms/types";
 
@@ -96,5 +96,48 @@ describe("the dated verification record", () => {
     // tenant table.
     const at = DOC.indexOf("FULL-STACK VERIFIED end-to-end (2026-06-27)");
     expect(DOC.slice(at, at + 700)).toMatch(/rls\.e2e-spec\.ts/);
+  });
+});
+
+describe("the index of where the detail lives", () => {
+  // CLAUDE.md was 12,719 lines, 87% of it write-ups of individual fixes. Those
+  // moved to docs/ENGINEERING-LOG.md and the RULES were distilled into it, so a
+  // session loads the contract rather than the case law. That trade only holds
+  // while the pointer is true: an index naming a file that does not exist is
+  // this repo's own recorded defect (a registry note named a screen that had
+  // never existed), and it is worse here, because a reader who follows a dead
+  // link concludes the reasoning was lost rather than moved.
+  const REFERENCED = [
+    "docs/ENGINEERING-LOG.md",
+    "API.md",
+    "docs/RUNBOOK-INCIDENT-RESPONSE.md",
+    "docs/RUNBOOK-BACKUP-RESTORE.md",
+    "docs/ONBOARDING-MANUAL.html",
+    "DEAD_AND_WOUNDED_PLATFORM_SPEC.md",
+    "docs/PRODUCTION_DEPLOYMENT.md",
+    "docs/SCHOOL_OWNER_PROPOSAL.md",
+  ];
+  const repoRoot = join(__dirname, "../../../..");
+
+  it("names each document, and each one exists", () => {
+    const broken = REFERENCED.filter((f) => !DOC.includes(f) || !existsSync(join(repoRoot, f)));
+    expect(broken).toEqual([]);
+  });
+
+  it("states the number of write-ups the log actually holds", () => {
+    // The count that rots, one more time — and the reason the log is worth
+    // opening is that it is complete. A shrinking number would mean entries
+    // were dropped in a move rather than relocated.
+    const log = readFileSync(join(repoRoot, "docs/ENGINEERING-LOG.md"), "utf8");
+    const entries = log.split("\n").filter((l) => l.startsWith("### ")).length;
+    expect(entries).toBeGreaterThan(200); // a walk that finds nothing must not pass
+    expect(DOC).toContain(`${entries} written-up fixes`);
+  });
+
+  it("is a contract file a session can actually hold, not a case history", () => {
+    // The reason for the split. 12,719 lines went into context every session;
+    // if it grows back the distillation has stopped happening and the rules are
+    // being buried in the instances again.
+    expect(DOC.split("\n").length).toBeLessThan(2600);
   });
 });

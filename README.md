@@ -143,7 +143,14 @@ pnpm --filter @sms/api test:db     # everything, including the RLS e2e suite
 
 ## Documentation
 - **[CLAUDE.md](CLAUDE.md)** — the durable spec: golden rules, stack, multi-tenancy
-  and RBAC models, build status, repo gotchas. Start here.
+  and RBAC models, build status, the defect classes that keep recurring, repo
+  gotchas. Start here.
+- **[docs/ENGINEERING-LOG.md](docs/ENGINEERING-LOG.md)** — 248 write-ups of real
+  defects found and fixed: what was wrong, how it was measured, what was decided
+  and why, and the gotchas that cost time. These were 87% of CLAUDE.md; the RULES
+  were distilled into it and the INSTANCES live here. Grep it for a defect's
+  shape before fixing one — most are the second or third of a class already
+  recorded.
 - **[API.md](API.md)** — every HTTP endpoint with its permission / module / step-up
   gate. **Generated** from the controllers (`pnpm --filter @sms/api build:api-doc`)
   and gated by `api-doc-is-current.spec.ts`, so it cannot drift from the code.
