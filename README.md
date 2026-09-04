@@ -110,25 +110,61 @@ still dies mid-download, just re-run it; everything already fetched is cached.
 
 Sign in at http://localhost:3000 with a demo account (dev only) — password
 `password123`: `teacher@` / `student@` / `parent@` / `admin@` / `principal@` /
-`hrmanager@` / `warden@` / `librarian@demo.school`, etc. (see CLAUDE.md for the
-full 17-role list; platform owner is `owner@sms.platform`).
+`hrmanager@` / `warden@` / `librarian@demo.school`, etc. — one per **school-scoped
+role** (see CLAUDE.md for the full list). There are 19 roles in all: those 17 plus
+the two PLATFORM roles, `owner@sms.platform` (super_admin) and
+`manager@sms.platform` (manager_admin).
+
+> Demo fixtures are **fail-closed**: nothing above is created unless
+> `SEED_DEMO_DATA=true`, which `infrastructure/.env.example` sets for local work
+> and which must NEVER be set in cloud. The seed still runs in production for
+> the platform org, the SYSTEM audit actor and the role/permission registry —
+> that last one must keep re-running, because a newly added permission only
+> reaches a live database when the seed does.
 
 ## Test
 ```bash
-pnpm test                         # all workspaces
-pnpm --filter @sms/api test       # integrity unit + detector + report specs
-TEST_DATABASE_URL=... pnpm --filter @sms/api test  # includes the RLS e2e suite
+pnpm test                          # all workspaces (web, types, engines)
+pnpm --filter @sms/api test        # API unit + gate specs — SKIPS the DB suites
+pnpm --filter @sms/api test:db     # everything, including the RLS e2e suite
 ```
+
+> **`test:db` is the one that runs all of it.** A bare `jest` skips every
+> DB-gated suite — each `describe.skip`s without `TEST_DATABASE_URL` — so a
+> green local run says nothing about a large minority of the tests, including
+> the cross-tenant RLS cases, which are the most important category here. The
+> bare run now prints the skipped count and this command. `test:db` reads
+> `infrastructure/.env`, points at the `sms-test-pg` container on **5434**, and
+> supplies the four variables the suites need: `TEST_DATABASE_URL` (app role),
+> `TEST_ADMIN_URL` (superuser, to seed across FKs), `DATABASE_URL` (the `@sms/db`
+> singleton the service e2es go through) and `AUTH_SECRET` (the storage stub
+> signs presigned URLs with it — without it a report-card vault write fails
+> inside a best-effort catch and the suite fails two assertions later).
 
 ## Documentation
 - **[CLAUDE.md](CLAUDE.md)** — the durable spec: golden rules, stack, multi-tenancy
   and RBAC models, build status, repo gotchas. Start here.
-- **[API.md](API.md)** — every HTTP endpoint with its permission / module / step-up gate.
+- **[API.md](API.md)** — every HTTP endpoint with its permission / module / step-up
+  gate. **Generated** from the controllers (`pnpm --filter @sms/api build:api-doc`)
+  and gated by `api-doc-is-current.spec.ts`, so it cannot drift from the code.
+  Improve a description by writing a doc comment on the handler, or by editing
+  `apps/api/scripts/api-doc-purposes.json` — never by hand-editing API.md.
 - **[docs/notes/](docs/notes/README.md)** — engineering notes from the build sessions:
   why designs went the way they did, and the gotchas that cost real time. Point-in-time
   records, so verify specifics against the code.
+- **[docs/RUNBOOK-INCIDENT-RESPONSE.md](docs/RUNBOOK-INCIDENT-RESPONSE.md)** — the
+  on-call playbook: severity levels, five-minute triage, per-symptom procedures
+  (outage, latency, DB, Redis, bad deploy, payments, auth, **tenant-isolation
+  breach**, data loss, scheduled jobs), rollback, and the post-mortem template.
 - **[docs/RUNBOOK-BACKUP-RESTORE.md](docs/RUNBOOK-BACKUP-RESTORE.md)** — what is backed
   up, how to restore for real, and the restore drill that proves a backup is usable.
+- **[docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)** — the Terraform /
+  ECS deploy path and the environment it expects.
+- **[docs/ONBOARDING-MANUAL.html](docs/ONBOARDING-MANUAL.html)** — the school leader's
+  manual, served in-app at `/manual`. After editing it run
+  `pnpm --filter @sms/web build:manual`; `pricing-consistency.test.ts` fails if the
+  served copy is stale or if either owner-facing document quotes a price that no
+  longer matches `@sms/types`.
 
 ## Auth flow (who trusts what)
 - **Auth.js** (web) owns login + session and stamps `school_id`/`roles`/`permissions`.
@@ -138,10 +174,14 @@ TEST_DATABASE_URL=... pnpm --filter @sms/api test  # includes the RLS e2e suite
   the Bearer server-side — the browser never holds a verifiable API token.
 - **API** verifies the JWT on every request, then enforces permission → tenant → RLS.
 
-## Integration TODOs (placeholders to replace)
-- `apps/api/src/foundation/*` — AuditLog + Consent are dev placeholders; bind the real
-  foundation services (`FoundationModule` useClass bindings).
-- `packages/db/prisma/schema/_foundation-stubs.prisma` — move the User/School
-  back-relations into the real foundation models and delete the stub.
-- `apps/web/lib/auth.ts` — replace demo Credentials with the real user lookup / SSO.
-- `EMBEDDING_PROVIDER` — bind to enable prose similarity (skipped while unbound).
+## Known unbound integration
+- `EMBEDDING_PROVIDER` (`apps/api/src/integrity`) — an `@Optional()` injection with
+  no binding, so **prose similarity detection is skipped**. Code similarity
+  (n-gram/shingling) and every other integrity detector run regardless. Bind a
+  provider to switch it on; nothing else is waiting on it.
+
+Everything the earlier draft of this section listed as a placeholder is built:
+the foundation `AuditLog`/`Consent` services are the real ones (see
+`FoundationModule`'s `useClass` bindings), the Prisma foundation stub is gone,
+and `apps/web/lib/auth.ts` authenticates against the real `POST /auth/login`
+rather than demo credentials.

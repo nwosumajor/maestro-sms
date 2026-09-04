@@ -450,7 +450,7 @@
 
       <div class="note two-person">
         <span class="note-tag">Plan for this before it happens</span>
-        <p>Three wrong passwords locks an account and only an administrator can reactivate it. If your school has exactly one administrator and that account locks, you must <a href="#contact">contact us</a> to recover — WhatsApp is fastest for this. <strong>Appoint a second administrator on day one.</strong> It costs nothing and removes the single most common way schools lock themselves out.</p>
+        <p>Three wrong passwords locks an account, and the lock is <strong>permanent until we lift it</strong>. Your own administrators cannot undo it — there is no such button in the school, deliberately, because an attacker who merely knows an email address could otherwise get an account unlocked by asking. <a href="#contact">Contact us</a> to recover; WhatsApp is fastest. <strong>Appoint a second administrator on day one.</strong> It costs nothing and removes the single most common way schools lock themselves out, because a locked account with a colleague still signed in is an inconvenience rather than a stoppage.</p>
       </div>
     </section>
 
@@ -470,12 +470,12 @@
         <li>
           <h4>Import your students</h4>
           <span class="where">Admin → Bulk import</span>
-          <p>Upload a CSV. The import is safe to re-run — it matches on email address, so a repeated upload updates rather than duplicates. Parent links can be imported in the same pass, which saves considerable work later. On approval the system generates printable login slips with a unique one-time password per student.</p>
+          <p>Upload a CSV. A pupil needs only a <strong>name</strong> — a sign-in identifier is generated from it and your school's domain, so you do not have to invent an email address for a seven-year-old, and two pupils who share a name both import. Parent links can be imported in the same pass, which saves considerable work later. <strong>Upload at most 200 rows at a time.</strong> A larger file is refused before anything is created, and the refusal tells you how many rows it found: split it and upload the parts one after another. A <em>different</em> administrator approves the batch, and approval generates printable login slips with a unique one-time password per pupil — <strong>shown once</strong>, so print or save them before you leave the page.</p>
         </li>
         <li>
           <h4>Build classes, subjects and the academic session</h4>
           <span class="where">Classes</span>
-          <p>Create each class, assign its teachers, and name a <strong>class supervisor</strong> (form teacher) — that person writes the class remark on report cards, so don't skip it. Enrol students, link guardians, then set up your session and its terms. Grading has nowhere to record marks until terms exist.</p>
+          <p>Create each class, assign its teachers, and name a <strong>class teacher</strong> — required, because that person takes the register and writes the class remark on report cards. A class can be handed to a different teacher later, but never left with nobody. Enrol students, link guardians, then set up your session and its terms. Grading has nowhere to record marks until terms exist.</p>
         </li>
       </ol>
 
@@ -620,7 +620,7 @@
             <tr><td><strong>Principal</strong></td><td>Run the school and sit as final approver on staff requests.</td></tr>
             <tr><td><strong>Junior administrator</strong></td><td>Do the daily administrative work without holding any approval power.</td></tr>
             <tr><td><strong>Teacher</strong></td><td>Teach, take the register and enter marks — for their own classes only.</td></tr>
-            <tr><td><strong>Head teacher</strong></td><td>Act as the first approval stage for staff requests.</td></tr>
+            <tr><td><strong>Head teacher</strong></td><td>Act as the first approval stage for staff requests, and see what the decision turns on — who is already out across those dates, and which lessons the absence would leave uncovered.</td></tr>
             <tr><td><strong>Head administrator</strong></td><td>Act as first approval stage on the administrative side.</td></tr>
             <tr><td><strong>Accountant</strong></td><td>Manage fees, invoices and payments day to day.</td></tr>
             <tr><td><strong>HR clerk</strong></td><td>Maintain staff records without seeing or setting pay.</td></tr>
@@ -635,7 +635,7 @@
       <p>Every role in that table has a guide of its own under <strong>Help</strong>, written for exactly what that person does and leaving out everything they cannot do. When you appoint someone, ask them to read it once — it takes a few minutes and prevents most of the &ldquo;I can't find it&rdquo; questions that otherwise arrive at your desk.</p>
 
       <h3>The junior administrator, specifically</h3>
-      <p>This role deserves separate attention because it is the one that will most reduce your daily workload. A junior administrator can maintain records, take and correct attendance, adjust the timetable, manage documents, <strong>record</strong> fee payments, and review admissions. They cannot manage roles, cannot approve fees, and cannot sit in any approval chain.</p>
+      <p>This role deserves separate attention because it is the one that will most reduce your daily workload. A junior administrator can maintain records, read attendance, adjust the timetable, manage documents, <strong>record</strong> fee payments, and review admissions. They do not <em>take</em> a register — that records who physically looked at the room, so it stays with the class teacher, covered by a school administrator. They cannot manage roles, cannot approve fees, and cannot sit in any approval chain.</p>
       <p>In other words: they can do the work, but they cannot authorise it. That is precisely the shape you want for a capable office administrator you do not yet want holding financial authority.</p>
 
       <div class="note two-person">
@@ -844,7 +844,7 @@
       <p>Two separate things share the word "exam":</p>
       <ul>
         <li><strong>Exams</strong> — the logistics of physical examinations: halls, dates, seat allocation and invigilator rosters. Editing a scheduled sitting is non-destructive, clashes are detected before you commit, and a hall pack (seating chart plus attendance sheet) prints for the invigilator. Students and parents see only their own hall, time and seat.</li>
-        <li><strong>CBT exams</strong> — computer-based tests sat in the system. The clock is enforced by the server, correct answers are withheld until a sitting closes, and answer release is gated to the principal. Automatic marks are presented as figures for staff to review, never as a final result. Theory questions are supported alongside objective ones and are marked by a human, anonymously — the marker does not see whose script they are marking.</li>
+        <li><strong>CBT exams</strong> — computer-based tests sat in the system. The clock is enforced by the server, correct answers are withheld until a sitting closes, and answer release is gated to the principal. Automatic marks are presented as figures for staff to review, never as a final result. Theory questions are supported alongside objective ones and are marked by a human, anonymously — the marker does not see whose script they are marking. A candidate sees the <strong>whole paper on one page</strong> with a numbered map that travels with them as they scroll, so they can jump to any question, watch the clock and see how many are left without scrolling back to the top; answers save as they go, and one that fails to save is flagged by number rather than left looking answered. A question bank can be renamed or moved to another subject afterwards — worth knowing, because the subject decides who may edit the bank and which subject its exams are marked under.</li>
       </ul>
 
       <h3>Cover for absent teachers</h3>

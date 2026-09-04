@@ -898,6 +898,81 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A reference documenting 351 of 901 routes, under a footer saying it was generated
+`API.md` (regenerated), `scripts/build-api-doc.mjs`, `scripts/api-doc.gen.spec.ts`,
+`scripts/api-doc-purposes.json`, `test/surface/api-doc-is-current.spec.ts`, and
+`what-the-help-page-promises.spec.ts` widened to the manual. Asked for: update
+every in-app help, the manual and the markdown, for accuracy and consistency.
+**THE BIGGEST DOCUMENT IN THE REPO WAS WRONG ABOUT ITSELF, TWICE.** `API.md`
+carried a headline of **634 routes**, a footer claiming it was "generated from
+the NestJS controllers", and a hand-written table listing **351**. The API
+declares **901**. So five hundred and fifty endpoints were absent from the one
+file somebody consults to ask whether an endpoint exists — and **the absence of
+a route reads as the route not existing**, which is the answer they came for.
+Both numbers were true when typed; neither had been rechecked.
+// **GENERATED FOR REAL, off the SHARED extractor** (`test/support/api-routes`),
+never a second walker — this file already records what six private route
+extractors cost, five of them wrong. Purpose comes from a curated JSON
+(**seeded from the hand-written table so no sentence anybody wrote was lost**),
+then the handler's own doc comment, then the humanised handler name. 307
+curated, 446 doc sentences, and 0 unresolved permission identifiers: the
+generator resolves `ADMIN_PERMISSIONS.RBAC_MANAGE` through the REAL constant
+rather than printing the identifier, so a renamed permission cannot leave a
+plausible-looking lie in the reference.
+// A FRESHNESS GATE, because a regenerated file rots the same way a typed one
+does. It compares the COMMITTED file against the extractor and deliberately does
+NOT re-run the generator — a test that regenerates what it checks always passes.
+Both directions: a route missing from the doc, AND a route the doc names that
+the API no longer declares (which sends a reader to build against a 404).
+// GOTCHA in my own parser, twice: rows use a combined form
+`| GET · POST | /path |`, so counting method cells naively found 263 of 351;
+and a trailing-column regex lost 33 curated purposes. Split the row, do not
+match it.
+// GOTCHA: an over-eager "degenerate purpose" filter dropped `"List subjects"`
+and `"Edit content"`, which are informative. The bare `"List"` I had seen came
+from the handler-name FALLBACK, not from curated prose — so the fallback was
+fixed instead ("List" -> "List — disputes"). Deleting good prose to satisfy a
+heuristic is the wrong end of that trade.
+// GOTCHA: `npx tsx` is not available in `apps/api`, so the data step is a
+`.spec.ts` under `scripts/` — outside jest's `roots`, invisible to a normal run
+— exactly the `write-coverage` idiom this repo already uses.
+**AND THE GATE WRITTEN TO PREVENT SIBLING ASYMMETRY HAD IT.**
+`what-the-help-page-promises.spec.ts` reasons the account-lockout rule out in
+full — three failures lock an account PERMANENTLY, no administrator in a school
+can lift it, and telling a locked-out teacher otherwise sends them to an office
+with no such button — and applied it to `/help` ONLY. `docs/ONBOARDING-MANUAL.html`
+said *"only an administrator can reactivate it"* for as long as that gate has
+existed. **A school owner reads the manual BEFORE anybody signs in**, so it makes
+the same promises to the same people and was held to no rule at all. Both
+documents are one gate now.
+**FOUR MORE CLAIMS WERE FALSE AND ARE NOW PINNED AGAINST THE CODE:**
+```
+junior_admin "takes and corrects attendance"   REGISTER_COVER_ROLES is school_admin ONLY
+the import "is idempotent on email"            a pupil needs only a NAME; two of one name both import
+the import has no stated limit                 BULK_IMPORT_MAX_ROWS = 200, refused before anything is created
+"class supervisor — don't skip it"             it is REQUIRED at creation and can never be cleared
+```
+// EACH IS DRIVEN FROM THE SOURCE, not from a remembered rule: the register test
+reads `REGISTER_COVER_ROLES` and the cap test reads `BULK_IMPORT_MAX_ROWS`, so
+the day either CHANGES the gate goes red and the sentence is corrected rather
+than left quietly wrong. Mutation-validated six ways — five wordings plus the
+PREMISE (granting `junior_admin` the register, which fails the gate, as it
+should, so the documents can follow).
+**AND README's "Integration TODOs" LISTED THREE THINGS THAT ARE BUILT** — S3
+storage, the email sender and the payment gateway — leaving one genuine gap
+(`EMBEDDING_PROVIDER`). Its test command was the one CLAUDE.md warns "SKIPS every
+DB-gated suite"; it now names `test:db` and the four variables that suite needs.
+// CHECKED AND DELIBERATELY UNCHANGED, so they are not re-chased: the manual's
+17 school-level roles, the idle sign-out, the 30-day password age, the 7-day
+stale register, the approvers' head -> HR manager -> principal chain,
+`SCHOOL_OWNER_PROPOSAL.md` (it makes no checkable role/lockout/import claim),
+`PRODUCTION_DEPLOYMENT.md`'s seed warnings, and the incident runbook's probe
+table — all seven commands verified present in `apps/web/package.json`.
+// GOTCHA: after ANY manual edit, `pnpm --filter @sms/web build:manual` — the
+served copy is generated and `pricing-consistency` fails on a stale one.
+Mutation-validated three ways on the API.md gate: remove a documented route,
+name one that does not exist, and break the headline count.
+
 ### Four options, and a box too narrow to read one
 `SCHOLARSHIP_OPTION_COUNT` (`@sms/types`), both scholarship composers, and
 `shortOptions` in `CbtExamRoom`. Asked for: a scholarship question is set A to
