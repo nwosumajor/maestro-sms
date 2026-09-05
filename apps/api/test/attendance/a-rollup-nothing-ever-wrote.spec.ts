@@ -60,7 +60,7 @@ function makeService(opts: {
 describe("the nightly rollup sweep", () => {
   it("rolls up every school and reports what it did", async () => {
     const { svc, refresh } = makeService({});
-    await expect(svc.runSweep()).resolves.toEqual({ schools: 2, terms: 2, skipped: 0 });
+    await expect(svc.runSweep()).resolves.toEqual({ schools: 2, terms: 2, skipped: 0, failed: 0 });
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
@@ -76,7 +76,8 @@ describe("the nightly rollup sweep", () => {
     // audit_log.actorId is a non-null FK to User; the all-zero SYSTEM id would
     // violate it, and a rollup nobody can be held to is not worth the row.
     const { svc, refresh } = makeService({ actorFor: (id) => (id === "s1" ? { userId: "a1" } : null) });
-    await expect(svc.runSweep()).resolves.toEqual({ schools: 1, terms: 1, skipped: 1 });
+    // A genuine SKIP: work that was not due, not work that failed.
+    await expect(svc.runSweep()).resolves.toEqual({ schools: 1, terms: 1, skipped: 1, failed: 0 });
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -88,7 +89,11 @@ describe("the nightly rollup sweep", () => {
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce({ refreshed: ["Term 2"], skipped: 0 });
     const { svc } = makeService({ refresh });
-    await expect(svc.runSweep()).resolves.toEqual({ schools: 1, terms: 1, skipped: 1 });
+    // FAILED, not skipped. This asserted `skipped: 1` — the same counter the
+    // test above uses for a school with no actor — so a school the sweep could
+    // not roll up was indistinguishable from one it had no need to, and the
+    // jobs console (which reads `failed` by name) showed a clean run.
+    await expect(svc.runSweep()).resolves.toEqual({ schools: 1, terms: 1, skipped: 0, failed: 1 });
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
@@ -96,7 +101,7 @@ describe("the nightly rollup sweep", () => {
     // Same posture as retention and dunning: no privileged URL means the sweep
     // is disabled, not half-run.
     const { svc, refresh } = makeService({ client: null });
-    await expect(svc.runSweep()).resolves.toEqual({ schools: 0, terms: 0, skipped: 0 });
+    await expect(svc.runSweep()).resolves.toEqual({ schools: 0, terms: 0, skipped: 0, failed: 0 });
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -115,6 +120,6 @@ describe("the nightly rollup sweep", () => {
     // cannot tell them apart is how this one went unnoticed for so long.
     const refresh = jest.fn().mockResolvedValue({ refreshed: [], skipped: 0 });
     const { svc } = makeService({ refresh });
-    await expect(svc.runSweep()).resolves.toEqual({ schools: 0, terms: 0, skipped: 0 });
+    await expect(svc.runSweep()).resolves.toEqual({ schools: 0, terms: 0, skipped: 0, failed: 0 });
   });
 });

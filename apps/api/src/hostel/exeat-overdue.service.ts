@@ -41,6 +41,18 @@ const SCHOOL_WIDE_ALERT_ROLES = ["head_warden", "school_admin", "principal"];
 export interface OverdueSweepResult {
   scanned: number;
   alerted: number;
+  /**
+   * Schools whose alert could not be sent THIS RUN.
+   *
+   * The catch below is per school, so the sweep does not throw and every other
+   * signal on the jobs console stays clean — `lastOk` true, cadence fine. A run
+   * that told nobody about four schools' overdue boarders looked exactly like a
+   * run that did the whole fleet. `JobRunsService.failedCount` reads this field
+   * by name; without it the console shows null, and the operator's page built
+   * precisely so a quiet sweep is visible had nothing to show. The dunning run
+   * and the retention purge already counted theirs.
+   */
+  failed: number;
   skipped?: "NO_DB";
 }
 
@@ -61,7 +73,7 @@ export class ExeatOverdueService {
    */
   async sweep(now = new Date()): Promise<OverdueSweepResult> {
     const client = this.db.client;
-    if (!client) return { scanned: 0, alerted: 0, skipped: "NO_DB" };
+    if (!client) return { scanned: 0, alerted: 0, failed: 0, skipped: "NO_DB" };
 
     const due = await client.hostelExeat.findMany({
       where: {
@@ -79,9 +91,10 @@ export class ExeatOverdueService {
         expectedReturnAt: true,
       },
     });
-    if (due.length === 0) return { scanned: 0, alerted: 0 };
+    if (due.length === 0) return { scanned: 0, alerted: 0, failed: 0 };
 
     let alerted = 0;
+    const failedSchools = new Set<string>();
     // Grouped by school so one school's failure cannot stop another's alert —
     // the same isolation the dunning sweep keeps.
     const bySchool = new Map<string, typeof due>();
@@ -237,11 +250,15 @@ export class ExeatOverdueService {
           });
         }
       } catch (err) {
+        failedSchools.add(schoolId);
         this.logger.error(`school=${schoolId}: overdue exeat alert failed: ${(err as Error).message}`);
       }
     }
 
     if (alerted > 0) this.logger.log(`alerted on ${alerted} overdue boarder(s)`);
-    return { scanned: due.length, alerted };
+    if (failedSchools.size > 0) {
+      this.logger.error(`overdue sweep could not alert ${failedSchools.size} school(s)`);
+    }
+    return { scanned: due.length, alerted, failed: failedSchools.size };
   }
 }

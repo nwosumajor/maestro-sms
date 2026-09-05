@@ -27,7 +27,7 @@ export class PaymentReconciliationProcessor extends WorkerHost {
       if (job.name !== FEE_RECONCILE_JOB)
         return {
           scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0,
-          creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0,
+          creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0, failed: 0,
         };
       const r = await this.reconcile.sweep("SCHEDULED");
       this.logger.log(

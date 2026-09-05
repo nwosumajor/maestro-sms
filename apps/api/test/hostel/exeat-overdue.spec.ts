@@ -168,7 +168,7 @@ describe("the overdue sweep", () => {
 
   it("does nothing, cheaply, when nobody is late", async () => {
     const { svc, enqueueMany } = makeService([]);
-    expect(await svc.sweep(NOW)).toEqual({ scanned: 0, alerted: 0 });
+    expect(await svc.sweep(NOW)).toEqual({ scanned: 0, alerted: 0, failed: 0 });
     expect(enqueueMany).not.toHaveBeenCalled();
   });
 });

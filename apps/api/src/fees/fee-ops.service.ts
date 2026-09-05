@@ -419,7 +419,7 @@ export class FeeOpsService {
 
   /** Add the configured flat late fee ONCE to each invoice overdue past grace.
    *  Idempotent: the marker line item is the "already applied" flag. */
-  async lateFeeSweep(): Promise<{ schools: number; feesApplied: number; skipped?: boolean }> {
+  async lateFeeSweep(): Promise<{ schools: number; feesApplied: number; failed: number; skipped?: boolean }> {
     const client = this.privileged.client;
     // SAY SO. This returned zeros in silence, and the processor then logged
     // "Late-fee sweep done: schools=0 applied=0" — which reads as a quiet night
@@ -430,7 +430,7 @@ export class FeeOpsService {
     // were the exception.
     if (!client) {
       this.logger.warn("Late-fee sweep requested but no privileged DB — skipping. No late fee was applied to any school.");
-      return { schools: 0, feesApplied: 0, skipped: true };
+      return { schools: 0, feesApplied: 0, failed: 0, skipped: true };
     }
     // ONLY SCHOOLS THAT ARE STILL SWITCHED ON.
     //
@@ -456,6 +456,7 @@ export class FeeOpsService {
       },
     });
     let feesApplied = 0;
+    let failed = 0;
     for (const school of schools) {
       // GRACE IS COUNTED IN THE SCHOOL'S DAYS, from the school's today. This
       // subtracted the grace from the instant the sweep happened to run, which
@@ -601,6 +602,9 @@ export class FeeOpsService {
               },
             );
           } catch (e) {
+            // Money not billed. The catch is per invoice and does not throw, so
+            // the run reports success; `failed` is what the jobs console reads.
+            failed++;
             this.logger.warn(`late fee failed for invoice ${inv.id}: ${(e as Error).message}`);
             continue;
           }
@@ -641,7 +645,7 @@ export class FeeOpsService {
         this.logger.warn(`late-fee sweep failed for school ${school.id}: ${(e as Error).message}`);
       }
     }
-    return { schools: schools.length, feesApplied };
+    return { schools: schools.length, feesApplied, failed };
   }
 
   /** Weekly overdue-reminder sweep: the staff-triggered reminder, run for every

@@ -20,12 +20,14 @@ export class AcademicProgressionProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job): Promise<{ schools: number; advanced: number }> {
+  async process(job: Job): Promise<{ schools: number; advanced: number; failed: number }> {
     return this.runs.record("lms.progression", "SCHEDULE", async () => {
-      if (job.name !== ADVANCE_TERMS_JOB) return { schools: 0, advanced: 0 };
+      if (job.name !== ADVANCE_TERMS_JOB) return { schools: 0, advanced: 0, failed: 0 };
       const r = await this.progression.runSweep("SCHEDULED");
       this.logger.log(`Progression sweep done: schools=${r.schools} advanced=${r.advanced}`);
-      return { schools: r.schools, advanced: r.advanced };
+      // `failed` CARRIED THROUGH, not dropped: record() files whatever this
+      // returns, and the console reads the field by name.
+      return { schools: r.schools, advanced: r.advanced, failed: r.failed };
   
     });
   }

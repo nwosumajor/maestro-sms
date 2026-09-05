@@ -53,6 +53,10 @@ export interface ReconcileResult {
   creditRecovered: number;
   missing: number;
   posted: number;
+  /** Charges this run could not post. The catches below are per charge and do
+   *  not throw, so the sweep reports success while money stays unrecovered —
+   *  and `JobRunsService.failedCount` reads this field by name. */
+  failed: number;
 }
 
 /** Gateway metadata, normalised across Paystack (numeric) and Stripe (string). */
@@ -107,7 +111,7 @@ export class PaymentReconciliationService {
   }
 
   async sweep(trigger: "SCHEDULED" | "MANUAL"): Promise<ReconcileResult> {
-    const zero: ReconcileResult = { scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0, creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0 };
+    const zero: ReconcileResult = { scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0, creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0, failed: 0 };
     const client = this.privileged.client;
     if ((!this.paystack.isConfigured() && !this.stripe.isConfigured()) || !client) {
       if (trigger === "SCHEDULED") this.logger.log("reconcile skipped (no gateway or privileged client)");
@@ -167,6 +171,7 @@ export class PaymentReconciliationService {
           this.logger.warn(`reconcile: recovered missed SUBSCRIPTION settlement ${c.reference}`);
         }
       } catch (e) {
+        result.failed++;
         // One school's bad row must not stop the sweep reaching the others.
         this.logger.warn(`reconcile: subscription ${c.reference} failed: ${(e as Error).message}`);
       }
@@ -212,6 +217,7 @@ export class PaymentReconciliationService {
           this.logger.warn(`reconcile: recovered missed CREDIT purchase ${c.reference}`);
         }
       } catch (e) {
+        result.failed++;
         this.logger.warn(`reconcile: credits ${c.reference} failed: ${(e as Error).message}`);
       }
     }

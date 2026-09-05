@@ -77,16 +77,17 @@ export class AttendanceRollupService {
    * stops the rest — the worst case is that its figures stay live, which is
    * what they were before this existed.
    */
-  async runSweep(): Promise<{ schools: number; terms: number; skipped: number }> {
+  async runSweep(): Promise<{ schools: number; terms: number; skipped: number; failed: number }> {
     const client = this.privileged.client;
     if (!client) {
       this.logger.warn("Rollup sweep requested but no privileged DB — skipping.");
-      return { schools: 0, terms: 0, skipped: 0 };
+      return { schools: 0, terms: 0, skipped: 0, failed: 0 };
     }
     const schools = await client.school.findMany({ where: { isPlatform: false }, select: { id: true } });
     let terms = 0;
     let skipped = 0;
     let touched = 0;
+    let failed = 0;
     for (const s of schools) {
       const actor = await client.userRole.findFirst({
         where: { schoolId: s.id, role: { name: { in: ["principal", "school_admin"] } } },
@@ -107,11 +108,16 @@ export class AttendanceRollupService {
         terms += r.refreshed.length;
         skipped += r.skipped;
       } catch (err) {
-        skipped++;
+        // NOT `skipped`. The jobs console reads `failed` by name, and the
+        // convention it documents is narrow on purpose: `skipped` is work that
+        // was not due, `failed` is work this run could not do. Folding one into
+        // the other hid a school the sweep never rolled up inside a number that
+        // reads as normal.
+        failed++;
         this.logger.warn(`rollup sweep failed for school ${s.id}: ${String(err)}`);
       }
     }
-    return { schools: touched, terms, skipped };
+    return { schools: touched, terms, skipped, failed };
   }
 
   private ctx(p: Principal): TenantContext {

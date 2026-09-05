@@ -17,7 +17,7 @@ export class IndexBloatProcessor extends WorkerHost {
   async process(job: Job): Promise<IndexBloatResult> {
     return this.runs.record("maintenance.indexBloat", "SCHEDULE", async () => {
       const zero: IndexBloatResult = {
-        invalidDropped: 0, reindexed: 0, bytesReclaimed: 0, remaining: 0, details: [],
+        invalidDropped: 0, reindexed: 0, bytesReclaimed: 0, remaining: 0, details: [], failed: 0,
       };
       if (job.name !== INDEX_BLOAT_JOB) return zero;
       return this.bloat.reclaim("SCHEDULED");

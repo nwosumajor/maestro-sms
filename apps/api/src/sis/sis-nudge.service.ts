@@ -58,10 +58,10 @@ export class SisNudgeService {
    *   own schoolId — taken from the verified JWT, never from request input — so a
    *   school admin can nudge their pupils without gaining a cross-tenant trigger.
    */
-  async sweep(onlySchoolId?: string): Promise<{ nudged: number; scanned: number; skipped?: string }> {
+  async sweep(onlySchoolId?: string): Promise<{ nudged: number; scanned: number; failed: number; skipped?: string }> {
     const client = this.db.client;
     // No privileged URL configured ⇒ the nudge is DISABLED, not partially working.
-    if (!client) return { nudged: 0, scanned: 0, skipped: "NO_DB" };
+    if (!client) return { nudged: 0, scanned: 0, failed: 0, skipped: "NO_DB" };
 
     const cutoff = new Date(Date.now() - SIS_NUDGE_INTERVAL_DAYS * 24 * 60 * 60 * 1000);
     const due = (await client.studentProfile.findMany({
@@ -87,7 +87,7 @@ export class SisNudgeService {
       orderBy: { updatedAt: "asc" },
       take: SIS_NUDGE_BATCH_MAX,
     })) as ProfileRow[];
-    if (due.length === 0) return { nudged: 0, scanned: 0 };
+    if (due.length === 0) return { nudged: 0, scanned: 0, failed: 0 };
 
     // Guardians in ONE query for the whole batch, not one per pupil.
     const studentIds = due.map((r) => r.studentId);
@@ -132,6 +132,7 @@ export class SisNudgeService {
       nudgedIds.push(row.id);
     }
     let nudged = 0;
+    let failed = 0;
     for (const [key, g] of groups) {
       const schoolId = key.split("\u0000")[0]!;
       try {
@@ -142,6 +143,7 @@ export class SisNudgeService {
         );
       } catch (e) {
         // One group (or one school) failing must not abort the sweep.
+        failed += 1;
         this.logger.warn(`nudge group failed: ${(e as Error).message}`);
       }
     }
@@ -156,10 +158,13 @@ export class SisNudgeService {
         await client.studentProfile.updateMany({ where: { id: { in: batch } }, data: { lastNudgedAt: new Date() } });
         nudged += batch.length;
       } catch (e) {
+        // Worse than a missed nudge: it WAS sent and is not recorded, so the
+        // next run sends it again.
+        failed += batch.length;
         this.logger.warn(`nudge stamp failed for ${batch.length} profile(s): ${(e as Error).message}`);
       }
     }
-    return { nudged, scanned: due.length };
+    return { nudged, scanned: due.length, failed };
   }
 
 }

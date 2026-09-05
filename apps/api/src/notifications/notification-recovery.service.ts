@@ -77,6 +77,13 @@ export interface NotificationRecoveryResult {
   abandoned: number;
   /** Still inside the grace window — left alone, deliberately. */
   tooRecent: number;
+  /**
+   * Rows this run could not re-queue. MILDER than its siblings — the row stays
+   * PENDING and un-attempted, so the next run retries it — but an operator
+   * should read "the queue was unavailable" off the console rather than infer
+   * it from scanned minus the other three.
+   */
+  failed: number;
   /** True when the sweep could not run at all — NOT a clean bill of health. */
   skipped?: "NO_DB";
 }
@@ -106,7 +113,7 @@ export class NotificationRecoveryService {
       // sweep that found nothing look identical in a log, and only one of them
       // is good news.
       this.logger.warn("Notification recovery skipped: no privileged database URL configured.");
-      return { scanned: 0, requeued: 0, abandoned: 0, tooRecent: 0, skipped: "NO_DB" };
+      return { scanned: 0, requeued: 0, abandoned: 0, tooRecent: 0, failed: 0, skipped: "NO_DB" };
     }
 
     const now = Date.now();
@@ -120,7 +127,7 @@ export class NotificationRecoveryService {
       take: RECOVERY_BATCH,
     })) as PendingRow[];
 
-    const result: NotificationRecoveryResult = { scanned: pending.length, requeued: 0, abandoned: 0, tooRecent: 0 };
+    const result: NotificationRecoveryResult = { scanned: pending.length, requeued: 0, abandoned: 0, tooRecent: 0, failed: 0 };
 
     // One job per NOTIFICATION, not per delivery row: the job performs every
     // pending channel for that notification, so queueing it twice would have the
@@ -168,6 +175,7 @@ export class NotificationRecoveryService {
         } catch (err) {
           // The row stays PENDING and un-attempted, so the next run tries again.
           // That is the correct outcome for a queue that is still unavailable.
+          result.failed += 1;
           this.logger.warn(`Could not re-queue notification ${notificationId}: ${String(err)}`);
         }
       }

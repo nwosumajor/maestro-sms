@@ -46,12 +46,15 @@ export class AcademicProgressionService {
   async runSweep(trigger: ProgressionTrigger = "SCHEDULED"): Promise<{
     schools: number;
     advanced: number;
+    /** Schools this run could not advance. The catch below is per school, so
+     *  nothing else on the jobs console would show it. */
+    failed: number;
     results: SchoolProgressionResult[];
   }> {
     const client = this.privileged.client;
     if (!client) {
       this.logger.warn("Progression sweep requested but no privileged DB — skipping.");
-      return { schools: 0, advanced: 0, results: [] };
+      return { schools: 0, advanced: 0, failed: 0, results: [] };
     }
     const asOf = new Date();
     const schools = await client.school.findMany({
@@ -59,6 +62,7 @@ export class AcademicProgressionService {
       select: { id: true },
     });
     const results: SchoolProgressionResult[] = [];
+    let failed = 0;
     for (const s of schools) {
       // Attribute the auto-advance to a real management user (audit_log.actorId
       // is a non-null FK to User; the all-zero SYSTEM id would violate it).
@@ -86,11 +90,12 @@ export class AcademicProgressionService {
           );
         }
       } catch (err) {
+        failed += 1;
         this.logger.warn(`school=${s.id} auto-advance failed: ${(err as Error).message}`);
       }
     }
     this.logger.log(`Progression sweep (${trigger}): ${schools.length} schools, ${results.length} advanced.`);
-    return { schools: schools.length, advanced: results.length, results };
+    return { schools: schools.length, advanced: results.length, failed, results };
   }
 
   /** In-app heads-up to management that the term rolled over (transparency). */

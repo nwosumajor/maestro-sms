@@ -63,7 +63,7 @@ function makeService(opts: { profiles?: Record<string, unknown>[]; guardians?: {
 describe("SisNudgeService", () => {
   it("is DISABLED (no-op) without a privileged database", async () => {
     const { service, enqueue } = makeService({ noDb: true });
-    await expect(service.sweep()).resolves.toEqual({ nudged: 0, scanned: 0, skipped: "NO_DB" });
+    await expect(service.sweep()).resolves.toEqual({ nudged: 0, scanned: 0, failed: 0, skipped: "NO_DB" });
     expect(enqueue).not.toHaveBeenCalled();
   });
 

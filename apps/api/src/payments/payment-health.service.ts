@@ -49,6 +49,10 @@ export interface ChannelHealth {
 export type HealthMap = Partial<Record<PaymentChannel, ChannelHealth>>;
 
 export interface HealthSweepResult {
+  /** Items this run could not process. The catches below do not throw, so
+   *  nothing else on the jobs console shows it; `failedCount` reads this field
+   *  by name. Same convention as the dunning run's. */
+  failed: number;
   checked: PaymentChannel[];
   broke: PaymentChannel[];
   recovered: PaymentChannel[];
@@ -85,7 +89,7 @@ export class PaymentHealthService {
       this.logger.warn(
         "Payment health check requested but no privileged DB — skipping. This is NOT a report that the rails are healthy.",
       );
-      return { checked: [], broke: [], recovered: [], skipped: true };
+      return { checked: [], broke: [], recovered: [], failed: 0, skipped: true };
     }
 
     const enabled = await this.channels.enabled();
@@ -94,6 +98,7 @@ export class PaymentHealthService {
     const health: HealthMap = { ...previous };
     const broke: PaymentChannel[] = [];
     const recovered: PaymentChannel[] = [];
+    let failed = 0;
 
     for (const channel of enabled) {
       const result = await this.channels.testConnection(channel);
@@ -122,8 +127,10 @@ export class PaymentHealthService {
       data: { health: health as unknown as object },
     });
 
-    if (broke.length > 0) await this.alertOwners(client, broke, health, "DOWN");
-    if (recovered.length > 0) await this.alertOwners(client, recovered, health, "RECOVERED");
+    // The alert is best-effort, but a FAILED alert is the whole point of this
+    // job going unreported — it exists to say a payment rail broke.
+    if (broke.length > 0) failed += await this.alertOwners(client, broke, health, "DOWN");
+    if (recovered.length > 0) failed += await this.alertOwners(client, recovered, health, "RECOVERED");
 
     const checked = enabled.filter((c) => health[c]?.at === now);
     this.logger.log(
@@ -132,16 +139,18 @@ export class PaymentHealthService {
         `${recovered.length ? `, recovered: ${recovered.join(", ")}` : ""}` +
         `${!broke.length && !recovered.length ? " — no change." : ""}`,
     );
-    return { checked, broke, recovered, skipped: false };
+    return { checked, broke, recovered, failed, skipped: false };
   }
 
-  /** Best-effort: an alert failure must never fail the sweep that found it. */
+  /** Best-effort: an alert failure must never fail the sweep that found it —
+   *  but it is RETURNED so the run can report it. A void best-effort method
+   *  cannot tell anyone it did nothing. */
   private async alertOwners(
     client: NonNullable<PrivilegedDatabaseService["client"]>,
     channels: PaymentChannel[],
     health: HealthMap,
     kind: "DOWN" | "RECOVERED",
-  ): Promise<void> {
+  ): Promise<number> {
     try {
       const owners = await client.user.findMany({
         where: { roles: { some: { role: { name: "super_admin" } } } },
@@ -168,8 +177,10 @@ export class PaymentHealthService {
           },
         );
       }
+      return 0;
     } catch (e) {
       this.logger.warn(`payment health alert failed: ${(e as Error).message}`);
+      return 1;
     }
   }
 }

@@ -295,7 +295,10 @@ describe("the term sweep — the part a school will actually rely on", () => {
     (tx.schoolArchive.create as jest.Mock)
       .mockRejectedValueOnce(new Error("storage down"))
       .mockResolvedValueOnce({ id: "a-2", createdAt: new Date() });
-    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ scanned: 2, archived: 1, skipped: 1 });
+    // FAILED, not skipped. `skipped` two lines up in the service means "already
+    // archived"; sharing the counter made a term the sweep COULD NOT do read as
+    // one it had no need to, and the jobs console reads `failed` by name.
+    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ scanned: 2, archived: 1, skipped: 0, failed: 1 });
   });
 
   it("is inert without the privileged client", async () => {

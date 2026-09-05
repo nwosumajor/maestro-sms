@@ -63,6 +63,10 @@ export const INDEX_BLOAT_RATIO = 4;
 export const INDEX_BLOAT_MAX_PER_RUN = 3;
 
 export interface IndexBloatResult {
+  /** Items this run could not process. The catches below do not throw, so
+   *  nothing else on the jobs console shows it; `failedCount` reads this field
+   *  by name. Same convention as the dunning run's. */
+  failed: number;
   /** Invalid leftovers from an interrupted reindex that were dropped. */
   invalidDropped: number;
   /** Indexes rebuilt this run. */
@@ -90,7 +94,7 @@ export class IndexBloatService {
       // Said out loud: a sweep that could not run and a sweep that found nothing
       // read identically in a log, and only one of them is good news.
       this.logger.warn("Index maintenance skipped: no privileged database URL configured.");
-      return { invalidDropped: 0, reindexed: 0, bytesReclaimed: 0, remaining: 0, skipped: "NO_DB", details: [] };
+      return { invalidDropped: 0, reindexed: 0, bytesReclaimed: 0, remaining: 0, failed: 0, skipped: "NO_DB", details: [] };
     }
 
     // 1. Sweep leftovers from an interrupted REINDEX CONCURRENTLY. An invalid
@@ -104,11 +108,13 @@ export class IndexBloatService {
       WHERE NOT i.indisvalid AND n.nspname = 'public'
     `)) as Array<{ schemaname: string; indexname: string }>;
     let invalidDropped = 0;
+    let failed = 0;
     for (const idx of invalid) {
       try {
         await client.$executeRawUnsafe(`DROP INDEX CONCURRENTLY IF EXISTS "${idx.schemaname}"."${idx.indexname}"`);
         invalidDropped += 1;
       } catch (err) {
+        failed += 1;
         this.logger.warn(`Could not drop invalid index ${idx.indexname}: ${String(err)}`);
       }
     }
@@ -157,6 +163,7 @@ export class IndexBloatService {
       } catch (err) {
         // One index failing must not stop the rest — and the leftover it may
         // have created is swept at the start of the next run.
+        failed += 1;
         this.logger.warn(`REINDEX of ${c.indexname} failed: ${String(err)}`);
       }
     }
@@ -167,6 +174,7 @@ export class IndexBloatService {
       bytesReclaimed,
       remaining: Math.max(0, suspect.length - details.length),
       details,
+      failed,
     };
     const mb = (n: number) => `${Math.round((n / 1048576) * 10) / 10}MB`;
     const line =

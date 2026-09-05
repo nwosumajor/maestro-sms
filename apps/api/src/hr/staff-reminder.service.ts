@@ -31,6 +31,10 @@ export interface ReminderResult {
   /** Approved raises this run put into force on their effective date. */
   salaryChangesApplied?: number;
   skipped?: "NO_DB";
+  /** Schools this run could not remind — the per-school catches below do not
+   *  throw, so nothing else on the jobs console would show it. Same convention
+   *  and same reason as the dunning run's. */
+  failed: number;
 }
 
 @Injectable()
@@ -47,7 +51,7 @@ export class StaffReminderService {
 
   async sweep(): Promise<ReminderResult> {
     const client = this.db.client;
-    if (!client) return { reminded: 0, scanned: 0, skipped: "NO_DB" };
+    if (!client) return { reminded: 0, scanned: 0, failed: 0, skipped: "NO_DB" };
     // Close the access of anyone whose last working day has now passed. This
     // runs FIRST and independently of the document reminders: a failure to
     // notify HR about an expiring certificate must never leave a departed
@@ -79,6 +83,7 @@ export class StaffReminderService {
     // has not changed is scanned and deliberately not announced — so the two
     // numbers answer different questions and are reported separately.
     let notified = 0;
+    const failedSchools = new Set<string>();
     const bySchool = new Map<string, typeof due>();
     for (const d of due) (bySchool.get(d.schoolId) ?? bySchool.set(d.schoolId, []).get(d.schoolId)!).push(d);
 
@@ -116,22 +121,26 @@ export class StaffReminderService {
           notified += 1;
         }
       } catch (e) {
+        failedSchools.add(schoolId);
         this.logger.warn(`reminder sweep failed for school ${schoolId}: ${(e as Error).message}`);
       }
     }
     this.logger.log(`Staff reminder sweep: scanned=${due.length} reminded=${notified}`);
-    await this.sweepContracts(client);
-    return { reminded: notified, scanned: due.length, accessRevoked, salaryChangesApplied };
+    // Its failures come BACK. A void sweep cannot report a school it could not
+    // reach, and this one catches per school exactly like the loop above.
+    for (const id of await this.sweepContracts(client)) failedSchools.add(id);
+    return { reminded: notified, scanned: due.length, accessRevoked, salaryChangesApplied, failed: failedSchools.size };
   }
 
   /** Fixed-term contracts ending within 30 days: nudge each school's HR once
    *  (contractReminderSentAt stamps idempotency; a RENEWAL approval re-arms it). */
-  private async sweepContracts(client: NonNullable<PrivilegedDatabaseService["client"]>): Promise<void> {
+  private async sweepContracts(client: NonNullable<PrivilegedDatabaseService["client"]>): Promise<Set<string>> {
     const ending = await client.employee.findMany({
       where: contractCandidateWhere(new Date()),
       select: { id: true, schoolId: true, userId: true, endDate: true, contractNoticeStage: true },
     });
-    if (ending.length === 0) return;
+    const failedSchools = new Set<string>();
+    if (ending.length === 0) return failedSchools;
     const bySchool = new Map<string, typeof ending>();
     for (const e of ending) (bySchool.get(e.schoolId) ?? bySchool.set(e.schoolId, []).get(e.schoolId)!).push(e);
     for (const [schoolId, emps] of bySchool) {
@@ -160,10 +169,12 @@ export class StaffReminderService {
           });
         }
       } catch (err) {
+        failedSchools.add(schoolId);
         this.logger.warn(`contract reminder failed for school ${schoolId}: ${(err as Error).message}`);
       }
     }
     this.logger.log(`Contract reminder sweep: reminded=${ending.length}`);
+    return failedSchools;
   }
 
   /**

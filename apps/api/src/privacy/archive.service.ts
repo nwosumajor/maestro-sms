@@ -665,7 +665,7 @@ export class SchoolArchiveService {
     trigger: "SCHEDULED" | "MANUAL",
   ): Promise<{ scanned: number; archived: number; skipped: number; undated: number }> {
     const client = this.privileged.client;
-    const result = { scanned: 0, archived: 0, skipped: 0, undated: 0 };
+    const result = { scanned: 0, archived: 0, skipped: 0, undated: 0, failed: 0 };
     if (!client) {
       if (trigger === "SCHEDULED") this.logger.log("term archive skipped (no privileged client)");
       return result;
@@ -722,7 +722,12 @@ export class SchoolArchiveService {
       } catch (err) {
         // One school's failure must not stop the rest. A term left unarchived is
         // retried tomorrow; a sweep that dies halfway is not.
-        result.skipped++;
+        //
+        // COUNTED SEPARATELY from `skipped`, which two lines above means "already
+        // archived". Sharing the counter made a term the sweep COULD NOT do
+        // indistinguishable from one it had no need to, and the jobs console
+        // reads `failed` by name — so a failing school showed as a clean run.
+        result.failed++;
         this.logger.error(`term archive failed school=${t.schoolId} term=${t.id}: ${(err as Error).message}`);
       }
     }
