@@ -584,3 +584,102 @@ describe("annual position", () => {
     expect(t).not.toContain("3/30");
   });
 });
+
+describe("a component mark above the school's own maximum", () => {
+  // The total is a sum of CLAMPED components; every reader printed the RAW ones
+  // beside it. A school that lowers its exam weighting after marks are entered
+  // gets a row that does not add up. Measured live on a school moving to
+  // 40/20/30/10 with a 42 already recorded: the card printed
+  // "C.A. 28 · Exam 42 · Total 68" under a header saying the exam is out of 40.
+  //
+  // Clamping is the right arithmetic — 42 out of 40 is not a mark. Printing the
+  // unclamped figure beside a total that ignores it is what made the page
+  // incoherent, and a parent adding up the row got a different answer.
+  const LOW_EXAM = [
+    { key: "exam", label: "Exam", max: 40 },
+    { key: "midterm", label: "Midterm test", max: 20 },
+    { key: "assignment", label: "Assignment", max: 30 },
+    { key: "classNote", label: "Class note", max: 10 },
+  ];
+  const overMax = {
+    components: LOW_EXAM,
+    subjects: [
+      {
+        subjectId: "s1", subjectName: "English", exam: 42, midterm: 12, assignment: 7,
+        classNote: 6, total: 65, grade: "B3", complete: true, position: 4, subjectRanked: 10,
+      },
+    ],
+  };
+
+  it("prints the mark AS IT COUNTS, so the row adds up to its own total", async () => {
+    const t = textOf(await render(overMax as never));
+    // 40, not 42 — and 25 + 40 = 65, the total printed beside it.
+    expect(t).toContain("English");
+    expect(t).not.toMatch(/\b42\b/);
+    expect(t).toMatch(/\b40\b/);
+  });
+
+  it("never prints a component above the maximum stated in its own header", async () => {
+    const t = textOf(await render(overMax as never));
+    // The header this card prints for the exam column.
+    expect(t).toMatch(/Maximum mark[\s\S]{0,40}40/);
+  });
+
+  it("clamps a CONTINUOUS-ASSESSMENT component too, not just the exam", async () => {
+    // Caught by mutation: the first assertion above only ever exercised the exam
+    // column, because every C.A. component in that fixture was already within
+    // its maximum. Reverting the C.A. sum to the raw marks kept the suite green.
+    // classNote 14 against a maximum of 10 is what makes this row bite.
+    const t = textOf(
+      await render({
+        components: LOW_EXAM,
+        subjects: [
+          {
+            subjectId: "s1", subjectName: "English", exam: 30, midterm: 12, assignment: 7,
+            classNote: 14, total: 59, grade: "C", complete: true, position: 4, subjectRanked: 10,
+          },
+        ],
+      } as never),
+    );
+    // C.A. = 12 + 7 + 10 = 29, never 12 + 7 + 14 = 33.
+    expect(t).toMatch(/\b29\b/);
+    expect(t).not.toMatch(/\b33\b/);
+  });
+
+  it("prints a dash for a component nobody has marked, never a zero", async () => {
+    // Caught by mutation: making effectiveComponents return 0 for null left the
+    // whole suite green, and an unmarked exam would have printed "0".
+    //
+    // The distinction is the reason the helper preserves null. This card already
+    // reasons about it one line away — a total with a component unmarked counts
+    // it as ZERO, so the row carries an asterisk because a family cannot tell
+    // "scored 24" from "only the class note is in". Printing a bare 0 in the
+    // column makes that worse: it reads as a mark the child was given.
+    const t = textOf(
+      await render({
+        components: LOW_EXAM,
+        subjects: [
+          {
+            subjectId: "s1", subjectName: "English", exam: null, midterm: 12, assignment: 7,
+            classNote: 6, total: 25, grade: "F", complete: false, position: 4, subjectRanked: 10,
+          },
+        ],
+      } as never),
+    );
+    // Cell by cell: the extractor puts each table cell on its own line, so the
+    // row is read positionally rather than with a line-spanning regex.
+    const cells = t.split("\n");
+    const at = cells.indexOf("English *");
+    expect(at).toBeGreaterThan(-1);
+    expect(cells[at + 1]).toBe("25"); // C.A. = 12 + 7 + 6
+    // The exam column is a dash. A zero there is a mark; an unmarked exam is not.
+    expect(cells[at + 2]).toBe("—");
+  });
+
+  it("leaves a mark within the maximum exactly as the teacher entered it", async () => {
+    // Clamping must not become rounding: the ordinary case is untouched.
+    const t = textOf(await render());
+    expect(t).toMatch(/\b50\b/);
+    expect(t).toMatch(/\b81\b/);
+  });
+});

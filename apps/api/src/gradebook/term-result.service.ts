@@ -34,6 +34,7 @@ import {
   averageOf,
   gradeComponentMax,
   GRADE_COMPONENTS,
+  effectiveComponents,
   GRADE_PUBLISH_CHAIN,
   type GradeComponentKey,
   type GradingRosterDto,
@@ -1110,7 +1111,8 @@ export class TermResultService {
       ),
     );
 
-    const buffer = await this.renderTermScoresheetPdf(report, term);
+    const comps = (await this.region.academicForSchool(p.schoolId)).grading?.components ?? GRADE_COMPONENTS;
+    const buffer = await this.renderTermScoresheetPdf(report, term, comps);
     const slug = (s: string) => s.replace(/\s+/g, "-").replace(/[^a-z0-9-]/gi, "").toLowerCase();
     return { buffer, filename: `scoresheet-${slug(report.studentName)}-${slug(term.termName)}.pdf` };
   }
@@ -1118,6 +1120,9 @@ export class TermResultService {
   private renderTermScoresheetPdf(
     report: StudentSessionReportDto,
     term: StudentTermReportDto,
+    /** THE SCHOOL'S weighting. The four columns print each component AS IT
+     *  COUNTS, so the row adds up to the total beside it. */
+    comps: ReadonlyArray<{ key: GradeComponentKey; max: number }>,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const doc = createPdfDocument({ margin: 50, size: "A4" });
@@ -1153,7 +1158,7 @@ export class TermResultService {
         doc.fontSize(10).fillColor("#888").text("No published results for this term yet.", startX).fillColor("#000");
       } else {
         for (const s of term.subjects) {
-          drawRow([s.subjectName, fmt(s.exam), fmt(s.midterm), fmt(s.assignment), fmt(s.classNote), fmt(s.total), s.grade ?? "—"]);
+          drawRow([s.subjectName, ...(() => { const e = effectiveComponents(s, comps); return [fmt(e.exam), fmt(e.midterm), fmt(e.assignment), fmt(e.classNote)]; })(), fmt(s.total), s.grade ?? "—"]);
         }
       }
       doc.moveDown(0.5);
@@ -1195,12 +1200,16 @@ export class TermResultService {
         tx,
       ),
     );
-    const buffer = await this.renderSessionReportPdf(report);
+    const comps = (await this.region.academicForSchool(p.schoolId)).grading?.components ?? GRADE_COMPONENTS;
+    const buffer = await this.renderSessionReportPdf(report, comps);
     const slug = (x: string) => x.replace(/\s+/g, "-").replace(/[^a-z0-9-]/gi, "").toLowerCase();
     return { buffer, filename: `session-report-${slug(report.studentName)}-${slug(report.sessionName)}.pdf` };
   }
 
-  private renderSessionReportPdf(report: StudentSessionReportDto): Promise<Buffer> {
+  private renderSessionReportPdf(
+    report: StudentSessionReportDto,
+    comps: ReadonlyArray<{ key: GradeComponentKey; max: number }>,
+  ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const doc = createPdfDocument({ margin: 50, size: "A4" });
       const chunks: Buffer[] = [];
@@ -1237,7 +1246,7 @@ export class TermResultService {
           doc.fontSize(9).fillColor("#888").text("No published results for this term.", startX).fillColor("#000");
         } else {
           for (const sub of term.subjects) {
-            drawRow([sub.subjectName, fmt(sub.exam), fmt(sub.midterm), fmt(sub.assignment), fmt(sub.classNote), fmt(sub.total), sub.grade ?? "—"]);
+            drawRow([sub.subjectName, ...(() => { const e = effectiveComponents(sub, comps); return [fmt(e.exam), fmt(e.midterm), fmt(e.assignment), fmt(e.classNote)]; })(), fmt(sub.total), sub.grade ?? "—"]);
           }
         }
       }

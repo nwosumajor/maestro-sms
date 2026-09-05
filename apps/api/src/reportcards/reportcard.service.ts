@@ -32,7 +32,8 @@ import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
 import { TRAIT_GROUPS, TRAIT_KEYS, TRAIT_SCALE, traitLabel, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor, gradeWordFor, attendanceRatePct } from "@sms/types";
 import { GRADE_COMPONENTS, gradeComponentMax } from "@sms/types";
-import type { GradeBand } from "@sms/types";
+import type { GradeBand, GradeComponentKey } from "@sms/types";
+import { effectiveComponents } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import type { TermSubjectRowDto } from "@sms/types";
 import { createPdfDocument } from "../common/pdf-document";
@@ -759,15 +760,21 @@ export class ReportCardService {
           // component still unmarked counts that component as ZERO, so 24 here can
           // mean "scored 24" or "only the class note is in". A family cannot tell
           // those apart, and the second one is not a fail.
+          // AS THEY COUNT, not as they were typed. The total is a sum of CLAMPED
+          // components; printing the raw ones beside it gave a row that does not
+          // add up — "C.A. 28 · Exam 42 · Total 68" — under a header saying the
+          // exam is out of 40. Reachable whenever a school lowers a component's
+          // weighting after marks are entered.
+          const eff = effectiveComponents(sub, d.components as ReadonlyArray<{ key: GradeComponentKey; max: number }>);
           const ca = [sub.midterm, sub.assignment, sub.classNote].some((v) => v !== null)
-            ? (sub.midterm ?? 0) + (sub.assignment ?? 0) + (sub.classNote ?? 0)
+            ? (eff.midterm ?? 0) + (eff.assignment ?? 0) + (eff.classNote ?? 0)
             : null;
           const lowHigh =
             sub.classLowest != null && sub.classHighest != null ? `${sub.classLowest}/${sub.classHighest}` : "—";
           drawRow([
             sub.subjectName + (sub.complete ? "" : " *"),
             fmt(ca),
-            fmt(sub.exam),
+            fmt(eff.exam),
             fmt(sub.total),
             sub.grade ?? "—",
             pos,

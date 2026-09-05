@@ -283,6 +283,35 @@ export function gradeWordFor(grade: string | null, bands?: readonly GradeBand[])
  * is always meaningful; `complete` flags whether the teacher has entered all
  * four (i.e. whether the total is final).
  */
+/**
+ * The component marks AS THEY COUNT under a school's weighting — each bounded by
+ * its own maximum, exactly as `computeTermSubjectGrade` bounds them for the
+ * total, and null preserved as null so "not marked" stays distinguishable from
+ * "scored zero".
+ *
+ * WHY A REPORT CARD NEEDS THIS. The total is a sum of CLAMPED components; every
+ * reader printed the RAW ones beside it. A school that lowers its exam
+ * weighting after marks are entered gets a row reading "C.A. 28 · Exam 42 ·
+ * Total 68" — which does not add up — under a header saying the exam is out of
+ * 40. Measured on a school moving to 40/20/30/10 with a 42 already recorded.
+ *
+ * Clamping is the right arithmetic: 42 out of 40 is not a mark. Printing the
+ * unclamped figure beside a total that ignores it is what makes the page
+ * incoherent, and a parent who adds up the row gets a different answer from the
+ * school.
+ */
+export function effectiveComponents(
+  c: TermGradeComponents,
+  components: ReadonlyArray<{ key: GradeComponentKey; max: number }> = GRADE_COMPONENTS,
+): Record<GradeComponentKey, number | null> {
+  const out = {} as Record<GradeComponentKey, number | null>;
+  for (const comp of components) {
+    const v = c[comp.key];
+    out[comp.key] = v === null || v === undefined ? null : clampMark(v, comp.max);
+  }
+  return out;
+}
+
 export function computeTermSubjectGrade(
   c: TermGradeComponents,
   /** The school's weighting. Defaults to the platform's, so every existing caller
