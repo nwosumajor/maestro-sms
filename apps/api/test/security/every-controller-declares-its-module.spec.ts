@@ -49,6 +49,11 @@ const ALWAYS_ON: Record<string, string> = {
   AdminController: "The admin dashboard and RBAC. A school must be able to manage its own people at any tier.",
   OperatorController: "The platform owner's console. It manages subscriptions and cannot depend on one.",
   LegalController: "Records that a school accepted the terms — a precondition of using the product, not a feature of it.",
+  PublicAttestationController:
+    "Checking a report card already in someone's hands. Gating it on the school's " +
+    "current subscription would stop a genuine document verifying because the " +
+    "school changed tier — the card was real when it was issued, and that does " +
+    "not expire.",
   PublicController: "Unauthenticated: the directory, onboarding, invites and password resets. There is no school session to resolve an entitlement from.",
   LocalStorageController: "The DEV storage stub, registered only when STORAGE_PROVIDER is not s3.",
   MobileMoneyController: "Payment rails, including callbacks that arrive with no session. Money must reach a school whatever its tier.",

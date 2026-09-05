@@ -172,8 +172,8 @@ export class ReportCardRemarkService {
       await this.assertTermExists(tx, termId);
       const row = await tx.reportCardRemark.upsert({
         where: { studentId_termId: { studentId, termId } },
-        create: { schoolId: p.schoolId, studentId, termId, headRemark: remark, headId: p.userId },
-        update: { headRemark: remark, headId: p.userId },
+        create: { schoolId: p.schoolId, studentId, termId, headRemark: remark, headId: p.userId, headRemarkAt: new Date() },
+        update: { headRemark: remark, headId: p.userId, headRemarkAt: new Date() },
       });
       await this.audit.record(
         { actorId: p.userId, action: "reportcard.remark.head", entity: "user", entityId: studentId, schoolId: p.schoolId, metadata: { termId } },

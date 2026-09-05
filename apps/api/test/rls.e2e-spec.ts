@@ -180,6 +180,7 @@ const meetingCohostA = randomUUID();
   const termA = randomUUID();
   const subjectResultA = randomUUID();
   const reportCardRemarkA = randomUUID();
+  const reportCardAttestationA = randomUUID();
 const studentTraitRatingA = randomUUID();
 const settlementReleaseA = randomUUID();
 const documentRequirementA = randomUUID();
@@ -800,6 +801,16 @@ const documentSubmissionA = randomUUID();
        VALUES ($1,$2,$3,$4,'Good progress.',now())`,
       [reportCardRemarkA, A, userA, termA],
     );
+    // Report-card attestation (student userA, termA) — rls/112. What the card
+    // carries instead of a signature, so it is a named person's approval of a
+    // named child's marks: cross-tenant reach here would let another school read
+    // both.
+    await a.query(
+      `INSERT INTO report_card_attestation (id,"schoolId","studentId","termId",code,
+         "approvedById","approvedByName","approvedByRole","approvedAt",subjects,"contentHash","updatedAt")
+       VALUES ($1,$2,$3,$4,'ABCD1234EFGH',$5,'Mrs Head','Principal',now(),'[]'::jsonb,'deadbeef',now())`,
+      [reportCardAttestationA, A, userA, termA, userA],
+    );
     // Behavioural trait rating (student userA, termA) — rls/107.
     await a.query(
       `INSERT INTO student_trait_rating (id,"schoolId","studentId","termId","traitKey",score,"updatedAt")
@@ -1248,6 +1259,8 @@ const documentSubmissionA = randomUUID();
       // both; term references academic_session -> term before session.
       "promotion_batch",
       "report_card_remark",
+      // FKs to term -> purge before term.
+      "report_card_attestation",
       // document_submission FKs to document_requirement -> child first.
       "document_submission",
       "document_requirement",
@@ -1599,6 +1612,7 @@ const documentSubmissionA = randomUUID();
     ["academic_session", sessionA],
     ["term", termA],
     ["report_card_remark", reportCardRemarkA],
+    ["report_card_attestation", reportCardAttestationA],
     ["student_trait_rating", studentTraitRatingA],
     ["platform_settlement_release", settlementReleaseA],
     ["document_requirement", documentRequirementA],

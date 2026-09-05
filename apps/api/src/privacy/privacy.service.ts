@@ -110,6 +110,7 @@ export class PrivacyService {
       grades,
       remarks,
       traitRatings,
+      cardAttestations,
       subjectSelections,
       guardians,
       credits,
@@ -159,6 +160,12 @@ export class PrivacyService {
       // the bundle protected nothing and made the bundle wrong.
       tx.reportCardRemark.findMany({ where: { studentId }, orderBy: { updatedAt: "desc" } }),
       tx.studentTraitRating.findMany({ where: { studentId }, orderBy: { updatedAt: "desc" } }),
+      // WHO SIGNED OFF THE CHILD'S CARD, and what they signed. Same reasoning as
+      // the remarks beside it: the family reads this on every report card, and a
+      // named person's approval of a named child's marks is held about that
+      // child. The code is included on purpose — it is printed on their own card
+      // and is how they check any copy of it.
+      tx.reportCardAttestation.findMany({ where: { studentId }, orderBy: { issuedAt: "desc" } }),
       // The subjects they offer, and who the school records as their guardians —
       // a relationship held ABOUT the pupil, which they are entitled to see.
       tx.subjectSelection.findMany({ where: { studentId } }),
@@ -249,6 +256,7 @@ export class PrivacyService {
       grades,
       remarks,
       traitRatings,
+      cardAttestations,
       subjectSelections,
       guardians,
       credits,
@@ -284,6 +292,7 @@ export class PrivacyService {
           "grades",
           "remarks",
           "traitRatings",
+          "cardAttestations",
           "subjectSelections",
           "guardians",
           "credits",

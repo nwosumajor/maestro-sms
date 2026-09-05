@@ -63,6 +63,7 @@ const ACCOUNTED: Record<string, string> = {
   SubjectResult: "grades",
   ReportCardRemark: "remarks",
   StudentTraitRating: "traitRatings",
+  ReportCardAttestation: "cardAttestations",
   SubjectSelection: "subjectSelections",
   ParentChild: "guardians",
   StudentCreditEntry: "credits",

@@ -183,6 +183,7 @@ apply_rls packages/db/prisma/rls/108_platform_settlement_release_rls.sql platfor
 apply_rls packages/db/prisma/rls/109_document_requirement_rls.sql document_requirement_delete
 apply_rls packages/db/prisma/rls/110_document_submission_rls.sql document_submission_update
 apply_rls packages/db/prisma/rls/111_module_addon_price_rls.sql module_addon_price_select
+apply_rls packages/db/prisma/rls/112_report_card_attestation_rls.sql report_card_attestation_update
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

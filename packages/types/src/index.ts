@@ -30,6 +30,7 @@ export * from "./timetable-day";
 export * from "./recurrence";
 export * from "./scan";
 export * from "./dto/member-scan";
+export * from "./dto/report-card-attestation";
 export * from "./admission-number";
 export * from "./entity-code";
 export * from "./meeting-link";

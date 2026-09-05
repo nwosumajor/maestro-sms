@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 import { ReportCardController } from "./reportcard.controller";
 import { ReportCardService } from "./reportcard.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
+import { ReportCardAttestationService } from "./report-card-attestation.service";
+import { PublicAttestationController } from "./public-attestation.controller";
 import { StudentTraitService } from "./student-trait.service";
 import { BrandingModule } from "../branding/branding.module";
 import { DocumentsModule } from "../documents/documents.module";
@@ -13,8 +15,8 @@ import { GradebookModule } from "../gradebook/gradebook.module";
 // it; DocumentsModule's own NotificationModule import covers the guardian alert.
 @Module({
   imports: [BrandingModule, DocumentsModule, GradebookModule],
-  controllers: [ReportCardController],
-  providers: [ReportCardService, ReportCardRemarkService, StudentTraitService],
-  exports: [ReportCardService],
+  controllers: [ReportCardController, PublicAttestationController],
+  providers: [ReportCardService, ReportCardRemarkService, StudentTraitService, ReportCardAttestationService],
+  exports: [ReportCardService, ReportCardAttestationService],
 })
 export class ReportCardModule {}

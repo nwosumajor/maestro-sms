@@ -107,6 +107,13 @@ const BASE = {
   annualBySubject: { s1: [81, 77, null], s2: [65, null, null] } as Record<string, Array<number | null>>,
   annualPosition: { s1: { position: 3, of: 30 } } as Record<string, { position: number; of: number }>,
   promotionLine: null as string | null,
+  // No attestation by default: most of these cases are about the marks table,
+  // and a card with no head remark genuinely carries none. The attestation's own
+  // describe block supplies one.
+  attestation: null as {
+    code: string; version: number; approvedByName: string; approvedByRole: string;
+    approvedAt: Date; verifyUrl: string;
+  } | null,
 };
 
 // reason: renderPdf is private and needs none of the injected services — it is a
@@ -114,6 +121,7 @@ const BASE = {
 function render(overrides: Partial<typeof BASE> = {}): Promise<Buffer> {
   const svc = new ReportCardService(
     null as never, null as never, null as never, null as never, null as never, null as never, null as never,
+    null as never,
   );
   return (svc as unknown as { renderPdf(d: unknown, logo?: Buffer | null): Promise<Buffer> }).renderPdf(
     { ...BASE, ...overrides },
@@ -392,6 +400,52 @@ describe("the word beside each mark", () => {
     const t = textOf(await render());
     expect(t).toContain("Annual avg");
     expect(t).toContain("Grade");
+  });
+});
+
+describe("the attestation block", () => {
+  const attested = {
+    attestation: {
+      code: "ABCD1234EFGH",
+      version: 1,
+      approvedByName: "Mrs Ngozi Adeyemi",
+      approvedByRole: "Principal",
+      approvedAt: new Date("2026-12-11T00:00:00Z"),
+      verifyUrl: "https://sms.example/verify/card/st-andrews/ABCD1234EFGH",
+    },
+  };
+
+  it("names who approved the card, in what role, and when", async () => {
+    // The block it sits beside is a ruled line signed by hand after printing,
+    // which leaves the VAULT copy — the one a guardian downloads — permanently
+    // blank. This is the half that reaches them.
+    const t = textOf(await render(attested as never));
+    expect(t).toContain("Approved by Mrs Ngozi Adeyemi (Principal) on 11 December 2026.");
+  });
+
+  it("prints the code grouped for a person typing it off the page", async () => {
+    const t = textOf(await render(attested as never));
+    expect(t).toContain("ABCD-1234-EFGH");
+  });
+
+  it("prints the issue number, which a holder cannot otherwise know", async () => {
+    // A card reissued after a correction leaves earlier printouts looking
+    // identical and no longer current.
+    const t = textOf(await render({ attestation: { ...attested.attestation, version: 3 } } as never));
+    expect(t).toMatch(/Issue 3/);
+  });
+
+  it("tells the reader where to check it", async () => {
+    const t = textOf(await render(attested as never));
+    expect(t).toContain("sms.example/verify/card/st-andrews/ABCD1234EFGH");
+  });
+
+  it("says nothing at all when nobody has signed", async () => {
+    // No head remark means no attestation, and a block claiming an approval that
+    // did not happen is the exact failure this exists to prevent.
+    const t = textOf(await render({ attestation: null }));
+    expect(t).not.toContain("VERIFIED SCHOOL RECORD");
+    expect(t).not.toMatch(/Approved by/);
   });
 });
 

@@ -137,6 +137,14 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "DELETE /scholarships/banks/:p": {
+      "kind": "ui",
+      "note": "the per-bank Delete on QuestionBanks.tsx"
+    },
+    "DELETE /scholarships/questions/:p": {
+      "kind": "ui",
+      "note": "removing a library question on ScholarshipAdmin.tsx"
+    },
     "DELETE /schools/branding/logo": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -312,6 +320,10 @@
     "GET /billing": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /billing/addons": {
+      "kind": "ui",
+      "note": "the school's add-on shop on /billing — referenced by a literal path in apps/web"
     },
     "GET /billing/credits": {
       "kind": "ui",
@@ -649,13 +661,13 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "GET /fees/revenue-by-source": {
-      "kind": "ui",
-      "note": "Revenue separated by department — RevenueBySource on /fees/reports"
-    },
     "GET /fees/reports": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/revenue-by-source": {
+      "kind": "ui",
+      "note": "Revenue separated by department — RevenueBySource on /fees/reports"
     },
     "GET /fees/settlement": {
       "kind": "ui",
@@ -957,10 +969,6 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "GET /library/borrowers": {
-      "kind": "ui",
-      "note": "reviewed: components/library/LibraryManager.tsx fetches it from the \"Who is borrowing?\" card so a librarian can name the pupil or member of staff a book is issued to"
-    },
     "GET /library/books": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -968,6 +976,10 @@
     "GET /library/books/export.csv": {
       "kind": "ui",
       "note": "reviewed: a call in components/library/LibraryManager.tsx builds this path"
+    },
+    "GET /library/borrowers": {
+      "kind": "ui",
+      "note": "reviewed: components/library/LibraryManager.tsx fetches it from the \"Who is borrowing?\" card so a librarian can name the pupil or member of staff a book is issued to"
     },
     "GET /library/loans": {
       "kind": "ui",
@@ -1068,6 +1080,10 @@
     "GET /notifications/me/preferences": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/addon-pricing": {
+      "kind": "ui",
+      "note": "operator add-on price table on /operator/pricing"
     },
     "GET /operator/admin-appointments": {
       "kind": "ui",
@@ -1281,6 +1297,10 @@
       "kind": "system",
       "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
+    "GET /public/report-card/verify/:p/:p": {
+      "kind": "ui",
+      "note": "public report-card check — app/verify/card/[slug]/[code]/page.tsx (unauthenticated; the QR on the card resolves here)"
+    },
     "GET /public/schools": {
       "kind": "system",
       "note": "public read (plan pricing, directory) — consumed by marketing pages"
@@ -1337,33 +1357,61 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "GET /scholarships/portal": {
+    "GET /scholarships/banks": {
       "kind": "ui",
-      "note": "referenced by a literal path in apps/web"
+      "note": "the bank list on QuestionBanks.tsx"
     },
-    "GET /scholarships/programs/:p/questions": {
+    "GET /scholarships/banks/:p": {
       "kind": "ui",
-      "note": "reviewed: components/operator/ScholarshipAdmin.tsx reads the paper back into the Review-questions panel so the operator can check the answer key and remove a wrong question"
-    },
-    "GET /scholarships/sittings/:p": {
-      "kind": "ui",
-      "note": "reviewed: app/(app)/scholarships/sitting/[id]/page.tsx renders the shared CbtExamRoom with basePath=scholarships, so a candidate sits their paper without the PREMIUM CBT module"
+      "note": "opening a bank on QuestionBanks.tsx"
     },
     "GET /scholarships/exams/:p/papers": {
       "kind": "ui",
       "note": "reviewed: the Start-the-exam control in components/scholarship/ScholarshipPortal.tsx lists one button per paper when a scholarship is examined in several subjects"
     },
-    "GET /scholarships/results": {
+    "GET /scholarships/portal": {
       "kind": "ui",
-      "note": "reviewed: app/(app)/scholarships/page.tsx renders components/scholarship/PublishedResults.tsx — the cross-school table of school, position and score that every tenant may read"
+      "note": "referenced by a literal path in apps/web"
     },
     "GET /scholarships/programs": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /scholarships/programs/:p/answer-key.pdf": {
+      "kind": "ui",
+      "note": "the per-subject \"Key\" link on the paper panel in ScholarshipAdmin.tsx"
+    },
+    "GET /scholarships/programs/:p/paper.pdf": {
+      "kind": "ui",
+      "note": "the per-subject \"Print\" link on the paper panel in ScholarshipAdmin.tsx"
+    },
+    "GET /scholarships/programs/:p/questions": {
+      "kind": "ui",
+      "note": "reviewed: components/operator/ScholarshipAdmin.tsx reads the paper back into the Review-questions panel so the operator can check the answer key and remove a wrong question"
+    },
+    "GET /scholarships/programs/:p/school-spread": {
+      "kind": "ui",
+      "note": "the \"Spread by school\" panel on ScholarshipAdmin.tsx"
+    },
+    "GET /scholarships/questions": {
+      "kind": "ui",
+      "note": "the question library panel on ScholarshipAdmin.tsx"
+    },
+    "GET /scholarships/results": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/scholarships/page.tsx renders components/scholarship/PublishedResults.tsx — the cross-school table of school, position and score that every tenant may read"
+    },
     "GET /scholarships/school-applications": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /scholarships/sittings/:p": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/scholarships/sitting/[id]/page.tsx renders the shared CbtExamRoom with basePath=scholarships, so a candidate sits their paper without the PREMIUM CBT module"
+    },
+    "GET /scholarships/subjects": {
+      "kind": "ui",
+      "note": "the subject picker on the Create-a-question-bank card, QuestionBanks.tsx"
     },
     "GET /schools/branding": {
       "kind": "ui",
@@ -1797,6 +1845,14 @@
       "kind": "system",
       "note": "Auth.js session layer (apps/web/lib/auth.ts) — the login PAGE is the surface; this is its plumbing"
     },
+    "POST /billing/addons/:p/cancel": {
+      "kind": "ui",
+      "note": "stop renewing an add-on — the Cancel button beside it on /billing's AddonShop"
+    },
+    "POST /billing/addons/:p/init": {
+      "kind": "ui",
+      "note": "buy one module — the AddonShop button on /billing"
+    },
     "POST /billing/checkout/init": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1828,10 +1884,6 @@
     "POST /cbt/banks": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
-    },
-    "PUT /cbt/banks/:p": {
-      "kind": "ui",
-      "note": "Rename / move on each bank row in CbtStaffPanel.tsx (the path is built from the bank id)"
     },
     "POST /cbt/banks/:p/questions": {
       "kind": "ui",
@@ -2033,6 +2085,10 @@
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/content/:p\")"
     },
+    "POST /content/submissions/:p/grade": {
+      "kind": "ui",
+      "note": "grade an LMS content submission — the GradeRow save in components/lms/ContentDetail.tsx"
+    },
     "POST /discipline/complaints": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2136,6 +2192,10 @@
     "POST /exams/:p/release": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/:p/seat": {
+      "kind": "ui",
+      "note": "seat one sitting from its class — the 'Seat class' button on an unseated row in the /exams planner"
     },
     "POST /exams/:p/seats": {
       "kind": "ui",
@@ -2360,10 +2420,6 @@
     "POST /hr/leave/requests": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
-    },
-    "PUT /hr/leave/types/:p": {
-      "kind": "ui",
-      "note": "Edit / Retire on the leave types list in LeaveAdmin.tsx"
     },
     "POST /hr/leave/types": {
       "kind": "ui",
@@ -2913,9 +2969,57 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /scholarships/applications/decide-bulk": {
+      "kind": "ui",
+      "note": "bulk funnel actions on the selected rows in ScholarshipAdmin.tsx"
+    },
+    "POST /scholarships/banks": {
+      "kind": "ui",
+      "note": "\"Create question bank\" on QuestionBanks.tsx"
+    },
+    "POST /scholarships/banks/:p/reopen": {
+      "kind": "ui",
+      "note": "\"Reopen to edit\" on QuestionBanks.tsx"
+    },
+    "POST /scholarships/banks/:p/save": {
+      "kind": "ui",
+      "note": "\"Save bank\" on QuestionBanks.tsx"
+    },
     "POST /scholarships/exams/:p/start": {
       "kind": "ui",
       "note": "reviewed: the Start-the-exam button in components/scholarship/ScholarshipPortal.tsx creates the sitting and routes to it"
+    },
+    "POST /scholarships/programs": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/programs/:p/announce-exam": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/programs/:p/collect-results": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/programs/:p/publish-results": {
+      "kind": "ui",
+      "note": "reviewed: the Publish-results button in components/operator/ScholarshipAdmin.tsx"
+    },
+    "POST /scholarships/programs/:p/questions/copy": {
+      "kind": "ui",
+      "note": "\"Add to this paper\" on the library panel in ScholarshipAdmin.tsx"
+    },
+    "POST /scholarships/programs/:p/scores": {
+      "kind": "ui",
+      "note": "the physical mark sheet on ScholarshipAdmin.tsx"
+    },
+    "POST /scholarships/programs/:p/unpublish-results": {
+      "kind": "ui",
+      "note": "reviewed: the same button, which reads Withdraw results once published"
+    },
+    "POST /scholarships/questions": {
+      "kind": "ui",
+      "note": "the library's own composer on ScholarshipAdmin.tsx"
     },
     "POST /scholarships/sittings/:p/answer": {
       "kind": "ui",
@@ -2932,98 +3036,6 @@
     "POST /scholarships/sittings/:p/submit": {
       "kind": "ui",
       "note": "reviewed: components/cbt/CbtExamRoom.tsx submits here when basePath is scholarships"
-    },
-    "POST /scholarships/programs/:p/publish-results": {
-      "kind": "ui",
-      "note": "reviewed: the Publish-results button in components/operator/ScholarshipAdmin.tsx"
-    },
-    "POST /scholarships/programs/:p/unpublish-results": {
-      "kind": "ui",
-      "note": "reviewed: the same button, which reads Withdraw results once published"
-    },
-    "POST /scholarships/programs": {
-      "kind": "ui",
-      "note": "referenced by a literal path in apps/web"
-    },
-    "POST /scholarships/programs/:p/announce-exam": {
-      "kind": "ui",
-      "note": "referenced by a literal path in apps/web"
-    },
-    "POST /scholarships/programs/:p/collect-results": {
-      "kind": "ui",
-      "note": "referenced by a literal path in apps/web"
-    },
-    "POST /scholarships/applications/decide-bulk": {
-      "kind": "ui",
-      "note": "bulk funnel actions on the selected rows in ScholarshipAdmin.tsx"
-    },
-    "GET /scholarships/subjects": {
-      "kind": "ui",
-      "note": "the subject picker on the Create-a-question-bank card, QuestionBanks.tsx"
-    },
-    "GET /scholarships/banks": {
-      "kind": "ui",
-      "note": "the bank list on QuestionBanks.tsx"
-    },
-    "GET /scholarships/banks/:p": {
-      "kind": "ui",
-      "note": "opening a bank on QuestionBanks.tsx"
-    },
-    "POST /scholarships/banks": {
-      "kind": "ui",
-      "note": "\"Create question bank\" on QuestionBanks.tsx"
-    },
-    "PUT /scholarships/banks/:p": {
-      "kind": "ui",
-      "note": "\"Rename / move\" on QuestionBanks.tsx"
-    },
-    "POST /scholarships/banks/:p/save": {
-      "kind": "ui",
-      "note": "\"Save bank\" on QuestionBanks.tsx"
-    },
-    "POST /scholarships/banks/:p/reopen": {
-      "kind": "ui",
-      "note": "\"Reopen to edit\" on QuestionBanks.tsx"
-    },
-    "DELETE /scholarships/banks/:p": {
-      "kind": "ui",
-      "note": "the per-bank Delete on QuestionBanks.tsx"
-    },
-    "GET /scholarships/questions": {
-      "kind": "ui",
-      "note": "the question library panel on ScholarshipAdmin.tsx"
-    },
-    "POST /scholarships/questions": {
-      "kind": "ui",
-      "note": "the library's own composer on ScholarshipAdmin.tsx"
-    },
-    "PUT /scholarships/questions/:p": {
-      "kind": "ui",
-      "note": "editing a library question in place on ScholarshipAdmin.tsx"
-    },
-    "DELETE /scholarships/questions/:p": {
-      "kind": "ui",
-      "note": "removing a library question on ScholarshipAdmin.tsx"
-    },
-    "POST /scholarships/programs/:p/questions/copy": {
-      "kind": "ui",
-      "note": "\"Add to this paper\" on the library panel in ScholarshipAdmin.tsx"
-    },
-    "GET /scholarships/programs/:p/answer-key.pdf": {
-      "kind": "ui",
-      "note": "the per-subject \"Key\" link on the paper panel in ScholarshipAdmin.tsx"
-    },
-    "GET /scholarships/programs/:p/paper.pdf": {
-      "kind": "ui",
-      "note": "the per-subject \"Print\" link on the paper panel in ScholarshipAdmin.tsx"
-    },
-    "GET /scholarships/programs/:p/school-spread": {
-      "kind": "ui",
-      "note": "the \"Spread by school\" panel on ScholarshipAdmin.tsx"
-    },
-    "POST /scholarships/programs/:p/scores": {
-      "kind": "ui",
-      "note": "the physical mark sheet on ScholarshipAdmin.tsx"
     },
     "POST /schools/branding/logo": {
       "kind": "ui",
@@ -3321,6 +3333,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "PUT /cbt/banks/:p": {
+      "kind": "ui",
+      "note": "Rename / move on each bank row in CbtStaffPanel.tsx (the path is built from the bank id)"
+    },
     "PUT /cbt/exams/:p/status": {
       "kind": "ui",
       "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
@@ -3389,6 +3405,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "PUT /hr/leave/types/:p": {
+      "kind": "ui",
+      "note": "Edit / Retire on the leave types list in LeaveAdmin.tsx"
+    },
     "PUT /hr/me": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -3424,6 +3444,10 @@
     "PUT /notifications/me/preferences": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/addon-pricing": {
+      "kind": "ui",
+      "note": "operator sets add-on prices — AddonPricingManager on /operator/pricing"
     },
     "PUT /operator/agents/:p/active": {
       "kind": "ui",
@@ -3521,9 +3545,17 @@
       "kind": "ui",
       "note": "reviewed: reached from components/scholarship/ScholarshipPortal.tsx"
     },
+    "PUT /scholarships/banks/:p": {
+      "kind": "ui",
+      "note": "\"Rename / move\" on QuestionBanks.tsx"
+    },
     "PUT /scholarships/programs/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /scholarships/questions/:p": {
+      "kind": "ui",
+      "note": "editing a library question in place on ScholarshipAdmin.tsx"
     },
     "PUT /students/:p/medical": {
       "kind": "ui",
@@ -3576,34 +3608,6 @@
     "PUT /ultimate/consent": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
-    },
-    "GET /billing/addons": {
-      "kind": "ui",
-      "note": "the school's add-on shop on /billing — referenced by a literal path in apps/web"
-    },
-    "POST /billing/addons/:p/init": {
-      "kind": "ui",
-      "note": "buy one module — the AddonShop button on /billing"
-    },
-    "GET /operator/addon-pricing": {
-      "kind": "ui",
-      "note": "operator add-on price table on /operator/pricing"
-    },
-    "PUT /operator/addon-pricing": {
-      "kind": "ui",
-      "note": "operator sets add-on prices — AddonPricingManager on /operator/pricing"
-    },
-    "POST /billing/addons/:p/cancel": {
-      "kind": "ui",
-      "note": "stop renewing an add-on — the Cancel button beside it on /billing's AddonShop"
-    },
-    "POST /exams/:p/seat": {
-      "kind": "ui",
-      "note": "seat one sitting from its class — the 'Seat class' button on an unseated row in the /exams planner"
-    },
-    "POST /content/submissions/:p/grade": {
-      "kind": "ui",
-      "note": "grade an LMS content submission — the GradeRow save in components/lms/ContentDetail.tsx"
     }
   }
 }

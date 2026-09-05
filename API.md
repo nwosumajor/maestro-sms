@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **901 routes across 89 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **902 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -1018,6 +1018,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **901 routes across 89
 
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
+| GET | `/public/report-card/verify/:slug/:code` | 🌐 public | The code is 60 bits, so the limit is not what makes guessing hopeless — it bounds noise and keeps one scanner from becoming a load source. |
 | POST | `/reportcards/:studentId/generate` | 🔑 `grade.read` · 📦 `gradebook` | Generate a report-card PDF (grades + attendance, **school logo embedded**); `?termId=` folds in that term's remarks |
 | GET | `/reportcards/:studentId/remarks` | 🔑 `grade.read` · 📦 `gradebook` | Read a student's remarks for a term (report-card scope). |
 | PUT | `/reportcards/:studentId/remarks/class-teacher` | 🔑 `grade.write` · 📦 `gradebook` | Class teacher (or staff) writes the class-teacher remark |

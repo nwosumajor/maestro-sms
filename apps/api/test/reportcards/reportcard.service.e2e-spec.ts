@@ -26,6 +26,7 @@ import { TermResultService } from "../../src/gradebook/term-result.service";
 import { DocumentsService } from "../../src/documents/documents.service";
 import { NotificationService } from "../../src/notifications/notification.service";
 import { BrandingService } from "../../src/branding/branding.service";
+import { ReportCardAttestationService } from "../../src/reportcards/report-card-attestation.service";
 import { StubStorageProvider } from "../../src/documents/storage.provider";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
@@ -120,7 +121,8 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     const hooks = { onFinalized: jest.fn() } as never;
     const region = { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never;
     const termResults = new TermResultService(tenant, audit, workflow, hooks, region);
-    reportCards = new ReportCardService(tenant, audit, branding, documents, remarks, termResults, region);
+    const attestations = new ReportCardAttestationService(tenant, audit);
+    reportCards = new ReportCardService(tenant, audit, branding, attestations, documents, remarks, termResults, region);
   });
 
   afterAll(async () => {

@@ -47,6 +47,7 @@ function makeTx(notificationCount: number) {
       // them. See every-student-table-is-accounted-for.spec.ts.
       reportCardRemark: { findMany: jest.fn().mockResolvedValue([]) },
       studentTraitRating: { findMany: jest.fn().mockResolvedValue([]) },
+      reportCardAttestation: { findMany: jest.fn().mockResolvedValue([]) },
       subjectSelection: { findMany: jest.fn().mockResolvedValue([]) },
       parentChild: { findMany: jest.fn().mockResolvedValue([]) },
       studentCreditEntry: { findMany: jest.fn().mockResolvedValue([]) },

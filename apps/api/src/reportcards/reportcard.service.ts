@@ -36,6 +36,9 @@ import type { GradeBand } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import type { TermSubjectRowDto } from "@sms/types";
 import { createPdfDocument } from "../common/pdf-document";
+import { publicWebUrl } from "../common/public-url";
+import { drawQrCode } from "../certificate/qr";
+import { ReportCardAttestationService, formatAttestationCode } from "./report-card-attestation.service";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
@@ -89,6 +92,18 @@ type ReportCardData = {
       components: ReadonlyArray<{ key: string; label: string; max: number }>;
       /** Every term's marks added together — the printed format's cumulative score. */
       cumulativeScore: number;
+      /** WHAT THE CARD CARRIES INSTEAD OF A SIGNATURE — a named approver, the
+       *  date, and a code the holder can check. Null when nobody has signed:
+       *  no head remark means no attestation, and a block claiming one would be
+       *  the very thing this is here to prevent. */
+      attestation: {
+        code: string;
+        version: number;
+        approvedByName: string;
+        approvedByRole: string;
+        approvedAt: Date;
+        verifyUrl: string;
+      } | null;
 };
 
 /** The pdfkit document `createPdfDocument` hands back, whose text is folded
@@ -103,6 +118,7 @@ export class ReportCardService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly branding: BrandingService,
+    private readonly attestations: ReportCardAttestationService,
     private readonly documents: DocumentsService,
     private readonly remarks: ReportCardRemarkService,
     private readonly termResults: TermResultService,
@@ -185,7 +201,7 @@ export class ReportCardService {
       await this.assertCanAccess(tx, p, studentId);
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { name: true } });
       if (!student) throw new NotFoundException("Student not found");
-      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true, slug: true } });
       const profile = await tx.studentProfile.findFirst({
         where: { studentId },
         select: { admissionNumber: true, gender: true },
@@ -513,7 +529,23 @@ export class ReportCardService {
         }
       }
 
+      // ISSUED IN THE SAME TRANSACTION that assembled the card, so the code
+      // printed on the page and the row it resolves to cannot disagree.
+      const issued = term
+        ? await this.attestations.issueInTx(tx, {
+            schoolId: p.schoolId,
+            studentId,
+            termId: term.id,
+            termAverage,
+            termGrade,
+            subjects: subjectRows.map((r) => ({ subject: r.subjectName, total: r.total ?? null, grade: r.grade ?? null })),
+          })
+        : null;
+
       return {
+        attestation: issued
+          ? { ...issued, verifyUrl: `${publicWebUrl()}/verify/card/${school?.slug ?? ""}/${issued.code}` }
+          : null,
         promotionLine,
         annualTermNames,
         annualBySubject: Object.fromEntries(annualBySubject),
@@ -1064,6 +1096,47 @@ export class ReportCardService {
         rule(stampX, 225);
         doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#666")
           .text("Signature, school stamp and date", stampX);
+      }
+
+      // =======================================================================
+      // THE ATTESTATION — what this card carries INSTEAD of a signature
+      // =======================================================================
+      // The block above is signed by hand after printing, which leaves the VAULT
+      // copy a guardian downloads with a permanently blank line. This block is
+      // the digital half: a named approver, the date they signed, and a code
+      // whoever is handed the card can check for themselves.
+      //
+      // Printed only when somebody has actually signed. A card with no head
+      // remark carries no attestation, because a block asserting an approval
+      // that did not happen is the exact failure this exists to prevent.
+      if (d.attestation) {
+        const a = d.attestation;
+        doc.moveDown(1.2);
+        const boxTop = doc.y;
+        const boxH = 74;
+        doc.save().rect(startX, boxTop, 545 - startX, boxH).fillOpacity(0.04).fill("#000").restore();
+        doc.rect(startX, boxTop, 545 - startX, boxH).strokeColor("#bbb").lineWidth(0.5).stroke().strokeColor("#000");
+
+        const qrSize = 54;
+        const qrX = 545 - qrSize - 10;
+        drawQrCode(doc, a.verifyUrl, qrX, boxTop + 10, qrSize);
+
+        const textX = startX + 10;
+        const textW = qrX - textX - 14;
+        doc.fontSize(8).font("Helvetica-Bold").fillColor("#333")
+          .text("VERIFIED SCHOOL RECORD", textX, boxTop + 9, { width: textW });
+        doc.fontSize(9).font("Helvetica").fillColor("#000")
+          .text(`Approved by ${a.approvedByName} (${a.approvedByRole}) on ${a.approvedAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.`,
+            textX, doc.y + 1, { width: textW });
+        doc.fontSize(8).fillColor("#555")
+          .text(`Check this card at ${a.verifyUrl.replace(/^https?:\/\//, "")}`, textX, doc.y + 2, { width: textW });
+        // The version is printed because it is the one thing a holder cannot
+        // otherwise know: a card reissued after a correction leaves earlier
+        // printouts looking identical and no longer current.
+        doc.fontSize(8).font("Helvetica-Bold").fillColor("#333")
+          .text(`Code ${formatAttestationCode(a.code)}    Issue ${a.version}`, textX, doc.y + 3, { width: textW });
+        doc.fillColor("#000").fontSize(10);
+        doc.y = boxTop + boxH;
         doc.fillColor("#000");
       }
 

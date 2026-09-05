@@ -150,6 +150,7 @@ model School {
   // Gradebook
   grades                  Grade[]
   reportCardRemarks       ReportCardRemark[]
+  reportCardAttestations  ReportCardAttestation[]
   studentTraitRatings     StudentTraitRating[]
   platformSettlementReleases PlatformSettlementRelease[]
   subjectResults          SubjectResult[]

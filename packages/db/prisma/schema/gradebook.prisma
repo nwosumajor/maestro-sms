@@ -140,6 +140,12 @@ model ReportCardRemark {
   classTeacherId     String? @db.Uuid
   headRemark         String?
   headId             String? @db.Uuid
+  /// WHEN THE HEAD SIGNED. `updatedAt` cannot answer this — a class teacher
+  /// editing their own remark moves it — and the attestation printed on the card
+  /// says "Approved by X on <date>", which is worth nothing if the date is
+  /// whenever the row last happened to change. Null on rows written before this
+  /// column existed; the attestation falls back to `updatedAt` and says so.
+  headRemarkAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -191,4 +197,69 @@ model StudentTraitRating {
   @@index([schoolId])
   @@index([schoolId, termId])
   @@map("student_trait_rating")
+}
+
+/// THE ATTESTATION A REPORT CARD CARRIES INSTEAD OF A SIGNATURE.
+///
+/// This platform captures no signature — no image, no certificate. A printed
+/// card has a ruled line signed by hand, and the VAULT copy a guardian
+/// downloads carried that line permanently blank, so the digital card was the
+/// one nobody had signed.
+///
+/// A stored signature IMAGE would not fix that: it is a forgeable credential, a
+/// signature stamp left in an unlocked drawer, and it proves nothing an
+/// attestation does not. What the school has already done is stronger — a named
+/// person wrote the head's remark, and every mark passed a two-person
+/// GRADE_PUBLISH chain recorded in the immutable WorkflowAuditLog. This table
+/// makes that checkable by whoever is handed the card.
+///
+/// ONE ROW PER PUPIL PER TERM, so the code on a card is stable. Reissued rather
+/// than duplicated when the card's content changes: `version` increments and
+/// `contentHash` moves, so somebody holding an older printout sees that theirs
+/// has been superseded instead of silently believing a stale page.
+model ReportCardAttestation {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// DB FK to user; no Prisma relation (lean User model).
+  studentId String @db.Uuid
+  termId    String @db.Uuid
+
+  /// The short code printed on the card and typed by anyone verifying it by
+  /// hand. Unguessable (60 bits), and scoped to the school because the URL
+  /// carries the slug — so the lookup runs under RLS rather than across tenants.
+  code String
+
+  /// WHO SIGNED, snapshotted. The name and role are copied rather than joined:
+  /// an attestation must still read correctly after the person leaves or their
+  /// roles change, and a signature that rewrites itself is not a signature.
+  approvedById   String   @db.Uuid
+  approvedByName String
+  approvedByRole String
+  approvedAt     DateTime
+
+  /// WHAT WAS SIGNED, snapshotted, so verification can catch a doctored card. A
+  /// verifier holding the card learns nothing new from these — which is the
+  /// argument for returning them at all.
+  termAverage Float?
+  termGrade   String?
+  /// [{ subject, total, grade }] as issued.
+  subjects    Json
+
+  /// sha256 over the canonical form of everything above. What decides whether a
+  /// regenerated card is the same document or a new version of it.
+  contentHash String
+  version     Int      @default(1)
+  issuedAt    DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  term   Term   @relation(fields: [termId], references: [id])
+
+  @@unique([studentId, termId])
+  @@unique([schoolId, code])
+  @@index([schoolId])
+  @@map("report_card_attestation")
 }

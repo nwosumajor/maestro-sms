@@ -1626,6 +1626,42 @@ side-effect-free lookup. `member.scan` is a NEW permission: run the seed against
 DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
 (`role-permissions.service`, static `@sms/types` map is only the fallback).
 
+## Report-card ATTESTATION + public verification QR — BUILT
+(`apps/api/src/reportcards/report-card-attestation.*`, `public-attestation.controller.ts`,
+`report_card_attestation`, migration `20270115000000`, rls/112, web
+`/verify/card/[slug]/[code]`.) **This platform captures no signature** — no
+image, no certificate, nothing in `SchoolBranding` but a logo and three brand
+numbers. A printed card has a ruled line signed by hand, and the VAULT copy a
+guardian downloads carried it permanently blank: the digital card was the one
+nobody had signed. A stored signature IMAGE was rejected deliberately — it is a
+forgeable credential, a signature stamp in an unlocked drawer, and proves
+nothing an attestation does not.
+The card now carries a named approver (from `report_card_remark.headId`, with
+`headRemarkAt` added so the date is when the head SIGNED and not whenever the
+row last changed), the date, a 12-character code and a QR. Printed ONLY when
+somebody has signed: no head remark, no block — a block asserting an approval
+that did not happen is the failure this exists to prevent.
+// GOTCHA: **the public route takes NO cross-tenant read.** The URL carries the
+school's SLUG, so the school is resolved from the RLS-exempt registry first and
+the lookup then runs under that school's GUC — an unauthenticated verifier is
+confined by exactly the policy a member of staff is. A privileged client on an
+internet-facing route would have given a public endpoint more reach than the app
+role has (Golden Rule #4). ONE 404 for unknown school, unknown code and
+right-code-wrong-school alike.
+// GOTCHA: `contentHash` is what decides a new ISSUE, and it must be stable
+under things that are not the document — it sorts subjects, because query order
+is not part of a card, or every reprint would tell every holder theirs was
+superseded. It DOES move on a changed grade at an unchanged total, because a
+scale change re-letters a mark and that is a different document to anyone
+reading the letter. Live: reprint unchanged -> Issue 1; one mark moved -> Issue 2.
+// The verification page shows the MARKS on purpose: catching a doctored card
+needs a comparison a human can make, a digest cannot be recomputed by eye, and
+the reader already holds the card. Rate-limited, audited to `SYSTEM_ACTOR_ID`
+(the caller is unauthenticated by design; inventing an identity would make the
+trail say something untrue), and exported in the NDPR bundle as
+`cardAttestations` — a named person's approval of a named child's marks is held
+about that child.
+
 ## Grade reports — term-weighted + session-weighted (consistency pass, BUILT)
 Both weightings share the pure grading policy in `@sms/types/grading`
 (GRADE_COMPONENTS exam60/mid20/assn10/note10 = 100; `computeTermSubjectGrade`,
