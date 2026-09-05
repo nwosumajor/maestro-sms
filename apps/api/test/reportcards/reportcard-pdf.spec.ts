@@ -139,6 +139,15 @@ function render(overrides: Partial<typeof BASE> = {}): Promise<Buffer> {
 }
 
 describe("the printed report card", () => {
+  it("calls the document what this product calls it", async () => {
+    // The gridded layout was taken from a real school's Continuous Assessment
+    // Report, and its letterhead wording came along with it — renaming every
+    // other school's card to something they do not call it.
+    const t = textOf(await render());
+    expect(t).toContain("Report Card");
+    expect(t).not.toContain("Continuous Assessment Report");
+  });
+
   it("prints the pupil, class and term", async () => {
     const t = textOf(await render());
     expect(t).toContain("Ada Obi");

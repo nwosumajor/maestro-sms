@@ -788,8 +788,11 @@ export class ReportCardService {
       doc.font("Helvetica-Bold").fontSize(15).fillColor(INK)
         .text(d.schoolName || "Report Card", L + 46, y + 2, { width: headW - 46, align: "center" });
       const sub = [d.termName, d.sessionName].filter(Boolean).join(" · ");
+      // What this product calls the document. The reference's own letterhead says
+      // "Continuous Assessment Report" because that is what THAT school calls it;
+      // copying the words along with the layout renamed everyone else's card.
       doc.font("Helvetica").fontSize(7.5).fillColor("#444")
-        .text("Continuous Assessment Report", L + 46, y + 21, { width: headW - 46, align: "center" });
+        .text("Report Card", L + 46, y + 21, { width: headW - 46, align: "center" });
       doc.fontSize(7).text(sub, L + 46, y + 31, { width: headW - 46, align: "center" });
       doc.fillColor(INK);
 
