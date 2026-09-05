@@ -14,7 +14,7 @@
 // =============================================================================
 
 import zlib from "node:zlib";
-import { GRADE_SCALES, TRAIT_GROUPS } from "@sms/types";
+import { GRADE_COMPONENTS, GRADE_SCALES, TRAIT_GROUPS } from "@sms/types";
 import { ReportCardService } from "../../src/reportcards/reportcard.service";
 
 /**
@@ -90,6 +90,9 @@ const BASE = {
   guardianNames: [] as string[],
   gender: "Female" as string | null,
   bands: GRADE_SCALES.WAEC.bands,
+  // The school's own weighting, exactly as every real card carries it. A fixture
+  // without it models a card the service cannot produce.
+  components: GRADE_COMPONENTS as ReadonlyArray<{ key: string; label: string; max: number }>,
   cumulativeScore: 0,
   termBegins: new Date("2026-09-14T00:00:00Z"),
   termEnds: new Date("2026-12-12T00:00:00Z"),

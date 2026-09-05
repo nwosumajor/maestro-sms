@@ -82,6 +82,11 @@ type ReportCardData = {
       promotionLine: string | null;
       /** The school's own grade scale — what the key at the foot of the card states. */
       bands: readonly GradeBand[];
+      /** The school's own WEIGHTING — what each column is out of, and the note at
+       *  the foot. Carried for exactly the reason `bands` is: both are fields of
+       *  the SAME policy object, the card already computed with this one, and it
+       *  printed the platform's default instead. */
+      components: ReadonlyArray<{ key: string; label: string; max: number }>;
       /** Every term's marks added together — the printed format's cumulative score. */
       cumulativeScore: number;
 };
@@ -514,6 +519,7 @@ export class ReportCardService {
         annualBySubject: Object.fromEntries(annualBySubject),
         annualPosition: Object.fromEntries(annualPosition),
         bands,
+        components: grading?.components ?? GRADE_COMPONENTS,
         // THE CUMULATIVE SCORE — every term's marks added together, which is the
         // figure the printed format sets beside the cumulative position. The
         // card already showed a cumulative AVERAGE; a school that reads the
@@ -700,9 +706,14 @@ export class ReportCardService {
       // sentence at the foot. A mark means nothing without its denominator, and
       // a parent reading "37" under Exam should not have to find a note three
       // inches below to learn it was out of 60.
-      const caMax = GRADE_COMPONENTS.filter((c) => c.key !== "exam").reduce((n, c) => n + c.max, 0);
+      // THE SCHOOL'S OWN DENOMINATORS, not the platform's. The sentence above is
+      // the whole argument and it was applied to the platform default: a school
+      // weighting the exam at 45 marked a pupil's FULL exam score under a header
+      // saying the maximum was 60, so full marks read as 75%.
+      const examMax = d.components.find((c) => c.key === "exam")?.max ?? gradeComponentMax("exam");
+      const caMax = d.components.filter((c) => c.key !== "exam").reduce((n, c) => n + c.max, 0);
       doc.fillColor("#666");
-      drawRow(["Maximum mark", String(caMax), String(gradeComponentMax("exam")), "100", "", "", "", "", ""], false);
+      drawRow(["Maximum mark", String(caMax), String(examMax), "100", "", "", "", "", ""], false);
       doc.fillColor("#000");
       if (d.subjects.length === 0) {
         doc.fontSize(10).fillColor("#888").text("No published grades for this term yet.", startX).fillColor("#000");
@@ -1016,8 +1027,12 @@ export class ReportCardService {
           .fillColor("#000");
       }
 
+      // A LITERAL HERE IS A FACTUAL CLAIM ABOUT HOW THE MARK WAS ARRIVED AT, and
+      // it was false for every school not on the platform's own 60/20/10/10.
+      const weighting = d.components.map((c) => `${c.label} ${c.max}`).join(" · ");
+      const weightingTotal = d.components.reduce((n, c) => n + c.max, 0);
       doc.font("Helvetica").fontSize(8).fillColor("#999").moveDown(1)
-        .text("Term weighting: Exam 60 · Midterm 20 · Assignment 10 · Class note 10 = 100.", startX);
+        .text(`Term weighting: ${weighting} = ${weightingTotal}.`, startX);
   }
 
   /**
