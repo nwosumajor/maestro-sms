@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and fifty-six write-ups, newest first. Each records a **real defect
+Two hundred and fifty-seven write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [A whole academic year, driven term by term, and the four traps were all mine](#a-whole-academic-year-driven-term-by-term-and-the-four-traps-were-all-mine)
 - [A row that did not add up, and a page that read as prose](#a-row-that-did-not-add-up-and-a-page-that-read-as-prose)
 - [A card nobody had signed, and the image that would not have fixed it](#a-card-nobody-had-signed-and-the-image-that-would-not-have-fixed-it)
 - [Ten grading systems, one set of marks, and a card describing itself wrongly](#ten-grading-systems-one-set-of-marks-and-a-card-describing-itself-wrongly)
@@ -287,6 +288,58 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### A whole academic year, driven term by term, and the four traps were all mine
+Asked for: a FULL SESSION — assessment, CBT exams, grading and a report card for
+each of three terms. One school, 40 pupils, 9 subjects; only the roll, the
+offerings, the register and the OTHER 39 pupils' marks bulk-loaded, so every
+class average, low/high and position is a real figure. The focus pupil's year was
+driven entirely over the API.
+**THE CHAIN IS SOUND END TO END, AND THE CROSS-TERM PROPERTIES ARE THE POINT:**
+```
+card    register  term avg   position   annual cols        cumulative scope
+term 1  42 days   60.56 (B)  33 of 40   none               1 of 3 terms recorded
+term 2  46 days   69.89 (B)   4 of 40   First Term         2 of 3 terms recorded
+term 3  50 days   78.33 (A)   1 of 40   First + Second     all 3 terms
+```
+Each card carries its OWN term's register, its own rank recomputed against
+classmates, and a DISTINCT attestation code. The annual half of the marks table
+grows a column per elapsed term and never repeats the current one. Per term: 9
+subjects assessed, a 10-question CBT paper published through maker-checker, 10
+candidates sitting it themselves, 9 subjects published head -> principal.
+**NO PRODUCT DEFECT WAS FOUND, AND SAYING SO PLAINLY IS THE RESULT.** Four things
+looked like defects and were not:
+```
+every /cbt route 404      the MODULE GATE. No school_subscription row -> the
+                          fail-closed STANDARD floor, and CBT is PREMIUM. The
+                          documented default working, not a fault.
+sitting answer/submit 404 MINE: the start response keys it `sittingId`, not
+                          `id`, so I was posting to /cbt/sittings/undefined/
+6 sittings in term 1,     MINE: POST /auth/login is rate limited to 10/min per
+none afterwards           IP and I signed the cohort in again every term. The
+                          guard doing its job; the cohort signs in once now.
+CBT grades un-published    CORRECT, AND ALREADY SURFACED. Writing a mark onto a
+the subject                PUBLISHED row reverts it to DRAFT by design, and
+                           `record-grades` returns `revertedFromPublished`.
+```
+// **THE ORDERING RULE THAT FALLS OUT OF THE LAST ONE**: record CBT grades BEFORE
+publishing the term, never after. Doing it the other way round takes the subject
+the exam was for off every family's card until it goes back through the two-person
+chain. It is not silent — `CbtStaffPanel` and `LmsGradebook` both say "now back in
+draft and off report cards until re-approved" — but the ORDER is what an operator
+needs to know, and it belongs in the runbook rather than only in a response body.
+// AND THE CBT SCORE VISIBLY REACHED THE CARD: Mathematics printed exam 36 in all
+three terms against 43/45/49 for the hand-entered subjects, because 6 of 10 scaled
+to the school's own /60 is 36. `record-grades` reported `examMax: 60`, which is
+the SCHOOL's exam component and not the platform's — the scaling reads the policy.
+// The candidate's own view withholds the key: a started sitting serialises
+`answerIndex: null` on every question. Verified rather than assumed.
+// GOTCHA, MINE: `generate_series(1,9) i` inside a PL/pgSQL block that DECLAREs
+`i` is "column reference i is ambiguous" — a fixture error that reads like a
+schema error.
+**PROBE:** one school, 44 users, 3 terms, 1,053 background marks, 138 register
+days, 3 CBT papers and their sittings, 27 workflow requests; all removed, every
+table back to baseline.
 
 ### A row that did not add up, and a page that read as prose
 Two findings from re-running the ten-school grading simulation, which is what a

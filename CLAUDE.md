@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **256 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **257 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **256 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **257 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1650,6 +1650,21 @@ school's "Second Term" fits and a four-quarter school's ellipsize visibly.
 total is a sum of CLAMPED components and printing the raw ones gave a row that
 did not add up. All THREE printers use it — card, term scoresheet, session
 report. It preserves null, so "not marked" stays distinct from "scored zero".
+
+## CBT grades and the publish order — an operational rule
+**Record CBT grades BEFORE publishing the term, never after.** Writing a mark
+onto a PUBLISHED `subject_result` reverts it to DRAFT by design (the change must
+go back through the two-person chain), so `POST /cbt/exams/:id/record-grades`
+run after a publish takes that subject off every family's card until it is
+re-approved. Not silent — the response carries `revertedFromPublished` and both
+`CbtStaffPanel` and `LmsGradebook` say "now back in draft and off report cards
+until re-approved" — but the ORDER is the thing an operator needs.
+// The CBT score is scaled to the SCHOOL's exam component, not the platform's
+(`record-grades` reports `examMax`), and it REPLACES a hand-entered exam mark.
+// GOTCHA for anyone driving it: the start response keys the sitting
+`sittingId`, not `id`; a candidate's view serialises `answerIndex: null`; and
+publishing an exam is SINGLE-stage `CBT_EXAM_PUBLISH` (one workflow.review
+holder who is not the requester), not the head→principal gradesheet chain.
 
 ## Report-card ATTESTATION + public verification QR — BUILT
 (`apps/api/src/reportcards/report-card-attestation.*`, `public-attestation.controller.ts`,
