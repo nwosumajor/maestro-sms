@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **257 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **258 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **257 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **258 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1650,6 +1650,23 @@ school's "Second Term" fits and a four-quarter school's ellipsize visibly.
 total is a sum of CLAMPED components and printing the raw ones gave a row that
 did not add up. All THREE printers use it — card, term scoresheet, session
 report. It preserves null, so "not marked" stays distinct from "scored zero".
+
+## Promotion: a pupil returning to a class is not "already there"
+`@@unique([classId, studentId])` means ONE enrolment row per pupil per class,
+whose status is the latest state — so a pupil sent back to a class they have
+been in before must have that row REACTIVATED, never skipped and never
+duplicated. `enrollInto` skipped anyone holding any row for the destination,
+which is right for an ACTIVE one and wrong for a CLOSED one — and a closed one
+is the normal shape of a DEMOTION, because demoting means sending a pupil back
+to the class they came from. Measured over five simulated years: the pupil ended
+with no ACTIVE enrolment anywhere, off every register and out of the seat count,
+and the roll read 119 of 120 with nothing saying where the other went. A
+reactivation also takes a place, so it counts against the destination's
+capacity.
+// GOTCHA: the same method returns students LANDED, not rows written. That is
+right — someone already ACTIVE there still ends the batch in it — but it was
+true of everyone only once the reactivation existed; before that the count said
+a demoted pupil had landed somewhere they had not.
 
 ## CBT grades and the publish order — an operational rule
 **Record CBT grades BEFORE publishing the term, never after.** Writing a mark

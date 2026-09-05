@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and fifty-seven write-ups, newest first. Each records a **real defect
+Two hundred and fifty-eight write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Five years, four promotions, and a pupil who fell off the roll](#five-years-four-promotions-and-a-pupil-who-fell-off-the-roll)
 - [A whole academic year, driven term by term, and the four traps were all mine](#a-whole-academic-year-driven-term-by-term-and-the-four-traps-were-all-mine)
 - [A row that did not add up, and a page that read as prose](#a-row-that-did-not-add-up-and-a-page-that-read-as-prose)
 - [A card nobody had signed, and the image that would not have fixed it](#a-card-nobody-had-signed-and-the-image-that-would-not-have-fixed-it)
@@ -288,6 +289,77 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Five years, four promotions, and a pupil who fell off the roll
+Asked for: a five-year, multi-session simulation with promotions. One school,
+five sessions, fifteen terms, six classes, a cohort of 120 entering JSS 1 and
+promoted through to SS 2. 16,146 marks and 71,760 attendance records bulk-loaded
+PER SESSION — after that year's promotion had moved the cohort, because a mark
+belongs to the class the pupil was in at the time. The promotions, the pointers
+and the cards were driven over the API.
+**THE DEFECT ONLY EXISTS ONCE A PUPIL HAS BEEN IN A CLASS, LEFT IT, AND COME
+BACK — which is what a DEMOTION is.** `PromotionService.enrollInto` skipped
+anyone holding ANY enrolment row for the destination, whatever its status, to
+stay idempotent on a re-approval. Right for an ACTIVE row. Wrong for a closed
+one, and a closed one is the normal shape of a demotion: you demote a pupil back
+into the class they came from.
+```
+LC Pupil 004 after being demoted from JSS 3 into the JSS 2 they left a year before
+  JSS 1 A  PROMOTED
+  JSS 2 A  PROMOTED     <- the row that made the service think they were "already there"
+  JSS 3 A  DEMOTED
+  ACTIVE   none
+```
+Off every register, out of every class list, no class for a report card, and
+uncounted in the billing seats. **The roll read 119 of 120 and nothing said where
+the other one went.** The way back up has the same shape — re-promoting a pupil
+into the class they were demoted out of.
+// `@@unique([classId, studentId])` is one row per pupil per class, so the closed
+row is REACTIVATED, never duplicated. The history of the move lives on the
+promotion batch, which is what records it.
+// **SECOND DEFECT IN THE SAME METHOD, AND THE REASON THE FIRST WAS INVISIBLE:**
+`return studentIds.length` reports students LANDED rather than rows written, so
+the count said a demoted pupil had landed somewhere they were not. The comment
+argued for it ("someone already enrolled in the destination still ends the batch
+in it") and was true only of the case it was written for.
+// A REACTIVATION TAKES A PLACE. Counting only the inserts would let a demotion
+overfill exactly the class the capacity guard exists to protect.
+// THE STUB IS WHY 17 GREEN TESTS HAD NOTHING TO SAY: it returned enrolment rows
+with no `status` while the service selects it, so every row read as ACTIVE. It
+also lacked `$executeRaw`, so the capacity path failed as a TypeError rather than
+a ConflictException. A double must model the CONTRACT, not the signature.
+**WHAT FIVE YEARS PROVED SOUND, and this is the half worth not re-chasing:**
+```
+promotion is maker-checker     stage 201, SELF-APPROVE 403, approve 201, x4 years
+RETAIN                         two pupils held in JSS 2 and never swept up by a
+                               later batch, because those moved a class they
+                               were no longer in
+the card is SESSION-scoped     year 5 prints First Term / Second Term / Annual
+                               avg for 2026/2027 ALONE — two annual columns, not
+                               fifteen terms of history
+cumulative scope               "all 3 terms" every year, never "all 15"
+position                       1 of 117 — ranked against the class as it is NOW
+promotion line                 where: { termId, status: APPROVED }, so a Year 2
+                               card cannot print Year 5's decision
+one attestation per term       five distinct codes across the five cards
+```
+**NOTHING IS O(LIFETIME) HERE.** Identical work, measured year on year as the
+school's history grew from one session to five:
+```
+report card       636 -> 417 -> 426 -> 393 -> 387 ms
+session report    165 -> 155 -> 182 -> 155 -> 159 ms
+```
+Flat. The first is a cold cache. This is the shape CLAUDE.md warns degrades
+invisibly, and on these two paths it does not.
+// GOTCHA: **psql does NOT interpolate `:variables` inside a dollar-quoted
+`DO $$ ... $$` block.** They stay literal and the block dies on "syntax error at
+or near :". The driver substitutes before sending now.
+// GOTCHA: `INSERT ... RETURNING id INTO scalar` fails with "query returned more
+than one row" the moment a RETAIN or a DEMOTE splits the cohort across classes —
+a fixture that worked for four years and broke in year three of the second run.
+**PROBE:** one school, 124 users, 5 sessions, 15 terms, 6 classes, 16,146 marks,
+71,760 attendance records, 4 promotion batches; all removed, every table back to
+baseline.
 
 ### A whole academic year, driven term by term, and the four traps were all mine
 Asked for: a FULL SESSION — assessment, CBT exams, grading and a report card for
