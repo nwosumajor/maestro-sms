@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [A report card filed to the family before the marks were published](#a-report-card-filed-to-the-family-before-the-marks-were-published)
 - [A question box that could not wrap, at any width](#a-question-box-that-could-not-wrap-at-any-width)
 - [Ninety schools, every module written to, and a guide that sold one tier in one currency](#ninety-schools-every-module-written-to-and-a-guide-that-sold-one-tier-in-one-currency)
 - [Seventy schools, four tiers, both payment rails — and a bill in the wrong money](#seventy-schools-four-tiers-both-payment-rails--and-a-bill-in-the-wrong-money)
@@ -282,6 +283,115 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### A report card filed to the family before the marks were published
+Asked for: 100 schools of 700 pupils, assessment -> CBT -> behavioural traits ->
+report card -> grading, to prove the grading flow accurate, efficient,
+consistent and controllable. **Only the VOLUME was bulk-loaded** — 100 schools,
+70,000 pupils, 630,000 marks, 420,000 trait scores in 50 s; the grading CHAIN
+itself was driven over the real API. Stating the split is the point: the
+conclusions rest on it.
+**THE FIRST DEFECT DEFEATS THE PUBLISH GATE FOR THE ONE DOCUMENT IT PROTECTS.**
+`generate` renders a card with the CALLER's scope, and the rule beside it is
+explicit — *"student→self, parent→children PUBLISHED-only, staff-of-class all"*.
+So a member of staff printing before publication correctly sees DRAFT marks. That
+exact buffer was then filed into the pupil's Document Vault, where `uploadBytes`
+**NOTIFIES THE GUARDIANS**. Measured on a real pupil:
+```
+unpublished for that pupil/term   Chemistry 83 · Civic Education 49 · Economics 60 · English 78
+the STORED vault card contained   Chemistry, Civic Education, Economics, English  — and 83, 49, 60, 78
+```
+GRADE_PUBLISH is a two-person gate whose entire purpose is that a mark does not
+reach a family until it is approved. The card walked round it **not by reading
+but by DELIVERING**.
+// THE RESTRICTIVE OPTION (Golden Rule #7): the caller still gets their own full
+PDF; nothing is filed while any of the term's marks are unpublished. That matches
+the real workflow — a school issues cards after publishing — and it cannot leak.
+Driven both ways: 7 unpublished -> `X-Report-Card-Filed: no`, vault 5 -> 5;
+0 unpublished -> `yes`, vault 5 -> 6.
+// **THE FULLER ANSWER IS NAMED AND DELIBERATELY NOT BUILT**: render the vault
+copy a SECOND time under a forced published-only scope, so the family gets a
+correct partial card immediately. That needs `getStudentSessionReport` to take an
+explicit tightening flag, which is a signature change across two services —
+named in the comment rather than half-built.
+// AND THE BFF DROPPED THE FLAG, for the third time in this file after
+`Content-Disposition` and `Retry-After`: the proxy rebuilds the header set, so
+`X-Report-Card-Filed` never reached the browser and a withheld card looked
+identical to a filed one. Added to the forwarded list.
+**THE SECOND DEFECT: THE BROADSHEET AND THE CARD DISAGREED ABOUT ONE PUPIL.**
+The broadsheet built its COLUMNS from `class_subject_teacher` and computed each
+pupil's `average` — and ranked `position` on it — over those cells alone. The
+report card reads `{ classId, termId, PUBLISHED }` with no offerings filter. So a
+mark for a subject the class does not offer was not merely missing a column: it
+was excluded from the average, and **every other pupil's position moved**.
+// THAT IS THE DEFECT THE ROWS OF THE SAME QUERY WERE FIXED FOR, argued there in
+full — *"dropping a pupil who placed third silently promotes everyone below them
+— a class position is printed on a report card."* The columns kept it.
+// REACHABLE TWO WAYS, both driven:
+```
+remove an offering that has marks   allowed, NO guard. A class with 70 published
+                                    Mathematics marks -> 0 columns, every average
+                                    and every position null, 70 rows still there
+record a mark with no offering      canGradeClassSubject returns TRUE immediately
+                                    for a school-wide caller without consulting them
+```
+// THE UNION IS THE ANSWER, the same one the rows reached. After, on the same
+class with the offering still removed: 9 subjects, average **64.89**, position 34
+of 70 — and 64.89 is exactly what the database holds.
+**WHAT THE CHAIN DID CORRECTLY, driven end to end and worth not re-chasing:**
+```
+roster              70 pupils with their current marks, 33 ms
+a mark entered      55+18+9+8 -> total 90, grade A — totalled and BANDED by the
+                    system, never by the caller
+exam=61 (max 60)    400 "Exam must be between 0 and 60" — refused, not clamped
+publish requested   201 {"pendingApproval":true,"submitted":70} and ZERO rows published
+the requester       403 "You cannot review your own request"
+head teacher +
+principal approve   70 rows published at once
+trait score 9 on
+a 1-5 scale         400, refused before storage
+```
+// **THE UNDECIDABLE-CHAIN GUARD REFUSED ME TWICE, AND WAS RIGHT BOTH TIMES.**
+First: no head teacher at the school — *"The 'Head teacher' stage has to be
+approved, and nobody at this school currently holds…"*. Then, with one added:
+*"The 'Principal (final)' stage has to be approved by a different person"*,
+because the principal had raised it. Refusing AT CREATE rather than leaving a
+dead-end request is exactly what `assertChainCanBeDecided` is for. **A staffed
+publish chain needs THREE distinct people** when the initiator also holds a stage
+permission — my fixture, not the product, was wrong.
+**EFFICIENCY at 100 schools / 70,000 pupils / 630,000 marks:**
+```
+subject roster (70)          47 ms      class broadsheet (70 x 9)     69 ms
+class-subject analytics      60 ms      one pupil's session report    35 ms
+report card PDF             127 ms
+```
+// `/analytics/overview` correctly 404s on these schools: no subscription row, so
+`DEFAULT_PLAN` is the STANDARD floor and ANALYTICS is PREMIUM. The fail-closed
+default working, not a fault.
+// GOTCHA, MINE, TWICE IN ONE GATE and both the recorded trap: the method
+extractor took the first `{` after the name, which is the one in the PARAMETER
+type (`q: { classId: string }`) — a 35-character "body", the same 35 characters
+CLAUDE.md already records for `setTraits`. Fixed, then it took the brace in the
+inline RETURN type (`: Promise<{ buffer: Buffer }>`). It walks the parameter
+parens AND tracks angle depth now.
+// GOTCHA: I nearly reported the session report as leaking drafts to families. It
+splits `publishedOnly` correctly and NAMES an unreleased subject with no figures;
+I was reading it as a principal, which is the staff view. Read who you are before
+calling a view a leak.
+// GOTCHA: `POST /reportcards/:id/generate` answers **201** with
+`application/pdf`, and my client read the body with `res.text()`. Both made a
+real PDF look like a failure. Read the status and the bytes, not one of them.
+// AND AN EXISTING GATE WENT RED ON AN IMPROVEMENT for the eleventh time:
+`an-answer-the-server-does-not-hold` asserted the literal
+`"retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"` and broke when the
+list GREW. Re-anchored to the property — each header is forwarded, by the loop
+that copies them — and re-validated by removing one.
+// PROBE: 100 schools, 70,400 users, 630,000 subject results, 420,000 trait
+ratings and their classes, subjects, sessions, terms and enrolments removed;
+every table back to baseline.
+Mutation-validated six ways: columns back to offerings alone, the ROWS union
+traded away, the report card starting to filter by offerings, the vault filed
+regardless, the guard moved after the write, and the BFF dropping the flag.
 
 ### A question box that could not wrap, at any width
 `components/ui/auto-textarea.tsx`, the four authoring surfaces, the three that

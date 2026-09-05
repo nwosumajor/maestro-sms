@@ -108,7 +108,11 @@ export class ReportCardService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  async generate(p: Principal, studentId: string, termId?: string): Promise<{ buffer: Buffer; filename: string }> {
+  async generate(
+    p: Principal,
+    studentId: string,
+    termId?: string,
+  ): Promise<{ buffer: Buffer; filename: string; filedToVault: boolean; unpublishedMarks: number }> {
     // Resolve the term: the one asked for, else the current term. A report card
     // is a TERM document.
     // A LEAVER'S DOCUMENTS ARE THE PRINCIPAL'S TO RELEASE. No effect on a pupil
@@ -565,6 +569,43 @@ export class ReportCardService {
       .join("-")
       .concat(".pdf");
 
+    // THE VAULT COPY IS THE FAMILY'S, AND MUST NOT CARRY A MARK THEY MAY NOT SEE.
+    //
+    // This card is rendered with the CALLER's scope, and the scope rule one
+    // method up is explicit: "student→self, parent→children PUBLISHED-only,
+    // staff-of-class all". So a staff member printing before publication gets a
+    // PDF containing DRAFT marks — correct for them — and that exact buffer was
+    // then filed into the pupil's vault, where `uploadBytes` NOTIFIES THE
+    // GUARDIANS. Measured on a real pupil: the stored card carried Chemistry 83,
+    // Civic Education 49, Economics 60 and English Language 78, none of them
+    // published.
+    //
+    // That defeats the GRADE_PUBLISH maker-checker for the one artifact it
+    // exists to protect. Two people approve a mark precisely so a family does
+    // not see it before then, and the card walked round the gate — not by
+    // reading, but by DELIVERING.
+    //
+    // The restrictive option (Golden Rule #7): the caller still gets their own
+    // full PDF, and nothing is filed until every one of the term's marks is
+    // published. That matches the workflow — a school issues cards after
+    // publishing — and the caller is TOLD rather than left to assume a copy went
+    // out. The fuller answer is to render the vault copy a SECOND time under a
+    // forced published-only scope, which needs `getStudentSessionReport` to take
+    // an explicit tightening flag; it is named here rather than half-built.
+    const unpublished = term
+      ? await this.db.runAsTenant(this.ctx(p), (tx) =>
+          tx.subjectResult.count({
+            where: { studentId, termId: term.id, status: { not: "PUBLISHED" } },
+          }),
+        )
+      : 0;
+    if (unpublished > 0) {
+      this.logger.warn(
+        `report card for ${studentId} NOT filed to the vault: ${unpublished} of the term's marks are not published yet`,
+      );
+      return { buffer, filename, filedToVault: false, unpublishedMarks: unpublished };
+    }
+
     // Persist into the Document Vault so the student/parent have their OWN
     // retrievable copy regardless of who generated it — best-effort: a vault
     // write failure must never block the caller from getting their PDF now.
@@ -584,7 +625,7 @@ export class ReportCardService {
       this.logger.warn(`report card vault persist failed for student ${studentId} (non-fatal): ${String(err)}`);
     }
 
-    return { buffer, filename };
+    return { buffer, filename, filedToVault: true, unpublishedMarks: 0 };
   }
 
   /**

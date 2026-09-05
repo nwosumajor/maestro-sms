@@ -52,7 +52,17 @@ describe("an answer the server does not hold", () => {
       path.join(process.cwd(), "app/api/sms/[...path]/route.ts"),
       "utf8",
     );
-    expect(proxy).toMatch(/"retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"/);
+    // ANCHORED TO THE PROPERTY, not the literal line. This read the three names
+    // as one comma-separated string and went red when the list GREW — a
+    // fixed-text assertion firing on a change that strengthens exactly what it
+    // guards, which this repo has now recorded eleven times. What matters is
+    // that each header is forwarded, not how the array is laid out.
+    for (const h of ["retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"]) {
+      expect([h, proxy.includes(`"${h}"`)]).toEqual([h, true]);
+    }
+    // and they are forwarded by the loop that copies response headers across,
+    // rather than merely mentioned in a comment
+    expect(proxy).toMatch(/for \(const h of \[[\s\S]{0,300}\]\)\s*\{[\s\S]{0,160}res\.headers\.get\(h\)/);
   });
 
   // FLAGGED FROM THE FIRST FAILURE, not after the last attempt: a retry that

@@ -1432,16 +1432,44 @@ export class TermResultService {
       if (!klass || !term) throw new NotFoundException("Not found");
       if (!(await this.canViewClass(tx, p, classId))) throw new NotFoundException("Not found");
 
-      // Columns: the subjects offered on this class. Rows: its ACTIVE students.
+      // Columns: the subjects offered on this class, UNION the subjects that
+      // actually carry marks for this class and term. Rows: its ACTIVE students,
+      // union whoever has marks — the same rule, for the same reason.
+      //
+      // THE COLUMNS HAD THE BUG THE ROWS WERE FIXED FOR. They were the offerings
+      // alone, so a mark recorded against a subject the class does not offer was
+      // silently absent — and `average` is computed over these cells and
+      // `position` is ranked on that average, so the marks did not merely fail
+      // to show: they moved every other pupil's place.
+      //
+      // Reachable two ways, both driven:
+      //   * removing an offering is allowed with NO guard while marks exist.
+      //     Measured: a class with 70 published Mathematics marks went to zero
+      //     columns, every average and every position `null`, the 70 rows still
+      //     in the table.
+      //   * `canGradeClassSubject` returns TRUE immediately for a school-wide
+      //     caller without consulting the offerings, so a principal can record
+      //     and publish a mark for a subject the class never offered.
+      //
+      // The report card reads the marks themselves (`{ classId, termId,
+      // PUBLISHED }`, no offerings filter), so before this the two documents
+      // printed different averages and different positions for one pupil in one
+      // term. The union makes the sheet agree with the marks, which is the same
+      // answer the rows arrived at below.
       const offerings = await tx.classSubjectTeacher.findMany({
         where: { classId },
         select: { subjectId: true },
       });
-      const subjectIds = [...new Set(offerings.map((o) => o.subjectId))];
-      const [subjectRows, enrollments, results] = await Promise.all([
+      const results = await tx.subjectResult.findMany({ where: { classId, termId } });
+      const subjectIds = [
+        ...new Set([
+          ...offerings.map((o) => o.subjectId),
+          ...results.map((r) => r.subjectId),
+        ]),
+      ];
+      const [subjectRows, enrollments] = await Promise.all([
         tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } }),
         tx.enrollment.findMany({ where: { classId, status: "ACTIVE" }, select: { studentId: true } }),
-        tx.subjectResult.findMany({ where: { classId, termId } }),
       ]);
       const subjects = subjectRows.sort((a, b) => a.name.localeCompare(b.name));
       const orderedSubjectIds = subjects.map((s) => s.id);

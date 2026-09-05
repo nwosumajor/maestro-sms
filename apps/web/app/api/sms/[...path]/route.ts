@@ -74,7 +74,19 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   // away — and it is the same defect as the dropped `Content-Disposition` this
   // file already carries. The budget headers ride along so a client can pace
   // itself BEFORE it is refused.
-  for (const h of ["retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"]) {
+  // THE REPORT-CARD FILING FLAG travels for the same reason. A card generated
+  // while any of the term's marks are unpublished is NOT filed to the family's
+  // vault — otherwise printing early would put an unapproved mark in front of
+  // them — and the caller has to be able to tell that from a card that was
+  // filed. Dropped here, the download looks identical either way, which is
+  // exactly the silent-success shape the API went to trouble to avoid.
+  for (const h of [
+    "retry-after",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+    "x-report-card-filed",
+    "x-report-card-unpublished-marks",
+  ]) {
     const v = res.headers.get(h);
     if (v) out[h] = v;
   }

@@ -54,10 +54,16 @@ export class ReportCardController {
     @Res({ passthrough: true }) res: Response,
     @Query("termId") termId?: string,
   ): Promise<StreamableFile> {
-    const { buffer, filename } = await this.reportcards.generate(p, studentId, termId);
+    const { buffer, filename, filedToVault, unpublishedMarks } = await this.reportcards.generate(p, studentId, termId);
     res.set({
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${safeFilename(filename)}"`,
+      // SAY WHAT WAS NOT DONE. The caller gets their PDF either way, but the
+      // family's vault copy is withheld while any of the term's marks are
+      // unpublished — otherwise printing early would put an unapproved mark in
+      // front of them. A silent skip would read as "the family has their copy".
+      "X-Report-Card-Filed": filedToVault ? "yes" : "no",
+      ...(filedToVault ? {} : { "X-Report-Card-Unpublished-Marks": String(unpublishedMarks) }),
     });
     return new StreamableFile(buffer);
   }
