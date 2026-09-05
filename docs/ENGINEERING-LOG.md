@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and fifty-nine write-ups, newest first. Each records a **real defect
+Two hundred and sixty write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Five hundred boarding schools, and the button that swept all of them](#five-hundred-boarding-schools-and-the-button-that-swept-all-of-them)
 - [Ten schools, five years each: does the FLEET's history slow one tenant down?](#ten-schools-five-years-each-does-the-fleets-history-slow-one-tenant-down)
 - [Five years, four promotions, and a pupil who fell off the roll](#five-years-four-promotions-and-a-pupil-who-fell-off-the-roll)
 - [A whole academic year, driven term by term, and the four traps were all mine](#a-whole-academic-year-driven-term-by-term-and-the-four-traps-were-all-mine)
@@ -290,6 +291,83 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Five hundred boarding schools, and the button that swept all of them
+Asked for: transport and hostel at 500 schools. 30,000 boarders, 1,000 houses,
+6,000 rooms, 1,000 buses, 1,000 routes, 30,000 passengers, 1,500 overdue exeats
+— loaded in 25 s. Two real defects, both invisible at one school and obvious at
+five hundred.
+**DEFECT 1: A PER-SCHOOL PERMISSION RAN A PLATFORM-WIDE SWEEP.**
+`POST /hostels/exeats/overdue/run` is gated on `hostel.manage`, which a warden
+or a registrar holds, and it called the FLEET sweep. Driven as ONE school's
+registrar:
+```
+before   school 001 stamped 0 · school 002 stamped 0 · fleet 0
+run      201 in 12,636 ms   {"scanned":1500,"alerted":1500}
+after    school 001 stamped 3 · school 002 stamped 3 · fleet 1500
+```
+Nothing sent was untrue — those alerts were due — but a tenant user caused
+writes and guardian notifications in 499 tenants they have no relationship with,
+CONSUMED their pending alerts so their own hourly sweep would find nothing, and
+held a request open for 12.6 s. At 5,000 schools that is two minutes.
+// The job catalogue declared that route `scope: "SCHOOL"`. It was not.
+// THE SIBLINGS ALREADY KNEW: dunning and reconciliation gate their manual
+triggers on PLATFORM permissions. Scoped to the caller's school now, which is
+what both the permission and the declared scope say; the scheduler still sweeps
+the fleet. After: scanned 3, alerted 3, school 002 untouched, **244 ms**.
+**DEFECT 2, FOUND READING FOR THE FIRST: TEN FLEET SWEEPS SKIPPED A SCHOOL AND
+REPORTED A CLEAN RUN.** `JobRunsService` documents the convention and reads the
+field by name — *"a run that skipped four schools was indistinguishable from a
+run that did the whole fleet ... a count nobody surfaces is a count nobody acts
+on"*. Dunning, retention and mobile-money recovery counted theirs. Ten did not:
+```
+hostel.exeatOverdue     the sweep that exists to notice a child who has not
+                        come back to the boarding house
+hr.staffReminders       one catch in a VOID method, so its failures could not
+                        reach the result at all
+attendance.rollup   |   counted a FAILURE as `skipped`, which the convention
+privacy.archive     |   explicitly defines as work that was NOT DUE
+fees.ops                late fees — money not billed, reported as a clean run
+fees.reconciliation     per-charge catches — money left unrecovered
+payments.health         the job whose whole purpose is saying a rail broke
+lms.progression         dropped its count BETWEEN service and processor
+sis.nudge               a stamp failure re-sends a nudge already sent
+notifications.recovery  milder (the row self-heals), same convention
+```
+// `privacy.archive`'s comment quotes the rule it half-keeps: *"One school's
+failure must not stop the rest"* — and then increments the same counter it uses
+two lines above for "already archived".
+// TWO CARRIED THE EXEAT PROCESSOR'S OWN RECORDED LESSON WITHOUT APPLYING IT.
+`record()` files whatever the callback returns, so `lms.progression` discarded
+`failed` on the way out, and payment-health's alert helper was `Promise<void>` —
+a best-effort method that cannot tell anyone it did nothing.
+**WHAT 500 SCHOOLS PROVED SOUND:**
+```
+room capacity, 10 concurrent  all ten refused "Room is at full capacity",
+                              room still 5/5 — the FOR UPDATE lock holds
+the gender rule               fires BEFORE capacity and names the remedy
+warden scoping                own 2 houses in 45 ms · a neighbour's 404
+driver scoping                own 2 vehicles in 37 ms · a neighbour's 404
+```
+// GOTCHA, MINE: the capacity guard looked proven when all ten were refused —
+by the GENDER rule, because my fixture set no gender. A refusal is not evidence
+until you read WHICH refusal. Re-run against a boys' room and ten boys, it was
+"Room is at full capacity".
+**THE GATE COMPUTES THE SET.** Every BullMQ processor names the service it
+drives, so the processors are walked, the service resolved from its import, and
+any that catches-and-logs without rethrowing must increment a `failed` counter;
+a second assertion forbids `skipped++` inside a catch.
+// GOTCHA: the gate's first form asked only for a `failed:` FIELD and passed a
+mutation that kept the field and stopped counting into it — the defect wearing
+the fix's clothes. The INCREMENT is the evidence. Its predecessor was the
+opposite error, flagging six already-correct services: an over-wide gate is the
+same failure as a blind one, because it teaches its reader to add an exemption.
+// GOTCHA: `git checkout` restores nothing on an UNTRACKED file, so a mutation
+to a NEW spec silently stayed in place and the next edit applied on top of it.
+The tracked-file version of this trap is already in this log; this is the other
+half.
+// PROBE: 500 schools, 31,500 users, 30,000 allocations, 30,000 assignments,
+1,500 exeats removed; every table back to baseline.
 
 ### Ten schools, five years each: does the FLEET's history slow one tenant down?
 The single-school five-year run asked whether a school's OWN history slows it
