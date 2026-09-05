@@ -69,7 +69,10 @@ describe("the report card says so", () => {
   const src = read("reportcards/reportcard.service.ts");
 
   it("marks a provisional subject in the table", () => {
-    expect(src).toMatch(/sub\.complete \? "" : " \*"/);
+    // Anchored to the PROPERTY, not to the loop variable: the gridded re-layout
+    // renamed `sub` to `s` and this went red on a change that touched neither
+    // the rule nor the mark it flags.
+    expect(src).toMatch(/\.complete \? "" : " \*"/);
   });
 
   it("explains the asterisk, and only when it applies", () => {

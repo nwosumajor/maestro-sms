@@ -465,6 +465,10 @@ describe("sessionAverageScope", () => {
 
   it("handles the first term of a brand-new school", () => {
     expect(sessionAverageScope(1, 3)).toBe("1 of 3 terms recorded");
+    // "all 1 terms" is what a first-term card used to print about a child's
+    // year. A page a family reads should not be ungrammatical about it.
+    expect(sessionAverageScope(1, 1)).toBe("this term only");
+    expect(sessionAverageScope(3, 3)).toBe("all 3 terms");
   });
 
   it("never claims coverage it cannot substantiate when the total is unknown", () => {

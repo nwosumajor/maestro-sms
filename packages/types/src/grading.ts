@@ -830,7 +830,12 @@ export interface ClassBroadsheetDto {
 // So the label states the coverage. A parent can then see that the figure is
 // partial without having to know when the school joined the platform.
 export function sessionAverageScope(counted: number, total: number): string {
-  return total > 0 && counted < total ? `${counted} of ${total} terms recorded` : `all ${counted} terms`;
+  if (total > 0 && counted < total) return `${counted} of ${total} term${total === 1 ? "" : "s"} recorded`;
+  // "all 1 terms" on a first-term card. A card a family reads should not be
+  // ungrammatical about their child's year, and "this term" is what one term
+  // actually is.
+  if (counted === 1) return "this term only";
+  return `all ${counted} terms`;
 }
 
 // -----------------------------------------------------------------------------

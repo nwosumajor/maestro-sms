@@ -198,8 +198,11 @@ describe("what the report card does with them", () => {
   ) as string;
 
   it("prints them in their groups, with the scale spelled out", () => {
-    expect(PDF).toMatch(/Skills and behaviour/);
-    expect(PDF).toMatch(/TRAIT_SCALE\.map\(\(r\) => `\$\{r\.score\} = \$\{r\.label\}`\)/);
+    expect(PDF).toMatch(/SKILLS DEVELOPMENT AND BEHAVIOURAL ATTRIBUTES/);
+    // The key is set in two lines on the gridded card, so TRAIT_SCALE is sliced
+    // before it is mapped. The property is that every score is printed with the
+    // words for it, from the constant — not how the array is walked.
+    expect(PDF).toMatch(/TRAIT_SCALE[\s\S]{0,40}\.map\(\(r\) => `\$\{r\.score\} = \$\{r\.label\}`\)/);
   });
 
   it("never folds them into an academic total", () => {

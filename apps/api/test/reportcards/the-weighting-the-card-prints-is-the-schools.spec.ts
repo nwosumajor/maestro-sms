@@ -66,8 +66,11 @@ describe("the weighting a report card prints is the school's own", () => {
   });
 
   it("states the weighting at the foot from the same components", () => {
-    expect(body).toMatch(/d\.components\.map\(/);
-    expect(body).toMatch(/Term weighting: \$\{weighting\}/);
+    // THE PROPERTY: the sentence is INTERPOLATED from d.components, never typed.
+    // This used to name the local `weighting`, and went red when the re-layout
+    // inlined the same expression — a test pinned to how the value is spelled
+    // rather than to where it comes from.
+    expect(body).toMatch(/Term weighting: \$\{[\s\S]{0,40}d\.components\.map\(/);
     // The literal it replaced was a factual claim about how the mark was
     // reached, and it was false for every school not on 60/20/10/10.
     expect(body).not.toMatch(/Term weighting: Exam 60/);

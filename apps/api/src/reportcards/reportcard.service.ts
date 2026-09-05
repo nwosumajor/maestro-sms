@@ -78,6 +78,8 @@ type ReportCardData = {
       totalTermScore: number;
       /** Every term of the session, in order — the annual columns' headings. */
       annualTermNames: string[];
+      /** The academic year, as the letterhead names it ("2025/2026"). */
+      sessionName: string | null;
       /** subjectId → that subject's total in each of those terms (null = no marks). */
       annualBySubject: Record<string, Array<number | null>>;
       /** subjectId → the pupil's place in that subject across the whole year. */
@@ -176,6 +178,7 @@ export class ReportCardService {
     // It costs NOTHING extra: `getStudentSessionReport` already returns every
     // term, and the code below was throwing all but one of them away.
     let annualTermNames: string[] = [];
+    let sessionName: string | null = null;
     let annualTermIds: string[] = [];
     let annualBySubject = new Map<string, Array<number | null>>();
     if (term) {
@@ -188,6 +191,7 @@ export class ReportCardService {
       sessionTermsTotal = report.terms.length;
       sessionTermsCounted = report.terms.filter((t) => t.average !== null).length;
 
+      sessionName = report.sessionName ?? null;
       annualTermNames = report.terms.map((t) => t.termName);
       annualTermIds = report.terms.map((t) => t.termId);
       for (const row of subjectRows) {
@@ -549,6 +553,7 @@ export class ReportCardService {
           : null,
         promotionLine,
         annualTermNames,
+        sessionName,
         annualBySubject: Object.fromEntries(annualBySubject),
         annualPosition: Object.fromEntries(annualPosition),
         bands,
@@ -679,486 +684,549 @@ export class ReportCardService {
    * It draws and returns; opening, paging and ending the document belong to the
    * caller, which is what lets the pack put a page break between pupils.
    */
+  /**
+   * THE PRINTED FORMAT, as Nigerian schools actually issue it.
+   *
+   * Laid out from a real Continuous Assessment Report: everything sits in a
+   * bordered box under a titled bar, and the page reads as a FORM rather than a
+   * flowing document. That is not decoration — a card is read across, by a
+   * parent looking for one subject's row and one figure, and whitespace between
+   * free-standing headings made ours slower to scan the more it carried.
+   *
+   * Section order is the reference's: identity and attendance side by side, the
+   * rating key BEFORE the ratings that use it, the grade key BEFORE the marks
+   * that use it, then academic performance, then the signed conclusion.
+   */
   private drawCard(doc: PdfDocument, d: ReportCardData, logo?: Buffer | null): void {
-      const startX = 50;
+      // The reference is portrait and dense; 28pt margins buy the width the
+      // academic table needs without going landscape.
+      const L = 28;
+      const R = 567;
+      const W = R - L;
       const fmt = (n: number | null): string => (n === null || n === undefined ? "—" : String(n));
+      const INK = "#000";
+      const RULE = "#333";
+      const FAINT = "#f2f2f2";
 
+      const rect = (x: number, y: number, w: number, h: number, fill?: string) => {
+        if (fill) doc.rect(x, y, w, h).fillColor(fill).fill();
+        doc.rect(x, y, w, h).lineWidth(0.6).strokeColor(RULE).stroke();
+        doc.fillColor(INK);
+      };
+      /** Text inside a cell, vertically centred, never spilling past its box. */
+      const cellText = (
+        t: string,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        o: { bold?: boolean; size?: number; align?: "left" | "center" | "right"; color?: string; wrap?: boolean } = {},
+      ) => {
+        const size = o.size ?? 6.6;
+        doc.font(o.bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor(o.color ?? INK);
+        // A CELL HOLDING A SENTENCE MUST WRAP. `lineBreak: false` is right for a
+        // table cell — a mark or a grade that no longer fits should ellipsize
+        // visibly rather than reflow the row — and wrong for the message cells,
+        // where it silently truncated "No attendance was recorded for this
+        // student, though the register was taken on 49 days." to its first line.
+        const th = doc.heightOfString(t || " ", { width: w - 4 });
+        doc.text(t ?? "", x + 2, y + Math.max(0.5, (h - th) / 2), {
+          width: w - 4,
+          align: o.align ?? "center",
+          lineBreak: o.wrap ?? false,
+          ellipsis: !o.wrap,
+        });
+        doc.fillColor(INK);
+      };
+      /** A titled section bar. Returns the y beneath it. */
+      const bar = (x: number, y: number, w: number, title: string, h = 12): number => {
+        rect(x, y, w, h, FAINT);
+        cellText(title, x, y, w, h, { bold: true, size: 7.4 });
+        return y + h;
+      };
+      /** One row of cells with their own borders. Returns the y beneath. */
+      const row = (
+        x: number,
+        y: number,
+        widths: number[],
+        cells: string[],
+        o: { h?: number; bold?: boolean; size?: number; fill?: string; align?: "left" | "center" | "right"; wrap?: boolean } = {},
+      ): number => {
+        const h = o.h ?? 11;
+        let cx = x;
+        widths.forEach((w, i) => {
+          rect(cx, y, w, h, o.fill);
+          cellText(cells[i] ?? "", cx, y, w, h, { bold: o.bold, size: o.size, align: o.align, wrap: o.wrap });
+          cx += w;
+        });
+        return y + h;
+      };
+      /** Shorten a heading VISIBLY rather than letting the renderer clip it —
+       *  "Annual av" with no ellipsis reads as the name of the column. */
+      const fit = (label: string, width: number, size = 6.4): string => {
+        doc.font("Helvetica-Bold").fontSize(size);
+        if (doc.widthOfString(label) <= width - 4) return label;
+        let out = label;
+        while (out.length > 1 && doc.widthOfString(out + "…") > width - 4) out = out.slice(0, -1);
+        return out + "…";
+      };
+
+      let y = 30;
+
+      // =====================================================================
+      // 1. LETTERHEAD — crest, school, and the term this card is for
+      // =====================================================================
+      const badgeW = 64;
       if (logo) {
         try {
-          doc.image(logo, doc.page.width / 2 - 26, 45, { fit: [52, 52], align: "center" });
-          doc.moveDown(3.5);
+          doc.image(logo, L + 4, y + 2, { fit: [40, 40] });
         } catch {
           /* ignore unsupported/corrupt image */
         }
       }
-      doc.fontSize(22).text(d.schoolName || "Report Card", { align: "center" });
-      doc.moveDown(0.3).fontSize(14).fillColor("#666")
-        .text(d.termName ? `Report Card — ${d.termName}` : "Student Report Card", { align: "center" });
-      doc.fillColor("#000").moveDown(0.8);
+      const headW = W - badgeW - 6;
+      doc.font("Helvetica-Bold").fontSize(15).fillColor(INK)
+        .text(d.schoolName || "Report Card", L + 46, y + 2, { width: headW - 46, align: "center" });
+      const sub = [d.termName, d.sessionName].filter(Boolean).join(" · ");
+      doc.font("Helvetica").fontSize(7.5).fillColor("#444")
+        .text("Continuous Assessment Report", L + 46, y + 21, { width: headW - 46, align: "center" });
+      doc.fontSize(7).text(sub, L + 46, y + 31, { width: headW - 46, align: "center" });
+      doc.fillColor(INK);
 
-      // PERSONAL DATA — the identifying block. Sex is on it because the printed
-      // format carries it and because two pupils in a year group share a name
-      // more often than schools expect.
-      doc.fontSize(11).text(`Student: ${d.studentName}`, startX);
-      const idLine = [
-        d.admissionNumber ? `Admission no.: ${d.admissionNumber}` : null,
-        d.gender ? `Sex: ${d.gender}` : null,
-        d.className ? `Class: ${d.className}` : null,
-      ].filter(Boolean);
-      if (idLine.length) doc.text(idLine.join("    "), startX);
-      doc.text(`Generated: ${new Date().toLocaleString()}`, startX);
-      doc.moveDown(0.8);
+      // The class and the term, boxed at the top right exactly as the reference
+      // carries them: the two things somebody sorting a stack of cards reads.
+      const bx = R - badgeW;
+      rect(bx, y, badgeW, 21);
+      cellText(d.className ?? "—", bx, y, badgeW, 21, { bold: true, size: 10 });
+      rect(bx, y + 21, badgeW, 20, FAINT);
+      cellText((d.termName ?? "TERM").toUpperCase(), bx, y + 21, badgeW, 20, { bold: true, size: 7.5 });
+      y += 46;
 
-      // Term-weighted subject table.
-      // Eight columns now (Pos added). Re-spaced rather than squeezed on the
-      // end: the last column runs to 545, so appending without re-spacing would
-      // have pushed Grade off the page edge.
-      const colX = [startX, 168, 210, 252, 296, 336, 386, 432, 486];
-      const drawRow = (cells: string[], bold = false) => {
-        const y = doc.y;
-        doc.fontSize(10).font(bold ? "Helvetica-Bold" : "Helvetica");
-        cells.forEach((c, i) => doc.text(c, colX[i], y, { width: (colX[i + 1] ?? 545) - colX[i] - 4, lineBreak: false }));
-        doc.moveDown(0.6);
-      };
-      doc.fontSize(14).font("Helvetica-Bold").text("Grades", startX);
-      doc.moveDown(0.2).font("Helvetica");
-      // POS is this pupil's rank in THAT subject among classmates — a number
-      // about them, never another child's marks or name. Same posture as the
-      // overall class position below.
-      // C.A. is the school's three continuous-assessment components added up —
-      // the printed format shows "C.A. /40 + Exam /60", which is the same marks
-      // this platform already holds as four. Derived, never stored twice.
-      // The REMARK column is the grade in a word. The printed format carries
-      // both because a letter is a code and a family reading "B3" cannot tell
-      // whether their child did well; the word is the school's own, from its own
-      // scale, never invented here.
-      drawRow(["Subject", "C.A.", "Exam", "Total", "Grade", "Pos", "Class avg", "Low/High", "Remark"], true);
-      doc.moveTo(startX, doc.y).lineTo(545, doc.y).strokeColor("#ccc").stroke();
-      doc.moveDown(0.3);
-      // WHAT EACH COLUMN IS OUT OF, stated in the table rather than only as a
-      // sentence at the foot. A mark means nothing without its denominator, and
-      // a parent reading "37" under Exam should not have to find a note three
-      // inches below to learn it was out of 60.
-      // THE SCHOOL'S OWN DENOMINATORS, not the platform's. The sentence above is
-      // the whole argument and it was applied to the platform default: a school
-      // weighting the exam at 45 marked a pupil's FULL exam score under a header
-      // saying the maximum was 60, so full marks read as 75%.
+      // =====================================================================
+      // 2. PERSONAL DATA | ATTENDANCE + TERMINAL DURATION, side by side
+      // =====================================================================
+      const leftW = Math.round(W * 0.46);
+      const rightW = W - leftW;
+      const rx = L + leftW;
+
+      let ly = bar(L, y, leftW, "STUDENT'S PERSONAL DATA");
+      const labelW = Math.round(leftW * 0.34);
+      const idRows: Array<[string, string]> = [
+        ["NAME", d.studentName],
+        ["ADMISSION NO.", d.admissionNumber ?? "—"],
+        ["SEX", d.gender ?? "—"],
+        ["CLASS", d.className ?? "—"],
+      ];
+      for (const [k, v] of idRows) {
+        rect(L, ly, labelW, 11, FAINT);
+        cellText(k, L, ly, labelW, 11, { bold: true, size: 6.2, align: "left" });
+        rect(L + labelW, ly, leftW - labelW, 11);
+        cellText(v, L + labelW, ly, leftW - labelW, 11, { size: 6.8, align: "left" });
+        ly += 11;
+      }
+
+      // ATTENDANCE. The denominator comes FIRST: "present 46" means nothing
+      // without the number of days the school actually opened.
+      let ry = bar(rx, y, rightW, "ATTENDANCE");
+      const a3 = [Math.round(rightW / 3), Math.round(rightW / 3), rightW - 2 * Math.round(rightW / 3)];
+      const attTotal = d.att.PRESENT + d.att.LATE + d.att.ABSENT + d.att.EXCUSED;
+      // Only when there is something under them. A label row over an empty box is
+      // the same defect as a trait group heading with no ratings beneath it,
+      // which this card already refuses.
+      if (attTotal > 0 || d.daysOpened > 0) {
+        ry = row(rx, ry, a3, ["Times Sch. Opened", "Times Present", "Times Absent"], { bold: true, size: 5.9, fill: FAINT, h: 10 });
+      }
+      // FOUR ZEROS ARE A STATEMENT ABOUT THE CHILD; NO REGISTER IS A STATEMENT
+      // ABOUT THE SCHOOL. A parent seeing four zeros reads "my child was never
+      // present"; the truth is usually that no register has been taken yet.
+      if (attTotal > 0) {
+        ry = row(rx, ry, a3, [
+          d.daysOpened > 0 ? `Times school opened: ${d.daysOpened}` : "—",
+          `Present: ${d.att.PRESENT}`,
+          `Absent: ${d.att.ABSENT}`,
+        ], { size: 6.4, h: 11 });
+        ry = row(rx, ry, a3, ["Times Late", "Times Excused", "Attendance Rate"], { bold: true, size: 5.9, fill: FAINT, h: 10 });
+        ry = row(rx, ry, a3, [
+          `Late: ${d.att.LATE}`,
+          `Excused: ${d.att.EXCUSED}`,
+          `Attendance rate: ${attendanceRatePct({ present: d.att.PRESENT, late: d.att.LATE, absent: d.att.ABSENT, excused: d.att.EXCUSED })}%`,
+        ], { size: 6.4, h: 11 });
+      } else if (d.daysOpened > 0) {
+        // The register WAS taken and this pupil is in none of it — a different
+        // fact from the one below, and one the school can act on. The opened
+        // count stays: it is the figure that gives the absence its meaning.
+        ry = row(rx, ry, [a3[0], rightW - a3[0]], [
+          `Times school opened: ${d.daysOpened}`,
+          `No attendance was recorded for this student, though the register was taken on ${d.daysOpened} day${d.daysOpened === 1 ? "" : "s"}.`,
+        ], { size: 6.2, h: 22, wrap: true });
+      } else {
+        ry = row(rx, ry, [rightW], ["No attendance has been recorded for this term."], { size: 6.4, h: 22, wrap: true });
+      }
+
+      const day = (v: Date | null) => (v ? new Date(v).toISOString().slice(0, 10) : null);
+      ry = bar(rx, ry, rightW, "TERMINAL DURATION");
+      ry = row(rx, ry, a3, ["Term Begins", "Term Ends", "Next Term Begins"], { bold: true, size: 5.9, fill: FAINT, h: 10 });
+      ry = row(rx, ry, a3, [
+        day(d.termBegins) ? `Term begins: ${day(d.termBegins)}` : "—",
+        day(d.termEnds) ? `Term ends: ${day(d.termEnds)}` : "—",
+        day(d.nextTermBegins) ? `Next term begins: ${day(d.nextTermBegins)}` : "—",
+      ], { size: 6, h: 11 });
+
+      y = Math.max(ly, ry);
+
+      // =====================================================================
+      // 3. THE RATING KEY — before the ratings that use it
+      // =====================================================================
+      // "4" tells a parent nothing on its own, and a number a family cannot
+      // interpret is how a behavioural rating becomes an argument.
+      if (d.traitRatings.length > 0) {
+        y = bar(L, y, W, "KEYS TO RATINGS ON OBSERVABLE BEHAVIOUR");
+        const half = Math.ceil(TRAIT_SCALE.length / 2);
+        const line1 = TRAIT_SCALE.slice(0, half).map((r) => `${r.score} = ${r.label}`).join("   |   ");
+        const line2 = TRAIT_SCALE.slice(half).map((r) => `${r.score} = ${r.label}`).join("   |   ");
+        y = row(L, y, [W], [line1], { size: 5.9, h: 10 });
+        y = row(L, y, [W], [line2], { size: 5.9, h: 10 });
+
+        // =================================================================
+        // 4. SKILLS AND BEHAVIOUR — the catalogue's groups, side by side
+        // =================================================================
+        y = bar(L, y, W, "SKILLS DEVELOPMENT AND BEHAVIOURAL ATTRIBUTES");
+        const scoreOf = new Map(d.traitRatings.map((r) => [r.traitKey, r.score]));
+        const groups: Array<{ label: string; items: Array<{ label: string; score: number }> }> = [];
+        for (const g of TRAIT_GROUPS) {
+          const items = g.traits
+            .filter((t) => scoreOf.has(t.key))
+            .map((t) => ({ label: t.label, score: scoreOf.get(t.key) as number }));
+          // Never a group heading with nothing under it.
+          if (items.length > 0) groups.push({ label: g.label.toUpperCase(), items });
+        }
+        // A RATING UNDER A RETIRED TRAIT STILL HAPPENED. This walks the
+        // CATALOGUE, so a trait removed from TRAIT_GROUPS would take every
+        // historical rating of it off every past card — silently, which is the
+        // part that matters. `isTraitKey` refuses an unknown key on the way IN,
+        // so these can only be rows the catalogue has moved on from.
+        const retired = d.traitRatings.filter((r) => !TRAIT_KEYS.includes(r.traitKey));
+        if (retired.length > 0) {
+          groups.push({
+            label: "OTHER RECORDED TRAITS",
+            items: retired.map((r) => ({ label: traitLabel(r.traitKey), score: r.score })),
+          });
+        }
+        if (groups.length > 0) {
+          const gw = Math.floor(W / groups.length);
+          const ptsW = 26;
+          const rows = Math.max(...groups.map((g) => g.items.length));
+          let hy = y;
+          groups.forEach((g, gi) => {
+            const gx = L + gi * gw;
+            const wide = gi === groups.length - 1 ? W - gi * gw : gw;
+            rect(gx, hy, wide - ptsW, 10, FAINT);
+            cellText(fit(g.label, wide - ptsW, 5.8), gx, hy, wide - ptsW, 10, { bold: true, size: 5.8, align: "left" });
+            rect(gx + wide - ptsW, hy, ptsW, 10, FAINT);
+            cellText("POINTS", gx + wide - ptsW, hy, ptsW, 10, { bold: true, size: 5.2 });
+          });
+          hy += 10;
+          for (let i = 0; i < rows; i += 1) {
+            groups.forEach((g, gi) => {
+              const gx = L + gi * gw;
+              const wide = gi === groups.length - 1 ? W - gi * gw : gw;
+              const it = g.items[i];
+              rect(gx, hy, wide - ptsW, 9.5);
+              cellText(it ? it.label : "", gx, hy, wide - ptsW, 9.5, { size: 5.8, align: "left" });
+              rect(gx + wide - ptsW, hy, ptsW, 9.5);
+              cellText(it ? String(it.score) : "", gx + wide - ptsW, hy, ptsW, 9.5, { size: 6.2, bold: true });
+            });
+            hy += 9.5;
+          }
+          y = hy;
+        }
+      }
+
+      // =====================================================================
+      // 5. THE GRADE KEY — before the marks that use it
+      // =====================================================================
+      // Without it every letter below is unreadable: a parent handed "B3" has no
+      // way to know whether it is good, and a card that cannot be read has not
+      // really reported anything. Printed from the SCHOOL's own scale. It is NOT
+      // necessarily the one the letters were computed on — a published grade is
+      // frozen and this key is today's — so the note below owns up when they
+      // disagree.
+      if (d.bands.length > 0) {
+        y = bar(L, y, W, "GRADE");
+        const keys = d.bands.map((b, i) => {
+          const ceiling = i === 0 ? 100 : d.bands[i - 1].min - 1;
+          return `${b.grade} ${b.min}–${ceiling}${b.label ? ` ${b.label.toLowerCase()}` : ""}`;
+        });
+        const perRow = Math.min(5, Math.max(3, Math.ceil(keys.length / 2)));
+        for (let i = 0; i < keys.length; i += perRow) {
+          const slice = keys.slice(i, i + perRow);
+          const w = Math.floor(W / perRow);
+          const widths = slice.map((_, j) => (j === slice.length - 1 && slice.length === perRow ? W - (perRow - 1) * w : w));
+          y = row(L, y, widths, slice, { size: 5.9, h: 10 });
+        }
+        const defined = new Set(d.bands.map((b) => b.grade));
+        const foreign = [...new Set(d.subjects.map((sx) => sx.grade).filter((g): g is string => !!g && !defined.has(g)))];
+        if (foreign.length > 0) {
+          y = row(L, y, [W], [
+            `${foreign.join(", ")} below ${foreign.length === 1 ? "was" : "were"} awarded on the grading scale in force when the mark was published, and ${foreign.length === 1 ? "is" : "are"} not in the key above. The school's scale has changed since.`,
+          ], { size: 5.6, h: 14, wrap: true });
+        }
+      }
+
+      // =====================================================================
+      // 6. ACADEMIC PERFORMANCE
+      // =====================================================================
+      y = bar(L, y, W, "ACADEMIC PERFORMANCE");
+
+      // THE YEAR, alongside the term, as the reference sets them: the current
+      // term's marks under MARKS OBTAINED and the session's shape under ANNUAL
+      // SUMMARY. The annual half appears only once there is more than one term's
+      // marks to compare — on a first-term card it would be the same column
+      // twice.
+      const annualTerms = d.annualTermNames;
+      const annualRows = new Map(
+        d.subjects.map((s) => [s.subjectId, {
+          totals: d.annualBySubject[s.subjectId] ?? [],
+          rank: d.annualPosition[s.subjectId] ?? null,
+        }]),
+      );
+      const showAnnual =
+        annualTerms.length > 1 &&
+        [...annualRows.values()].some((r) => r.totals.filter((t) => t !== null).length > 1);
+      // The PRIOR terms: the current term's own figures are in MARKS OBTAINED,
+      // so repeating them here would be the same number twice. When the current
+      // term is not among them (a calendar the card was not generated against)
+      // every term is shown rather than none.
+      const currentIdx = d.termName ? annualTerms.indexOf(d.termName) : -1;
+      const priorIdx = annualTerms.map((_, i) => i).filter((i) => i !== currentIdx);
+
       const examMax = d.components.find((c) => c.key === "exam")?.max ?? gradeComponentMax("exam");
       const caMax = d.components.filter((c) => c.key !== "exam").reduce((n, c) => n + c.max, 0);
-      doc.fillColor("#666");
-      drawRow(["Maximum mark", String(caMax), String(examMax), "100", "", "", "", "", ""], false);
-      doc.fillColor("#000");
+
+      const termHeads = ["C.A.", "Exam", "Total", "Grade", "Pos", "Class avg", "Low/High", "Remark"];
+      const termW = [24, 24, 26, 26, 30, 36, 34, 40];
+      const annHeads = showAnnual
+        ? [...priorIdx.map((i) => annualTerms[i]), "Annual avg", "Grade", "Pos", "Remark"]
+        : [];
+      // The prior-term columns take WHAT IS LEFT rather than a fixed width, so a
+      // three-term school's "Second Term" fits and a four-quarter school's
+      // columns narrow until a heading has to be shortened — visibly, with an
+      // ellipsis, rather than clipped mid-word.
+      const annFixed = showAnnual ? [42, 26, 28, 36] : [];
+      const spent = 76 + termW.reduce((a, b) => a + b, 0) + annFixed.reduce((a, b) => a + b, 0);
+      const perTerm = showAnnual && priorIdx.length > 0
+        ? Math.max(22, Math.floor((W - spent) / priorIdx.length))
+        : 0;
+      const annW = showAnnual ? [...priorIdx.map(() => perTerm), ...annFixed] : [];
+      let widths = [76, ...termW, ...annW];
+      // Scale to the page rather than running off it: a four-quarter school has
+      // more columns than a three-term one, and the headings ellipsize rather
+      // than being clipped mid-word.
+      const sum = widths.reduce((a, b) => a + b, 0);
+      if (sum > W) widths = widths.map((w) => (w * W) / sum);
+      const xs = widths.map((_, i) => L + widths.slice(0, i).reduce((a, b) => a + b, 0));
+
+      // Column-group banner, so a reader knows which half of the row is the term
+      // and which is the year.
+      const termSpan = widths.slice(1, 1 + termW.length).reduce((a, b) => a + b, 0);
+      rect(L, y, widths[0], 10, FAINT);
+      rect(L + widths[0], y, termSpan, 10, FAINT);
+      cellText("MARKS OBTAINED", L + widths[0], y, termSpan, 10, { bold: true, size: 6 });
+      if (showAnnual) {
+        const annSpan = W - widths[0] - termSpan;
+        rect(L + widths[0] + termSpan, y, annSpan, 10, FAINT);
+        cellText("ANNUAL SUMMARY", L + widths[0] + termSpan, y, annSpan, 10, { bold: true, size: 6 });
+      }
+      y += 10;
+
+      const heads = ["Subject", ...termHeads, ...annHeads];
+      y = row(L, y, widths, heads.map((h, i) => fit(h, widths[i])), { bold: true, size: 6.4, fill: FAINT, h: 13 });
+
+      // WHAT EACH COLUMN IS OUT OF, in the table rather than only as a sentence
+      // at the foot. A mark means nothing without its denominator, and a parent
+      // reading "37" under Exam should not have to find a note three inches
+      // below to learn it was out of 60. THE SCHOOL'S OWN denominators.
+      y = row(L, y, widths,
+        ["Maximum mark", String(caMax), String(examMax), "100", "", "", "100", "", "",
+          ...(showAnnual ? [...priorIdx.map(() => "100"), "100", "", "", ""] : [])],
+        { size: 6, h: 10, fill: "#fafafa" });
+
       if (d.subjects.length === 0) {
-        doc.fontSize(10).fillColor("#888").text("No published grades for this term yet.", startX).fillColor("#000");
+        y = row(L, y, [W], ["No published grades for this term yet."], { size: 7, h: 14 });
       } else {
-        for (const sub of d.subjects) {
-          // "3/28" reads better than a bare 3: a position is meaningless without
-          // knowing how many were ranked, and ungraded pupils are excluded from
-          // that count rather than counted as beaten.
-          const pos = sub.subjectPosition && sub.subjectRanked ? `${sub.subjectPosition}/${sub.subjectRanked}` : "—";
-          // An asterisk, not a footnote nobody reads in isolation: a total with a
-          // component still unmarked counts that component as ZERO, so 24 here can
-          // mean "scored 24" or "only the class note is in". A family cannot tell
-          // those apart, and the second one is not a fail.
+        for (const s of d.subjects) {
           // AS THEY COUNT, not as they were typed. The total is a sum of CLAMPED
           // components; printing the raw ones beside it gave a row that does not
-          // add up — "C.A. 28 · Exam 42 · Total 68" — under a header saying the
-          // exam is out of 40. Reachable whenever a school lowers a component's
-          // weighting after marks are entered.
-          const eff = effectiveComponents(sub, d.components as ReadonlyArray<{ key: GradeComponentKey; max: number }>);
-          const ca = [sub.midterm, sub.assignment, sub.classNote].some((v) => v !== null)
+          // add up.
+          const eff = effectiveComponents(s, d.components as ReadonlyArray<{ key: GradeComponentKey; max: number }>);
+          const ca = [s.midterm, s.assignment, s.classNote].some((v) => v !== null)
             ? (eff.midterm ?? 0) + (eff.assignment ?? 0) + (eff.classNote ?? 0)
             : null;
-          const lowHigh =
-            sub.classLowest != null && sub.classHighest != null ? `${sub.classLowest}/${sub.classHighest}` : "—";
-          drawRow([
-            sub.subjectName + (sub.complete ? "" : " *"),
+          // "3/28" reads better than a bare 3: a position is meaningless without
+          // knowing how many were ranked.
+          const pos = s.subjectPosition && s.subjectRanked ? `${s.subjectPosition}/${s.subjectRanked}` : "—";
+          const lowHigh = s.classLowest != null && s.classHighest != null ? `${s.classLowest}/${s.classHighest}` : "—";
+          const ann = annualRows.get(s.subjectId);
+          let annCells: string[] = [];
+          if (showAnnual) {
+            const totals = ann?.totals ?? [];
+            const present = totals.filter((t): t is number => t !== null);
+            // The average counts the terms that HAVE marks — a missing term is
+            // an absent measurement, and treating it as a zero would print a
+            // failure the pupil never earned.
+            const avg = present.length > 0 ? Math.round(present.reduce((x, z) => x + z, 0) / present.length) : null;
+            annCells = [
+              ...priorIdx.map((i) => (totals[i] === null || totals[i] === undefined ? "—" : String(totals[i]))),
+              fmt(avg),
+              avg === null ? "—" : gradeLetter(avg, d.bands),
+              ann?.rank ? `${ann.rank.position}/${ann.rank.of}` : "—",
+              avg === null ? "" : (gradeDescriptor(avg, d.bands) ?? ""),
+            ];
+          }
+          const cells = [
+            // An asterisk, not a footnote nobody reads: a total with a component
+            // still unmarked counts that component as ZERO, so 24 can mean
+            // "scored 24" or "only the class note is in".
+            s.subjectName + (s.complete ? "" : " *"),
             fmt(ca),
             fmt(eff.exam),
-            fmt(sub.total),
-            sub.grade ?? "—",
+            fmt(s.total),
+            s.grade ?? "—",
             pos,
-            fmt(sub.classAverage ?? null),
+            fmt(s.classAverage ?? null),
             lowHigh,
-            // THE WORD MUST DESCRIBE THE LETTER BESIDE IT. This re-banded the
-            // TOTAL against today's scale while the Grade column shows the
-            // letter the mark was PUBLISHED with — so after a scale change the
-            // two named different bands on the same row.
-            gradeWordFor(sub.grade ?? null, d.bands) ?? "",
-          ]);
+            // THE WORD MUST DESCRIBE THE LETTER BESIDE IT, never a re-banding of
+            // the total against today's scale while the Grade column shows the
+            // letter the mark was PUBLISHED with.
+            gradeWordFor(s.grade ?? null, d.bands) ?? "",
+            ...annCells,
+          ];
+          let cx = L;
+          widths.forEach((w, i) => {
+            rect(cx, y, w, 10);
+            cellText(cells[i] ?? "", cx, y, w, 10, { size: 6.2, align: i === 0 ? "left" : "center" });
+            cx += w;
+          });
+          y += 10;
         }
+      }
+
+      // The figures the printed format carries along the foot of the table.
+      const foot: string[] = [];
+      if (d.classSize) foot.push(`NO. IN ROLL: ${d.classSize}`);
+      if (d.totalTermScore > 0) foot.push(`Total term score: ${d.totalTermScore}`);
+      if (d.cumulativeScore > 0) foot.push(`Cumulative score: ${d.cumulativeScore}`);
+      foot.push(`Term average: ${fmt(d.termAverage)}${d.termGrade ? `  (${d.termGrade})` : ""}`);
+      if (d.position && d.classSize) foot.push(`Position in class: ${d.position} of ${d.classSize}`);
+      const fw = Math.floor(W / foot.length);
+      y = row(L, y, foot.map((_, i) => (i === foot.length - 1 ? W - (foot.length - 1) * fw : fw)), foot,
+        { bold: true, size: 6.2, h: 12, fill: FAINT });
+      if (d.sessionAverage !== null) {
+        // Name the terms it covers rather than claiming "all terms so far": a
+        // school that onboarded in Term 2 has no Term 1 marks.
+        const scope = sessionAverageScope(d.sessionTermsCounted, d.sessionTermsTotal);
+        y = row(L, y, [W], [`Cumulative session average (${scope}): ${d.sessionAverage}`], { size: 6.2, h: 10 });
       }
       // Said once, plainly, and only when it applies — a standing disclaimer on
       // every report card is one nobody reads.
       if (d.subjects.some((sx) => !sx.complete)) {
-        doc.moveDown(0.2);
-        doc.fontSize(8).font("Helvetica-Oblique").fillColor("#a15c00")
-          .text(
-            "* Not every component has been marked for this subject yet. Unmarked components count as zero, so this total is provisional.",
-            startX,
-          );
-        doc.fillColor("#000");
-      }
-      doc.moveDown(0.4);
-      doc.fontSize(11).font("Helvetica-Bold")
-        .text(`Term average: ${fmt(d.termAverage)}${d.termGrade ? `  (${d.termGrade})` : ""}`, startX);
-      if (d.position && d.classSize) {
-        doc.font("Helvetica").text(`Position in class: ${d.position} of ${d.classSize}`, startX);
-      }
-      if (d.sessionAverage !== null) {
-        // Name the terms it covers rather than claiming "all terms so far". A
-        // school that onboarded in Term 2 has no Term 1 marks, and a cumulative
-        // average over 2 of 3 terms must not be read as a full-year figure.
-        const scope = sessionAverageScope(d.sessionTermsCounted, d.sessionTermsTotal);
-        doc.font("Helvetica").fillColor("#666").text(`Cumulative session average (${scope}): ${d.sessionAverage}`, startX).fillColor("#000");
+        y = row(L, y, [W], [
+          "* Not every component has been marked for this subject yet. Unmarked components count as zero, so this total is provisional.",
+        ], { size: 5.6, h: 10, wrap: true });
       }
 
-      // Attendance (term-scoped).
-      doc.moveDown(0.8).fontSize(14).font("Helvetica-Bold").text("Attendance", startX);
-      doc.moveDown(0.2).font("Helvetica").fontSize(11);
-      // The denominator first: "present 46" means nothing without the number of
-      // days the school actually opened.
-      if (d.daysOpened > 0) doc.text(`Times school opened: ${d.daysOpened}`, startX);
-      // When the term ran, and when the next one starts — the line a parent
-      // actually acts on, and the only date on the page that is about the future.
-      const day = (v: Date | null) => (v ? new Date(v).toISOString().slice(0, 10) : null);
-      const frame = [
-        day(d.termBegins) ? `Term begins: ${day(d.termBegins)}` : null,
-        day(d.termEnds) ? `Term ends: ${day(d.termEnds)}` : null,
-        day(d.nextTermBegins) ? `Next term begins: ${day(d.nextTermBegins)}` : null,
-      ].filter(Boolean);
-      if (frame.length > 0) doc.text(frame.join("    "), startX);
-      // FOUR ZEROS ARE A STATEMENT ABOUT THE CHILD; NO REGISTER IS A STATEMENT
-      // ABOUT THE SCHOOL.
-      //
-      // "Times school opened" and "Attendance rate" are both suppressed when
-      // they would be zero — correctly, there is nothing to say — while
-      // "Present: 0  Late: 0  Absent: 0  Excused: 0" printed unconditionally.
-      // So the two figures that give the zeros their meaning vanished in
-      // precisely the case where the zeros mislead, and the comment six lines
-      // above says why that matters: the denominator is what "present: 46" is
-      // read against. A parent seeing four zeros reads "my child was never
-      // present"; the truth is usually that no register has been taken yet.
-      //
-      // Live on a real pupil before this: a term running 2026-09-07 to
-      // 2026-12-18, generated on 2026-08-25 — before it had started — printed
-      // four zeros and nothing else.
-      const total = d.att.PRESENT + d.att.LATE + d.att.ABSENT + d.att.EXCUSED;
-      if (total > 0) {
-        doc.text(`Present: ${d.att.PRESENT}    Late: ${d.att.LATE}    Absent: ${d.att.ABSENT}    Excused: ${d.att.EXCUSED}`, startX);
-        // The definition every other surface now shares. This one was already
-        // right; routing it through the helper is what stops the next screen
-        // inventing a seventh.
-        doc.text(
-          `Attendance rate: ${attendanceRatePct({ present: d.att.PRESENT, late: d.att.LATE, absent: d.att.ABSENT, excused: d.att.EXCUSED })}%`,
-          startX,
-        );
-      } else if (d.daysOpened > 0) {
-        // The register WAS taken and this pupil is in none of it. A different
-        // fact from the one below, and one the school can act on.
-        doc.text(
-          `No attendance was recorded for this student, though the register was taken on ${d.daysOpened} ` +
-            `day${d.daysOpened === 1 ? "" : "s"}.`,
-          startX,
-        );
-      } else {
-        // Says nothing about the child OR the school beyond what is known. It
-        // does not claim the school failed to open — `daysOpened` is also zero
-        // when the term has not begun, or when no class could be resolved for
-        // this pupil.
-        doc.text("No attendance has been recorded for this term.", startX);
-      }
-
-      // SKILLS AND BEHAVIOUR — printed beside the marks, never mixed into them.
-      // Grouped as the catalogue groups them, with the scale spelled out
-      // underneath: "4" tells a parent nothing on its own, and a number a family
-      // cannot interpret is how a behavioural rating becomes an argument.
-      if (d.traitRatings.length > 0) {
-        const scoreOf = new Map(d.traitRatings.map((r) => [r.traitKey, r.score]));
-        doc.moveDown(0.8).fontSize(14).font("Helvetica-Bold").text("Skills and behaviour", startX);
-        doc.moveDown(0.2).fontSize(9).font("Helvetica");
-        for (const group of TRAIT_GROUPS) {
-          const rated = group.traits.filter((t) => scoreOf.has(t.key));
-          if (rated.length === 0) continue;
-          doc.font("Helvetica-Bold").text(group.label, startX);
-          doc.font("Helvetica").text(
-            rated.map((t) => `${t.label}: ${scoreOf.get(t.key)}`).join("    "),
-            startX,
-            undefined,
-            { width: 545 - startX },
-          );
-          doc.moveDown(0.2);
-        }
-        // A RATING UNDER A RETIRED TRAIT STILL HAPPENED. This loop walks the
-        // CATALOGUE and picks up the ratings it recognises, so a trait removed
-        // from TRAIT_GROUPS takes every historical rating of it off every past
-        // card — silently, which is the part that matters. `isTraitKey` refuses
-        // an unknown key on the way IN, so these can only be rows the catalogue
-        // has moved on from.
-        // `traitLabel` was written for exactly this ("a rating recorded last
-        // year must still print, even under a retired trait") and had no
-        // production caller at all — only a test asserting the fallback that
-        // nothing could reach.
-        const retired = d.traitRatings.filter((r) => !TRAIT_KEYS.includes(r.traitKey));
-        if (retired.length > 0) {
-          doc.font("Helvetica-Bold").text("Other recorded traits", startX);
-          doc.font("Helvetica").text(
-            retired.map((r) => `${traitLabel(r.traitKey)}: ${r.score}`).join("    "),
-            startX,
-            undefined,
-            { width: 545 - startX },
-          );
-          doc.moveDown(0.2);
-        }
-        doc.fillColor("#666").fontSize(8).text(
-          TRAIT_SCALE.map((r) => `${r.score} = ${r.label}`).join("   |   "),
-          startX,
-          undefined,
-          { width: 545 - startX },
-        );
-        doc.fillColor("#000").fontSize(10);
-      }
-
-      // The footer figures the printed format carries beside the position.
-      if (d.totalTermScore > 0) {
-        doc.moveDown(0.6).fontSize(10).font("Helvetica-Bold").text(`Total term score: ${d.totalTermScore}`, startX);
-        doc.font("Helvetica");
-      }
-
-      // THE YEAR, subject by subject — each term's total and the average across
-      // them. Printed only once there is more than one term's marks to compare:
-      // on a first-term card it would be the same column twice.
-      const annualTerms = d.annualTermNames;
-      const annualRows = d.subjects
-        .map((s) => ({
-          name: s.subjectName,
-          totals: d.annualBySubject[s.subjectId] ?? [],
-          rank: d.annualPosition[s.subjectId] ?? null,
-        }))
-        .filter((r) => r.totals.filter((t) => t !== null).length > 1);
-      if (annualTerms.length > 1 && annualRows.length > 0) {
-        doc.moveDown(0.8).fontSize(14).font("Helvetica-Bold").text("The year so far", startX);
-        doc.moveDown(0.2).fontSize(9);
-        // Annual average, its GRADE and the word for it — the same three things
-        // the term columns above carry, so a parent can read the year the way
-        // they just read the term rather than being handed a bare number.
-        // Widths are DERIVED from how many terms there are, not fixed: a school
-        // on a four-quarter calendar has four columns, and a fixed width sized
-        // for three silently clipped the headings — "Second Term" printed as
-        // "Second Te". The names are also shortened to fit rather than being cut
-        // off mid-word by the renderer.
-        const tailW = [58, 34, 42, 62];
-        const subjectW = 112;
-        const termW = Math.max(
-          38,
-          Math.floor((545 - startX - subjectW - tailW.reduce((a, b) => a + b, 0)) / Math.max(1, annualTerms.length)),
-        );
-        const fit = (label: string, width: number) => {
-          doc.fontSize(9).font("Helvetica-Bold");
-          if (doc.widthOfString(label) <= width - 4) return label;
-          let out = label;
-          while (out.length > 1 && doc.widthOfString(out + "\u2026") > width - 4) out = out.slice(0, -1);
-          return out + "\u2026";
-        };
-        const aw = [subjectW, ...annualTerms.map(() => termW), ...tailW];
-        const ax = aw.map((_, i) => startX + aw.slice(0, i).reduce((a, b) => a + b, 0));
-        const arow = (cells: string[], bold: boolean) => {
-          doc.font(bold ? "Helvetica-Bold" : "Helvetica");
-          const y = doc.y;
-          cells.forEach((c, i) => doc.text(c, ax[i], y, { width: aw[i] - 4, lineBreak: false }));
-          doc.y = y + 13;
-        };
-        // EVERY heading is fitted, not just the term names: a heading silently
-        // cut to "Annual av" is the same defect as a clipped term, and the next
-        // person to re-balance these columns should not have to remember which
-        // ones were protected.
-        const aHead = ["Subject", ...annualTerms, "Annual avg", "Grade", "Pos", "Remark"];
-        arow(aHead.map((h, i) => fit(h, aw[i])), true);
-        for (const r of annualRows) {
-          const present = r.totals.filter((t): t is number => t !== null);
-          // The average counts the terms that HAVE marks — a missing term is an
-          // absent measurement, and treating it as a zero would print a failure
-          // the pupil never earned.
-          const avg = present.length > 0 ? Math.round(present.reduce((a, b) => a + b, 0) / present.length) : null;
-          arow(
-            [
-              r.name,
-              ...r.totals.map((t) => (t === null ? "—" : String(t))),
-              fmt(avg),
-              avg === null ? "—" : gradeLetter(avg, d.bands),
-              r.rank ? `${r.rank.position}/${r.rank.of}` : "—",
-              avg === null ? "" : (gradeDescriptor(avg, d.bands) ?? ""),
-            ],
-            false,
-          );
-        }
-        if (d.cumulativeScore > 0) {
-          doc.moveDown(0.3).fontSize(10).font("Helvetica-Bold")
-            .text(`Cumulative score: ${d.cumulativeScore}`, startX);
-          doc.font("Helvetica");
-        }
-      }
-
-      // THE GRADE KEY. Without it every letter above is unreadable: a parent
-      // handed "B3" has no way to know whether it is good, and a card that
-      // cannot be read has not really reported anything. Printed from the
-      // SCHOOL's own scale. It is NOT necessarily the one the letters above were
-      // computed on — a published grade is frozen and this key is today's — so
-      // the note below owns up whenever they disagree.
-      if (d.bands.length > 0) {
-        doc.moveDown(0.7).fontSize(10).font("Helvetica-Bold").text("Grades", startX);
-        doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#555");
-        const key = d.bands.map((b, i) => {
-          const ceiling = i === 0 ? 100 : d.bands[i - 1].min - 1;
-          return `${b.grade} ${b.min}\u2013${ceiling}${b.label ? ` ${b.label.toLowerCase()}` : ""}`;
-        });
-        doc.text(key.join("   |   "), startX, undefined, { width: 545 - startX });
-        // "...the same one the letters were computed on" — the comment above said
-        // that, and it is false the moment a school changes its scale. A grade is
-        // FROZEN at publication and the key is today's, so a school that
-        // published under one scale and then set another prints a key explaining
-        // none of the letters above it. Measured: subject grades A/B/C/D/E/F
-        // under a key reading 9 90-100 | 8 80-89 | ... | 1 0-19.
-        // Freezing the scale alongside each mark is the fuller answer and is a
-        // schema change; saying so on the page costs nothing and never misleads.
-        const defined = new Set(d.bands.map((b) => b.grade));
-        const foreign = [...new Set(d.subjects.map((sx) => sx.grade).filter((g): g is string => !!g && !defined.has(g)))];
-        if (foreign.length > 0) {
-          doc.moveDown(0.25).fillColor("#8a5a00")
-            .text(
-              `${foreign.join(", ")} above ${foreign.length === 1 ? "was" : "were"} awarded on the grading scale in force when the mark was published, and ${foreign.length === 1 ? "is" : "are"} not in the key above. The school's scale has changed since.`,
-              startX,
-              undefined,
-              { width: 545 - startX },
-            );
-        }
-        doc.fillColor("#000").fontSize(10);
-      }
-
-      // =======================================================================
-      // REMARKS AND CONCLUSION — the signed half of the document
-      // =======================================================================
+      // =====================================================================
+      // 7. REMARKS AND CONCLUSION — the signed half of the document
+      // =====================================================================
       // Everything above is arithmetic the system performed. Everything here is
-      // a judgement a PERSON made, and the printed format treats the two
-      // differently: each comment sits over a signature rule and the name of
-      // whoever wrote it, and the promotion decision is stamped beside the
-      // principal's words rather than floating on its own.
+      // a judgement a PERSON made, and the format treats the two differently:
+      // each comment sits beside the name of whoever wrote it.
       //
-      // The names come from `classTeacherId` / `headId`, which this table has
-      // stamped since it was created and which no reader had ever looked at —
-      // so the card used to print a comment about a child with nobody's name
-      // against it. An unattributed remark reads as the school speaking
-      // collectively, which is not what happened and not something a parent can
-      // reply to.
-      const rule = (x: number, width: number) => {
-        doc.moveTo(x, doc.y).lineTo(x + width, doc.y).strokeColor("#999").lineWidth(0.5).stroke().strokeColor("#000");
+      // The names come from `classTeacherId` / `headId`. An unattributed remark
+      // reads as the school speaking collectively, which is not what happened
+      // and not something a parent can reply to.
+      y = bar(L, y, W, "REMARKS AND CONCLUSION");
+      const signW = 150;
+      const commentW = W - signW;
+      const commentRow = (title: string, text: string, signTitle: string, signName: string | null, h: number) => {
+        rect(L, y, commentW, h);
+        doc.font("Helvetica-Bold").fontSize(6).fillColor("#555").text(title, L + 4, y + 3, { width: commentW - 8 });
+        doc.font("Helvetica").fontSize(7).fillColor(INK)
+          .text(text, L + 4, y + 12, { width: commentW - 8, height: h - 15, ellipsis: true });
+        rect(L + commentW, y, signW, h);
+        doc.font("Helvetica-Bold").fontSize(5.6).fillColor("#555")
+          .text(signTitle, L + commentW + 4, y + 3, { width: signW - 8, align: "center" });
+        if (signName) {
+          doc.font("Helvetica").fontSize(6.6).fillColor(INK)
+            .text(signName, L + commentW + 4, y + h - 12, { width: signW - 8, align: "center" });
+        }
+        doc.fillColor(INK);
+        y += h;
       };
-      if (d.remarks.classTeacher || d.remarks.head || d.promotionLine) {
-        doc.moveDown(0.9).fontSize(13).font("Helvetica-Bold").text("Remarks and conclusion", startX);
 
-        if (d.remarks.classTeacher) {
-          doc.moveDown(0.35).fontSize(9).font("Helvetica-Bold").fillColor("#555").text("CLASS TEACHER'S COMMENTS", startX);
-          doc.fillColor("#000").fontSize(11).font("Helvetica-Oblique")
-            .text(d.remarks.classTeacher.text, startX, undefined, { width: 495 - startX });
-          doc.moveDown(0.9);
-          rule(startX, 240);
-          doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#666")
-            .text(d.remarks.classTeacher.byName ?? "Class teacher", startX);
-          doc.fillColor("#000");
-        }
-
-        if (d.remarks.head) {
-          doc.moveDown(0.5).fontSize(9).font("Helvetica-Bold").fillColor("#555")
-            .text(d.remarks.head.label.toUpperCase(), startX);
-          doc.fillColor("#000");
-          // The decision is stamped BESIDE the words, as the printed format has
-          // it — the comment and the outcome are one statement, and separating
-          // them lets a card be read as praising a child it is holding back.
-          const y = doc.y + 2;
-          let textX = startX;
-          if (d.promotionLine) {
-            const w = doc.fontSize(10).font("Helvetica-Bold").widthOfString(d.promotionLine) + 12;
-            doc.rect(startX, y, w, 16).lineWidth(0.8).strokeColor("#000").stroke();
-            doc.text(d.promotionLine, startX + 6, y + 4);
-            textX = startX + w + 10;
-          }
-          doc.fontSize(11).font("Helvetica-Oblique")
-            .text(d.remarks.head.text, textX, y + 3, { width: 495 - textX });
-          doc.moveDown(0.9);
-          rule(startX, 240);
-          doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#666")
-            .text(d.remarks.head.byName ?? "Head teacher", startX);
-          doc.fillColor("#000");
-        }
-
-        // A decision with no comment beside it still has to appear.
-        if (d.promotionLine && !d.remarks.head) {
-          doc.moveDown(0.5).fontSize(11).font("Helvetica-Bold").text(d.promotionLine, startX);
-          doc.font("Helvetica").fontSize(10);
-        }
-
-        // School stamp and date — the block a school physically signs.
-        doc.moveDown(1.1);
-        const stampX = 320;
-        rule(stampX, 225);
-        doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#666")
-          .text("Signature, school stamp and date", stampX);
+      if (d.remarks.classTeacher) {
+        commentRow(
+          "CLASS TEACHER'S COMMENTS",
+          d.remarks.classTeacher.text,
+          "Signature (Class Teacher)",
+          d.remarks.classTeacher.byName ?? "Class teacher",
+          40,
+        );
+      }
+      if (d.remarks.head || d.promotionLine) {
+        const label = (d.remarks.head?.label ?? "Head teacher's comments").toUpperCase();
+        // The promotion decision is stamped BESIDE the head's words rather than
+        // floating on its own — it is the conclusion those words explain.
+        const text = [d.promotionLine ? `[ ${d.promotionLine} ]` : null, d.remarks.head?.text ?? null]
+          .filter(Boolean)
+          .join("   ");
+        commentRow(label, text, "Signature, school stamp and date", d.remarks.head?.byName ?? "Head teacher", 40);
+      }
+      if (d.guardianNames.length > 0) {
+        y = row(L, y, [W], [`Parent / guardian: ${d.guardianNames.join(", ")}`], { size: 6.4, h: 11, align: "left" });
       }
 
-      // =======================================================================
+      // =====================================================================
       // THE ATTESTATION — what this card carries INSTEAD of a signature
-      // =======================================================================
+      // =====================================================================
       // The block above is signed by hand after printing, which leaves the VAULT
-      // copy a guardian downloads with a permanently blank line. This block is
-      // the digital half: a named approver, the date they signed, and a code
-      // whoever is handed the card can check for themselves.
+      // copy a guardian downloads with a permanently blank line. This is the
+      // digital half: a named approver, the date they signed, and a code whoever
+      // is handed the card can check for themselves.
       //
       // Printed only when somebody has actually signed. A card with no head
       // remark carries no attestation, because a block asserting an approval
       // that did not happen is the exact failure this exists to prevent.
       if (d.attestation) {
         const a = d.attestation;
-        doc.moveDown(1.2);
-        const boxTop = doc.y;
-        const boxH = 74;
-        doc.save().rect(startX, boxTop, 545 - startX, boxH).fillOpacity(0.04).fill("#000").restore();
-        doc.rect(startX, boxTop, 545 - startX, boxH).strokeColor("#bbb").lineWidth(0.5).stroke().strokeColor("#000");
-
-        const qrSize = 54;
-        const qrX = 545 - qrSize - 10;
-        drawQrCode(doc, a.verifyUrl, qrX, boxTop + 10, qrSize);
-
-        const textX = startX + 10;
-        const textW = qrX - textX - 14;
-        doc.fontSize(8).font("Helvetica-Bold").fillColor("#333")
-          .text("VERIFIED SCHOOL RECORD", textX, boxTop + 9, { width: textW });
-        doc.fontSize(9).font("Helvetica").fillColor("#000")
-          .text(`Approved by ${a.approvedByName} (${a.approvedByRole}) on ${a.approvedAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.`,
-            textX, doc.y + 1, { width: textW });
-        doc.fontSize(8).fillColor("#555")
-          .text(`Check this card at ${a.verifyUrl.replace(/^https?:\/\//, "")}`, textX, doc.y + 2, { width: textW });
+        const h = 46;
+        const qr = 38;
+        rect(L, y, W, h);
+        drawQrCode(doc, a.verifyUrl, R - qr - 6, y + 4, qr);
+        const tx = L + 6;
+        const tw = W - qr - 20;
+        doc.font("Helvetica-Bold").fontSize(6).fillColor("#333").text("VERIFIED SCHOOL RECORD", tx, y + 5, { width: tw });
+        doc.font("Helvetica").fontSize(7.2).fillColor(INK).text(
+          `Approved by ${a.approvedByName} (${a.approvedByRole}) on ${a.approvedAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.`,
+          tx, y + 14, { width: tw },
+        );
+        doc.fontSize(6.2).fillColor("#555")
+          .text(`Check this card at ${a.verifyUrl.replace(/^https?:\/\//, "")}`, tx, y + 25, { width: tw });
         // The version is printed because it is the one thing a holder cannot
         // otherwise know: a card reissued after a correction leaves earlier
         // printouts looking identical and no longer current.
-        doc.fontSize(8).font("Helvetica-Bold").fillColor("#333")
-          .text(`Code ${formatAttestationCode(a.code)}    Issue ${a.version}`, textX, doc.y + 3, { width: textW });
-        doc.fillColor("#000").fontSize(10);
-        doc.y = boxTop + boxH;
-        doc.fillColor("#000");
+        doc.font("Helvetica-Bold").fontSize(6.4).fillColor("#333")
+          .text(`Code ${formatAttestationCode(a.code)}    Issue ${a.version}`, tx, y + 34, { width: tw });
+        doc.fillColor(INK);
+        y += h;
       }
 
-      if (d.guardianNames.length > 0) {
-        doc.moveDown(0.5).fontSize(9).font("Helvetica").fillColor("#666")
-          .text(`Parent / guardian: ${d.guardianNames.join(", ")}`, startX)
-          .fillColor("#000");
-      }
-
-      // A LITERAL HERE IS A FACTUAL CLAIM ABOUT HOW THE MARK WAS ARRIVED AT, and
-      // it was false for every school not on the platform's own 60/20/10/10.
-      const weighting = d.components.map((c) => `${c.label} ${c.max}`).join(" · ");
-      const weightingTotal = d.components.reduce((n, c) => n + c.max, 0);
-      doc.font("Helvetica").fontSize(8).fillColor("#999").moveDown(1)
-        .text(`Term weighting: ${weighting} = ${weightingTotal}.`, startX);
+      doc.font("Helvetica").fontSize(5.6).fillColor("#888").text(
+        `Term weighting: ${d.components.map((c) => `${c.label} ${c.max}`).join(" · ")} = ${d.components.reduce((n, c) => n + c.max, 0)}.` +
+          `    Generated ${new Date().toLocaleString()}.`,
+        L, y + 3, { width: W },
+      );
+      doc.fillColor(INK);
   }
 
   /**
@@ -1169,7 +1237,7 @@ export class ReportCardService {
    */
   private renderPack(cards: ReportCardData[], logo?: Buffer | null): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = createPdfDocument({ margin: 50, size: "A4" });
+      const doc = createPdfDocument({ margin: 28, size: "A4" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

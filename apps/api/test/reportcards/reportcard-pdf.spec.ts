@@ -65,6 +65,14 @@ function textOf(pdf: Buffer): string {
   return out.join("\n");
 }
 
+/**
+ * Wrapped text arrives as several positioned runs, so a sentence that spans a
+ * line break is not a contiguous substring of `textOf`. Flatten before
+ * asserting about a SENTENCE; assert on the raw lines when the subject is a
+ * table CELL, where the newline boundary is the thing being pinned.
+ */
+const flat = (t: string) => t.replace(/\u00b7/g, " ").replace(/\s+/g, " ");
+
 const BASE = {
   studentName: "Ada Obi",
   schoolName: "St Andrews",
@@ -93,6 +101,7 @@ const BASE = {
   // The school's own weighting, exactly as every real card carries it. A fixture
   // without it models a card the service cannot produce.
   components: GRADE_COMPONENTS as ReadonlyArray<{ key: string; label: string; max: number }>,
+  sessionName: "2026/2027" as string | null,
   cumulativeScore: 0,
   termBegins: new Date("2026-09-14T00:00:00Z"),
   termEnds: new Date("2026-12-12T00:00:00Z"),
@@ -141,7 +150,7 @@ describe("the printed report card", () => {
     // The defect this suite exists for. Ratings and remarks are separate acts by
     // possibly different people; a missing remark must not swallow the ratings.
     const t = textOf(await render({ remarks: { classTeacher: null, head: null } }));
-    expect(t).toContain("Skills and behaviour");
+    expect(t).toContain("SKILLS DEVELOPMENT AND BEHAVIOURAL ATTRIBUTES");
     expect(t).toContain("Obedience");
     expect(t).toContain("Punctuality");
     expect(t).toContain("Total term score: 146");
@@ -156,7 +165,7 @@ describe("the printed report card", () => {
         },
       }),
     );
-    expect(t).toContain("Skills and behaviour");
+    expect(t).toContain("SKILLS DEVELOPMENT AND BEHAVIOURAL ATTRIBUTES");
     expect(t).toContain("A steady term.");
   });
 
@@ -167,14 +176,13 @@ describe("the printed report card", () => {
 
   it("omits the whole block when nothing was rated", async () => {
     const t = textOf(await render({ traitRatings: [] }));
-    expect(t).not.toContain("Skills and behaviour");
+    expect(t).not.toContain("SKILLS DEVELOPMENT AND BEHAVIOURAL ATTRIBUTES");
   });
 
   it("never prints a group heading with no ratings under it", async () => {
     const t = textOf(await render({ traitRatings: [{ traitKey: "obedience", score: 4 }] }));
-    const personal = TRAIT_GROUPS[0].label;
-    expect(t).toContain(personal);
-    for (const g of TRAIT_GROUPS.slice(1)) expect(t).not.toContain(g.label);
+    expect(t).toContain(TRAIT_GROUPS[0].label.toUpperCase());
+    for (const g of TRAIT_GROUPS.slice(1)) expect(t).not.toContain(g.label.toUpperCase());
   });
 });
 
@@ -215,7 +223,7 @@ describe("attendance", () => {
     // Live before this: a real pupil, term 2026-09-07 to 2026-12-18, card
     // generated 2026-08-25 — four zeros and nothing else.
     const t = textOf(await render({ att: { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 }, daysOpened: 0 }));
-    expect(t).toContain("No attendance has been recorded for this term.");
+    expect(flat(t)).toContain("No attendance has been recorded for this term.");
     expect(t).not.toMatch(/Present: 0/);
     // And it does not claim the school failed to open: `daysOpened` is also
     // zero before a term begins, and when no class could be resolved.
@@ -226,8 +234,8 @@ describe("attendance", () => {
     // A different fact from the one above, and one the school can act on.
     const t = textOf(await render({ att: { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 }, daysOpened: 5 }));
     expect(t).toContain("Times school opened: 5");
-    expect(t).toContain("No attendance was recorded for this student");
-    expect(t).toContain("the register was taken on 5 days");
+    expect(flat(t)).toContain("No attendance was recorded for this student");
+    expect(flat(t)).toContain("the register was taken on 5 days");
     expect(t).not.toMatch(/Present: 0/);
   });
 
@@ -251,10 +259,10 @@ describe("attendance", () => {
   });
 });
 
-describe("the year so far", () => {
+describe("the annual summary", () => {
   it("shows each term's total per subject and the average across them", async () => {
     const t = textOf(await render());
-    expect(t).toContain("The year so far");
+    expect(t).toContain("ANNUAL SUMMARY");
     expect(t).toContain("Second Term");
     expect(t).toContain("79"); // (81 + 77) / 2
   });
@@ -270,13 +278,16 @@ describe("the year so far", () => {
     // because the next person spends their time proving their change innocent.
     // The cells are newline-separated, so the row pins the average to the marks
     // it was computed from.
-    expect(t).toContain("\n90\n—\n80\n85\n");
-    expect(t).not.toContain("\n90\n—\n80\n57\n"); // (90 + 0 + 80) / 3
+    // First Term is the card's own term, so the annual columns are Second and
+    // Third: "—" then 80, and 85 is the average of the two terms that HAVE
+    // marks (90 and 80), never of three.
+    expect(t).toContain("\n—\n80\n85\n");
+    expect(t).not.toContain("\n—\n80\n57\n"); // (90 + 0 + 80) / 3
   });
 
   it("stays off a card with only one term of marks", async () => {
     const t = textOf(await render({ annualBySubject: { s1: [81, null, null], s2: [65, null, null] } }));
-    expect(t).not.toContain("The year so far");
+    expect(t).not.toContain("ANNUAL SUMMARY");
   });
 });
 
@@ -463,16 +474,17 @@ describe("a rating recorded under a trait the catalogue has since retired", () =
 
   it("still prints, under the key the catalogue no longer has a label for", async () => {
     const t = textOf(await render(withRetired as never));
-    expect(t).toContain("Other recorded traits");
-    expect(t).toContain("somethingRetired: 3");
+    expect(t).toContain("OTHER RECORDED TRAITS");
+    // A grid cell per trait and per score, like every other rated trait.
+    expect(t).toContain("somethingRetired");
     // and the catalogued one is untouched
-    expect(t).toContain("Punctuality: 5");
+    expect(t).toContain("Punctuality");
   });
 
   it("adds no heading when every rating is one the catalogue knows", async () => {
     const t = textOf(await render({ traitRatings: [{ traitKey: "punctuality", score: 5 }] } as never));
-    expect(t).toContain("Punctuality: 5");
-    expect(t).not.toContain("Other recorded traits");
+    expect(t).toContain("Punctuality");
+    expect(t).not.toContain("OTHER RECORDED TRAITS");
   });
 });
 
@@ -483,20 +495,27 @@ describe("a grade the card's own key does not explain", () => {
   // under simple letters and then set UK GCSE 9-1: subject grades A/B/C/D/E/F
   // printed under a key reading "9 90-100 | 8 80-89 | ... | 1 0-19" — a key
   // explaining not one letter on the page.
-  const staleScale = { bands: GRADE_SCALES.SIMPLE_LETTER.bands };
+  // ONE term of marks, so the ANNUAL SUMMARY columns stay off the card. Their
+  // Remark is derived from the annual AVERAGE, which is computed live and is
+  // right to carry today's word — so leaving them on would put a legitimate
+  // "Very good" on the page and make the anchor below untestable.
+  const staleScale = {
+    bands: GRADE_SCALES.SIMPLE_LETTER.bands,
+    annualBySubject: { s1: [81, null, null], s2: [65, null, null] },
+  };
 
   it("says so, naming the grades, rather than printing a key that fits none of them", async () => {
     // A1 and B3 are WAEC letters; the school's scale is now A-F.
     const t = textOf(await render(staleScale));
-    expect(t).toMatch(/A1, B3 above were awarded on the grading scale in force when the mark was published/);
-    expect(t).toContain("not in the key above");
+    expect(flat(t)).toMatch(/A1, B3 below were awarded on the grading scale in force when the mark was published/);
+    expect(flat(t)).toContain("not in the key above");
   });
 
   it("stays off a card whose grades the key does explain", async () => {
     // The standing-disclaimer rule this file already applies elsewhere: a note
     // on every card is a note nobody reads.
     const t = textOf(await render());
-    expect(t).not.toContain("not in the key above");
+    expect(flat(t)).not.toContain("not in the key above");
   });
 
   it("never puts a word from today's scale beside a letter from the old one", async () => {
@@ -531,7 +550,11 @@ describe("the cumulative score", () => {
 
 describe("personal data", () => {
   it("carries sex alongside the admission number", async () => {
-    expect(textOf(await render())).toContain("Sex: Female");
+    // A labelled cell and its value, the way the printed format carries it.
+    const t = textOf(await render());
+    const cells = t.split("\n");
+    expect(cells[cells.indexOf("SEX") + 1]).toBe("Female");
+    expect(cells.indexOf("ADMISSION NO.")).toBeGreaterThan(-1);
   });
 
   it("omits it rather than guessing when the profile does not say", async () => {
@@ -613,10 +636,15 @@ describe("a component mark above the school's own maximum", () => {
 
   it("prints the mark AS IT COUNTS, so the row adds up to its own total", async () => {
     const t = textOf(await render(overMax as never));
-    // 40, not 42 — and 25 + 40 = 65, the total printed beside it.
-    expect(t).toContain("English");
-    expect(t).not.toMatch(/\b42\b/);
-    expect(t).toMatch(/\b40\b/);
+    // READ THE CELL, not the document. `not.toMatch(/\b42\b/)` over the whole
+    // page went red the moment the card grew a generated-at timestamp, because
+    // 5:42 pm contains 42 — the same accident this repo has recorded three times.
+    const cells = t.split("\n");
+    const at = cells.indexOf("English");
+    expect(at).toBeGreaterThan(-1);
+    expect(cells[at + 1]).toBe("25"); // C.A. = 12 + 7 + 6
+    expect(cells[at + 2]).toBe("40"); // the exam AS IT COUNTS, never the 42 stored
+    expect(cells[at + 3]).toBe("65"); // and 25 + 40 is the total beside them
   });
 
   it("never prints a component above the maximum stated in its own header", async () => {
