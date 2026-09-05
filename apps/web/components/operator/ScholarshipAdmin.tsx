@@ -22,6 +22,7 @@ import { sendWithStepUp } from "@/lib/stepup";
 import { sendSms } from "@/components/game/play-ui";
 import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -1526,7 +1527,7 @@ function ProgramRow({
               })}
             </div>
           )}
-          <Input placeholder="Question text" value={q.text} onChange={(e) => setQ({ ...q, text: e.target.value })} />
+          <AutoTextarea placeholder="Question text" aria-label="Question text" value={q.text} onChange={(e) => setQ({ ...q, text: e.target.value })} />
           {/* ONE OPTION PER ROW, FULL WIDTH. Two narrow columns showed about a
               dozen characters, so an owner could not read back what they had
               typed — and an option too long for the box is exactly the one a
@@ -1534,10 +1535,10 @@ function ProgramRow({
               CBT editor, which had it right. */}
           <div className="space-y-1.5">
             {q.options.map((value, i) => (
-              <label key={i} className="flex items-center gap-2">
-                <input type="radio" name={`ans-${pr.id}`} checked={q.answer === i} onChange={() => setQ({ ...q, answer: i })} />
-                <span className="w-4 text-xs font-semibold text-muted-foreground">{String.fromCharCode(65 + i)}</span>
-                <Input
+              <label key={i} className="flex items-start gap-2">
+                <input type="radio" className="mt-2.5" name={`ans-${pr.id}`} checked={q.answer === i} onChange={() => setQ({ ...q, answer: i })} />
+                <span className="mt-2 w-4 text-xs font-semibold text-muted-foreground">{String.fromCharCode(65 + i)}</span>
+                <AutoTextarea
                   className="flex-1"
                   aria-label={`Option ${String.fromCharCode(65 + i)}`}
                   placeholder={`Option ${String.fromCharCode(65 + i)}${i < 2 ? " (required)" : ""}`}

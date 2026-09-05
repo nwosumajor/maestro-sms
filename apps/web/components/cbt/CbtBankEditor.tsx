@@ -4,6 +4,7 @@ import * as React from "react";
 import type { CbtBankQuestionsDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Input } from "@/components/ui/input";
 import { readApiError } from "@/lib/api-error";
 
@@ -193,19 +194,20 @@ function QuestionForm({
           out from them. You can still change its topic{q.type === "THEORY" ? " and mark guide" : ""}.
         </p>
       )}
-      <Input value={prompt} disabled={frozen} onChange={(e) => setPrompt(e.target.value)} aria-label="Question" />
+      <AutoTextarea value={prompt} disabled={frozen} onChange={(e) => setPrompt(e.target.value)} aria-label="Question" />
       {q.type !== "THEORY" &&
         choices.map((c, ci) => (
-          <div key={ci} className="flex items-center gap-2">
+          <div key={ci} className="flex items-start gap-2">
             <input
               type="radio"
               name={`answer-${q.id}`}
               checked={answerIndex === ci}
               disabled={frozen}
               onChange={() => setAnswerIndex(ci)}
+              className="mt-2.5"
               aria-label={`Mark option ${String.fromCharCode(65 + ci)} correct`}
             />
-            <Input
+            <AutoTextarea
               value={c}
               disabled={frozen}
               onChange={(e) => setChoices(choices.map((x, xi) => (xi === ci ? e.target.value : x)))}
@@ -215,7 +217,7 @@ function QuestionForm({
         ))}
       <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Topic (optional)" aria-label="Topic" />
       {q.type === "THEORY" && (
-        <Input
+        <AutoTextarea
           value={markGuide}
           onChange={(e) => setMarkGuide(e.target.value)}
           placeholder="Mark scheme (markers only)"

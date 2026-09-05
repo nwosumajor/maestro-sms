@@ -476,7 +476,15 @@ export function CbtExamRoom({
             )}
           <Card ref={(el) => { cardRefs.current[q.id] = el; }} className={cn(open && unsaved[q.id] ? "border-destructive/60" : open && !done && "border-amber-500/40")}>
             <CardContent className="space-y-3 p-4">
-              <p className="text-sm font-medium">
+              {/* WRAPS, KEEPS ITS LINE BREAKS, AND CANNOT OVERFLOW.
+                  `whitespace-pre-wrap` because the authoring fields are now
+                  textareas: a teacher can put a stem on one line and the data
+                  on the next, and without this the browser collapses both into
+                  a paragraph. `break-words` because a long unbroken token — a
+                  chemical name, a URL, a formula — has no space to break at and
+                  would otherwise run out of the card. The OPTIONS were given
+                  both in an earlier round and the prompt was left. */}
+              <p className="whitespace-pre-wrap break-words text-sm font-medium">
                 <span className="mr-2 text-muted-foreground">{i + 1}.</span>
                 {q.prompt}
                 {open && unsaved[q.id] && (
@@ -493,7 +501,7 @@ export function CbtExamRoom({
               {q.type === "THEORY" ? (
                 <div className="space-y-1">
                   <textarea
-                    className="min-h-[9rem] w-full rounded-md border border-input bg-background p-2 text-sm"
+                    className="min-h-[9rem] w-full resize-y overflow-auto rounded-md border border-input bg-background p-2 text-sm [field-sizing:content]"
                     value={s.theoryAnswers[q.id] ?? ""}
                     onChange={(e) => void write(q.id, e.target.value)}
                     disabled={!open}

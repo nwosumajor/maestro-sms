@@ -24,6 +24,7 @@ import { SCHOLARSHIP_BANK_TARGET_MIN, SCHOLARSHIP_BANK_TARGET_MAX, SCHOLARSHIP_O
 import { sendWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -305,7 +306,7 @@ export function QuestionBanks() {
                   <Label className="text-xs" htmlFor="q-text">
                     {editing ? "Correct the question" : `Question ${open.questionCount + 1}`}
                   </Label>
-                  <Input id="q-text" placeholder="Type the question" value={draft.text}
+                  <AutoTextarea id="q-text" placeholder="Type the question" value={draft.text}
                     onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))} />
                 </div>
                 {/* ONE OPTION PER ROW, FULL WIDTH — the layout the school's own
@@ -316,16 +317,17 @@ export function QuestionBanks() {
                     full. */}
                 <div className="space-y-1.5">
                   {draft.options.map((value, i) => (
-                    <div key={i} className="flex items-center gap-2">
+                    <div key={i} className="flex items-start gap-2">
                       <input
                         type="radio"
                         name="correct-option"
                         aria-label={`${letter(i)} is the correct answer`}
                         checked={draft.answer === i}
                         onChange={() => setDraft((d) => ({ ...d, answer: i }))}
+                        className="mt-2.5"
                       />
-                      <span className="w-4 text-xs font-semibold text-muted-foreground">{letter(i)}</span>
-                      <Input
+                      <span className="mt-2 w-4 text-xs font-semibold text-muted-foreground">{letter(i)}</span>
+                      <AutoTextarea
                         className="flex-1"
                         aria-label={`Option ${letter(i)}`}
                         placeholder={i < 2 ? `Option ${letter(i)} (required)` : `Option ${letter(i)}`}
@@ -368,7 +370,7 @@ export function QuestionBanks() {
                 {open.questions.map((q, i) => (
                   <li key={q.id} className="flex items-start gap-2 rounded-md border border-border/60 p-2 text-sm">
                     <span className="tabular-nums text-muted-foreground">{i + 1}.</span>
-                    <span className="flex-1">
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
                       {q.text}
                       <span className="ml-2 text-muted-foreground">
                         answer: {q.options[q.answerIndex] ?? "(none)"}

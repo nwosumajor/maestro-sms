@@ -15,6 +15,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -426,7 +427,12 @@ export function CbtStaffPanel({
                           </button>
                         )}
                       </div>
-                      <Input value={q.prompt} onChange={(e) => setQ(i, { prompt: e.target.value })} placeholder="Type the question…" />
+                      <AutoTextarea
+                        value={q.prompt}
+                        onChange={(e) => setQ(i, { prompt: e.target.value })}
+                        placeholder="Type the question…"
+                        aria-label={`Question ${i + 1}`}
+                      />
                       {/* Objective vs theory. Theory has no options — it is written
                           out and marked by a person, so it carries a mark ceiling
                           and a mark scheme instead of a correct choice. */}
@@ -452,9 +458,9 @@ export function CbtStaffPanel({
                                 inputMode="numeric"
                               />
                             </label>
-                            <Input
+                            <AutoTextarea
                               aria-label={`Mark scheme for question ${i + 1}`}
-                              className="h-8 flex-1 text-xs"
+                              className="flex-1 text-xs"
                               value={q.markGuide}
                               onChange={(e) => setQ(i, { markGuide: e.target.value })}
                               placeholder="Mark scheme — seen only by the marker"
@@ -497,17 +503,18 @@ export function CbtStaffPanel({
                           different things about one question. */}
                       <div className="space-y-1.5">
                         {q.choices.map((c, k) => (
-                          <label key={k} className="flex items-center gap-2">
+                          <label key={k} className="flex items-start gap-2">
                             <input
                               type="radio"
                               name={`cbt-correct-${i}`}
                               checked={q.answerIndex === k}
                               onChange={() => setQ(i, { answerIndex: k })}
+                              className="mt-2.5"
                               title="Mark correct"
                               aria-label={`Option ${"ABCDEF"[k]} of question ${i + 1} is the correct answer`}
                             />
-                            <span className="w-4 text-xs font-semibold text-muted-foreground">{"ABCDEF"[k]}</span>
-                            <Input
+                            <span className="mt-2 w-4 text-xs font-semibold text-muted-foreground">{"ABCDEF"[k]}</span>
+                            <AutoTextarea
                               className="flex-1"
                               aria-label={`Option ${"ABCDEF"[k]} of question ${i + 1}`}
                               value={c}

@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [A question box that could not wrap, at any width](#a-question-box-that-could-not-wrap-at-any-width)
 - [Ninety schools, every module written to, and a guide that sold one tier in one currency](#ninety-schools-every-module-written-to-and-a-guide-that-sold-one-tier-in-one-currency)
 - [Seventy schools, four tiers, both payment rails — and a bill in the wrong money](#seventy-schools-four-tiers-both-payment-rails--and-a-bill-in-the-wrong-money)
 - [A reference documenting 351 of 901 routes, under a footer saying it was generated](#a-reference-documenting-351-of-901-routes-under-a-footer-saying-it-was-generated)
@@ -281,6 +282,75 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### A question box that could not wrap, at any width
+`components/ui/auto-textarea.tsx`, the four authoring surfaces, the three that
+render a question back, and `a-question-you-can-read-back.test.ts`. Asked
+directly: the fields for questions and options should expand so long text
+crosses onto the next line and a candidate can read it.
+**THE ANSWER IS THAT IT WAS NEVER A WIDTH PROBLEM.** Every prompt and every
+option, on all four surfaces that author them, was an `<input>` — and **an
+`<input>` cannot wrap at any width**. Text past the edge scrolls sideways out of
+view. So the previous round's fix, which took those boxes from `w-32`/`w-24` to
+full width, helped and could not solve it: the ELEMENT was the constraint, not
+the pixels. A teacher writing a two-line question saw a window of it and could
+not read back what they were about to put on a paper a child will sit.
+// **TWO MECHANISMS, DELIBERATELY.** `field-sizing: content` is the right answer
+— the browser sizes the control, no JavaScript, no measuring on every keystroke
+— and it is Chromium-first. The `scrollHeight` sync is what everyone else gets,
+and it runs ONLY where the CSS is missing. A school's device fleet is whatever
+parents and teachers already own, which is exactly the population a
+Chromium-only feature excludes.
+// ONE SHARED CONTROL, used by all four at once. This feature has drifted twice
+already and both are recorded: `CbtBankEditor` used full-width rows while
+`CbtStaffPanel` — the form that WRITES questions — laid options out in two
+columns; and the candidate's options were given `break-words` while the prompt
+beside them was left. Four private copies is how that happens.
+// `rows={1}`, not the `Textarea` primitive's `min-h-[80px]`: a paper is forty
+of these, and a control that starts three lines tall pushes the questions off
+the screen before anything is typed. It grows from one line.
+**THE SECOND HALF IS THE READER, AND WITHOUT IT THE FIRST HALF LOSES DATA.** The
+moment an author can type a newline, every surface that renders a question needs
+`whitespace-pre-wrap` or the browser collapses the lines into a paragraph — and
+`break-words`, or a chemical name or URL runs out of the card. Fixed on all
+three: the candidate's exam room, the reviewer approving the paper (the last
+person who can catch a question that will not read properly), and the marker
+working through scripts. The candidate's THEORY box was a fixed 9rem window for
+an essay; it grows now, with 9rem as the floor.
+Measured in a real browser on the running app, not read off the source:
+```
+question, one long sentence     38px -> 78px   scrollHeight == clientHeight (nothing hidden)
+option A, one long sentence     38px ->  58px  fully visible
+a question with two line breaks 38px -> 98px   all four lines kept
+empty options                   unchanged at one line
+```
+// THE RADIO AND THE LETTER ARE TOP-ALIGNED now (`items-start`, `mt-2.5`): at
+`items-center` they float against the middle of a two-line option, which reads
+as belonging to the wrong line.
+// CLEAN NEGATIVES, so they are not re-chased: **the printed paper needs
+nothing** — pdfkit's `doc.text` wraps to the page and honours `\n` already; and
+the marking QUEUE keeps its `truncate`, because that is a one-line picker of
+which question to mark and the full prompt is one click away, now wrapped.
+// GOTCHA, and it is this repo's own recorded trap committed again: my gate
+PASSED against a candidate prompt whose wrapping had been deleted and against a
+field that had stopped growing, because **it was matching the prose of its own
+fix** — both `whitespace-pre-wrap` and `scrollHeight` appear in the comments
+above the code that uses them. Caught by mutation, never by reading. Comments
+are stripped now, as `strip-comments.ts` already does on the API side.
+// GOTCHA: the live check first reported ZERO textareas, because the composer is
+client-rendered and the SSR HTML has none of it — the "verifying a client
+component" trap this file records. Driving a real browser is what proved it.
+// **AND THE PREVIOUS ROUND'S GATE WENT RED ON AN IMPROVEMENT**, for the tenth
+time in this file: `four-options-a-candidate-can-read` asserted
+`<Input className="flex-1" aria-label={\`Option …`}`, anchored on the ELEMENT.
+The property it guards — the option field is full width — is strictly stronger
+now. Re-anchored to accept either control and re-validated by putting `w-32`
+back, which it still catches.
+Mutation-validated four ways: an option back to a single-line `Input`, the
+candidate's prompt losing its wrapping, the growing field stopping growing, and
+the MARKER's surface losing it — the reader nobody thinks of.
+// PROBE: one question bank created through the UI and removed; the four banks
+and five questions that were there are as found.
 
 ### Ninety schools, every module written to, and a guide that sold one tier in one currency
 Asked for before the AWS deployment: 90 schools, every tier, every module, both

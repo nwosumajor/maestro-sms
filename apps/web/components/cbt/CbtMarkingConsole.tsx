@@ -140,7 +140,9 @@ export function CbtMarkingConsole({ examId, examTitle }: { examId: string; examT
         <Card>
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-              {queue.prompt}
+              {/* The marker reads this against every script; it must show the
+                  question in full, line breaks included. */}
+              <span className="whitespace-pre-wrap break-words">{queue.prompt}</span>
               <Badge variant="outline">
                 {queue.marked}/{queue.total} marked
               </Badge>

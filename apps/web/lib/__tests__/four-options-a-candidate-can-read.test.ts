@@ -53,8 +53,15 @@ describe("a scholarship question is set A to D", () => {
       // BOUNDED TO THE OPTION FIELD. A bare search for `flex-1` matched
       // something else in the same file, and a narrow class swapped back onto
       // the option input left it green — matched by accident, caught by
-      // mutation. The assertion is the input that CARRIES the option label.
-      const field = /<Input\s+className="([^"]+)"\s+aria-label=\{`Option \$\{/;
+      // mutation. The assertion is the field that CARRIES the option label.
+      //
+      // RE-ANCHORED OFF THE ELEMENT NAME. This read `<Input …>` and went red
+      // when the option became an `AutoTextarea` — a change that STRENGTHENS
+      // exactly what this guards, since an <input> cannot wrap at any width.
+      // The property is that the field carrying the option label is full width,
+      // whichever control it is; `a-question-you-can-read-back` is what now
+      // forbids it going back to a single-line input.
+      const field = /<(?:Input|AutoTextarea)\s+className="([^"]+)"\s+aria-label=\{`Option \$\{/;
       const m = field.exec(src);
       expect(m).not.toBeNull();
       expect(m![1]).toBe("flex-1");
@@ -101,7 +108,7 @@ describe("the school's own CBT module too", () => {
   // `CbtStaffPanel`, which WRITES them, used `sm:grid-cols-2`, giving each
   // option half the panel. Fine for "3 / 4 / 5", far too narrow for a sentence.
   it("the composer gives each option a full-width field", () => {
-    const field = /<Input\s+className="([^"]+)"\s+aria-label=\{`Option \$\{"ABCDEF"\[k\]\} of question/;
+    const field = /<(?:Input|AutoTextarea)\s+className="([^"]+)"\s+aria-label=\{`Option \$\{"ABCDEF"\[k\]\} of question/;
     const m = field.exec(STAFF);
     expect(m).not.toBeNull();
     expect(m![1]).toBe("flex-1");

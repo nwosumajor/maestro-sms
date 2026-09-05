@@ -96,12 +96,16 @@ function BankRow({ bank }: { bank: Bank }) {
               <ol className="space-y-3">
                 {thread.questions.map((q, i) => (
                   <li key={q.id} className="text-sm">
-                    <p className="font-medium">
+                    {/* The reviewer approving a paper is the last person who
+                        can catch a question that will not read properly to a
+                        candidate, so they must see exactly what the candidate
+                        will — breaks kept, long tokens wrapped. */}
+                    <p className="whitespace-pre-wrap break-words font-medium">
                       {i + 1}. {q.prompt}
                     </p>
                     <ul className="mt-1 space-y-0.5 pl-4 text-muted-foreground">
                       {q.choices.map((c, ci) => (
-                        <li key={ci}>
+                        <li key={ci} className="whitespace-pre-wrap break-words">
                           {String.fromCharCode(65 + ci)}. {c}
                         </li>
                       ))}
