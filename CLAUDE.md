@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **254 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **256 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **254 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **256 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1625,6 +1625,31 @@ central check-in that bypasses the per-class teacher restriction, `takenById`
 side-effect-free lookup. `member.scan` is a NEW permission: run the seed against a live
 DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
 (`role-permissions.service`, static `@sms/types` map is only the fallback).
+
+## The report card is a GRIDDED FORM, not a flowing document
+Laid out from a real Continuous Assessment Report: every section is a bordered
+box under a titled bar, A4 portrait at 28pt margins. Order is
+letterhead → personal data | attendance + terminal duration → rating key →
+skills → grade key → academic performance → remarks + attestation. **The RATING
+KEY precedes the ratings and the GRADE KEY precedes the marks** — both used to
+sit below the thing they explain. The annual block is not a section: it is the
+ANNUAL SUMMARY half of the marks table, carrying the session's OTHER terms
+(the current term's figures are already under MARKS OBTAINED).
+// GOTCHA: a table cell wants `lineBreak: false` so a mark that no longer fits
+ellipsizes rather than reflowing the row; a cell holding a SENTENCE wants the
+opposite and silently truncates to its first line. `cellText` takes `wrap`.
+// GOTCHA: the reference's letterhead says "Continuous Assessment Report"
+because that is what THAT school calls it. The card says **"Report Card"** —
+copying a layout must not rename everyone else's document.
+// **RENDER IT AND LOOK.** Two defects were invisible in the text extraction and
+obvious in a PNG (`pdftoppm -r 110 -png`): a label row over an empty attendance
+box, and "all 1 terms". Text assertions do not see layout.
+// Prior-term column widths are DERIVED from what is left, so a three-term
+school's "Second Term" fits and a four-quarter school's ellipsize visibly.
+// **Component marks print AS THEY COUNT** (`effectiveComponents`), because the
+total is a sum of CLAMPED components and printing the raw ones gave a row that
+did not add up. All THREE printers use it — card, term scoresheet, session
+report. It preserves null, so "not marked" stays distinct from "scored zero".
 
 ## Report-card ATTESTATION + public verification QR — BUILT
 (`apps/api/src/reportcards/report-card-attestation.*`, `public-attestation.controller.ts`,

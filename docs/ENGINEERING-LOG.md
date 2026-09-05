@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and fifty-four write-ups, newest first. Each records a **real defect
+Two hundred and fifty-six write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,8 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [A row that did not add up, and a page that read as prose](#a-row-that-did-not-add-up-and-a-page-that-read-as-prose)
+- [A card nobody had signed, and the image that would not have fixed it](#a-card-nobody-had-signed-and-the-image-that-would-not-have-fixed-it)
 - [Ten grading systems, one set of marks, and a card describing itself wrongly](#ten-grading-systems-one-set-of-marks-and-a-card-describing-itself-wrongly)
 - [Every index is right for the application and useless to the foreign key](#every-index-is-right-for-the-application-and-useless-to-the-foreign-key)
 - [A report card filed to the family before the marks were published](#a-report-card-filed-to-the-family-before-the-marks-were-published)
@@ -285,6 +287,129 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### A row that did not add up, and a page that read as prose
+Two findings from re-running the ten-school grading simulation, which is what a
+simulation is for.
+**A TERM TOTAL IS THE SUM OF CLAMPED COMPONENTS, AND EVERY READER PRINTED THE RAW
+ONES.** A school weighting 40/20/30/10 with an exam mark of 42 already recorded:
+```
+C.A. 28 · Exam 42 · Total 68        under "Maximum mark 60 / 40 / 100"
+```
+28 + 42 is 70, and 42 is above the maximum the same card states two rows above. A
+parent adding up the row gets a different answer from the school. Reachable
+whenever a school lowers a component's weighting after marks are entered — the
+same mid-year-setup trigger as the scale-change case.
+// Clamping is the RIGHT arithmetic: 42 out of 40 is not a mark. Printing the
+unclamped figure beside a total that ignores it is what made the page incoherent.
+// New pure `effectiveComponents`, and **all THREE printers use it** — the report
+card, the term scoresheet and the session report. They are siblings off one
+computation, and fixing only the one that was measured is how this class
+survives. Neither scoresheet had the school's policy in scope; both take it now.
+It preserves NULL rather than zeroing it, so "not marked" stays distinguishable
+from "scored zero" — the distinction the card's own asterisk exists for.
+**THE CARD READ AS A FLOWING DOCUMENT AND GOT HARDER TO SCAN THE MORE IT
+CARRIED.** Re-laid out from a real Continuous Assessment Report: everything in a
+bordered box under a titled bar. A parent reads a card ACROSS, looking for one
+subject's row and one figure, which is what a grid is for. Two of the moves are
+substantive rather than cosmetic: the RATING KEY now precedes the ratings that use
+it and the GRADE KEY precedes the marks that use it — both used to sit below the
+thing they explain, so a parent met "B3" with no way to read it until three inches
+later. The annual block stopped being a section of its own and became the ANNUAL
+SUMMARY half of the marks table, carrying the OTHER terms of the session.
+// GOTCHA: **a table cell wants `lineBreak: false` and a cell holding a SENTENCE
+wants the opposite.** The first is right for a mark that no longer fits — it
+should ellipsize rather than reflow the row — and it silently truncated "No
+attendance was recorded for this student, though the register was taken on 49
+days." to its first line.
+// GOTCHA, and it is why rendering beats reading: two blemishes were invisible in
+the text extraction and obvious in a PNG — a label row printed over an EMPTY
+attendance box (the same defect as a trait group heading with no ratings, which
+this card already refuses), and **"all 1 terms"** on every first-term card. A page
+a family reads should not be ungrammatical about their child's year.
+// AND THE LETTERHEAD WORDING CAME ALONG WITH THE GRID: the reference says
+"Continuous Assessment Report" because that is what THAT school calls it, so
+copying it renamed every other school's card. Caught by the person who asked for
+the layout, not by me.
+**FOUR ASSERTIONS WERE PINNED TO THE WRONG THING ALL ALONG AND THIS EXPOSED
+THEM** — worth more than the layout itself:
+```
+sub.complete ? "" : " *"        named the LOOP VARIABLE, renamed by the re-layout
+TRAIT_SCALE.map(...)            named HOW THE ARRAY IS WALKED, now sliced first
+Term weighting: ${weighting}    named a LOCAL, not where the value comes from
+not.toMatch(/\b42\b/)           matched the GENERATED-AT TIMESTAMP: 5:42 pm
+```
+The last is the third time this repo has recorded that trap. It reads the cell
+positionally now. Eight further assertions were re-anchored because the text they
+named genuinely changed.
+// GOTCHA, MINE, and the one this file already warns about: `git checkout` on an
+UNCOMMITTED file during a mutation run **discards the FIX, not the mutation**.
+Every subsequent suite failed with "effectiveComponents is not a function" and
+read as a code fault. Mutations restore from a `.bak` copy now.
+// AND FOUR FIELDS THAT LOOKED BROKEN WERE NOT: logo, sex, attendance and next
+term were blank on the samples because the FIXTURE never wrote them — the product
+reads all four. Worth stating because the instinct is to go fixing. Measured
+first: `branding with logo = 0` across the whole database, so that path had never
+once been exercised; it works, and a school has to upload one at /admin/branding.
+
+### A card nobody had signed, and the image that would not have fixed it
+Asked: how does the principal's signature reach a parent? **IT DOES NOT, AND
+NOTHING IN THIS PLATFORM EVER CAPTURED ONE** — no image, no certificate, nothing
+in `SchoolBranding` but a logo and three brand-colour numbers. A printed card has
+a ruled line signed by hand. The VAULT copy a guardian is notified about and
+downloads carries that line **permanently blank**, so the digital card — the one
+most families actually receive — was the one nobody had signed.
+**THE OBVIOUS FIX IS THE WRONG ONE.** A stored signature image is a forgeable
+credential: a signature stamp left in an unlocked drawer, and anyone who can read
+it can put it on any document. It answers nothing an attestation does not, and it
+adds a new secret to protect. Rejected deliberately, and the reason is recorded
+in the service so the next person asked for one finds the argument rather than
+the gap.
+**WHAT THE SCHOOL HAD ALREADY DONE WAS STRONGER AND ALREADY AUDITED.** A NAMED
+person wrote the head's remark (`report_card_remark.headId`, and `headIsPrincipal`
+already labelled the block by that person's REAL role rather than by whoever holds
+the office), and every mark on the page passed a two-person GRADE_PUBLISH chain
+recorded in the immutable WorkflowAuditLog. None of it was on the page. Built:
+`report_card_attestation`, one row per pupil per term, printing a named approver,
+the date, a 12-character code and a QR.
+// **THE PUBLIC ROUTE TAKES NO CROSS-TENANT READ, and that is the design.** The
+URL carries the school's SLUG, so the school resolves from the RLS-exempt registry
+FIRST and the lookup then runs under that school's GUC — an unauthenticated
+verifier is confined by exactly the policy a member of staff is. A privileged
+client on an internet-facing route would have handed a public endpoint more reach
+than the app role itself has (Golden Rule #4). ONE 404 for unknown school,
+unknown code and right-code-wrong-school alike.
+// `headRemarkAt` is a new column because **`updatedAt` cannot answer "when did
+the head sign"** — a class teacher editing their own remark moves it, and
+"Approved by X on <date>" is worth nothing if the date is whenever the row last
+happened to change.
+// **`contentHash` decides what counts as a new ISSUE**, and both halves matter:
+it SORTS subjects, because query order is not part of a document and otherwise
+every reprint would tell every holder theirs was superseded; and it DOES move on
+a changed grade at an unchanged total, because a scale change re-letters a mark
+and that is a different document to anyone reading the letter.
+// **THE PAGE SHOWS THE MARKS ON PURPOSE.** Catching a doctored card needs a
+comparison a person can make; a digest cannot be recomputed by eye, so it would
+prove nothing. The reader already holds the card, the code is printed nowhere
+else, and it is unguessable — so holding the code IS holding the card. Rate
+limited, audited to `SYSTEM_ACTOR_ID` (the caller is unauthenticated BY DESIGN;
+inventing an identity would make the trail say something untrue), and exported in
+the NDPR bundle as `cardAttestations`.
+**FOUR GATES CAUGHT REAL OMISSIONS AND EACH WAS SATISFIED RATHER THAN EXEMPTED:**
+```
+every-controller-declares-its-module   no always-on reason for the public route
+api-surface.registry                   no entry for the new route
+every-student-table-is-accounted-for   the table was missing from the DSAR export
+rls.e2e coverage meta-test             MISSING "FORCE ROW LEVEL SECURITY"
+```
+The last was a genuine slip and the most important: without FORCE the table OWNER
+bypasses every policy, and migrations and seeds run as exactly that owner.
+**LIVE END TO END** on the running stack: card prints "Approved by Demo Principal
+(Principal) on 5 September 2026 / Code DKMM-A8KS-TJA1 / Issue 1"; the public page
+over nginx with NO SESSION confirms it genuine and names the pupil; wrong code,
+unknown school and right-code-wrong-school are indistinguishable; reprinting
+unchanged stays Issue 1; one changed mark moves it to Issue 2 and the page agrees.
+Mutation-validated six ways.
 
 ### Ten grading systems, one set of marks, and a card describing itself wrongly
 Asked for: how the principal's signature reaches a parent, and a simulation of
