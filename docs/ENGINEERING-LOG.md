@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and fifty-eight write-ups, newest first. Each records a **real defect
+Two hundred and fifty-nine write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Ten schools, five years each: does the FLEET's history slow one tenant down?](#ten-schools-five-years-each-does-the-fleets-history-slow-one-tenant-down)
 - [Five years, four promotions, and a pupil who fell off the roll](#five-years-four-promotions-and-a-pupil-who-fell-off-the-roll)
 - [A whole academic year, driven term by term, and the four traps were all mine](#a-whole-academic-year-driven-term-by-term-and-the-four-traps-were-all-mine)
 - [A row that did not add up, and a page that read as prose](#a-row-that-did-not-add-up-and-a-page-that-read-as-prose)
@@ -289,6 +290,61 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Ten schools, five years each: does the FLEET's history slow one tenant down?
+The single-school five-year run asked whether a school's OWN history slows it
+down. This asks the multi-tenant question, which is the one that matters on a
+shared deployment: whether the accumulated history of NINE OTHER TENANTS slows
+the tenth. Ten schools, fifty sessions, 150 terms, 1,000 pupils, 135,000 marks,
+300,000 attendance records, 40 promotion batches, ten different grading scales.
+**THE ANSWER IS NO, AND THE MEASUREMENT IS THE POINT.** School 01 was driven
+FIRST, when the tables held its data alone, and re-measured at the end when they
+held all ten schools' five years — 135,000 marks where there had been 13,500:
+```
+                        school 01 alone      the whole fleet loaded
+report card                    352 ms        336 / 306 / 313 ms
+session report                     —         128 / 121 / 122 ms
+class broadsheet (98)              —          65 /  62 /  59 ms
+```
+Flat. Mean card time across the fleet by year: 326 / 317 / 308 / 309 / 325 ms —
+no climb from year 1 to year 5 either.
+**TENANT ISOLATION, MEASURED RATHER THAN ASSERTED.** The sharp discriminator is
+the class MINIMUM, because the fleet's lowest differs from this school's:
+```
+the card printed          class avg 64 · low/high 38/95 · pos 1/98 · roll 98
+this school alone         63.57      · 38 / 95         · 98 pupils   MATCHES
+the whole fleet           62.75      · 37 / 95         · 980 pupils  would show 37
+```
+And five direct cross-tenant probes as a real principal against a real
+neighbour: session report 404, broadsheet 404, pupil profile 404, attendance
+404, report card 404.
+// GOTCHA, MINE, AND THE RECORDED ONE: the sixth probe, `GET /students?classId=`
+against a foreign class, returned 200 with a hundred pupils and looked like a
+leak. It was not. Every id belonged to the CALLER's school, and the endpoint
+takes only `?q=` — there is no `classId` parameter and there never was. **A probe
+that guesses a field name reports a fact about itself.** Checking whose ids came
+back, rather than whose NAMES, is what settled it: "Fleet Pupil 002" exists in
+all ten schools, so the names proved nothing either way.
+**PROMOTIONS AT FLEET SCALE.** 40 batches, every one maker-checker. Each school
+ended with a roll of exactly 100 — 98 in SS 2 A, plus the one RETAINed and the
+one DEMOTEd, both still on the roll. Before the demotion fix in the previous
+entry that would have read 99, ten times over.
+// GOTCHA on teardown, and the log's own advice paying off: 1,000 users with 73
+of 79 foreign keys into `user` unindexed. Deleting the two big children by
+`schoolId` FIRST took **half a second** (300,000 attendance rows in 309 ms,
+135,000 marks in 224 ms); four temporary indexes on the referencing columns then
+made the user delete and the rest finish in **17 seconds** total. The whole
+teardown was 22 s where the naive order took twenty-one minutes the first time
+this was met.
+// GOTCHA: `CREATE INDEX CONCURRENTLY` is REFUSED on a partitioned table, and
+`attendance_record` is partitioned. Its rows were already gone so it needed no
+index; the other four were created plainly and dropped after.
+// MEASURED AFTER: every table back to baseline exactly (school 4, user 1016,
+subject_result 24302, attendance_record 173701, enrollment 930), no temporary
+index left, no f10 row anywhere. `VACUUM FULL` took the database to **173 MB**,
+BELOW the 284 MB this file has been calling baseline — because that figure was
+itself carrying bloat from earlier runs. The row counts are the baseline; the
+size was never the same claim.
 
 ### Five years, four promotions, and a pupil who fell off the roll
 Asked for: a five-year, multi-session simulation with promotions. One school,
