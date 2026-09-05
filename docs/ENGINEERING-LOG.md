@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and forty-eight write-ups, newest first. Each records a **real defect
+Two hundred and fifty-four write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Ten grading systems, one set of marks, and a card describing itself wrongly](#ten-grading-systems-one-set-of-marks-and-a-card-describing-itself-wrongly)
 - [Every index is right for the application and useless to the foreign key](#every-index-is-right-for-the-application-and-useless-to-the-foreign-key)
 - [A report card filed to the family before the marks were published](#a-report-card-filed-to-the-family-before-the-marks-were-published)
 - [A question box that could not wrap, at any width](#a-question-box-that-could-not-wrap-at-any-width)
@@ -284,6 +285,116 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Ten grading systems, one set of marks, and a card describing itself wrongly
+Asked for: how the principal's signature reaches a parent, and a simulation of
+assessment -> CBT -> grading -> report card across **ten schools on ten different
+grading score systems**, with the cards printed for review. One pupil, Adaeze
+Okonkwo, with IDENTICAL component marks in all ten, so anything differing on the
+printed page is attributable to the school's own system and to nothing else.
+**THE SYSTEM'S CORE ANSWER IS RIGHT, AND WORTH SEEING.** The same 57.78 average:
+```
+WAEC/NECO A1-F9        C5   a credit
+Simple letters A-F     C    a credit
+Plus/minus A+..F       C
+Cambridge A*-G         D
+United States, pass 60 F    a fail
+```
+One child, one set of marks, five verdicts, each correct for its own scale. That
+is the feature working, and it is why a scale is per-school rather than global.
+**DEFECT 1 — THE CARD COMPUTED WITH THE SCHOOL'S WEIGHTING AND PRINTED THE
+PLATFORM'S.** A `GradingPolicy` carries two things the card must honour: the
+letter `bands` and the component `components`. It was wired to the first and not
+the second. Every total was computed with `grading?.components`, and the two
+places that DESCRIBE the weighting took the platform default:
+```
+"Maximum mark   40   60   100"                  the column denominators
+"Term weighting: Exam 60 · Midterm 20 · ..."    a literal string
+```
+Measured on a school weighting 45/25/20/10, both false. // THE DENOMINATOR IS THE
+WORSE OF THE TWO: a pupil scoring 45 has FULL MARKS there, printed under a header
+saying the maximum is 60 — a perfect exam reading as 75% on the document the
+family keeps. And the comment directly above the offending line already argued
+the point: *"a parent reading '37' under Exam should not have to find a note
+three inches below to learn it was out of 60."* It was applied to the platform's
+denominator. Sibling asymmetry inside ONE object: `bands` was carried onto the
+card data with a comment saying why, `components` was not.
+**DEFECT 2 — A KEY THAT EXPLAINED NONE OF THE GRADES ABOVE IT.** Two correct
+rules colliding. A PUBLISHED grade is a snapshot (`reportedTermGrade` reports the
+letter it was published with, so history does not move); the key at the foot is
+TODAY's. Publish under one scale, then set another, and:
+```
+subject grades   B  E  C  A  D  F
+the key beneath  9 90-100 | 8 80-89 | 7 70-79 | ... | 1 0-19
+```
+A key explaining not one letter on the page. Reachable by the mid-year onboarding
+path this repo already documents: publish under the default, then configure the
+school's real scale. // THE COMMENT ASSERTED THE DISAGREEMENT AWAY — *"printed
+from the SCHOOL's own scale, which is the same one the letters were computed
+on."* A comment asserting agreement is not agreement.
+// SAME DEFECT ONE COLUMN OVER: the Remark column re-banded each subject's TOTAL
+against today's bands while the Grade column beside it showed the frozen letter,
+so the two could name different bands on the same row. New `gradeWordFor` looks
+the word up BY THE LETTER and returns null when the school no longer has a band
+by that name — the honest answer, and the one thing that does not undo the
+snapshot.
+// THE RESTRICTIVE OPTION: the card NAMES the foreign grades and says the scale
+has changed; it says nothing when the key does fit (a standing disclaimer is one
+nobody reads). Freezing the scale alongside each mark is the fuller answer, is a
+schema change, and is named in the comment rather than half-built.
+**DEFECT 3 — A BEHAVIOURAL RATING VANISHED WHEN ITS TRAIT WAS RETIRED.** The
+skills block walks `TRAIT_GROUPS` and picks up the ratings it recognises, so
+removing a trait takes every historical rating of it off every past card,
+silently. `isTraitKey` refuses an unknown key on the way IN, so these can only be
+rows the catalogue has moved on from — precisely what `traitLabel` was written
+for (*"a rating recorded last year must still print, even under a retired
+trait"*). **That helper had NO production caller at all**: only tests, one of
+which asserts the retired-trait fallback nothing in the product could reach. A
+test on a helper proving nothing about a caller that did not exist.
+**THE SIGNATURE, WHICH WAS THE OTHER HALF OF THE QUESTION.** There is no captured
+signature anywhere in this platform — no image, no certificate, nothing in
+`SchoolBranding` but a logo and three brand-colour numbers. The card prints a
+ruled line, the writer's typed NAME from `report_card_remark.headId`, and a blank
+block labelled *"Signature, school stamp and date"*. So a printed card is signed
+by hand; **the VAULT copy — the one the guardian is notified about and downloads
+— carries that block permanently blank.**
+// WHAT THE CARD DOES CAPTURE IS BETTER THAN A SIGNATURE AND IS ALREADY AUDITED,
+which is the thing to build on rather than replace: `headIsPrincipal` checks
+whether the remark's real author holds the principal role and labels the block
+accordingly, so it names who ACTUALLY wrote it rather than whoever holds the
+office; and every mark on the page passed a two-person GRADE_PUBLISH chain
+recorded in the immutable `WorkflowAuditLog`. A stored signature IMAGE is a
+forgeable credential — a signature stamp in an unlocked drawer — and answers
+nothing an attestation does not.
+**WHAT THE CHAIN DID CORRECTLY, driven end to end over the real API:**
+```
+policy PUT with a 5-char grade    400 {"bands":["String must contain at most 4
+                                  character(s)"]} — refused, naming the field
+9 subjects x 10 schools           published through head teacher -> principal,
+                                  90 two-person approvals, 0 self-approvals
+weights not totalling 100         refused
+teardown: workflow_request        FK-refused by workflow_audit_log — the
+                                  immutable trail doing exactly its job
+```
+// GOTCHA, MINE: the PDF text extractor. pdfkit splits one line into several hex
+runs wherever the font kerns, so a naive `<hex> Tj` scan returns nothing at all.
+The repo's own `reportcard-pdf.spec.ts` already solved it — glue the runs and
+break lines on `Tm`. Reuse the extractor that exists before writing a worse one.
+// GOTCHA, MINE: my first anchor for "no word from today's scale beside a letter
+from the old one" asserted `not.toContain("Excellent")`, and went red on the
+ANNUAL AVERAGE's descriptor — which is computed live and is right to be there.
+Re-anchored to "Very good", which on this fixture only the subject row can
+produce. An assertion has to be unreachable by the correct behaviour.
+// GOTCHA: the PDF fixture was self-inconsistent in exactly the way that hid
+defect 2 — WAEC bands (A1-F9) with subject grades "A"/"B". Nothing noticed,
+because the word came from the total and never looked at the letter, so a test
+named *"the word beside each mark"* never checked the pairing it claims. Made
+coherent, and it now tests what its name says.
+// PROBE: 10 schools, 380 users, 3,150 subject results, 60 trait ratings, 90
+workflow requests and 360 audit-log rows removed; every table back to baseline
+exactly (school 4, user 1016, subject_result 24302, attendance_record 173701),
+zero rows matching the fixture anywhere.
+Mutation-validated ten ways across the three fixes.
 
 ### Every index is right for the application and useless to the foreign key
 Found while CLEANING UP after the 100-school grading exercise, which is a place
