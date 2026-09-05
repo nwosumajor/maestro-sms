@@ -30,7 +30,7 @@ import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
-import { TRAIT_GROUPS, TRAIT_SCALE, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor, gradeWordFor, attendanceRatePct } from "@sms/types";
+import { TRAIT_GROUPS, TRAIT_KEYS, TRAIT_SCALE, traitLabel, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor, gradeWordFor, attendanceRatePct } from "@sms/types";
 import { GRADE_COMPONENTS, gradeComponentMax } from "@sms/types";
 import type { GradeBand } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
@@ -844,6 +844,27 @@ export class ReportCardService {
           doc.font("Helvetica-Bold").text(group.label, startX);
           doc.font("Helvetica").text(
             rated.map((t) => `${t.label}: ${scoreOf.get(t.key)}`).join("    "),
+            startX,
+            undefined,
+            { width: 545 - startX },
+          );
+          doc.moveDown(0.2);
+        }
+        // A RATING UNDER A RETIRED TRAIT STILL HAPPENED. This loop walks the
+        // CATALOGUE and picks up the ratings it recognises, so a trait removed
+        // from TRAIT_GROUPS takes every historical rating of it off every past
+        // card — silently, which is the part that matters. `isTraitKey` refuses
+        // an unknown key on the way IN, so these can only be rows the catalogue
+        // has moved on from.
+        // `traitLabel` was written for exactly this ("a rating recorded last
+        // year must still print, even under a retired trait") and had no
+        // production caller at all — only a test asserting the fallback that
+        // nothing could reach.
+        const retired = d.traitRatings.filter((r) => !TRAIT_KEYS.includes(r.traitKey));
+        if (retired.length > 0) {
+          doc.font("Helvetica-Bold").text("Other recorded traits", startX);
+          doc.font("Helvetica").text(
+            retired.map((r) => `${traitLabel(r.traitKey)}: ${r.score}`).join("    "),
             startX,
             undefined,
             { width: 545 - startX },

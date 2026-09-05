@@ -395,6 +395,33 @@ describe("the word beside each mark", () => {
   });
 });
 
+describe("a rating recorded under a trait the catalogue has since retired", () => {
+  // The block walks TRAIT_GROUPS and picks up the ratings it recognises, so
+  // removing a trait from the catalogue took every historical rating of it off
+  // every past card — silently. `isTraitKey` refuses an unknown key on the way
+  // in, so these are only ever rows the catalogue has moved on from.
+  const withRetired = {
+    traitRatings: [
+      { traitKey: "punctuality", score: 5 },
+      { traitKey: "somethingRetired", score: 3 },
+    ],
+  };
+
+  it("still prints, under the key the catalogue no longer has a label for", async () => {
+    const t = textOf(await render(withRetired as never));
+    expect(t).toContain("Other recorded traits");
+    expect(t).toContain("somethingRetired: 3");
+    // and the catalogued one is untouched
+    expect(t).toContain("Punctuality: 5");
+  });
+
+  it("adds no heading when every rating is one the catalogue knows", async () => {
+    const t = textOf(await render({ traitRatings: [{ traitKey: "punctuality", score: 5 }] } as never));
+    expect(t).toContain("Punctuality: 5");
+    expect(t).not.toContain("Other recorded traits");
+  });
+});
+
 describe("a grade the card's own key does not explain", () => {
   // A PUBLISHED grade is a snapshot — `reportedTermGrade` reports the letter it
   // was published with, so history does not move when a school changes its
