@@ -71,7 +71,21 @@ export class ExeatOverdueService {
    * Cross-tenant and privileged, like the dunning and staff-document sweeps: it
    * has to run for every school without a request to hang off.
    */
-  async sweep(now = new Date()): Promise<OverdueSweepResult> {
+  /**
+   * @param onlySchoolId confine the sweep to ONE tenant. The scheduler passes
+   *   nothing and runs the fleet; the manual route passes the caller's school.
+   *
+   * WHY THE MANUAL ROUTE MUST PASS IT. `POST /hostels/exeats/overdue/run` is
+   * gated on `hostel.manage` — a per-school permission a warden or registrar
+   * holds — and called the fleet sweep. Measured across 500 schools: one
+   * school's registrar pressed it and the run reported `scanned: 1500,
+   * alerted: 1500`, stamping `overdueNotifiedAt` on 499 other schools' exeats
+   * and sending their guardians' alerts, in a request held open for 12.6
+   * seconds. The job catalogue declared that route `scope: "SCHOOL"`, which it
+   * was not. Its siblings already knew: the dunning and reconciliation sweeps
+   * gate their manual triggers on platform-level permissions.
+   */
+  async sweep(now = new Date(), onlySchoolId?: string): Promise<OverdueSweepResult> {
     const client = this.db.client;
     if (!client) return { scanned: 0, alerted: 0, failed: 0, skipped: "NO_DB" };
 
@@ -81,6 +95,7 @@ export class ExeatOverdueService {
         actualReturnAt: null,
         expectedReturnAt: { lt: now },
         overdueNotifiedAt: null,
+        ...(onlySchoolId ? { schoolId: onlySchoolId } : {}),
       },
       select: {
         id: true,

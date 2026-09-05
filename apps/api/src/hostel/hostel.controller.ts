@@ -19,7 +19,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { HostelService } from "./hostel.service";
-import { ExeatOverdueService } from "./exeat-overdue.service";
+import { ExeatOverdueService, type OverdueSweepResult } from "./exeat-overdue.service";
 import { JobRunsService } from "../maintenance/job-runs.service";
 
 const customFields = z.record(z.string()).optional();
@@ -195,9 +195,13 @@ export class HostelController {
    */
   @Post("exeats/overdue/run")
   @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
-  runOverdueCheck(): Promise<{ scanned: number; alerted: number }> {
+  runOverdueCheck(@CurrentPrincipal() p: Principal): Promise<OverdueSweepResult> {
+    // THE CALLER'S SCHOOL, not the fleet. `hostel.manage` is a per-school
+    // permission and this ran the whole platform's sweep: one registrar's press
+    // alerted 499 other schools' guardians and consumed their pending alerts.
+    // The hourly scheduler still sweeps everyone.
     return this.jobRuns.record("hostel.exeatOverdue", "MANUAL", () =>
-      this.overdue.sweep(),
+      this.overdue.sweep(new Date(), p.schoolId),
     );
   }
 
