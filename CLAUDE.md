@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **252 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **253 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **252 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **253 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1000,6 +1000,13 @@ These are the rules; the log is why each one exists.
   write amplification**: measure the variant before adding it.
 - **Count in the database**; never `findMany().length`. Never a query per row —
   `.map(r => this.toDto(tx, r))` is a query multiplier.
+- **A TENANT-LEADING INDEX SERVES EVERY READ AND NO FOREIGN-KEY CHECK.** Every
+  scoped query filters `schoolId` first, so `(schoolId, studentId)` is the right
+  index — and an FK check is handed a bare `studentId` with no tenant to lead
+  with, so it seq-scans. 73 of the 79 foreign keys into `user` are in that
+  position. Harmless, because nothing here hard-deletes a user; it costs an
+  afternoon the day somebody purges a tenant. Index the referencing columns,
+  delete, drop them again.
 
 ### Authorization and tenancy
 - **A permission has TWO halves**: the route gate says whether you may read at

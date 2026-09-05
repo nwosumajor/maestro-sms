@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Every index is right for the application and useless to the foreign key](#every-index-is-right-for-the-application-and-useless-to-the-foreign-key)
 - [A report card filed to the family before the marks were published](#a-report-card-filed-to-the-family-before-the-marks-were-published)
 - [A question box that could not wrap, at any width](#a-question-box-that-could-not-wrap-at-any-width)
 - [Ninety schools, every module written to, and a guide that sold one tier in one currency](#ninety-schools-every-module-written-to-and-a-guide-that-sold-one-tier-in-one-currency)
@@ -283,6 +284,81 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Every index is right for the application and useless to the foreign key
+Found while CLEANING UP after the 100-school grading exercise, which is a place
+worth looking: the teardown exercises a path the product itself never takes.
+Deleting 100 schools ran for **twenty-one minutes** and was cancelled. The cause
+was not the volume — the same rows went in seconds once I looked properly.
+**73 OF THE 79 FOREIGN KEYS INTO `user` HAVE NO INDEX ON THE REFERENCING SIDE.**
+A `DELETE` from `user` makes Postgres prove no row still points at it, once per
+row deleted, against every referencing table:
+```
+attendance_record.studentId   173,701 rows    no leading-column index
+enrollment.studentId           70,930         no leading-column index
+audit_log.actorId              52,652         actorId is in NO index at all
+notification.recipientId       48,081         no leading-column index
+```
+70,400 users x those four tables is the whole afternoon. With four temporary
+indexes on exactly those columns the identical statements finished in **seconds**
+— 70,000 enrolments, 70,400 users, 70,400 role rows and the rest — and the
+indexes were dropped again.
+// **AND THE REASON IS THE THING THAT MAKES THE SCHEMA CORRECT.** These columns
+are not unindexed. They sit in composites that all LEAD WITH THE TENANT:
+`(schoolId, studentId)`, `(schoolId, recipientId, createdAt)`. That is precisely
+right for this application — every tenant-scoped read filters on `schoolId`
+first, which is what RLS and the query planner both want. It is precisely wrong
+for an FK check, which is handed a bare `studentId` and has no `schoolId` to lead
+with, so the composite cannot serve it and the planner takes a sequential scan.
+42 of the 73 are in that position: covered by an index, uncovered for this.
+// THE SIX THAT ARE INDEXED are the ones whose natural lookup is BY PERSON rather
+than by tenant — `user_role.userId`, `parent_child.parentId`,
+`student_profile.studentId`, `employee.userId`, `teacher_unavailability.teacherId`,
+`admission_application.convertedStudentId`. Nobody chose the other 73 badly; the
+access pattern simply never asked.
+**THIS IS NOT A LIVE DEFECT, AND SAYING SO PRECISELY IS THE POINT.** The product
+never hard-deletes a user — `grep -E '\buser\.delete(Many)?\(' apps/api/src`
+returns **zero**. An exit sets `User.status = EXITED` and keeps the record, which
+this file already records as deliberate ("a leaver vanishing from their own past
+is a worse bug than the one being fixed"). So the FK-check path is never taken by
+anything the application does, and no request is slow because of it.
+// **AND THE INDEXES ARE DELIBERATELY NOT ADDED.** Four new indexes on
+`attendance_record`, `audit_log`, `notification` and `enrollment` — three of the
+most-written tables in the product, one of them partitioned across thirteen
+partitions — is permanent write amplification bought for a path nothing takes.
+That is the same conclusion this file reached when it DROPPED three trigram
+indexes that had never been scanned, and when it built two covering indexes for
+the revenue report, measured them and kept neither.
+**WHERE IT WILL BITE, AND THE REMEDY.** Anyone who genuinely purges a tenant:
+decommissioning a school, an NDPR/GDPR erasure that goes beyond the field-level
+one, or a restore-drill teardown. The order is:
+```
+1. create an index on each referencing column you are about to make Postgres check
+2. delete children -> parents -> "user" -> school
+3. drop the indexes again
+```
+It turns a scan per deleted row into a probe, and it is temporary, so nothing is
+paid for it afterwards.
+// GOTCHA IN MY OWN TEARDOWN, and it is the reason this took twenty-one minutes
+before it took seconds: the cleanup was written as **twelve passes over every
+table carrying a `schoolId`**, catching `foreign_key_violation` and retrying, so
+FK order never had to be worked out. That is a lovely shape for a hundred rows
+and a terrible one for a million: ~200 tables x 12 rounds of mostly-empty deletes,
+each still planned and executed. Deleting the two big children explicitly first
+(`subject_result` 630,000, `student_trait_rating` 420,000) took seconds and left
+81 rows for the sweep to find.
+// GOTCHA: `pg_stat_activity.query` shows the WHOLE multi-statement string, so a
+`psql -c "delete …; delete …; delete …"` tells you nothing about which statement
+is actually running. I spent a while blaming `enrollment` for what turned out to
+be `"user"`. Send them one at a time when you need to know.
+// GOTCHA: cancelling was the right call and cost nothing — the whole teardown
+was one transaction, so `pg_cancel_backend` rolled back 175,000 already-deleted
+rows in moments. A long-running destructive statement is not sunk cost.
+// MEASURED AFTER: every table back to its baseline count exactly, 0 rows
+matching the fixture by name anywhere, no temporary index or table left, the
+three demo subscriptions byte-identical, and `VACUUM FULL` on the ten tables that
+held the volume took the database from 532 MB back to **284 MB** against a
+285 MB baseline.
 
 ### A report card filed to the family before the marks were published
 Asked for: 100 schools of 700 pupils, assessment -> CBT -> behavioural traits ->
