@@ -19,20 +19,38 @@ function makeService(opts: {
   others?: Row[];
   activeEnrollments?: string[];
   batch?: Row | null;
-  existingTargetEnrollments?: string[];
+  /** Rows that already exist in the DESTINATION class. A bare string means an
+   *  ACTIVE one; `{ studentId, status }` models a CLOSED row, which is what a
+   *  pupil returning to a class they have been in before actually has. The stub
+   *  omitted `status` entirely while the service selects it — a double that did
+   *  not model the contract, and the reason the demotion defect was invisible
+   *  to this suite. */
+  existingTargetEnrollments?: Array<string | { studentId: string; status: string }>;
   /** The school's current term, or null when none is set. */
   currentTerm?: { id: string } | null;
+  /** classId -> capacity, for the overflow guard. */
+  capacityOf?: Record<string, number>;
+  /** How many pupils the destination already holds. */
+  activeInTarget?: number;
 }) {
   const state: { batch: Row | null } = { batch: opts.batch ?? null };
   const enrollUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
   const enrollCreateMany = jest.fn().mockResolvedValue({ count: 1 });
-  const existingTarget = opts.existingTargetEnrollments ?? [];
+  const existingTarget = (opts.existingTargetEnrollments ?? []).map((e) =>
+    typeof e === "string" ? { studentId: e, status: "ACTIVE" } : e,
+  );
   const tx = {
+    // The capacity guard locks the class row before counting. A double missing a
+    // method the real client always has fails as a TypeError, which reads as a
+    // code fault rather than a gap in the stub.
+    $executeRaw: jest.fn().mockResolvedValue(0),
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: {
       findFirst: jest.fn((a: { where: { id: string } }) => {
         const all = [opts.source, opts.target, ...(opts.others ?? [])].filter(Boolean) as Row[];
-        return Promise.resolve(all.find((c) => c.id === a.where.id) ?? null);
+        const found = all.find((c) => c.id === a.where.id) ?? null;
+        const cap = opts.capacityOf?.[a.where.id];
+        return Promise.resolve(found && cap != null ? { ...found, capacity: cap } : found);
       }),
       // Used both to resolve display names and to validate demotion targets, so
       // it must only return classes that actually exist in this tenant.
@@ -47,10 +65,10 @@ function makeService(opts: {
       // stage() queries ACTIVE source enrollments; approve() queries existing target.
       findMany: jest.fn((a: { where?: { studentId?: unknown; status?: string } }) =>
         a.where?.studentId
-          ? Promise.resolve(existingTarget.map((studentId) => ({ studentId })))
+          ? Promise.resolve(existingTarget)
           : Promise.resolve((opts.activeEnrollments ?? []).map((studentId) => ({ studentId }))),
       ),
-      count: jest.fn().mockResolvedValue(0),
+      count: jest.fn().mockResolvedValue(opts.activeInTarget ?? 0),
       updateMany: enrollUpdateMany,
       createMany: enrollCreateMany,
     },
@@ -247,6 +265,75 @@ describe("PromotionService per-student outcomes", () => {
     );
     // s2 gets no new enrollment anywhere — they simply repeat the present class.
     expect(creates.some((c: Row) => c.studentId === "s2")).toBe(false);
+  });
+
+  it("puts a pupil BACK on the roll of a class they have been in before", async () => {
+    // THE NORMAL SHAPE OF A DEMOTION: you demote a pupil back into the class
+    // they came from, so they already have a row for it — a CLOSED one.
+    //
+    // `enrollInto` skipped anyone with any row for the destination, whatever its
+    // status, to stay idempotent on a re-approval. Measured over five simulated
+    // years: a pupil demoted from JSS 3 into the JSS 2 they had left the year
+    // before ended with JSS 1 PROMOTED, JSS 2 PROMOTED, JSS 3 DEMOTED and NO
+    // ACTIVE ENROLMENT ANYWHERE — off every register, out of every class list,
+    // with no class for a report card, and uncounted in the billing seats.
+    //
+    // @@unique([classId, studentId]) is one row per pupil per class, so the
+    // closed row must be REACTIVATED rather than a second one inserted.
+    const { service, enrollUpdateMany, enrollCreateMany } = makeService({
+      ...threeClasses,
+      existingTargetEnrollments: [{ studentId: "s3", status: "PROMOTED" }],
+      batch: batch({
+        studentIds: ["s3"],
+        decisions: [{ studentId: "s3", outcome: "DEMOTE", targetClassId: "c0" }],
+      }),
+    });
+    await service.approve(p("approver"), "pb1");
+
+    const updates = enrollUpdateMany.mock.calls.map((c) => c[0]);
+    // The row in the destination is put back to ACTIVE...
+    const back = updates.find((u) => u.data.status === "ACTIVE" && u.where.classId === "c0");
+    expect(back).toBeTruthy();
+    expect(back?.where.studentId.in).toEqual(["s3"]);
+    // ...and never duplicated, because the pair is unique.
+    const creates = enrollCreateMany.mock.calls.map((c) => c[0].data).flat();
+    expect(creates.some((c: Row) => c.studentId === "s3" && c.classId === "c0")).toBe(false);
+  });
+
+  it("leaves a pupil who is ALREADY ACTIVE in the destination alone", async () => {
+    // The case the original skip was written for, and it still holds: a
+    // re-approval must not rewrite a row that is already right.
+    const { service, enrollUpdateMany, enrollCreateMany } = makeService({
+      ...threeClasses,
+      existingTargetEnrollments: ["s1"],
+      batch: batch({
+        studentIds: ["s1"],
+        decisions: [{ studentId: "s1", outcome: "PROMOTE", targetClassId: null }],
+      }),
+    });
+    await service.approve(p("approver"), "pb1");
+    const creates = enrollCreateMany.mock.calls.map((c) => c[0].data).flat();
+    expect(creates.some((c: Row) => c.studentId === "s1" && c.classId === "c2")).toBe(false);
+    const reactivations = enrollUpdateMany.mock.calls
+      .map((c) => c[0])
+      .filter((u) => u.data.status === "ACTIVE" && u.where.classId === "c2");
+    expect(reactivations).toHaveLength(0);
+  });
+
+  it("counts a reactivated pupil against the destination's capacity", async () => {
+    // A place is a place. Counting only the INSERTS would let a demotion
+    // overfill exactly the class this guard exists to protect.
+    const { service } = makeService({
+      ...threeClasses,
+      capacityOf: { c0: 1 },
+      activeInTarget: 1,
+      existingTargetEnrollments: [{ studentId: "s3", status: "PROMOTED" }],
+      batch: batch({
+        studentIds: ["s3"],
+        decisions: [{ studentId: "s3", outcome: "DEMOTE", targetClassId: "c0" }],
+      }),
+    });
+    await expect(service.approve(p("approver"), "pb1")).rejects.toBeInstanceOf(ConflictException);
   });
 
   it("approval of a RETAIN-only batch moves nothing at all", async () => {

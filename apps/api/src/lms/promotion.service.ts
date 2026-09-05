@@ -335,10 +335,26 @@ export class PromotionService {
   // --- helpers ---------------------------------------------------------------
 
   /**
-   * Enroll students into a destination class: skips anyone already there
-   * (idempotent re-approval) and refuses — rolling the whole batch back — if the
-   * destination would overflow its capacity. Shared by promotion and demotion so
-   * a demoted student can never silently overfill a lower class.
+   * Enroll students into a destination class, and refuse — rolling the whole
+   * batch back — if it would overflow its capacity. Shared by promotion and
+   * demotion so a demoted student can never silently overfill a lower class.
+   *
+   * A PUPIL WHO HAS BEEN IN THIS CLASS BEFORE IS NOT "ALREADY THERE".
+   *
+   * This skipped anyone with ANY enrolment row for the class, whatever its
+   * status, to stay idempotent on a re-approval. That is right for an ACTIVE row
+   * and wrong for a closed one — and a closed one is the NORMAL shape of a
+   * demotion, because demoting a pupil means sending them back to the class they
+   * came from. Measured over five simulated years: a pupil demoted from JSS 3
+   * into the JSS 2 they had left the year before ended with
+   * `JSS 1: PROMOTED, JSS 2: PROMOTED, JSS 3: DEMOTED` and NO ACTIVE ENROLMENT
+   * ANYWHERE — off every register, out of every class list, with no class for a
+   * report card and uncounted in the billing seat count. The way back up has the
+   * same shape: re-promoting them into the class they were demoted out of.
+   *
+   * `@@unique([classId, studentId])` means one row per pupil per class, so the
+   * closed row is REACTIVATED rather than a second one inserted. The history of
+   * the move lives on the promotion batch, which is what records it.
    */
   private async enrollInto(
     tx: TenantTx,
@@ -346,15 +362,14 @@ export class PromotionService {
     classId: string,
     studentIds: string[],
   ): Promise<number> {
-    const already = new Set(
-      (
-        await tx.enrollment.findMany({
-          where: { classId, studentId: { in: studentIds } },
-          select: { studentId: true },
-        })
-      ).map((e: { studentId: string }) => e.studentId),
-    );
-    const incoming = studentIds.filter((s) => !already.has(s));
+    const rows = (await tx.enrollment.findMany({
+      where: { classId, studentId: { in: studentIds } },
+      select: { studentId: true, status: true },
+    })) as Array<{ studentId: string; status: string }>;
+    const activeHere = new Set(rows.filter((e) => e.status === "ACTIVE").map((e) => e.studentId));
+    const reactivate = rows.filter((e) => e.status !== "ACTIVE").map((e) => e.studentId);
+    const reactivateSet = new Set(reactivate);
+    const incoming = studentIds.filter((s) => !activeHere.has(s) && !reactivateSet.has(s));
 
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { capacity: true, name: true } });
     if (cls?.capacity != null) {
@@ -364,7 +379,9 @@ export class PromotionService {
       // read the old occupancy and both fit.
       await tx.$executeRaw`SELECT id FROM "class" WHERE id = ${classId}::uuid FOR UPDATE`;
       const activeNow = await tx.enrollment.count({ where: { classId, status: "ACTIVE" } });
-      if (activeNow + incoming.length > cls.capacity) {
+      // A REACTIVATION TAKES A PLACE too — counting only the inserts would let a
+      // demotion overfill exactly the class this guard exists to protect.
+      if (activeNow + incoming.length + reactivate.length > cls.capacity) {
         throw new ConflictException(`${cls.name} is at capacity (${cls.capacity})`);
       }
     }
@@ -374,9 +391,17 @@ export class PromotionService {
         skipDuplicates: true,
       });
     }
-    // Report students LANDED here, not rows inserted: someone already enrolled
-    // in the destination still ends the batch in it. (Approve refuses a
-    // non-PENDING batch, so this never runs twice for the same students.)
+    if (reactivate.length > 0) {
+      await tx.enrollment.updateMany({
+        where: { classId, studentId: { in: reactivate } },
+        data: { status: "ACTIVE" },
+      });
+    }
+    // Report students LANDED here, not rows inserted: someone already ACTIVE in
+    // the destination still ends the batch in it. This was true of everyone only
+    // once the reactivation above existed — before it, the count said a demoted
+    // pupil had landed somewhere they were not. (Approve refuses a non-PENDING
+    // batch, so this never runs twice for the same students.)
     return studentIds.length;
   }
 
