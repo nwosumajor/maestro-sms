@@ -30,7 +30,7 @@ import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
-import { TRAIT_GROUPS, TRAIT_SCALE, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor, attendanceRatePct } from "@sms/types";
+import { TRAIT_GROUPS, TRAIT_SCALE, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor, gradeWordFor, attendanceRatePct } from "@sms/types";
 import { GRADE_COMPONENTS, gradeComponentMax } from "@sms/types";
 import type { GradeBand } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
@@ -741,7 +741,11 @@ export class ReportCardService {
             pos,
             fmt(sub.classAverage ?? null),
             lowHigh,
-            sub.total === null ? "" : (gradeDescriptor(sub.total, d.bands) ?? ""),
+            // THE WORD MUST DESCRIBE THE LETTER BESIDE IT. This re-banded the
+            // TOTAL against today's scale while the Grade column shows the
+            // letter the mark was PUBLISHED with — so after a scale change the
+            // two named different bands on the same row.
+            gradeWordFor(sub.grade ?? null, d.bands) ?? "",
           ]);
         }
       }
@@ -938,7 +942,9 @@ export class ReportCardService {
       // THE GRADE KEY. Without it every letter above is unreadable: a parent
       // handed "B3" has no way to know whether it is good, and a card that
       // cannot be read has not really reported anything. Printed from the
-      // SCHOOL's own scale, which is the same one the letters were computed on.
+      // SCHOOL's own scale. It is NOT necessarily the one the letters above were
+      // computed on — a published grade is frozen and this key is today's — so
+      // the note below owns up whenever they disagree.
       if (d.bands.length > 0) {
         doc.moveDown(0.7).fontSize(10).font("Helvetica-Bold").text("Grades", startX);
         doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#555");
@@ -947,6 +953,25 @@ export class ReportCardService {
           return `${b.grade} ${b.min}\u2013${ceiling}${b.label ? ` ${b.label.toLowerCase()}` : ""}`;
         });
         doc.text(key.join("   |   "), startX, undefined, { width: 545 - startX });
+        // "...the same one the letters were computed on" — the comment above said
+        // that, and it is false the moment a school changes its scale. A grade is
+        // FROZEN at publication and the key is today's, so a school that
+        // published under one scale and then set another prints a key explaining
+        // none of the letters above it. Measured: subject grades A/B/C/D/E/F
+        // under a key reading 9 90-100 | 8 80-89 | ... | 1 0-19.
+        // Freezing the scale alongside each mark is the fuller answer and is a
+        // schema change; saying so on the page costs nothing and never misleads.
+        const defined = new Set(d.bands.map((b) => b.grade));
+        const foreign = [...new Set(d.subjects.map((sx) => sx.grade).filter((g): g is string => !!g && !defined.has(g)))];
+        if (foreign.length > 0) {
+          doc.moveDown(0.25).fillColor("#8a5a00")
+            .text(
+              `${foreign.join(", ")} above ${foreign.length === 1 ? "was" : "were"} awarded on the grading scale in force when the mark was published, and ${foreign.length === 1 ? "is" : "are"} not in the key above. The school's scale has changed since.`,
+              startX,
+              undefined,
+              { width: 545 - startX },
+            );
+        }
         doc.fillColor("#000").fontSize(10);
       }
 

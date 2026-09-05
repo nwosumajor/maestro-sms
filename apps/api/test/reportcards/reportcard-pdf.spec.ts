@@ -72,11 +72,11 @@ const BASE = {
   className: "JSS1",
   termName: "First Term",
   subjects: [
-    { subjectId: "s1", subjectName: "Mathematics", exam: 50, midterm: 15, assignment: 8, classNote: 8, total: 81, grade: "A", complete: true, position: 1, subjectRanked: 10 },
-    { subjectId: "s2", subjectName: "English", exam: 40, midterm: 12, assignment: 7, classNote: 6, total: 65, grade: "B", complete: true, position: 4, subjectRanked: 10 },
+    { subjectId: "s1", subjectName: "Mathematics", exam: 50, midterm: 15, assignment: 8, classNote: 8, total: 81, grade: "A1", complete: true, position: 1, subjectRanked: 10 },
+    { subjectId: "s2", subjectName: "English", exam: 40, midterm: 12, assignment: 7, classNote: 6, total: 65, grade: "B3", complete: true, position: 4, subjectRanked: 10 },
   ] as never,
   termAverage: 73,
-  termGrade: "A",
+  termGrade: "B2",
   position: 2,
   classSize: 10,
   sessionAverage: 71,
@@ -392,6 +392,46 @@ describe("the word beside each mark", () => {
     const t = textOf(await render());
     expect(t).toContain("Annual avg");
     expect(t).toContain("Grade");
+  });
+});
+
+describe("a grade the card's own key does not explain", () => {
+  // A PUBLISHED grade is a snapshot — `reportedTermGrade` reports the letter it
+  // was published with, so history does not move when a school changes its
+  // scale. The key at the foot is TODAY's. Measured on a school that published
+  // under simple letters and then set UK GCSE 9-1: subject grades A/B/C/D/E/F
+  // printed under a key reading "9 90-100 | 8 80-89 | ... | 1 0-19" — a key
+  // explaining not one letter on the page.
+  const staleScale = { bands: GRADE_SCALES.SIMPLE_LETTER.bands };
+
+  it("says so, naming the grades, rather than printing a key that fits none of them", async () => {
+    // A1 and B3 are WAEC letters; the school's scale is now A-F.
+    const t = textOf(await render(staleScale));
+    expect(t).toMatch(/A1, B3 above were awarded on the grading scale in force when the mark was published/);
+    expect(t).toContain("not in the key above");
+  });
+
+  it("stays off a card whose grades the key does explain", async () => {
+    // The standing-disclaimer rule this file already applies elsewhere: a note
+    // on every card is a note nobody reads.
+    const t = textOf(await render());
+    expect(t).not.toContain("not in the key above");
+  });
+
+  it("never puts a word from today's scale beside a letter from the old one", async () => {
+    // The Remark column re-banded the TOTAL against today's bands while the
+    // Grade column showed the frozen letter, so the two named different bands
+    // on the same row. English's 65 re-bands to B "Very good" on A-F, and its
+    // letter is B3, which that scale does not have — so the honest answer is no
+    // word at all.
+    //
+    // "Very good" is the anchor precisely because nothing else on this card can
+    // produce it: the term average (73) and the session average (71) both band
+    // to A "Excellent", and the key prints its labels lower-cased. An earlier
+    // draft asserted "Excellent" and went red on the annual average's
+    // descriptor, which is computed live and is right to be there.
+    const t = textOf(await render(staleScale));
+    expect(t).not.toContain("Very good");
   });
 });
 

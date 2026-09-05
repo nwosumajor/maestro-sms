@@ -259,6 +259,24 @@ export function gradeDescriptor(total: number, bands?: readonly GradeBand[]): st
 }
 
 /**
+ * The word for a grade ALREADY AWARDED, looked up by the letter itself.
+ *
+ * WHY THIS EXISTS RATHER THAN `gradeDescriptor`. A PUBLISHED mark is a snapshot:
+ * `reportedTermGrade` reports the letter it was published with and never
+ * recomputes it, so history does not move when a school changes its scale.
+ * Describing that letter by re-banding its TOTAL against today's scale is the
+ * one thing that undoes the snapshot — the letter is from the old scale and the
+ * word from the new one, printed side by side on a report card.
+ *
+ * Null when the letter is not in the given scale, which is the honest answer:
+ * the school no longer has a band by that name, so there is no word for it.
+ */
+export function gradeWordFor(grade: string | null, bands?: readonly GradeBand[]): string | null {
+  if (!grade) return null;
+  return (bands ?? GRADE_BANDS).find((b) => b.grade === grade)?.label ?? null;
+}
+
+/**
  * Pure term total for one subject: the SUM of the four component marks, each
  * bounded by its own maximum (exam 60 / midterm 20 / assignment 10 / note 10),
  * so the total is out of 100. Missing components count as 0 so a running total
