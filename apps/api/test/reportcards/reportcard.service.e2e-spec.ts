@@ -119,9 +119,19 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     const remarks = new ReportCardRemarkService(tenant, audit);
     const workflow = { createRequest: jest.fn(), submit: jest.fn() } as never;
     const hooks = { onFinalized: jest.fn() } as never;
-    const region = { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never;
+    // A double must model the CONTRACT: the card and the attestation both resolve
+    // the school's own locale and timezone, so `inTx`/`forSchool` are as much
+    // part of this stub as the academic pair.
+    const academic = { calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } };
+    const profile = { locale: "en-NG", timezone: "Africa/Lagos", currency: "NGN" };
+    const region = {
+      academicInTx: async () => academic,
+      academicForSchool: async () => academic,
+      inTx: async () => profile,
+      forSchool: async () => profile,
+    } as never;
     const termResults = new TermResultService(tenant, audit, workflow, hooks, region);
-    const attestations = new ReportCardAttestationService(tenant, audit);
+    const attestations = new ReportCardAttestationService(tenant, audit, region);
     reportCards = new ReportCardService(tenant, audit, branding, attestations, documents, remarks, termResults, region);
   });
 

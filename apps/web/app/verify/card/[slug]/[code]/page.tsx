@@ -1,5 +1,6 @@
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import type { ReportCardAttestationDto, Serialized } from "@sms/types";
+import { shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,13 @@ export default async function VerifyCardPage({
     /* API unreachable — render the not-found state, which says the same thing */
   }
 
+  // THE ISSUING SCHOOL'S CLOCK, off the payload. A public page has no session to
+  // read a region from, and formatting on the reader's own clock dates a Lagos
+  // card a day early for anyone west of UTC.
+  const region = data
+    ? { locale: data.schoolLocale, timezone: data.schoolTimezone, currency: "" }
+    : undefined;
+
   return (
     <main className="relative mx-auto min-h-screen max-w-2xl bg-background p-6">
       <ThemeToggle className="absolute right-4 top-4 z-20" />
@@ -60,13 +68,7 @@ export default async function VerifyCardPage({
             </p>
             <p className="mt-2 text-sm">
               Approved by <span className="font-medium">{data.approvedByName}</span> (
-              {data.approvedByRole}) on{" "}
-              {new Date(data.approvedAt).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
-              .
+              {data.approvedByRole}) on {shortDate(data.approvedAt, region)}.
             </p>
             {/* The one thing a holder cannot otherwise know. A card reissued
                 after a correction leaves earlier printouts looking identical. */}
@@ -75,13 +77,7 @@ export default async function VerifyCardPage({
               {data.version > 1
                 ? " — this card has been reissued. If your copy shows a lower issue number, it has been superseded."
                 : ""}
-              , dated{" "}
-              {new Date(data.issuedAt).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
-              .
+              , dated {shortDate(data.issuedAt, region)}.
             </p>
           </div>
 

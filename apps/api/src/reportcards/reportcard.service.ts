@@ -80,6 +80,13 @@ type ReportCardData = {
       annualTermNames: string[];
       /** The academic year, as the letterhead names it ("2025/2026"). */
       sessionName: string | null;
+      /** The SCHOOL's own clock and language. The approval date and the
+       *  generated-at stamp were formatted "en-GB" and on the container's
+       *  timezone — so a card approved on the 5th in Lagos printed the 4th
+       *  wherever the server happened to be, in a date order the school may not
+       *  use. The web half of this is gated; the PDF is the same document. */
+      locale: string;
+      timezone: string;
       /** subjectId → that subject's total in each of those terms (null = no marks). */
       annualBySubject: Record<string, Array<number | null>>;
       /** subjectId → the pupil's place in that subject across the whole year. */
@@ -246,6 +253,7 @@ export class ReportCardService {
       // at the foot of the card is the scale the letters above it were actually
       // computed on.
       const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
+      const regionProfile = await this.region.inTx(tx, p.schoolId);
       const bands = resolveGradeBands(grading);
 
       // THE COHORT IS THE CLASS THE TERM'S MARKS WERE EARNED IN, which is not
@@ -554,6 +562,8 @@ export class ReportCardService {
         promotionLine,
         annualTermNames,
         sessionName,
+        locale: regionProfile.locale,
+        timezone: regionProfile.timezone,
         annualBySubject: Object.fromEntries(annualBySubject),
         annualPosition: Object.fromEntries(annualPosition),
         bands,
@@ -1210,7 +1220,7 @@ export class ReportCardService {
         const tw = W - qr - 20;
         doc.font("Helvetica-Bold").fontSize(6).fillColor("#333").text("VERIFIED SCHOOL RECORD", tx, y + 5, { width: tw });
         doc.font("Helvetica").fontSize(7.2).fillColor(INK).text(
-          `Approved by ${a.approvedByName} (${a.approvedByRole}) on ${a.approvedAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.`,
+          `Approved by ${a.approvedByName} (${a.approvedByRole}) on ${a.approvedAt.toLocaleDateString(d.locale, { day: "numeric", month: "long", year: "numeric", timeZone: d.timezone })}.`,
           tx, y + 14, { width: tw },
         );
         doc.fontSize(6.2).fillColor("#555")
@@ -1226,7 +1236,7 @@ export class ReportCardService {
 
       doc.font("Helvetica").fontSize(5.6).fillColor("#888").text(
         `Term weighting: ${d.components.map((c) => `${c.label} ${c.max}`).join(" · ")} = ${d.components.reduce((n, c) => n + c.max, 0)}.` +
-          `    Generated ${new Date().toLocaleString()}.`,
+          `    Generated ${new Date().toLocaleString(d.locale, { timeZone: d.timezone })}.`,
         L, y + 3, { width: W },
       );
       doc.fillColor(INK);

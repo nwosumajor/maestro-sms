@@ -102,6 +102,8 @@ const BASE = {
   // without it models a card the service cannot produce.
   components: GRADE_COMPONENTS as ReadonlyArray<{ key: string; label: string; max: number }>,
   sessionName: "2026/2027" as string | null,
+  locale: "en-NG",
+  timezone: "Africa/Lagos",
   cumulativeScore: 0,
   termBegins: new Date("2026-09-14T00:00:00Z"),
   termEnds: new Date("2026-12-12T00:00:00Z"),

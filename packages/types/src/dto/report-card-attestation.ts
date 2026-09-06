@@ -22,6 +22,18 @@ export interface AttestedSubject {
 export interface ReportCardAttestationDto {
   /** The school that issued it, by name — matched against the card's letterhead. */
   schoolName: string;
+  /**
+   * The issuing school's own locale and timezone.
+   *
+   * This page is PUBLIC, so there is no session to read a region from — the
+   * same gap `PublicSchoolDto` closed by carrying `currency`. Without them the
+   * dates below render on the READER's clock: a card approved on 5 September in
+   * Lagos reads as 4 September to anyone opening it west of UTC, and a client
+   * component formatting from `navigator` renders differently on the server and
+   * in the browser, which is a hydration mismatch a user sees as a blank page.
+   */
+  schoolLocale: string;
+  schoolTimezone: string;
   studentName: string;
   className: string | null;
   termName: string;

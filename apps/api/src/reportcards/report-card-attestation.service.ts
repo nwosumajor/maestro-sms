@@ -36,6 +36,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { Prisma } from "@sms/db";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 /** The all-zero uuid used as a principal where there is no acting user — the
  *  same one the other public read paths use to resolve a school by slug. */
@@ -98,6 +99,7 @@ export class ReportCardAttestationService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   /**
@@ -281,8 +283,11 @@ export class ReportCardAttestationService {
       })
       .catch((e: unknown) => this.logger.warn(`attestation verify not audited: ${String(e)}`));
 
+    const region = await this.region.forSchool(school.id);
     return {
       schoolName: school.name,
+      schoolLocale: region.locale,
+      schoolTimezone: region.timezone,
       studentName: found.studentName,
       className: found.className,
       termName: found.term.name,
