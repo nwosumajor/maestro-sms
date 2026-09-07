@@ -36,11 +36,24 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
           Back to dashboard
         </Button>
       </div>
-      {error.digest && (
+      {/* A DIGEST ONLY EXISTS FOR A SERVER ERROR. Next redacts a server message
+          and hands back a digest instead; a CLIENT-side throw — a hydration
+          failure, a chunk that no longer exists after a redeploy — has no
+          digest at all, so this screen showed the headline and nothing else.
+          The reader had nothing to quote and the person reading their report
+          had nothing to search, which is how "this page could not be loaded"
+          becomes an afternoon of guessing. The client message is not redacted
+          and is already in the reader's console; putting it on the page costs
+          nothing and is the whole difference between a report and a shrug. */}
+      {error.digest ? (
         <p className="text-xs text-muted-foreground">
           Reference <span className="font-mono">{error.digest}</span> — quote this if you report it.
         </p>
-      )}
+      ) : error.message ? (
+        <p className="text-xs text-muted-foreground">
+          Details: <span className="font-mono break-all">{error.message}</span> — quote this if you report it.
+        </p>
+      ) : null}
     </div>
   );
 }
