@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and sixty-one write-ups, newest first. Each records a **real defect
+Two hundred and sixty-two write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Five hundred schools, ten years, and a decade that costs nothing to carry](#five-hundred-schools-ten-years-and-a-decade-that-costs-nothing-to-carry)
 - [Five hundred schools of approvals, and the comment I said was missing](#five-hundred-schools-of-approvals-and-the-comment-i-said-was-missing)
 - [Five hundred boarding schools, and the button that swept all of them](#five-hundred-boarding-schools-and-the-button-that-swept-all-of-them)
 - [Ten schools, five years each: does the FLEET's history slow one tenant down?](#ten-schools-five-years-each-does-the-fleets-history-slow-one-tenant-down)
@@ -292,6 +293,68 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Five hundred schools, ten years, and a decade that costs nothing to carry
+Asked for 500 schools over 10 years. Done at full DEPTH and deliberately modest
+width, because the other two axes were already measured: SIZE at 100 pupils over
+5 years, BREADTH at 500 schools. What had never been measured is a DECADE.
+// **THE DESIGN IS THE FINDING'S EVIDENCE.** School N is `(N % 10) + 1` years
+old — fifty schools at each age from one to ten — so a one-year school and a
+ten-year school sit in the SAME tables, the SAME indexes, read by the SAME
+queries. Any divergence is depth and nothing else. Comparing two databases, or
+one database before and after, cannot say that.
+```
+500 schools · 2,750 sessions · 8,250 terms · 25,000 pupils
+3,712,500 marks loaded in 3m21s (one set-based INSERT; a PL/pgSQL loop is an
+afternoon) · subject_result 1,455 MB · database 1,666 MB
+                    1 year   67,500 marks   ...   10 years  675,000 marks
+```
+**TEN TIMES THE HISTORY COSTS NOTHING.** Median of three, after a warm-up:
+```
+                1y school      10y school
+report card       220 ms          192 ms      0.87x
+session report     77 ms           72 ms      0.94x
+class broadsheet   44 ms           40 ms      0.91x
+class roster       15 ms           13 ms      0.87x
+```
+Flat, or fractionally faster — noise, not a trend.
+// **THE MECHANISM, not the wall clock.** As the APP ROLE, under RLS, with a
+BOUND PARAMETER, on 3.7M rows:
+```
+Index Scan using subject_result_schoolId_classId_subjectId_termId_idx
+  Index Cond: (schoolId = current_setting('app.current_school_id')) AND (termId = $1)
+  Buffers: shared hit=41      Execution Time: 0.288 ms
+```
+A TENANT-LEADING index, with the RLS predicate INSIDE the index condition. That
+is why a school's reads cost what THAT SCHOOL holds rather than what the table
+holds — the property this file records as making those composites right for the
+application, measured here at the volume that would break it if it were wrong.
+**CORRECTNESS AT DEPTH, which matters more than the timings.** A pupil with ten
+years of marks:
+```
+holds 270 marks across ten years, 27 of them in the current session
+session report returns 3 TERMS, not 30
+the report card shows 2 ANNUAL COLUMNS, not 29
+"Cumulative session average (all 3 terms)" — per session, never per decade
+position 37 of 50 — ranked against the CURRENT class, not everyone ever taught
+```
+A decade of history is scoped away, on every surface a family reads.
+**INDEX HEALTH AT 3.7M ROWS:** heap 789 MB, indexes 665 MB, ratio 0.84 — not
+bloated. **Every index is scanned** (1,085 to 21,423), so none is the write
+amplification this file has twice dropped indexes for. // Worth knowing: the
+UNIQUE constraint `sessionId_termId_subjectId_studentId` is **396 MB of the 665**
+— 60% of all index bytes on the biggest table, for one integrity rule ("one mark
+per pupil per subject per term"). It is used and it earns its keep, but at a
+decade it IS the storage cost, and anyone sizing a ten-year deployment should
+know that before they are surprised by it.
+// GOTCHA: `ANALYZE` first. A 3.7M-row bulk load leaves stats describing the
+table as it was, and measuring on those measures the wrong plan. Four ANALYZEs
+took 0.5 s.
+**PROBE:** 500 schools, 26,500 users, 3.7M marks, 8,250 terms, 2,750 sessions
+removed. Teardown 2m16s with the documented order — the big child by `schoolId`
+first, then four temporary indexes on the unindexed FK columns into `user`.
+Every table back to baseline, no temporary index left; `VACUUM FULL` returned
+the database from 1,666 MB to 180 MB.
 
 ### Five hundred schools of approvals, and the comment I said was missing
 Asked for an approvals simulation at 500 schools, one day after reporting that
