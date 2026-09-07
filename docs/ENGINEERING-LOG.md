@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and sixty-three write-ups, newest first. Each records a **real defect
+Two hundred and sixty-four write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [A campus flagged on the group overview, and unflagged on its own page](#a-campus-flagged-on-the-group-overview-and-unflagged-on-its-own-page)
 - [The whole application at 500 schools, and the sweep that first passed on emptiness](#the-whole-application-at-500-schools-and-the-sweep-that-first-passed-on-emptiness)
 - [Five hundred schools, ten years, and a decade that costs nothing to carry](#five-hundred-schools-ten-years-and-a-decade-that-costs-nothing-to-carry)
 - [Five hundred schools of approvals, and the comment I said was missing](#five-hundred-schools-of-approvals-and-the-comment-i-said-was-missing)
@@ -294,6 +295,66 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### A campus flagged on the group overview, and unflagged on its own page
+Asked to simulate the GROUP module and check the console captures the right
+things. Built a proprietor with TWO chains and eight campuses each constructed to
+trigger one condition the console claims to notice, because the way to test
+"captures the right information" is to make each thing true and see whether it
+is said.
+**IT SAYS ALL OF THEM.** Over a period covering the data:
+```
+Lakeside — nobody to run it    22 pupils   0 staff    —     0 regs  NO_STAFF, NO_REGISTERS
+Eastgate — poor attendance     30 pupils   2 staff   63%   20 regs  LOW_ATTENDANCE
+Riverside — billing past due   28 pupils   2 staff   87%   15 regs  BILLING
+Westgate — switched off        25 pupils   2 staff   91%   10 regs  DISABLED
+Southgate — no registers       35 pupils   3 staff    —     0 regs  NO_REGISTERS
+Northgate — healthy            40 pupils   3 staff   96%   20 regs  —
+```
+Every flag on the campus built for it, none on the healthy one, worst first. Two
+currencies are kept APART (`NGN` and `USD` as separate entries, never summed),
+and "poor attendance" is distinguished from "nobody recorded anything" — which
+the DTO promises and which are different problems.
+**AND IT KEEPS ITS SECURITY PROMISES.** 240 names, 240 emails and 222 admission
+numbers exist across those chains; **none appears in the overview, the campus
+drill-down or the CSV**. Directorship — not a role, not a permission — is the
+authorization: the principal of the director's OWN campus gets 404, another
+campus's registrar 404, and a director asking about a school outside the group
+404. Both the screen and the export write `group.overview.read`, because an
+export is a read.
+**THE DEFECT: A FLAG THAT VANISHED WHEN YOU CLICKED IT.** The overview computes
+each campus's flags over the DIRECTOR'S SELECTED PERIOD. The drill-down computed
+them from `trend.at(-1)` — the CURRENT CALENDAR MONTH — and from a six-month
+count of attendance RECORDS where the overview counts SESSIONS. Two different
+questions wearing one name:
+```
+overview   period=term   att 63 · regs 20 · LOW_ATTENDANCE
+campus page (no period)  att —  · regs —  · (no flags)
+```
+The flag disappeared exactly where a director goes to find out why.
+// **WORSE THAN A MISMATCH, and why it is not an edge case:** the current
+calendar month is EMPTY on the 1st, so `attendancePct` was null and
+LOW_ATTENDANCE could not fire on ANY campus page for the first days of every
+month. A partial period read as a fact.
+// The drill-down takes the same `period` now and asks the same two questions,
+so the two agree BY CONSTRUCTION rather than by coincidence. Verified across all
+four periods: NO_REGISTERS, NO_REGISTERS, NO_REGISTERS, LOW_ATTENDANCE on both
+sides.
+// **AND THE PAGE NOW SHOWS THE FIGURES THE FLAG WAS COMPUTED FROM.** It carried
+`LOW_ATTENDANCE` and no percentage: a director told a campus needs attention and
+given nothing to judge it by, on the one page they open to find out. Same shape
+as the rule that an approver must be able to see what the decision turns on.
+// GOTCHA, MINE: my first mutation of this passed. The assertion read
+`not.toMatch(/latest\?\.attendancePct/)` — it named the OLD LINE'S VARIABLE, so a
+mutation spelled `trend.at(-1)?.attendancePct` walked straight through. Anchored
+to where the number COMES FROM instead, and re-validated against both spellings.
+// GOTCHA: the group spec's double had `attendanceSession.groupBy` and not
+`.count`, so the new query failed as a TypeError and read as a code fault. Fourth
+time this session that a stub modelled the calls that happened to exist rather
+than the contract.
+**PROBE:** two groups, eight campuses, 240 users, their invoices, payments and
+registers removed; every table back to baseline, no group row and no temporary
+index left.
 
 ### The whole application at 500 schools, and the sweep that first passed on emptiness
 Asked to exercise the WHOLE application at 500 schools. Driving 27 modules for

@@ -34,8 +34,15 @@ export class GroupController {
    *  a director never reaches a pupil, an invoice or a record through this. 404
    *  unless the campus is in a group they direct. */
   @Get("schools/:schoolId")
-  schoolDetail(@CurrentPrincipal() p: Principal, @Param("schoolId") schoolId: string): Promise<GroupSchoolDetailDto> {
-    return this.group.schoolDetail(p, schoolId);
+  schoolDetail(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    // The SAME window the overview used. Without it the flags here were
+    // computed over the current calendar month and disagreed with the list the
+    // director clicked from.
+    @Query("period") period?: string,
+  ): Promise<GroupSchoolDetailDto> {
+    return this.group.schoolDetail(p, schoolId, { period });
   }
 
   /** The overview as CSV, for a board pack. Same scoping and the same audit entry

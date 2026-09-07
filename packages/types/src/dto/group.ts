@@ -126,6 +126,16 @@ export interface GroupTrendPointDto {
  * or a record — those stay behind that school's own permissions.
  */
 export interface GroupSchoolDetailDto {
+  /**
+   * The figures the FLAGS below were computed from, over the selected period.
+   *
+   * The campus page carried a `LOW_ATTENDANCE` flag and no percentage: a
+   * director was told a campus needed attention and shown nothing to judge it
+   * by, on the one page they open to find out why. Same shape as the rule that
+   * an approver must be able to see what the decision turns on.
+   */
+  attendancePct: number | null;
+  registersTaken: number;
   schoolId: string;
   name: string;
   slug: string;

@@ -56,6 +56,10 @@ function makeService(over: Over = {}) {
     },
     attendanceSession: {
       groupBy: jest.fn().mockResolvedValue([{ schoolId: A, _count: { _all: 20 } }, { schoolId: B, _count: { _all: 8 } }]),
+      // The campus page counts SESSIONS over the selected period, the same
+      // question the overview asks. A double missing it fails as a TypeError,
+      // which reads as a code fault rather than a gap in the stub.
+      count: jest.fn().mockResolvedValue(20),
     },
     invoice: { groupBy: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },

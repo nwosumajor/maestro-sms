@@ -321,7 +321,26 @@ export class GroupService {
    * totals, status counts and headcount, never a named pupil, an invoice or a
    * record. Those stay behind that school's own permissions, where they belong.
    */
-  async schoolDetail(p: Principal, schoolId: string): Promise<GroupSchoolDetailDto> {
+  /**
+   * @param opts.period the SAME window the overview used, so the two agree.
+   *
+   * THE FLAGS USED TO DISAGREE WITH THE LIST THE DIRECTOR CLICKED FROM. They
+   * were computed from `trend.at(-1)` — the CURRENT CALENDAR MONTH — and from a
+   * six-month count of attendance RECORDS, while the overview computes both
+   * over the selected period and counts SESSIONS. Measured: a campus at 63%
+   * over 90 days showed `LOW_ATTENDANCE` on the overview and NO FLAGS on its own
+   * page, which is the one place a director goes to find out why.
+   *
+   * Worse than a mismatch, and the reason this is not an edge case: the current
+   * calendar month is EMPTY on the 1st, so `attendancePct` was null and
+   * LOW_ATTENDANCE could not fire there at all for the first days of every
+   * month. A partial period read as a fact.
+   */
+  async schoolDetail(
+    p: Principal,
+    schoolId: string,
+    opts: { period?: string } = {},
+  ): Promise<GroupSchoolDetailDto> {
     const client = this.client();
     const directorships = await this.directedGroups(p.userId);
     // The campus must be in a group this person directs. Anything else is 404 —
@@ -336,6 +355,7 @@ export class GroupService {
     if (!school) throw new NotFoundException("Not found");
 
     const now = new Date();
+    const period = this.resolvePeriod(opts.period);
     const trendFrom = new Date(now.getFullYear(), now.getMonth() - 5, 1);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -392,15 +412,28 @@ export class GroupService {
       });
     }
 
-    const registersTaken = monthlyAtt.reduce((n, r) => n + r.total, 0);
-    const latest = trend.at(-1);
+    // OVER THE SELECTED PERIOD, and counting SESSIONS — both the same questions
+    // the overview asks, so a flag cannot appear on the list and vanish here.
+    const [periodSessions, periodAtt] = await Promise.all([
+      client.attendanceSession.count({ where: { schoolId, date: { gte: period.from, lte: period.to } } }),
+      client.attendanceRecord.groupBy({
+        by: ["status"],
+        where: { schoolId, date: { gte: period.from, lte: period.to } },
+        _count: { _all: true },
+      }) as unknown as Promise<Array<{ status: string; _count: { _all: number } }>>,
+    ]);
+    const attTotal = periodAtt.reduce((n, r) => n + r._count._all, 0);
+    const attPresent = periodAtt
+      .filter((r) => r.status === "PRESENT" || r.status === "LATE")
+      .reduce((n, r) => n + r._count._all, 0);
+    const registersTaken = periodSessions;
     const base = {
       active: school.status === "ACTIVE",
       subscriptionStatus: sub?.status ?? "ACTIVE",
       students: head.students,
       staff: head.staff,
       registersTaken,
-      attendancePct: latest?.attendancePct ?? null,
+      attendancePct: attTotal > 0 ? Math.round((attPresent / attTotal) * 100) : null,
     };
 
     await this.logRead(p, "group.school.read", schoolId, { group: owning.group.name, school: school.name });
@@ -411,6 +444,8 @@ export class GroupService {
       slug: school.slug,
       active: base.active,
       groupName: owning.group.name,
+      attendancePct: base.attendancePct,
+      registersTaken: base.registersTaken,
       students: head.students,
       staff: head.staff,
       parents: head.parents,
