@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and sixty-two write-ups, newest first. Each records a **real defect
+Two hundred and sixty-three write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [The whole application at 500 schools, and the sweep that first passed on emptiness](#the-whole-application-at-500-schools-and-the-sweep-that-first-passed-on-emptiness)
 - [Five hundred schools, ten years, and a decade that costs nothing to carry](#five-hundred-schools-ten-years-and-a-decade-that-costs-nothing-to-carry)
 - [Five hundred schools of approvals, and the comment I said was missing](#five-hundred-schools-of-approvals-and-the-comment-i-said-was-missing)
 - [Five hundred boarding schools, and the button that swept all of them](#five-hundred-boarding-schools-and-the-button-that-swept-all-of-them)
@@ -293,6 +294,61 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### The whole application at 500 schools, and the sweep that first passed on emptiness
+Asked to exercise the WHOLE application at 500 schools. Driving 27 modules for
+500 tenants is not a thing that can be done; the question worth answering at
+that breadth is the one nobody had swept — **does every module's entitlement
+gate agree with `PLAN_MODULES`?** 500 schools, 125 on each of the four tiers,
+4,500 staff, 15,000 pupils, loaded in 7 s.
+// **BOTH SIDES OF THE COMPARISON ARE COMPUTED.** The route set is derived by
+walking every `*.controller.ts` for `@RequireModule` and taking its first
+parameter-free `@Get` — 27 gated modules across 66 controllers, 25 probeable.
+The expectation comes from `PLAN_MODULES` itself. A new controller, or a
+repackaged tier, cannot slip past a list nobody maintains.
+**96 CHECKS, FOUR TIERS, EVERY ONE AGREEING.**
+```
+STANDARD    10 in plan ·  9 correctly ON · 15 correctly OFF
+PREMIUM     19 in plan · 16 correctly ON ·  8 correctly OFF
+ULTIMATE    25 in plan · 22 correctly ON ·  2 correctly OFF
+ENTERPRISE  27 in plan · 24 correctly ON ·  0 correctly OFF
+```
+// TWO APPARENT DISAGREEMENTS, BOTH MINE, and worth recording because the second
+is a limit of the method rather than a slip:
+```
+STANDARD/WORKFLOW   200 where the plan said OFF. WorkflowController is
+                    DELIBERATELY not class-gated, and says why: gating it left
+                    STANDARD schools able to RAISE five maker-checker requests
+                    and unable to see or decide any of them. Its authoring
+                    routes carry @RequireModule one at a time. My sweep assumed
+                    class-level gating.
+ENTERPRISE/GROUP    404 where the plan said ON. The controller IS gated, so the
+                    gate passed; the 404 came from the SERVICE, because no group
+                    existed. **404-not-403 means a status code cannot tell
+                    "module off" from "no data".** Resolved by CREATING a group
+                    with a director, not by assuming — after which it answered.
+```
+**TENANT ISOLATION ACROSS MODULES, and the honest version of it.** The first run
+reported "0 leaks" over 25 modules and meant almost nothing: 23 of them returned
+NOTHING for either school, because the fixture had created no rows in them. That
+is this file's own rule — a walk that finds nothing produces no offenders and
+passes green — turned on my own probe. Seeding six modules across all 500 schools
+(1,500 events, 1,500 books, 1,000 forms, 1,000 polls, 1,000 tasks, 1,000
+announcements) made it real:
+```
+5 modules returned rows for BOTH schools and shared not one id
+19 still returned nothing for either — and that is reported, not counted as a pass
+a neighbour's pupil profile · class · class roster · calendar event · library book
+    404 · 404 · 404 · 404 · 404
+```
+// GOTCHA, MINE, TWICE IN ONE PROBE: the roster read 400 rather than 404 because
+I omitted `subjectId`, and I nearly recorded a validation refusal as an
+isolation result. A refusal is not evidence until you read WHICH refusal — the
+same lesson the hostel capacity guard taught two entries ago, where ten
+allocations were refused by the GENDER rule and looked like capacity holding.
+**PROBE:** 500 schools, 19,500 users, 6,000 module rows and one school group
+removed in 1m27s; every table back to baseline, nothing orphaned, no temporary
+index left.
 
 ### Five hundred schools, ten years, and a decade that costs nothing to carry
 Asked for 500 schools over 10 years. Done at full DEPTH and deliberately modest
