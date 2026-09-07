@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **264 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **266 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **264 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **266 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1606,6 +1606,20 @@ end-to-end (create→apply→consent-gate→submit→signals→cross-tenant revi
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
 ## ID-card QR scan — BUILT (`apps/api/src/certificate`)
+// GOTCHA: **a REPRINT reprints — it does not mint a second certificate.**
+`issueForClass` promises a pupil is "skipped, never re-serialled", and the
+console's own flow then printed each card through `POST /certificates/issue`,
+which created a fresh row with a fresh serial on every press. Measured on a
+class of 20: register, print, print again -> three registry rows for one
+physical card, and the serial the bulk run registered printed on nothing. A
+plain reprint (no title/body, what `ClassIssuer` sends) now reuses the
+registered certificate and its serial, audited as `certificate.reprint`; a
+title or body means a DIFFERENT award and still gets its own. And the serial
+was generated TWICE — the bulk path from a uuid, with the comment explaining
+why, and the printing path from a 4-character `Math.random()` suffix, a space
+2,557x smaller. One `certificateSerial()` now, and `serial` is UNIQUE
+(migration `20260907000000`) so a collision is a 409, not two cards that verify
+as one.
 Student/staff ID cards now carry a REAL scannable QR (pdfkit vector squares via
 the `qrcode` lib) encoding the member's global `uniqueId` — replacing the old
 decorative barcode. A tenant-scoped lookup resolves a scanned code to a member

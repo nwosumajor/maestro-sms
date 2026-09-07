@@ -17,7 +17,8 @@ model IssuedCertificate {
   body       String?
   issuedById String   @db.Uuid
   /// Stable human-facing serial for verification (printed on the document).
-  serial     String
+  /// UNIQUE: a serial that two documents share verifies neither of them.
+  serial     String   @unique
   createdAt  DateTime @default(now())
 
   school School @relation(fields: [schoolId], references: [id])

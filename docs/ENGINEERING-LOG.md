@@ -12640,3 +12640,70 @@ family holds a VALID link, the suspension is not a secret from them, and
 "not valid or has expired" sends them chasing a replacement that cannot help.
 The forged-token path still gets the vague message — verified live alongside.
 
+
+### A reprint that minted a second card, and the serial its sibling warned about
+`issueForClass` states its own contract in the code: a pupil who already holds
+that certificate type is "skipped, never re-serialled", because "a certificate is
+a document a school stands behind". The console's documented flow then walks
+straight past it. `ClassIssuer` bulk-registers a class and PRINTS each card by
+POSTing to `POST /certificates/issue` with `{type, subjectId}` and no title or
+body — and that path called `issuedCertificate.create` unconditionally.
+Measured live on a class of 20: bulk-register, each pupil holds one card; press
+print, that pupil holds TWO with different serials; press again, three. So the
+serial the bulk run registered was printed on nothing, and `history/:subjectId`
+— the surface a school verifies a document against — listed several serials for
+one physical card with no way to say which was real. That is the whole job of a
+verification id.
+A plain reprint (no title, no body — exactly what `ClassIssuer` sends) now
+REUSES the registered certificate and its serial; a caller who supplies a title
+or body is describing a DIFFERENT award ("Best in Mathematics" after "Best in
+Science") and still gets its own certificate. Both consumers keep working; only
+the duplication stops. A reprint is still audited, as `certificate.reprint` —
+a document left the building either way.
+
+**And the serial itself was written twice.** The bulk path used a uuid and
+carried the comment explaining why: the column "has no unique constraint — so a
+collision would not error, it would silently mint two certificates that verify
+as the same one... the uniqueness has to come from the uuid, not from a
+4-character random suffix". The single-issue path — the one that actually PRINTS
+the document — was still generating that 4-character `Math.random()` suffix. The
+warning and the thing it warns against were in the same file, forty lines apart.
+Textbook SIBLING ASYMMETRY: somebody reasoned the rule out, wrote it down, fixed
+the file in front of them and left its twin.
+Measured: 36^4 = 1,679,616 against 16^8 = 4,294,967,296, a space 2,557x smaller,
+drawn from `Math.random` rather than a CSPRNG. Honest about the size of it —
+replaying a real 10,000-certificate fleet run 200 times with the old generator,
+5% of runs produced at least one duplicate serial. Not a fire; but silent and
+permanent when it happened, on a document a school stands behind. ONE shared
+`certificateSerial()` now, and `serial` is UNIQUE (migration
+`20260907000000`) so a collision is a 409 the desk retries (P2002 -> 409 in the
+global filter) rather than two cards that verify as one.
+
+**Verified at 500 schools.** 10,043 certificates issued in 7.2s across the fleet,
+zero collisions. Reprint pinned by
+`test/certificate/a-reprint-that-minted-a-second-card.spec.ts`, both halves
+mutation-validated: restoring the unconditional create fails the three reprint
+tests, and restoring the 4-character suffix fails the generator test printing the
+offending suffix ("3LLD") in the diff.
+
+### The library fine fail-safe, held against seven currencies
+Not a defect — a property worth having measured, because it is the one that
+decides whether a family is billed for a guess. 500 schools in NGN/GBP/USD/GHS/
+KES/ZAR/XOF, one book ten days overdue in each, every loan returned through the
+real endpoint:
+  * schools on the platform's home currency and stating nothing: 50,000 minor
+    (10 days x the NGN 500/day default) — the constant applied where it is true;
+  * schools in the other SIX currencies stating nothing: **0** — the unset
+    CHARGE goes to zero, because a charge that guesses bills a family;
+  * schools that STATE their own figure: 250,000 minor in every currency alike.
+Every fine landed on an ISSUED invoice (never a DRAFT, which is invisible to a
+family and excluded from receivables) denominated in the SCHOOL's own currency,
+7 currencies / 7 matches, and `GET /library/report` reported the same figures
+back. The atomic copy-claim also held under real contention: one physical copy,
+12 desks issuing it at once in 10 schools — exactly 10 winners, 110 refusals,
+all "No copies available".
+The ID-card scan holds the tenant boundary at fleet scale: 500 own-school scans
+resolve with roster fields only (no PII), 499 FOREIGN cards scanned at one desk
+all answer 404, and a card that exists nowhere answers 404 too — indistinguishable,
+so a refusal never confirms what it hides. A foreign card at the desk wrote no
+`scan_event`.

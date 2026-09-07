@@ -26,6 +26,30 @@ import { hslToHex, renderCertificate, renderIdCard } from "./certificate-templat
 
 const TYPES = ["ID_CARD", "COMPLETION", "PARTICIPATION", "MERIT"];
 
+/**
+ * The serial printed on the document, and the id it is verified by.
+ *
+ * // GOTCHA: this existed TWICE, and the two halves disagreed. The bulk path
+ * used a uuid and carried a comment saying why — "the column has no unique
+ * constraint, so a collision would not error, it would silently mint two
+ * certificates that verify as the same one... the uniqueness has to come from
+ * the uuid, not from a 4-character random suffix". The single-issue path, which
+ * is the one that actually PRINTS the document a school stands behind, was
+ * still generating that 4-character `Math.random()` suffix. Somebody reasoned
+ * the rule out, wrote it down, fixed the file in front of them and left its
+ * sibling — with the warning sitting in the same file as the thing it warns
+ * against. Measured: 36^4 = 1,679,616 against 16^8 = 4,294,967,296, a space
+ * 2,557x smaller, drawn from `Math.random` rather than a CSPRNG.
+ *
+ * One definition, so there is no second copy to drift. `serial` is UNIQUE now
+ * (migration 20260907000000), so a collision is a loud 409 the desk retries
+ * rather than two documents that verify as one.
+ */
+function certificateSerial(type: string): string {
+  const prefix = type === "ID_CARD" ? "ID" : "CERT";
+  return `${prefix}-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+}
+
 /** Human label for the ID card from the subject's primary role. */
 const ROLE_LABELS: [string, string][] = [
   ["student", "Student"],
@@ -77,20 +101,57 @@ export class CertificateService {
           orderBy: { createdAt: "asc" },
         }),
       ]);
-      const serial = `${input.type === "ID_CARD" ? "ID" : "CERT"}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      await tx.issuedCertificate.create({
-        data: {
-          schoolId: p.schoolId,
-          type: input.type,
-          subjectId: input.subjectId,
-          title: input.title ?? null,
-          body: input.body ?? null,
-          issuedById: p.userId,
-          serial,
-        },
-      });
+      // A REPRINT REPRINTS. IT DOES NOT MINT A SECOND CERTIFICATE.
+      //
+      // This created a row unconditionally, and the console's documented flow
+      // walks straight into it: `issue-class` registers the class ("IDEMPOTENT
+      // ... never re-serialled"), and then ClassIssuer prints each card by
+      // POSTing HERE with no title or body. Measured live on a class of 20:
+      // bulk-register -> each pupil holds 1 card; press print -> that pupil
+      // holds 2, with different serials; press it again -> 3. So the serial the
+      // bulk run registered was printed on nothing, `history` listed several
+      // serials for one physical card, and no one of them was the real one —
+      // which is the whole job of a verification id. The bulk path's promise was
+      // true of the bulk path and false of the school.
+      //
+      // A plain reprint (no title, no body — exactly what ClassIssuer sends)
+      // therefore REUSES the registered certificate and its serial. A caller who
+      // supplies a title or body is describing a DIFFERENT award ("Best in
+      // Maths" after "Best in Science"), which is a new certificate and gets its
+      // own serial. Both consumers keep working; only the duplication stops.
+      const reprint =
+        input.title === undefined && input.body === undefined
+          ? await tx.issuedCertificate.findFirst({
+              where: { subjectId: input.subjectId, type: input.type },
+              select: { serial: true },
+              orderBy: { createdAt: "asc" },
+            })
+          : null;
+      const serial = reprint?.serial ?? certificateSerial(input.type);
+      if (!reprint) {
+        await tx.issuedCertificate.create({
+          data: {
+            schoolId: p.schoolId,
+            type: input.type,
+            subjectId: input.subjectId,
+            title: input.title ?? null,
+            body: input.body ?? null,
+            issuedById: p.userId,
+            serial,
+          },
+        });
+      }
       await this.audit.record(
-        { actorId: p.userId, action: "certificate.issue", entity: "issued_certificate", entityId: serial, schoolId: p.schoolId, metadata: { type: input.type, subjectId: input.subjectId } },
+        {
+          actorId: p.userId,
+          // A reprint is still a PDF of a pupil's document leaving the building,
+          // so it is still recorded — as the reprint it is, not as an issuance.
+          action: reprint ? "certificate.reprint" : "certificate.issue",
+          entity: "issued_certificate",
+          entityId: serial,
+          schoolId: p.schoolId,
+          metadata: { type: input.type, subjectId: input.subjectId },
+        },
         tx,
       );
       const roleNames = subject.roles.map((r) => r.role.name);
@@ -182,12 +243,10 @@ export class CertificateService {
             title: input.title ?? null,
             body: input.body ?? null,
             issuedById: p.userId,
-            // Serial is the HUMAN-FACING verification id printed on the document, and
-            // the column has no unique constraint — so a collision would not error, it
-            // would silently mint two certificates that verify as the same one. Date.now()
-            // is identical across a bulk insert, so the uniqueness has to come from the
-            // uuid, not from a 4-character random suffix.
-            serial: `${input.type === "ID_CARD" ? "ID" : "CERT"}-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 8).toUpperCase()}`,
+            // One shared generator — see `certificateSerial`. Date.now() is
+            // identical across a bulk insert, so the uniqueness comes from the
+            // uuid.
+            serial: certificateSerial(input.type),
           })),
         });
       }
