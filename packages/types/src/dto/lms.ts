@@ -208,7 +208,15 @@ export interface WorkflowApprovalDto {
 export interface WorkflowTrailEntryDto {
   at: Date;
   actorName: string | null;
-  oldState: string;
+  /**
+   * NULL on the row every request has — the one written when it was created,
+   * which had no previous state. `workflow_audit_log.oldState` is nullable and
+   * always has been; this said `string`, the wire said null, and nothing checks
+   * (`apiGet<T>` asserts a shape, it never verifies one). The approval-history
+   * component trusted the type, called `.replace()` on it, and threw — taking
+   * the whole page down through the error boundary.
+   */
+  oldState: string | null;
   newState: string;
   comments: string | null;
 }

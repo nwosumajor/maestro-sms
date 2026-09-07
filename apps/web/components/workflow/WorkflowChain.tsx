@@ -90,21 +90,45 @@ export function WorkflowChain({ requestId }: { requestId: string }) {
               ) : (
                 <p className="mt-2 text-muted-foreground">Single-stage request.</p>
               )}
-              {detail.trail.length > 0 && (
-                <ul className="mt-3 space-y-1 border-t border-border pt-2 text-xs text-muted-foreground">
-                  {detail.trail.map((t, i) => (
-                    <li key={i}>
-                      {dateTime(t.at)} · {t.oldState.replace("_", " ")} → {t.newState.replace("_", " ")}
-                      {t.actorName ? ` · ${t.actorName}` : ""}
-                      {t.comments ? ` · ${t.comments}` : ""}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {detail.trail.length > 0 && <WorkflowTrail trail={detail.trail} dateTime={dateTime} />}
             </>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The immutable trail, one line per transition.
+ *
+ * Its own component so it can be DRIVEN: the bug it exists to prevent was a
+ * render-time throw that no server-side check could see. `/workflows` returned
+ * 200 for every role under 24 filter combinations, every asset loaded, and the
+ * API returned 200 for the list and for each request's detail — and expanding
+ * this section still replaced the page with "This page could not be loaded".
+ */
+export function WorkflowTrail({
+  trail,
+  dateTime,
+}: {
+  trail: Array<{ at: string; actorName: string | null; oldState: string | null; newState: string; comments: string | null }>;
+  dateTime: (v: string) => string;
+}) {
+  const words = (s: string) => s.replace(/_/g, " ");
+  return (
+    <ul className="mt-3 space-y-1 border-t border-border pt-2 text-xs text-muted-foreground">
+      {trail.map((t, i) => (
+        <li key={i}>
+          {dateTime(t.at)} ·{" "}
+          {/* NO PREVIOUS STATE IS NOT A STATE CALLED "null". The creation row
+              has none, so it reads as an arrival rather than a transition. */}
+          {t.oldState ? `${words(t.oldState)} → ` : ""}
+          {words(t.newState)}
+          {t.actorName ? ` · ${t.actorName}` : ""}
+          {t.comments ? ` · ${t.comments}` : ""}
+        </li>
+      ))}
+    </ul>
   );
 }
