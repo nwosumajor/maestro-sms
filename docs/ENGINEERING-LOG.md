@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and sixty write-ups, newest first. Each records a **real defect
+Two hundred and sixty-one write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Five hundred schools of approvals, and the comment I said was missing](#five-hundred-schools-of-approvals-and-the-comment-i-said-was-missing)
 - [Five hundred boarding schools, and the button that swept all of them](#five-hundred-boarding-schools-and-the-button-that-swept-all-of-them)
 - [Ten schools, five years each: does the FLEET's history slow one tenant down?](#ten-schools-five-years-each-does-the-fleets-history-slow-one-tenant-down)
 - [Five years, four promotions, and a pupil who fell off the roll](#five-years-four-promotions-and-a-pupil-who-fell-off-the-roll)
@@ -291,6 +292,60 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Five hundred schools of approvals, and the comment I said was missing
+Asked for an approvals simulation at 500 schools, one day after reporting that
+`/workflows` showed "This page could not be loaded" for principal and
+school_admin. The crash was fixed first (its own entry); this exercised the
+whole mechanism against 500 schools, 2,500 staff, **12,000 requests** and
+26,500 trail rows, loaded in 19 s.
+**THE THING I SAID WAS MISSING WAS NOT.** I reported that reviewers' comments
+did not reach the trail. They do — the review schema takes **`comments`**, and I
+had sent `comment`, which zod strips. My own payload, and the THIRD time in this
+session that a probe guessing a field name reported a fact about itself
+(`/students?classId=`, the exam-seat routes, this). Driven with the right key,
+the trail reads exactly as designed:
+```
+null → DRAFT        Teacher 001      created
+DRAFT → PENDING     Teacher 001
+PENDING → PENDING   Head Teacher 001 Cover arranged with the department.; stage HEAD approved (1/3)
+PENDING → PENDING   HR Manager 001   Balance checked; 4 days remain.; stage HR approved (2/3)
+PENDING → APPROVED  Principal 001    Approved. Enjoy the break.; stage PRINCIPAL approved (final)
+```
+The reviewer's words JOINED to the system's note rather than replacing it, which
+is what this file already records as the fix for that column.
+**WHAT 500 SCHOOLS PROVED, all driven over the API:**
+```
+separation of duties     initiator self-approves           403
+                         same person takes a second stage  403 "You are not the
+                                                           HR manager approver"
+the three-stage chain    head -> HR manager -> principal   APPROVED
+unsatisfiable chain      a school stripped of head_teacher and hr_manager:
+                         400 at CREATE, naming the STAGE, the PERMISSION and
+                         the remedy — not a dead request nobody can decide
+elevation                a stage decided under a grant carries viaElevation,
+                         and the history renders "under temporary elevation"
+cross-tenant             school 001's principal -> school 002's request:
+                         detail 404, review 404; the register showed 25 of the
+                         fleet's 12,001
+the register at volume   21-91 ms for no filter, state, type, search and page
+awaiting-me              4 for the head teacher, 0 for the principal — it is a
+                         STAGE PERMISSION, not "requests I raised", and the
+                         seeded work sits at stage one
+```
+// **THE HISTORY, ON THE ROW THAT USED TO CRASH IT**: all 12,000 requests carry
+a creation row with a NULL `oldState`, and six sampled detail reads returned 200
+with that null first. That is the exact shape that threw
+`Cannot read properties of null` and took the whole page down through the error
+boundary; it renders as an arrival now.
+// GOTCHA IN MY OWN TEARDOWN: the probe raised a REAL `GRADE_PUBLISH` on the
+demo school and approved it, which PUBLISHED a real mark — status DRAFT ->
+PUBLISHED with a computed total and grade. Deleting the request would have left
+that behind. A workflow probe does not only write workflow rows; it fires the
+reactor, and the reactor is the point. Reverted the mark with the request.
+**PROBE:** 500 schools, 2,500 staff, 12,000 requests, 26,500 trail rows removed
+in 16 s; the demo school's published mark returned to DRAFT with its total and
+grade cleared; every table back to baseline.
 
 ### Five hundred boarding schools, and the button that swept all of them
 Asked for: transport and hostel at 500 schools. 30,000 boarders, 1,000 houses,
