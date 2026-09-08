@@ -69,6 +69,20 @@ export interface ArchiveSummary {
   sections: Record<string, number>;
   containsHrPii: boolean;
   createdAt: Date;
+  /**
+   * WHETHER THIS ARCHIVE IS BOUNDED, and to what.
+   *
+   * The manifest inside the file has carried `coversFrom`/`coversTo` since the
+   * scoping fix, but `list()` returned only the label — so on screen a bounded
+   * archive and a whole-school dump wearing one year's name looked exactly
+   * alike. Every school that archived before that fix holds some of each, and
+   * somebody will one day send "Term 1" to a lawyer believing it is one term.
+   *
+   * `null` means genuinely unbounded (a deliberate whole-school export, or one
+   * taken before scoping existed) — a fact the screen states rather than a gap
+   * it hides.
+   */
+  scope: { kind: "session" | "term"; from: Date; to: Date } | null;
 }
 
 /**
@@ -266,7 +280,7 @@ export class SchoolArchiveService {
     // right for a page load and wrong for this: measured live at 173,701
     // attendance rows it failed at 5,033 ms with "Transaction already closed",
     // so no school big enough to want an archive could produce one.
-    const { bundle, sections } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) =>
+    const { bundle, sections, window } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) =>
       this.assemble(tx, p.schoolId, { sessionId: input.sessionId, termId: input.termId }),
       { timeoutMs: ARCHIVE_TIMEOUT_MS },
     );
@@ -330,6 +344,9 @@ export class SchoolArchiveService {
       sections: sections as Record<string, number>,
       containsHrPii: true,
       createdAt: row.createdAt,
+      // Same shape the list returns, so the row the panel prepends after a
+      // create is not a differently-shaped twin of the ones it reloads.
+      scope: window ? { kind: input.termId ? ("term" as const) : ("session" as const), from: window.from, to: window.to } : null,
     };
   }
 
@@ -524,6 +541,9 @@ export class SchoolArchiveService {
 
     return {
       sections,
+      // Handed back so `create` can report the covered window without resolving
+      // it a second time — and so the two can never disagree.
+      window,
       bundle: {
         manifest: {
           schoolId,
@@ -592,15 +612,51 @@ export class SchoolArchiveService {
       const rows = (await tx.schoolArchive.findMany({ orderBy: { createdAt: "desc" } })) as Array<
         Record<string, unknown>
       >;
-      return rows.map((r) => ({
-        id: String(r.id),
-        label: String(r.label),
-        sizeBytes: Number(r.sizeBytes),
-        checksum: String(r.checksum),
-        sections: (r.sections ?? {}) as Record<string, number>,
-        containsHrPii: Boolean(r.containsHrPii),
-        createdAt: r.createdAt as Date,
-      }));
+      // The window each archive covers, resolved in TWO queries for the whole
+      // list rather than one per row — a list of fifteen years is otherwise a
+      // query multiplier on a page that is already reading storage metadata.
+      const termIds = [...new Set(rows.map((r) => r.termId).filter(Boolean) as string[])];
+      const sessionIds = [...new Set(rows.map((r) => r.sessionId).filter(Boolean) as string[])];
+      const [terms, sessions] = await Promise.all([
+        termIds.length
+          ? (tx.term.findMany({
+              where: { id: { in: termIds } },
+              select: { id: true, startDate: true, endDate: true },
+            }) as Promise<Array<{ id: string; startDate: Date | null; endDate: Date | null }>>)
+          : Promise.resolve([]),
+        sessionIds.length
+          ? (tx.academicSession.findMany({
+              where: { id: { in: sessionIds } },
+              select: { id: true, startDate: true, endDate: true },
+            }) as Promise<Array<{ id: string; startDate: Date | null; endDate: Date | null }>>)
+          : Promise.resolve([]),
+      ]);
+      const termById = new Map(terms.map((t) => [t.id, t]));
+      const sessionById = new Map(sessions.map((x) => [x.id, x]));
+      return rows.map((r) => {
+        // A term wins over a session: an archive scoped to a term stored both,
+        // and the term is the narrower truth.
+        const t = r.termId ? termById.get(String(r.termId)) : undefined;
+        const sess = r.sessionId ? sessionById.get(String(r.sessionId)) : undefined;
+        const src = t ?? sess;
+        // Dates can be absent even when an id is stored — a term whose dates
+        // were cleared afterwards. Reported as unbounded rather than guessed at,
+        // because a half-known window is worse than a stated unknown.
+        const scope =
+          src?.startDate && src.endDate
+            ? { kind: (t ? "term" : "session") as "term" | "session", from: src.startDate, to: src.endDate }
+            : null;
+        return {
+          id: String(r.id),
+          label: String(r.label),
+          sizeBytes: Number(r.sizeBytes),
+          checksum: String(r.checksum),
+          sections: (r.sections ?? {}) as Record<string, number>,
+          containsHrPii: Boolean(r.containsHrPii),
+          createdAt: r.createdAt as Date,
+          scope,
+        };
+      });
     });
   }
 

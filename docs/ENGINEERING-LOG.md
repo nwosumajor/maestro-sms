@@ -12707,3 +12707,62 @@ resolve with roster fields only (no PII), 499 FOREIGN cards scanned at one desk
 all answer 404, and a card that exists nowhere answers 404 too — indistinguishable,
 so a refusal never confirms what it hides. A foreign card at the desk wrote no
 `scan_event`.
+
+### An archive labelled for one year that held every year
+`POST /privacy/archives` takes `{label, sessionId?, termId?}`, and it is the ID
+that BOUNDS the export: `windowFor` resolves it to a date range and every dated
+section is filtered by it. The label bounds nothing — it is how a human finds
+the file in ten years.
+The panel sent a TYPED label and no id. So every archive a principal took by
+hand was a whole-school dump wearing one year's name. Measured live on the demo
+school, both labelled "2025/2026":
+
+| | typed label only | scoped to the session |
+|---|---|---|
+| size | 99.0 MB | 82.5 MB |
+| attendance | 173,701 | 169,200 |
+| invoices | 14 | 2 |
+| audit rows | 41,213 | 3,341 |
+
+Twelve times the audit trail, from years either side of the one on the label —
+precisely the defect `windowFor`'s own comment says it fixed: "a reader opening
+'Third Term 2026' in ten years got a document that misrepresented itself: the
+whole school, including years either side of the one on the label." Fixed in the
+service, then fixed again in the controller schema (whose comment records the
+sweep passing `termId` into a schema that dropped it), and the SCREEN — the only
+way a human takes one — still walked into it. Third instance in one feature.
+**A typed year cannot be checked, either.** "2025/2026", "2025-2026" and
+"2025/26" are three archives of one year to anyone searching in a decade, and a
+typo is unnoticeable. The default was a GUESS: `now.getMonth() >= 7` read off
+the BROWSER's clock, assuming a September start — wrong for a school whose year
+opens in January, and wrong about "now" for a reader in a different zone from
+the school.
+The picker offers what the school actually has (sessions, each with its terms,
+newest first, plus an explicit whole-school option) and every option carries the
+id that bounds it, so the name on the file and its contents agree by
+construction. A session with no end date — the year still running — is offered
+but DISABLED with the reason, because the API refuses it rather than widening
+and a missing option sends somebody hunting for a session they can see on the
+calendar page. The whole-school export stays reachable and states what it is: it
+is what a school closing down wants, it is simply no longer what you get by
+accident.
+
+**The sibling: the list could not tell the two apart.** The manifest inside the
+file has carried `coversFrom`/`coversTo` since the scoping fix, but `list()`
+returned only the label — so on screen a bounded archive and a whole-school dump
+read identically, and every school that archived before the fix holds some of
+each. `ArchiveSummary` now carries the resolved window (two queries for the
+whole list, not one per row) and each row shows it, or says "all years — not
+bounded to a session". Without that, somebody sends "Term 1" to a lawyer
+believing it is one term.
+
+// GOTCHA: `a-field-no-screen-can-fill-in` exists for exactly this class and
+CANNOT see it. That gate asks whether the WEB MENTIONS the identifier anywhere,
+and `sessionId`/`termId` appear on dozens of screens — report cards, gradebook,
+term results. A field name common across the app is invisible to a
+whole-codebase substring check even where one particular form omits it. The gate
+already states a neighbouring blind spot ("displaying a value is not supplying
+one"); this is a second one. Pinned instead by
+`an-archive-that-covers-what-it-names.test.tsx`, which drives the real
+component; three mutations validated (send the label only, default to every
+year, collapse a failed calendar read to an empty picker).

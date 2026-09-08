@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import type { Serialized } from "@sms/types";
+import type { AcademicSessionDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -26,6 +26,7 @@ type Archive = {
   sections: Record<string, number>;
   containsHrPii: boolean;
   createdAt: string;
+  scope: { kind: "session" | "term"; from: string; to: string } | null;
 };
 
 export default async function ArchivesPage() {
@@ -37,6 +38,21 @@ export default async function ArchivesPage() {
   // a failure told a data-protection officer this school has produced no
   // archive — the exact question this page exists to answer.
   const archives = await apiGet<Serialized<Archive>[]>("/privacy/archives");
+
+  // THE SESSIONS AND TERMS THIS SCHOOL ACTUALLY HAS.
+  //
+  // The panel used to take a TYPED label, which is how an archive came to be
+  // labelled for a year and hold every year. `POST /privacy/archives` accepts
+  // `sessionId`/`termId` and that is what BOUNDS the export; a label alone
+  // bounds nothing. A typed year also cannot be checked: "2025/2026",
+  // "2025-2026" and "2025/26" are three different archives of the same year to
+  // anyone searching in ten years, and a typo is unnoticeable.
+  //
+  // Read here rather than in the client so the picker is populated on first
+  // paint — a principal who opens this page is ready to archive, not to wait.
+  // NULL means the read failed; the panel says so rather than showing an empty
+  // picker, which would read as "this school has no sessions".
+  const sessions = await apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
@@ -65,7 +81,7 @@ export default async function ArchivesPage() {
             </AlertDescription>
           </Alert>
         ) : (
-          <ArchivePanel initial={archives} />
+          <ArchivePanel initial={archives} sessions={sessions} />
         )}
       </div>
     </AppShell>

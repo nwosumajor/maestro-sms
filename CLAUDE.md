@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **266 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **267 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **266 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **267 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1664,6 +1664,21 @@ school's "Second Term" fits and a four-quarter school's ellipsize visibly.
 total is a sum of CLAMPED components and printing the raw ones gave a row that
 did not add up. All THREE printers use it — card, term scoresheet, session
 report. It preserves null, so "not marked" stays distinct from "scored zero".
+
+## An archive is taken OF a session, and says which
+`POST /privacy/archives` takes `{label, sessionId?, termId?}` and it is the ID
+that bounds the export (`windowFor` -> a date range every dated section is
+filtered by). **The label bounds nothing.** The panel sent a typed label and no
+id, so every hand-taken archive was a whole-school dump wearing one year's name:
+measured, 99 MB vs 82.5 MB scoped and 41,213 audit rows vs 3,341, from years
+either side of the label. The screen now PICKS from the school's own sessions
+and terms (newest first; an undated year is offered but disabled with the
+reason; the whole-school export stays, explicitly). // GOTCHA: the list could
+not tell a bounded archive from an unbounded one — `ArchiveSummary` carries the
+resolved window now, and a row with none says "all years". // GOTCHA:
+`a-field-no-screen-can-fill-in` cannot catch this class when the field name is
+common across the web (`sessionId` is on dozens of screens); it asks only
+whether the web MENTIONS it.
 
 ## Background jobs: a sweep that skipped a school must SAY so
 `JobRunsService.failedCount` reads a **`failed`** field off each job's stored
