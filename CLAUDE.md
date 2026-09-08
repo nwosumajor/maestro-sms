@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **270 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **273 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **270 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **273 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1664,6 +1664,32 @@ school's "Second Term" fits and a four-quarter school's ellipsize visibly.
 total is a sum of CLAMPED components and printing the raw ones gave a row that
 did not add up. All THREE printers use it — card, term scoresheet, session
 report. It preserves null, so "not marked" stays distinct from "scored zero".
+
+## Analytics: every card obeys the period the page states
+`/analytics` is headed "figures for {term} ... so these agree with the
+term-scoped report card". The period was built for ATTENDANCE and never
+extended — the grade aggregate counted every PUBLISHED grade ever and the fee
+CTE had NO date filter, so the term picker moved one card of three. Measured on
+the demo school: attendance 25,200 / 57,600 / 63,000 / 0 across its four terms
+while avg grade read 68 and fees 12,885,000 for all of them. Grades now filter
+on the ASSESSMENT's term exactly as the report card does and FAIL OPEN on an
+untagged one (so a school mid-migration sees historic work in every term — the
+stated cost, and the same answer the report card gives); fees window on
+`COALESCE("issuedAt","createdAt")`, the day the school billed. // GOTCHA: a
+BACKTICK inside a `Prisma.sql` template terminates the literal — a SQL comment
+naming a column in backticks is a syntax error pointing at the wrong line.
+
+## Busy is not broken — a full connection pool answers 503, not 500
+Every tenant-scoped read opens a transaction (`runAsTenant` sets the RLS GUC in
+one), so a full pool raises Prisma **P2028** (P2024 for a plain query), and both
+fell through to 500 "Internal server error". Driving 1,500 schools' analytics at
+30-way concurrency failed **1,358 of 1,500**. The work is fine — a 1,200-pupil
+school renders in ~250ms alone and 32-way concurrency over small schools fails
+none; it is a few LARGE tenants that empty the pool (30 at once failed 24 of 40).
+Default pool is `cpus x 2 + 1` with no `connection_limit` set. Now 503 +
+`Retry-After: 5` saying nothing was changed and to retry, logged at WARN — a real
+fault is still a loud 500. **Set `?connection_limit=` explicitly in deployment**
+against the instance's CPUs and RDS `max_connections`.
 
 ## A total is AGGREGATED, never summed off a fetched page
 `/operator/analytics` read the most recent 5,000 payment rows and summed them in

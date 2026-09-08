@@ -253,6 +253,21 @@ export class AnalyticsService {
             SELECT id, currency, "totalMinor" FROM "invoice"
             WHERE status NOT IN ('DRAFT', 'CANCELLED')
             ${staff ? Prisma.sql`` : Prisma.sql`AND "studentId" = ANY(${studentIds ?? []}::uuid[])`}
+            -- BILLS RAISED IN THE STATED PERIOD, not every bill ever raised.
+            --
+            -- This had no date filter at all, so the fee card showed a lifetime
+            -- figure under a heading naming one term — and the term picker
+            -- beside it changed nothing. Measured on the demo school: invoiced
+            -- read 12,885,000 for all four of its terms.
+            --
+            -- Windowed on "issuedAt", the day the school actually billed, not
+            -- "createdAt" — a DRAFT can sit for weeks before it is issued, and
+            -- it is the issuing that puts money on a family's account. The same
+            -- reasoning the attendance window already uses: the event's own
+            -- date, never the day the row was written. COALESCE keeps a
+            -- historic row with no "issuedAt" visible rather than dropping it.
+            AND COALESCE("issuedAt", "createdAt") >= ${period.from}
+            AND COALESCE("issuedAt", "createdAt") <= ${period.to}
           ), net AS (
             SELECT p."invoiceId",
                    SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END) AS paid
@@ -327,6 +342,40 @@ export class AnalyticsService {
           // uses "A1"/"C6", and an unquoted alias would not survive that.
           return Prisma.sql`count(*) FILTER (WHERE ${cond})::int AS ${Prisma.raw(`"${b.grade.replace(/"/g, "")}"`)}`;
         });
+        // SCOPED TO THE PERIOD THE PAGE SAYS IT IS SHOWING.
+        //
+        // This counted every PUBLISHED grade the school had ever recorded, on a
+        // page headed "figures for {term} ... so these agree with the
+        // term-scoped report card". Measured on the demo school across its four
+        // terms: attendance moved 25,200 -> 57,600 -> 63,000 -> 0 while the
+        // average grade read 68 and the graded count 16,199 for every one of
+        // them. So the term picker moved one card of three, and the claim of
+        // agreement with the report card — whose grades ARE term-scoped — was
+        // false for every term.
+        //
+        // Filtered exactly the way the report card filters: on the ASSESSMENT's
+        // term, and FAIL-OPEN on an untagged one. `assessment.termId` is
+        // nullable and only new assessments are stamped, so a strict match would
+        // turn a school with historic untagged work from a wrong number into an
+        // empty one — worse, and for the schools least able to explain it.
+        //
+        // THE COST OF FAILING OPEN, stated rather than left to be discovered:
+        // an UNTAGGED assessment's marks count under EVERY term, because nothing
+        // says which one they belong to. That is the same answer the report card
+        // gives, and agreement with the report card is what this page promises —
+        // but it means a school mid-migration sees its historic work in each
+        // term until those assessments are tagged. Strictness would hide that
+        // work everywhere instead, which is a worse way to be wrong: a number
+        // that is too high can be questioned, one that is missing looks like
+        // nothing happened.
+        //
+        // With an explicit date RANGE there is no term to match, so it windows
+        // on `grade.gradedAt`: when the mark was actually given. (An assessment
+        // has `createdAt`, but that is when the teacher set the work, which can
+        // be a term earlier than the marking.)
+        const gradePeriodSql = period.termId
+          ? Prisma.sql`AND (a."termId" = ${period.termId}::uuid OR a."termId" IS NULL)`
+          : Prisma.sql`AND g."gradedAt" >= ${period.from} AND g."gradedAt" <= ${period.to}`;
         const bandSql = Prisma.sql`
           SELECT
             ${Prisma.join(bandCols, ", ")},
@@ -339,9 +388,11 @@ export class AnalyticsService {
             -- numeric division is exact decimal arithmetic — no such drift.
             SELECT COALESCE(g.score::numeric / NULLIF(g."maxScore", 0)::numeric * 100, 0) AS pct
             FROM "grade" g
-            ${staff ? Prisma.sql`` : Prisma.sql`JOIN "submission" s ON s.id = g."submissionId"`}
+            JOIN "submission" s ON s.id = g."submissionId"
+            JOIN "assessment" a ON a.id = s."assessmentId"
             WHERE g.status = 'PUBLISHED'
             ${staff ? Prisma.sql`` : Prisma.sql`AND s."studentId" = ANY(${studentIds ?? []}::uuid[])`}
+            ${gradePeriodSql}
           ) t
         `;
         // A family with no scoped students yet: skip the query, same as the

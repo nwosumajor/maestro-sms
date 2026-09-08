@@ -12888,3 +12888,71 @@ this file makes:
   audit feed is `"action":"sis.medical.read"` — the record that somebody read a
   medical record, which is Golden Rule #5 working. A marker that matches an
   ACTION NAME is the probe reporting a fact about itself.
+
+### A period picker that moved one card of three
+`/analytics` is headed *"School-wide figures for {term}. Defaults to the current
+term, so these agree with the term-scoped report card."* The period was built for
+ATTENDANCE and never extended: the grade aggregate counted every PUBLISHED grade
+the school had ever recorded, and the fee CTE had no date filter at all.
+Measured on the demo school (16,199 published grades) across its four terms:
+
+| term | attendance | avg grade | graded | fees invoiced |
+|---|---|---|---|---|
+| Term 1 (Sep–Dec 25) | 25,200 | 68 | 16,199 | 12,885,000 |
+| Second Term | 57,600 | 68 | 16,199 | 12,885,000 |
+| Third Term | 63,000 | 68 | 16,199 | 12,885,000 |
+| First Term (current) | **0** | 68 | 16,199 | 12,885,000 |
+
+Three KPI cards side by side under one heading, one of which honoured it — and
+the claim of agreement with the report card, whose grades ARE term-scoped, was
+false for every term. On the default (current) term a principal saw "0
+attendance records" beside "16,199 graded, 68% average".
+Grades now filter on the ASSESSMENT's term exactly as the report card does, and
+FAIL OPEN on an untagged one. Fees window on `COALESCE("issuedAt","createdAt")`
+— the day the school actually billed, not the day the row was written, the same
+rule the attendance window already used. Verified against SQL afterwards: every
+figure the API returns now matches a direct query.
+// GOTCHA, stated in the code rather than left to be discovered: failing open
+means an UNTAGGED assessment's marks count under EVERY term, so a school
+mid-migration sees its historic work in each one until those assessments are
+tagged. That is the answer the report card gives, and agreement with the report
+card is what this page promises. Strictness would hide the work everywhere
+instead — the worse way to be wrong, because a number that is too high can be
+questioned and one that is missing looks like nothing happened.
+// GOTCHA for anyone editing these queries: a BACKTICK inside a `Prisma.sql`
+template terminates the literal. Writing "`issuedAt`" in a SQL comment produced
+four TS1005s pointing at the wrong line.
+
+### Busy is not broken: a full pool answered 500
+Every tenant-scoped read opens a transaction, because `runAsTenant` sets the RLS
+GUC inside one. When the pool fills, Prisma raises **P2028** ("Unable to start a
+transaction in the given time") — P2024 for a plain query — and both fell through
+to a 500 *"Internal server error"*.
+Found by driving all 1,500 schools' analytics at 30-way concurrency: **1,358 of
+1,500 failed**. The work itself was fine — a 1,200-pupil school with 36,000
+attendance rows renders in 231–320 ms alone, and 60 requests at concurrency 32
+over small schools failed none. It is a handful of LARGE tenants that empty the
+pool: 30 large schools at once failed 24 of 40. Prisma's default pool here is
+`cpus × 2 + 1` = 17, with no `connection_limit` set on the URL.
+A 500 is wrong three ways: nothing is broken, it names no way out, and it sends a
+principal to support for a condition that clears itself in seconds. Now **503 +
+`Retry-After: 5`** with a message saying the system is busy, nothing was changed
+and to try again — verified live: the same 30-way run answers 25×200 and 15×503.
+Logged at WARN rather than ERROR: sustained pool exhaustion is a real operational
+signal, but 1,358 stack traces for one busy minute buries the faults that ARE
+faults. A genuine Prisma error is still a loud 500 — the filter gained a branch,
+it did not take over.
+// OPERATIONAL, not fixed in code because it is deployment configuration: the
+pool size is worth setting explicitly (`?connection_limit=`) against the
+instance's CPU count and RDS `max_connections`, rather than inherited from
+whatever the container happens to be scheduled on.
+
+### The analytics module at 1,500 schools — what held
+* **Per-school analytics does not care how large the fleet is**, as it should
+  not: 29–40 ms for a small school and 231–320 ms for a 1,200-pupil one with
+  36,000 attendance rows, with 1,500 tenants and ~4.9 M attendance rows in the
+  database. Concurrency 1→32 over small schools: p50 29 ms → 183 ms, zero
+  failures.
+* **The fee card is denominated in the SCHOOL's own currency** across all seven
+  in the fleet — NGN/GBP/USD/GHS/KES/ZAR/XOF each reported as themselves, never
+  folded into the platform's.

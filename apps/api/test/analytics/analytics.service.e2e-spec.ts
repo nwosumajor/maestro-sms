@@ -334,6 +334,113 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
       expect(o.period?.label).toBeTruthy();
     });
 
+    // ---------------------------------------------------------------------
+    // GRADES AND FEES MUST HONOUR THE PERIOD TOO
+    // ---------------------------------------------------------------------
+    // The period was built for attendance and never extended. The page reads
+    // "School-wide figures for {term} ... so these agree with the term-scoped
+    // report card", and the term picker moved ONE card of three. Measured on the
+    // demo school across its four terms: attendance went 25,200 -> 57,600 ->
+    // 63,000 -> 0 while the average grade read 68 and the graded count 16,199
+    // for every one of them, and fees invoiced 12,885,000 for every one. The
+    // claim of agreement with the report card — whose grades ARE term-scoped —
+    // was false for every term.
+    describe("grades and fees follow the same window", () => {
+      const TAGGED = randomUUID();   // an assessment stamped with TERM
+      const OTHER = randomUUID();    // one stamped with a DIFFERENT term
+      const UNTAGGED = randomUUID(); // one with no term at all
+      const TERM2 = randomUUID();
+      const IN_INV = randomUUID();
+      const OUT_INV = randomUUID();
+
+      beforeAll(async () => {
+        await admin.query(
+          `INSERT INTO term (id,"schoolId","sessionId",name,sequence,"startDate","endDate","isCurrent","updatedAt")
+           VALUES ($1,$2,$3,'AN Term 2',2, now() - interval '20 days', now() - interval '10 days', false, now())`,
+          [TERM2, SA, SESS],
+        );
+        // One graded submission per assessment, all for the same pupil.
+        for (const [aid, termId, score] of [
+          [TAGGED, TERM, 90],
+          [OTHER, TERM2, 30],
+          [UNTAGGED, null, 60],
+        ] as const) {
+          const sub = randomUUID();
+          await admin.query(
+            `INSERT INTO assessment (id,"schoolId",title,"createdById","termId","updatedAt") VALUES ($1,$2,'P',$3,$4,now())`,
+            [aid, SA, STAFF, termId],
+          );
+          await admin.query(
+            `INSERT INTO submission (id,"schoolId","assessmentId","studentId","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+            [sub, SA, aid, S1],
+          );
+          await admin.query(
+            `INSERT INTO grade (id,"schoolId","submissionId",score,"maxScore",status,"gradedById","gradedAt","updatedAt")
+             VALUES ($1,$2,$3,$4,100,'PUBLISHED',$5, now() - interval '45 days', now())`,
+            [randomUUID(), SA, sub, score, STAFF],
+          );
+        }
+        // Two invoices: one ISSUED inside TERM's window, one well outside it.
+        for (const [id, offset, total] of [
+          [IN_INV, "45 days", 500_000],
+          [OUT_INV, "1 day", 900_000],
+        ] as const) {
+          await admin.query(
+            `INSERT INTO invoice (id,"schoolId","studentId",reference,status,currency,"totalMinor","dueDate","issuedAt","createdById","updatedAt")
+             VALUES ($1,$2,$3,$4,'ISSUED','NGN',$5, now()::date, now() - interval '${offset}', $6, now())`,
+            [id, SA, S1, `AN-PERIOD-${id.slice(0, 8)}`, total, STAFF],
+          );
+        }
+      });
+
+      const feeStaff = (): Principal => ({
+        userId: STAFF,
+        schoolId: SA,
+        roles: ["principal"],
+        permissions: [...perms, "attendance.read"],
+      });
+
+      it("counts a grade under the term its ASSESSMENT belongs to, and not another", async () => {
+        const inTermView = await svc.overview(feeStaff(), { termId: TERM });
+        const otherView = await svc.overview(feeStaff(), { termId: TERM2 });
+        // Both views also carry the school's pre-existing UNTAGGED grades (see
+        // the fail-open case below), so compare the two rather than an absolute:
+        // the 90 belongs to TERM only and the 30 to TERM2 only.
+        const bandsIn = byGrade(inTermView.grades);
+        const bandsOther = byGrade(otherView.grades);
+        expect(bandsIn.A).toBeGreaterThan(bandsOther.A ?? 0);
+        expect(bandsOther.F).toBeGreaterThan(bandsIn.F ?? 0);
+      });
+
+      it("FAILS OPEN on an untagged assessment — it appears under every term", async () => {
+        // Deliberate, and the cost is stated in the service: a school
+        // mid-migration sees historic work in each term until it is tagged.
+        // Strictness would hide that work everywhere instead, and a number that
+        // is missing looks like nothing happened.
+        const a = await svc.overview(feeStaff(), { termId: TERM });
+        const b = await svc.overview(feeStaff(), { termId: TERM2 });
+        expect(a.grades?.graded ?? 0).toBeGreaterThan(0);
+        expect(b.grades?.graded ?? 0).toBeGreaterThan(0);
+      });
+
+      it("counts only the invoices ISSUED inside the window", async () => {
+        const inTerm = await svc.overview(feeStaff(), { termId: TERM });
+        const home = inTerm.fees?.byCurrency.find((c) => c.currency === "NGN");
+        // The 500,000 issued 45 days ago is inside TERM (60->30 days ago); the
+        // 900,000 issued yesterday is not.
+        expect(home?.invoicedMinor).toBe(500_000);
+      });
+
+      it("moves when the window moves — the term picker must change the fee card", async () => {
+        // The defect in one assertion: this figure was identical for every term.
+        const a = await svc.overview(feeStaff(), { termId: TERM });
+        const b = await svc.overview(feeStaff(), { termId: TERM2 });
+        expect(a.fees?.byCurrency.find((c) => c.currency === "NGN")?.invoicedMinor).not.toBe(
+          b.fees?.byCurrency.find((c) => c.currency === "NGN")?.invoicedMinor ?? 0,
+        );
+      });
+    });
+
     it("exports the same figures as CSV, carrying the period and formula-guarded", async () => {
       const { csv, filename } = await svc.overviewCsv(attStaff(), { termId: TERM });
       expect(filename).toMatch(/^analytics-\d{4}-\d{2}-\d{2}\.csv$/);

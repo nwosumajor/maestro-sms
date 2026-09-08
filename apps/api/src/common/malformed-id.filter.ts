@@ -61,6 +61,7 @@ import {
   HttpException,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { BaseExceptionFilter } from "@nestjs/core";
 import { Prisma } from "@sms/db";
@@ -71,6 +72,17 @@ const INCONSISTENT_COLUMN_DATA = "P2023";
 const UNIQUE_VIOLATION = "P2002";
 /** Prisma's marker for a RAW query that the database rejected. */
 const RAW_QUERY_FAILED = "P2010";
+/**
+ * The two ways Prisma reports "the connection pool is full right now".
+ *
+ * P2024 is a plain query waiting for a connection; P2028 is a TRANSACTION that
+ * could not be started in time — which is the one every tenant-scoped read
+ * produces, because `runAsTenant` opens a transaction to set the RLS GUC.
+ * Verified by reproduction rather than read off a table: a pool of 1 with three
+ * concurrent transactions returns P2028 with "Unable to start a transaction in
+ * the given time".
+ */
+const POOL_EXHAUSTED = new Set(["P2024", "P2028"]);
 
 /**
  * "leaveType" -> "leave type". Best effort: the model is the only thing the
@@ -123,6 +135,36 @@ export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionF
   catch(exception: Prisma.PrismaClientKnownRequestError, host: ArgumentsHost) {
     if (!isMalformedIdCandidate(host)) {
       super.catch(exception, host);
+      return;
+    }
+    // BUSY IS NOT BROKEN.
+    //
+    // A full connection pool answered 500 "Internal server error" — a message
+    // that is untrue (nothing is broken), gives no way out, and sends a
+    // principal to support for a condition that clears itself in seconds.
+    // Measured on a 1,500-school fleet: one large school's analytics overview
+    // takes ~250 ms, and thirty of them at once against Prisma's default pool
+    // (cpus x 2 + 1 = 17 here) failed 24 of 40 requests this way. A refusal must
+    // not assert something untrue, and should name the way out.
+    //
+    // 503 + Retry-After is the honest answer: the work was never attempted, the
+    // caller should try again, and a proxy or client that understands
+    // Retry-After will do so without being told twice.
+    //
+    // Logged at WARN, not ERROR: sustained pool exhaustion is a real operational
+    // signal an operator should see, but 1,358 stack traces for one busy minute
+    // buries the faults that ARE faults.
+    if (POOL_EXHAUSTED.has(exception.code)) {
+      const req = host.switchToHttp().getRequest<{ method?: string; url?: string }>();
+      this.logger.warn(`connection pool exhausted (${exception.code}) on ${req?.method} ${req?.url} -> 503`);
+      const res = host.switchToHttp().getResponse<{ setHeader?: (k: string, v: string) => void }>();
+      res?.setHeader?.("Retry-After", "5");
+      super.catch(
+        new ServiceUnavailableException(
+          "The system is busy right now and could not start your request. Nothing was changed — please try again in a few seconds.",
+        ),
+        host,
+      );
       return;
     }
     if (exception.code === UNIQUE_VIOLATION) {
