@@ -11,6 +11,7 @@ import { apiGet } from "@/lib/api";
 import { RegionEditor } from "@/components/operator/RegionEditor";
 import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, shortDate } from "@/lib/format";
@@ -54,10 +55,14 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
   // day boundary and switches the privacy regime, so it is gated on its own
   // permission rather than on the read that got you onto this page.
   const canSetRegion = hasPermission(user.permissions, "platform.tenants.region");
+  // NULL means the catalogue read FAILED; [] would mean the platform serves no
+  // countries. Collapsed with `?? []` the editor simply VANISHED on a failed
+  // read — the operator sees no region control and concludes there isn't one,
+  // which is the report that found this.
   const countries = canSetRegion
-    ? ((await apiGet<
+    ? await apiGet<
         { code: string; name: string; timezone: string; locale: string; currency: string; complianceRegime: string; payrollPack?: string | null }[]
-      >("/operator/countries")) ?? [])
+      >("/operator/countries")
     : [];
 
   return (
@@ -80,15 +85,29 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
           }
         />
 
-        {canSetRegion && countries.length > 0 && (
+        {canSetRegion && countries === null && (
+          <Alert variant="destructive">
+            <AlertTitle>The country catalogue could not be loaded</AlertTitle>
+            <AlertDescription>
+              The region control is hidden because the list of supported countries could not be read — not because
+              this school&rsquo;s region cannot be changed. Reload to try again.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {canSetRegion && countries !== null && countries.length > 0 && (
           <RegionEditor
             schoolId={params.id}
             schoolName={s.name}
+            // TYPED, not cast. These reached for fields the DTO did not have, so
+            // every school rendered as the platform default whatever its region
+            // actually was — and `currency` here was the SUBSCRIPTION currency,
+            // what the school pays the platform, not what it bills families in.
             current={{
-              country: (s as unknown as { country?: string | null }).country ?? null,
-              timezone: (s as unknown as { timezone?: string | null }).timezone ?? null,
-              currency: (s as unknown as { currency?: string | null }).currency ?? null,
-              complianceRegime: (s as unknown as { complianceRegime?: string | null }).complianceRegime ?? null,
+              country: s.country,
+              timezone: s.timezone,
+              currency: s.feeCurrency,
+              complianceRegime: s.complianceRegime,
             }}
             countries={countries}
           />

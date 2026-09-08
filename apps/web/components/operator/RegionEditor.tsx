@@ -47,16 +47,65 @@ export function RegionEditor({
 
   const picked = countries.find((c) => c.code === code);
   const changed = (current.country ?? "") !== code;
+  // WHAT IT IS NOW, resolved for display. An operator opening this screen is
+  // usually here to CORRECT a region, and the first thing they need is what it
+  // is currently set to — which this could not show while the DTO carried no
+  // country, so a Ghanaian school read as "platform default (Nigeria)".
+  const now = countries.find((c) => c.code === (current.country ?? ""));
+
+  /**
+   * CLEAR ONE OVERRIDE back to whatever the country says.
+   *
+   * The confirm dialog now names these as the reason a country change will not
+   * move the timezone or the currency — so there has to be a way to act on
+   * that. A message naming a way out that does not exist is the defect it was
+   * written to avoid. The API has always supported it: an EMPTY STRING clears a
+   * field to null, which `.optional()` alone could not express.
+   */
+  async function clearOverride(field: "timezone" | "currency" | "complianceRegime", label: string) {
+    if (!window.confirm(`Clear the ${label} override for ${schoolName}?\n\nIt will follow the school's country from now on.`))
+      return;
+    setBusy(true);
+    setNote(null);
+    const res = await sendWithStepUp("PUT", `operator/tenants/${schoolId}/region`, { [field]: "" });
+    setNote(
+      res.ok
+        ? `${label} override cleared — ${schoolName} now follows its country. Reload to see the new value.`
+        : interpretApiError(res.status, await res.text()),
+    );
+    setBusy(false);
+  }
 
   async function save() {
     if (!picked) return;
+    // TELL THE TRUTH ABOUT WHAT WILL ACTUALLY CHANGE.
+    //
+    // This promised that "today" becomes the new country's timezone and that
+    // money displays in its currency — unconditionally. Both are false when the
+    // school carries an EXPLICIT override, because those columns win over the
+    // country and a country change does not clear them. Measured: a school with
+    // timezone Africa/Accra and currency GHS moved to Kenya kept both, while the
+    // dialog said each would change. A confirmation that asserts an outcome
+    // which does not happen is the same failure as a refusal that asserts
+    // something untrue.
+    const lines = [
+      current.timezone
+        ? `• "Today" stays ${current.timezone} — this school has an explicit timezone override, which the country does not replace`
+        : `• "Today" becomes ${picked.timezone} — every register's day boundary moves`,
+      current.currency && current.currency !== picked.currency
+        ? `• Families are still billed in ${current.currency} — an explicit fee-currency override, not replaced by the country`
+        : `• Money and dates display as ${picked.currency} / ${picked.locale}`,
+      current.complianceRegime
+        ? `• Privacy regime stays ${current.complianceRegime} — explicitly set, not replaced by the country`
+        : `• Privacy regime becomes ${picked.complianceRegime}`,
+    ];
+    if (!picked.payrollPack) lines.push("• Statutory payroll is NOT available there — runs will be refused");
+    if (current.timezone || current.currency || current.complianceRegime)
+      lines.push("\nClear an override to let the country decide it — see the badges above.");
     if (
       !window.confirm(
-        `Move ${schoolName} to ${picked.name}?\n\n` +
-          `• "Today" becomes ${picked.timezone} — every register's day boundary moves\n` +
-          `• Money and dates display as ${picked.currency} / ${picked.locale}\n` +
-          `• Privacy regime becomes ${picked.complianceRegime}\n` +
-          (picked.payrollPack ? "" : "• Statutory payroll is NOT available there — runs will be refused\n"),
+        `Move ${schoolName} from ${now?.name ?? "the platform default (Nigeria)"} to ${picked.name}?\n\n` +
+          lines.join("\n"),
       )
     )
       return;
@@ -77,6 +126,61 @@ export function RegionEditor({
         A school&rsquo;s country decides its timezone, currency, locale, privacy regime, academic calendar shape and
         whether statutory payroll is available. Schools cannot change this themselves, deliberately.
       </p>
+
+      {/* CURRENTLY SET TO — stated before the control that changes it. */}
+      <div className="mb-3 rounded-md border border-border bg-muted/40 p-3">
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">Currently set to</p>
+        <p className="mt-0.5 text-sm font-medium">
+          {now ? now.name : current.country ? current.country : "No country set — the platform default (Nigeria) applies"}
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+          {/* An explicit override is shown as such: a school can sit in a country
+              and still bill in another currency, and hiding that makes the
+              editor look wrong to whoever set it deliberately. */}
+          {current.timezone && (
+            <span className="inline-flex items-center gap-1">
+              <Badge variant="outline">timezone override: {current.timezone}</Badge>
+              <button
+                type="button"
+                onClick={() => void clearOverride("timezone", "timezone")}
+                disabled={busy}
+                className="text-xs text-primary underline disabled:opacity-50"
+              >
+                clear
+              </button>
+            </span>
+          )}
+          {current.currency && (
+            <span className="inline-flex items-center gap-1">
+              <Badge variant="outline">bills families in {current.currency}</Badge>
+              <button
+                type="button"
+                onClick={() => void clearOverride("currency", "fee currency")}
+                disabled={busy}
+                className="text-xs text-primary underline disabled:opacity-50"
+              >
+                clear
+              </button>
+            </span>
+          )}
+          {current.complianceRegime && (
+            <span className="inline-flex items-center gap-1">
+              <Badge variant="secondary">{current.complianceRegime}</Badge>
+              <button
+                type="button"
+                onClick={() => void clearOverride("complianceRegime", "privacy regime")}
+                disabled={busy}
+                className="text-xs text-primary underline disabled:opacity-50"
+              >
+                clear
+              </button>
+            </span>
+          )}
+          {!current.timezone && !current.currency && !current.complianceRegime && (
+            <span className="text-muted-foreground">everything follows the country — no overrides</span>
+          )}
+        </div>
+      </div>
 
       <div className="mb-3 flex flex-wrap items-end gap-2">
         <div className="space-y-1.5">

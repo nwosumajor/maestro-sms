@@ -18,6 +18,7 @@ import {
   COUNTRIES,
   SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
+  countryProfile,
   resolveRegion,
   isModuleKey,
   isPlan,
@@ -300,7 +301,12 @@ export class OperatorService {
   ) {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Region administration requires the privileged database configuration");
-    const school = await client.school.findFirst({ where: { id: schoolId, isPlatform: false }, select: { id: true, name: true } });
+    const school = await client.school.findFirst({
+      where: { id: schoolId, isPlatform: false },
+      // The CURRENT region, needed to decide what a country change should carry
+      // with it — see the calendar-template realignment below.
+      select: { id: true, name: true, country: true, calendarTemplate: true },
+    });
     if (!school) throw new NotFoundException("School not found");
 
     const country = input.country?.toUpperCase();
@@ -326,10 +332,37 @@ export class OperatorService {
       throw new BadRequestException(`Calendar template must be one of ${Object.keys(CALENDAR_TEMPLATES).join(", ")}`);
     }
 
+    // THE YEAR'S SHAPE FOLLOWS A CORRECTED COUNTRY — when nobody chose it.
+    //
+    // Provisioning stamps `calendarTemplate` FROM the country
+    // (`profile.calendarTemplate`), so a school onboarded into the wrong country
+    // carries that country's year shape. Correcting the country fixed the
+    // timezone, currency, locale and privacy regime — all of which resolve from
+    // `country` when unset — and left the template, because it is a stored
+    // column. Measured: a school onboarded as US and corrected to Nigeria kept
+    // FOUR_QUARTER, so its next quick-created year had four quarters in a
+    // three-term country, and nothing said so.
+    //
+    // Realigned ONLY when the stored template equals the OLD country's default,
+    // i.e. it was DERIVED rather than chosen. `calendarTemplate` is a deliberate
+    // escape hatch for "a school whose year does not match its region"
+    // (a-field-no-screen-can-fill-in records exactly that reason), and silently
+    // clobbering a deliberate choice would be the worse defect. A template that
+    // differs from the old country's default was chosen by somebody, and is
+    // left alone.
+    const derivedTemplate =
+      country &&
+      country !== (school.country ?? null) &&
+      input.calendarTemplate === undefined &&
+      school.calendarTemplate === countryProfile(school.country).calendarTemplate
+        ? countryProfile(country).calendarTemplate
+        : null;
+
     await client.school.update({
       where: { id: schoolId },
       data: {
         ...(country ? { country } : {}),
+        ...(derivedTemplate ? { calendarTemplate: derivedTemplate } : {}),
         // An empty string clears an override back to the country default.
         ...(input.timezone !== undefined ? { timezone: input.timezone || null } : {}),
         ...(input.locale !== undefined ? { locale: input.locale || null } : {}),
@@ -352,7 +385,10 @@ export class OperatorService {
           entity: "school",
           entityId: schoolId,
           schoolId: p.schoolId,
-          metadata: { school: school.name, ...input },
+          // What was ASKED plus what followed from it. A realignment nobody
+          // requested must be in the trail, or the next reader cannot explain
+          // why the year's shape moved.
+          metadata: { school: school.name, ...input, ...(derivedTemplate ? { calendarTemplateRealignedTo: derivedTemplate } : {}) },
         },
         tx,
       ),
@@ -377,7 +413,12 @@ export class OperatorService {
   async setSchoolStatus(p: Principal, schoolId: string, status: "ACTIVE" | "DISABLED") {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("School administration requires the privileged database configuration");
-    const school = await client.school.findFirst({ where: { id: schoolId, isPlatform: false }, select: { id: true, name: true } });
+    const school = await client.school.findFirst({
+      where: { id: schoolId, isPlatform: false },
+      // The CURRENT region, needed to decide what a country change should carry
+      // with it — see the calendar-template realignment below.
+      select: { id: true, name: true, country: true, calendarTemplate: true },
+    });
     if (!school) throw new NotFoundException("School not found");
     await client.school.update({ where: { id: schoolId }, data: { status } });
     // Take effect NOW, on every instance, rather than when a 15-second cache

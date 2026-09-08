@@ -383,6 +383,27 @@ export interface SchoolProfileDto extends SchoolDirectoryRowDto {
    * fee rendered in the platform's naira.
    */
   feeCurrency: string;
+  /**
+   * THE SCHOOL'S REGION, as stored — what the region editor is editing.
+   *
+   * // GOTCHA: the editor was built, permissioned, step-up gated and linked, and
+   * had NOTHING to show, because none of this was on the DTO. The page reached
+   * for the fields through `as unknown as { country?: string | null }` casts,
+   * which is exactly the escape hatch the type-safety spine exists to forbid: a
+   * cast turned "this DTO has no country" from a compile error into a silent
+   * `undefined`. So a school explicitly set to Ghana rendered as "platform
+   * default (Nigeria)" — measured live — and an operator opening the screen to
+   * CORRECT a mis-set region could not see what it was set to, which is the
+   * first thing they need.
+   *
+   * `null` is meaningful and distinct from a value: it means no override, i.e.
+   * the platform's home country. It is NOT "unknown".
+   */
+  country: string | null;
+  timezone: string | null;
+  locale: string | null;
+  complianceRegime: string | null;
+  calendarTemplate: string | null;
   /** Referrer school name when this school arrived via a referral code. */
   referredBy: string | null;
   /** Recent platform-subscription payments, newest first. */

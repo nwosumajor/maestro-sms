@@ -113,6 +113,14 @@ export default async function OperatorTenantsPage({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* THE ROUTE TO THE REGION CONTROL, from the screen an operator
+                      is actually on. Region lives on the school profile, and this
+                      registry — where every other per-school lever is — had no
+                      link to it, so an operator correcting a mis-set country had
+                      no way through from here. */}
+                  <Link href={`/operator/schools/${t.id}`} className="text-xs text-primary hover:underline">
+                    Profile &amp; region →
+                  </Link>
                   <Badge variant="outline">{t.plan}</Badge>
                   <Badge variant="secondary">{t.moduleCount} modules</Badge>
                   <Badge variant={t.status === "ACTIVE" ? "secondary" : "outline"}>{t.status}</Badge>

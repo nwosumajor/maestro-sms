@@ -61,6 +61,13 @@ const PROFILE_SCHOOL_SELECT = {
   // pays the platform in. Both the directory row and the profile render money
   // figures denominated in it.
   currency: true,
+  // The stored REGION. The profile screen edits these, and without them the
+  // editor showed every school as the platform default whatever it was set to.
+  country: true,
+  timezone: true,
+  locale: true,
+  complianceRegime: true,
+  calendarTemplate: true,
 } as const;
 
 @Injectable()
@@ -195,6 +202,16 @@ export class OperatorDirectoryService {
       // saying which put both under the platform's naira sign.
       outstandingCurrency: detail.sub?.currency ?? schoolCurrency,
       feeCurrency: schoolCurrency,
+      // AS STORED, not as resolved. `resolveRegion` fills a null country in with
+      // the platform's home defaults, which is right for rendering money and
+      // wrong here: the editor has to distinguish "this school is explicitly in
+      // Nigeria" from "nobody has set a region", because those are different
+      // answers to the question it asks.
+      country: (school as { country?: string | null }).country ?? null,
+      timezone: (school as { timezone?: string | null }).timezone ?? null,
+      locale: (school as { locale?: string | null }).locale ?? null,
+      complianceRegime: (school as { complianceRegime?: string | null }).complianceRegime ?? null,
+      calendarTemplate: (school as { calendarTemplate?: string | null }).calendarTemplate ?? null,
       graceDays: detail.sub?.graceDays ?? null,
       autoRenew: detail.sub?.autoRenew ?? false,
       cardLast4: detail.sub?.cardLast4 ?? null,

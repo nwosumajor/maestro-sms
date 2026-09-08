@@ -12766,3 +12766,63 @@ one"); this is a second one. Pinned instead by
 `an-archive-that-covers-what-it-names.test.tsx`, which drives the real
 component; three mutations validated (send the label only, default to every
 year, collapse a failed calendar read to an empty picker).
+
+### A region control that could not show a region
+Reported as "I cannot find the page or button to adjust the region". The page
+existed, was permissioned, step-up gated and linked from the school directory —
+and could not SHOW a region, which is why it read as the wrong screen.
+`SchoolProfileDto` carried no `country`, `timezone`, `locale`,
+`complianceRegime` or `calendarTemplate`. The page reached for them through
+`as unknown as { country?: string | null }` — the escape hatch the type-safety
+spine exists to forbid, turning "this DTO has no country" from a compile error
+into a silent `undefined`. Measured live: a school explicitly set to **GH /
+Africa/Accra / GHS** rendered as **"— platform default (Nigeria) —"**. An
+operator opening the screen to CORRECT a region could not see what it was set
+to, which is the first thing they need; and `changed` compared against that
+empty value, so re-picking a school's own country counted as a change.
+It also passed `s.currency` — the SUBSCRIPTION currency, what the school pays
+the PLATFORM — where it wanted `feeCurrency`, what the school bills FAMILIES in.
+The DTO already carries both and says in its own comment that they are different
+questions.
+Now: the DTO carries the region AS STORED (`null` meaning "no override", which is
+not the same as "Nigeria"), the page passes typed fields, and the editor states
+**Currently set to** before offering the control that changes it.
+
+**The correction was incomplete, and this is the part that mattered.**
+Provisioning stamps `calendarTemplate` FROM the country
+(`profile.calendarTemplate`). Everything else — timezone, currency, locale,
+privacy regime — resolves from `country` when unset, so correcting the country
+fixed them; the template is a STORED column and stayed. Measured: a school
+onboarded as **US** (TWO_SEMESTER) and corrected to **Nigeria** kept
+TWO_SEMESTER, so its next quick-created year had two semesters in a three-term
+country, and nothing said so.
+Realigned ONLY when the stored template equals the OLD country's default, i.e.
+it was DERIVED rather than chosen. `calendarTemplate` is a deliberate escape
+hatch for "a school whose year does not match its region" — the reason
+`a-field-no-screen-can-fill-in` records for exempting it — so a template that
+differs from the old country's default was chosen by somebody and survives.
+Verified both ways live, and the realignment is in the audit metadata
+(`calendarTemplateRealignedTo`), because a change nobody asked for must be
+explicable from the trail.
+
+**A confirmation that promised what did not happen.** The dialog said
+unconditionally that "today" becomes the new country's timezone and money
+displays in its currency. Both are false when the school carries an EXPLICIT
+override, because those columns win over the country and a country change does
+not clear them: moving a school with `Africa/Accra` and `GHS` to Kenya kept
+both, while the dialog said each would change. Same failure as a refusal that
+asserts something untrue. It now says which values are pinned and by what —
+and, because it names clearing an override as the way out, the editor grew the
+control to do it (the API always supported it: an empty string clears to null).
+A message naming a way out that does not exist is the defect it was written to
+avoid.
+
+// GOTCHA on discoverability: `/operator/tenants` is the registry where every
+other per-school lever lives (status, subscription, grace, users) and had NO
+link to the school profile, so an operator working there had no route to the
+region control at all. One link added. *Present is not the same as findable.*
+
+// GOTCHA: the page did `apiGet(...) ?? []` on the country catalogue, so a
+FAILED read hid the whole editor — an operator would see no region control and
+conclude there isn't one, which is exactly the report that started this. `null`
+now says the catalogue could not be loaded.
