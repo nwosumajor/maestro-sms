@@ -84,6 +84,18 @@ export interface NotificationRecoveryResult {
    * it from scanned minus the other three.
    */
   failed: number;
+  /**
+   * PENDING rows that were DUE and that this run did not reach, because
+   * `RECOVERY_BATCH` bounds it.
+   *
+   * Without this the sweep reported `scanned=500 requeued=500 failed=0` whether
+   * the queue held 500 rows or 500,000 — the same clean line either way.
+   * Measured on 3,500 schools after a queue outage stranded 21,918 deliveries:
+   * three hourly runs each reported a full, clean sweep while 21,858 stayed
+   * pending. At 500 an hour that is ~44 hours before the last family is even
+   * attempted, and the operator console said everything was fine.
+   */
+  backlog: number;
   /** True when the sweep could not run at all — NOT a clean bill of health. */
   skipped?: "NO_DB";
 }
@@ -113,7 +125,7 @@ export class NotificationRecoveryService {
       // sweep that found nothing look identical in a log, and only one of them
       // is good news.
       this.logger.warn("Notification recovery skipped: no privileged database URL configured.");
-      return { scanned: 0, requeued: 0, abandoned: 0, tooRecent: 0, failed: 0, skipped: "NO_DB" };
+      return { scanned: 0, requeued: 0, abandoned: 0, tooRecent: 0, failed: 0, backlog: 0, skipped: "NO_DB" };
     }
 
     const now = Date.now();
@@ -127,7 +139,18 @@ export class NotificationRecoveryService {
       take: RECOVERY_BATCH,
     })) as PendingRow[];
 
-    const result: NotificationRecoveryResult = { scanned: pending.length, requeued: 0, abandoned: 0, tooRecent: 0, failed: 0 };
+    // COUNTED IN THE DATABASE, not inferred from the page. A count of what is
+    // left is the only thing that distinguishes a sweep keeping up from one
+    // falling behind, and it costs one indexed count once an hour.
+    const totalPending = await client.notificationDelivery.count({ where: { status: "PENDING" } });
+    const result: NotificationRecoveryResult = {
+      scanned: pending.length,
+      requeued: 0,
+      abandoned: 0,
+      tooRecent: 0,
+      failed: 0,
+      backlog: Math.max(0, totalPending - pending.length),
+    };
 
     // One job per NOTIFICATION, not per delivery row: the job performs every
     // pending channel for that notification, so queueing it twice would have the
@@ -185,11 +208,13 @@ export class NotificationRecoveryService {
 
     const line =
       `Notification recovery (${trigger}): scanned=${result.scanned} requeued=${result.requeued} ` +
-      `abandoned=${result.abandoned} tooRecent=${result.tooRecent}`;
+      `abandoned=${result.abandoned} tooRecent=${result.tooRecent} backlog=${result.backlog}`;
     // WARN when anything was recovered: a stranded delivery means a message a
     // school believed it had sent had not been sent, which is worth noticing
     // even now that it has gone out.
-    if (result.requeued > 0 || result.abandoned > 0) this.logger.warn(line);
+    // A BACKLOG IS WORTH THE SAME NOTICE AS A RECOVERY. A sweep that cleared its
+    // batch and left thousands behind is not a quiet success.
+    if (result.requeued > 0 || result.abandoned > 0 || result.backlog > 0) this.logger.warn(line);
     else this.logger.log(line);
     return result;
   }

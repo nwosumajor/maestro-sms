@@ -12956,3 +12956,56 @@ whatever the container happens to be scheduled on.
 * **The fee card is denominated in the SCHOOL's own currency** across all seven
   in the fleet — NGN/GBP/USD/GHS/KES/ZAR/XOF each reported as themselves, never
   folded into the platform's.
+
+### A sweep that was BEHIND and reported a clean run
+Every scheduled sweep here takes a bounded batch, deliberately, so one bad night
+never becomes one enormous transaction. Each reported only what it TOOK — so a
+run that cleared its 500 and left a hundred thousand behind produced exactly the
+same line as one that emptied the queue.
+Measured on a 3,500-school fleet after a queue outage stranded **21,918**
+deliveries at register time (an absence alert per guardian, the product's single
+biggest fan-out). Three consecutive hourly runs each returned:
+`scanned=500 requeued=500 abandoned=0 tooRecent=0 failed=0` — every signal on the
+operator's jobs console green — while **21,858 families were still waiting**. At
+500 an hour that is ~44 hours before the last one is even ATTEMPTED, and nothing
+anywhere said so.
+`backlog` is a FOURTH fact and none of the existing three can carry it:
+`failed` is what this run tried and could not; `skipped` is work not due;
+`unreachable` is a fact about the data; `backlog` is work that IS due, queued
+behind a cap. It is also the number that says whether a sweep is keeping up —
+live, three runs moved it 20,885 -> 20,866 -> 20,846, which is the diagnosis.
+**Swept the siblings in the same commit**, because fixing where it hurts is how
+the class survives: `notification-recovery` (RECOVERY_BATCH), `sis-nudge`
+(SIS_NUDGE_BATCH_MAX), `submission-retention` (500) and the term `archive` (500)
+all count what is due with the SAME predicate their page uses — named once in
+each so the count and the page cannot drift — and subtract what they took.
+`JobRunsService` reads `backlog` the way it already reads `failed` (opt-in, null
+when a job has no notion of one), and the console shows a **Behind** badge with
+the magnitude and what it means. A real `failed` still outranks it: the run did
+everything it was allowed to; the problem is what it was not allowed to reach.
+
+// GOTCHA, and it cost six suites: adding one `count()` call broke every double
+that had modelled the old contract — `client.x.count is not a function`, which
+reads as a code fault. Each now counts THE SAME set its `findMany` draws from,
+because a double answering a constant would pass against a service computing the
+backlog from the wrong predicate.
+// GOTCHA: `a-sweep-that-skipped-a-school-and-said-nothing` asserted the literal
+source `(summary as { failed?: unknown }).failed` and went red the moment that
+reader was generalised to serve a second count beside it — a change that
+STRENGTHENED what it guards. Tenth recorded instance of "anchor a test to the
+PROPERTY, not to the text"; it now drives `failedCount` directly.
+
+### Purging a tenant costs an afternoon — the prediction, and the remedy
+This file already said it: "73 of the 79 foreign keys into `user` are in that
+position... Harmless, because nothing here hard-deletes a user; it costs an
+afternoon the day somebody purges a tenant." Removing a 1,500-school fixture is
+that day, and the count is still exactly **73**.
+Two cleanup attempts ran **25 minutes and 11 minutes without committing** —
+every user deleted forces a seq scan of each unindexed referencing table, and the
+largest are the partitioned `attendance_record_*` (58 MB, 49 MB, 18 MB on
+`studentId`), `invoice`, `payment` and `notification`.
+The remedy the entry prescribes — "Index the referencing columns, delete, drop
+them again" — works exactly as written: **23 temporary indexes built in 1.2 s**,
+the same delete then committed **1,370,900 rows in 3 m 6 s**, indexes dropped.
+Worth knowing before anyone offboards a real school, and worth scripting if that
+becomes routine.

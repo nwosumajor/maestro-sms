@@ -25,7 +25,7 @@ export class NotificationRecoveryProcessor extends WorkerHost {
 
   async process(job: Job): Promise<NotificationRecoveryResult> {
     return this.runs.record("notifications.deliveryRecovery", "SCHEDULE", async () => {
-      const zero = { scanned: 0, requeued: 0, abandoned: 0, tooRecent: 0, failed: 0 };
+      const zero = { scanned: 0, requeued: 0, abandoned: 0, tooRecent: 0, failed: 0, backlog: 0 };
       if (job.name !== NOTIFICATION_RECOVERY_JOB) return zero;
       return this.recovery.recoverStranded("SCHEDULED");
     });

@@ -24,6 +24,14 @@ function build(opts: { applications?: Row[]; submissions?: Row[]; deleteFails?: 
   const order: string[] = [];
   const client = {
     admissionApplication: {
+      // Counts THE SAME predicate the page is drawn from, so the backlog the
+      // sweep reports is derived from the fixture rather than asserted by it.
+      count: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        const cutoff = (where.updatedAt as { lt: Date }).lt;
+        return (opts.applications ?? []).filter(
+          (a) => a.status === where.status && (a.updatedAt as Date) < cutoff,
+        ).length;
+      }),
       findMany: ({ where }: { where: Record<string, unknown> }) => {
         const cutoff = (where.updatedAt as { lt: Date }).lt;
         return Promise.resolve(

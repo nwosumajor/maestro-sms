@@ -721,7 +721,7 @@ export class SchoolArchiveService {
     trigger: "SCHEDULED" | "MANUAL",
   ): Promise<{ scanned: number; archived: number; skipped: number; undated: number }> {
     const client = this.privileged.client;
-    const result = { scanned: 0, archived: 0, skipped: 0, undated: 0, failed: 0 };
+    const result = { scanned: 0, archived: 0, skipped: 0, undated: 0, failed: 0, backlog: 0 };
     if (!client) {
       if (trigger === "SCHEDULED") this.logger.log("term archive skipped (no privileged client)");
       return result;
@@ -731,12 +731,18 @@ export class SchoolArchiveService {
     // corrections entered in the final week are inside the snapshot rather than
     // stranded outside it.
     const cutoff = new Date(Date.now() - TERM_ARCHIVE_GRACE_DAYS * 86_400_000);
+    // Named once so the COUNT and the PAGE cannot drift apart.
+    const dueWhere = { endDate: { not: null, lt: cutoff } };
     const terms = (await client.term.findMany({
-      where: { endDate: { not: null, lt: cutoff } },
+      where: dueWhere,
       select: { id: true, schoolId: true, name: true, sessionId: true, endDate: true, startDate: true },
       orderBy: { endDate: "asc" },
       take: 500,
     })) as Array<{ id: string; schoolId: string; name: string; sessionId: string; endDate: Date; startDate: Date | null }>;
+    // Ended terms this run did not reach — see `JobStatus.lastBacklog`. At 3,500
+    // schools a fleet with several years of history holds far more than one
+    // batch, and a capped run reported the same clean line either way.
+    result.backlog = Math.max(0, (await client.term.count({ where: dueWhere })) - terms.length);
 
     // A term with no START date cannot be archived AS a term — the window is
     // what makes the archive about that term rather than about everything.

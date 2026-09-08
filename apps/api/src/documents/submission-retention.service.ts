@@ -35,10 +35,13 @@ export type SubmissionRetentionResult = {
   /** Objects the store would not give up. Left for the next run rather than
    *  orphaned — see the ordering note below. */
   failed: number;
+  /** Rejected applications past the window that this run did not reach, because
+   *  the batch is capped at 500 — see `JobStatus.lastBacklog`. */
+  backlog: number;
   skipped?: boolean;
 };
 
-const EMPTY: SubmissionRetentionResult = { applications: 0, filesPurged: 0, rowsCleared: 0, failed: 0 };
+const EMPTY: SubmissionRetentionResult = { applications: 0, filesPurged: 0, rowsCleared: 0, failed: 0, backlog: 0 };
 
 @Injectable()
 export class SubmissionRetentionService {
@@ -67,14 +70,24 @@ export class SubmissionRetentionService {
     // starts when the school SAID NO, not when the family first applied — an
     // application that sat in review for months must not have its documents
     // vanish the day it is refused.
+    // Named once so the COUNT below and the PAGE here cannot drift apart — a
+    // backlog computed from a different predicate is worse than none.
+    const dueWhere = { status: "REJECTED" as const, updatedAt: { lt: cutoff } };
     const rejected = (await client.admissionApplication.findMany({
-      where: { status: "REJECTED", updatedAt: { lt: cutoff } },
+      where: dueWhere,
       select: { id: true, schoolId: true },
       take: 500,
     })) as Array<{ id: string; schoolId: string }>;
     if (rejected.length === 0) return EMPTY;
 
-    const result: SubmissionRetentionResult = { applications: rejected.length, filesPurged: 0, rowsCleared: 0, failed: 0 };
+    const totalDue = await client.admissionApplication.count({ where: dueWhere });
+    const result: SubmissionRetentionResult = {
+      applications: rejected.length,
+      filesPurged: 0,
+      rowsCleared: 0,
+      failed: 0,
+      backlog: Math.max(0, totalDue - rejected.length),
+    };
 
     for (const application of rejected) {
       const withFiles = (await client.documentSubmission.findMany({

@@ -39,6 +39,10 @@ export type JobStatus = {
   /** Items the last run could not process. A run that skipped four schools
    *  still reports lastOk: true — this is the only signal that says otherwise. */
   lastFailed: number | null;
+  /** Work that was DUE and that the last run did not reach, because it hit its
+   *  own batch cap. A capped sweep reports the same clean line whether nothing
+   *  is waiting or a hundred thousand rows are — this is what tells them apart. */
+  lastBacklog: number | null;
   manual?: {
     path: string;
     permission: string;
@@ -108,8 +112,17 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
   // school does not throw, so lastOk stays true and every other signal is clean
   // — a run that skipped four schools looked exactly like one that swept the
   // whole fleet.
+  // A BACKLOG IS A PROBLEM EVEN WHEN THE RUN WAS CLEAN. Measured on a
+  // 3,500-school fleet: after a queue outage stranded 21,918 deliveries the
+  // hourly recovery sweep returned scanned=500 requeued=500 failed=0 every hour
+  // — every signal above green — while 21,858 families were still waiting.
   const wrong = (j: JobStatus) =>
-    j.neverRun || j.overdue || j.lastOk === false || j.overrunning || (j.lastFailed ?? 0) > 0;
+    j.neverRun ||
+    j.overdue ||
+    j.lastOk === false ||
+    j.overrunning ||
+    (j.lastFailed ?? 0) > 0 ||
+    (j.lastBacklog ?? 0) > 0;
   const sorted = [...jobs].sort((a, b) => Number(wrong(b)) - Number(wrong(a)));
   const problems = sorted.filter(wrong).length;
 
@@ -168,6 +181,10 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
                     <Badge variant="destructive">Too often</Badge>
                   ) : (j.lastFailed ?? 0) > 0 ? (
                     <Badge variant="destructive">Partial</Badge>
+                  ) : (j.lastBacklog ?? 0) > 0 ? (
+                    // Not "Partial": the run did everything it was allowed to.
+                    // The problem is what it was not allowed to reach.
+                    <Badge variant="destructive">Behind</Badge>
                   ) : (
                     <Badge variant="secondary">OK</Badge>
                   )}
@@ -188,6 +205,13 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
                       Ran, but {j.lastFailed} {j.lastFailed === 1 ? "item" : "items"} could not be
                       processed and {j.lastFailed === 1 ? "was" : "were"} left as they were. The log
                       names them.
+                    </span>
+                  ) : (j.lastBacklog ?? 0) > 0 ? (
+                    <span className="text-destructive">
+                      Ran cleanly, but {(j.lastBacklog ?? 0).toLocaleString()} more{" "}
+                      {j.lastBacklog === 1 ? "item was" : "items were"} due and not reached — this run
+                      filled its batch. It clears over the following runs; if the number is not
+                      falling, work is arriving faster than the batch drains it.
                     </span>
                   ) : j.lastError ? (
                     <span className="text-destructive">{j.lastError.slice(0, 160)}</span>

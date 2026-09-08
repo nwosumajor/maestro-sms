@@ -22,7 +22,7 @@ export class SubmissionRetentionProcessor extends WorkerHost {
   async process(job: Job): Promise<SubmissionRetentionResult> {
     return this.runs.record("documents.submissionRetention", "SCHEDULE", async () => {
       if (job.name !== SUBMISSION_RETENTION_JOB) {
-        return { applications: 0, filesPurged: 0, rowsCleared: 0, failed: 0 };
+        return { applications: 0, filesPurged: 0, rowsCleared: 0, failed: 0, backlog: 0 };
       }
       const result = await this.retention.purgeRejected("SCHEDULED");
       // The number an operator reads is the one the job result stores, so it

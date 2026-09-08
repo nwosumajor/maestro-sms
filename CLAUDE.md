@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **273 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **275 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **273 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **275 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1742,6 +1742,34 @@ resolved window now, and a row with none says "all years". // GOTCHA:
 `a-field-no-screen-can-fill-in` cannot catch this class when the field name is
 common across the web (`sessionId` is on dozens of screens); it asks only
 whether the web MENTIONS it.
+
+## A capped sweep must report its BACKLOG, not just what it took
+Every scheduled sweep bounds its read with a `take`, deliberately. Each reported
+only what it TOOK, so a run that cleared its 500 and left 100,000 behind produced
+the same line as one that emptied the queue. Measured at 3,500 schools after a
+queue outage stranded 21,918 deliveries: three hourly runs each returned
+`scanned=500 requeued=500 failed=0` — every console signal green — while 21,858
+families were still waiting (~44 hours to even attempt them). **`backlog` is a
+FOURTH fact**: not `failed` (tried and could not), not `skipped` (not due), not
+`unreachable` (about the data) — DUE work queued behind a cap, and the number
+that says whether the sweep is keeping up. All four capped sweeps report it
+(`notification-recovery`, `sis-nudge`, `submission-retention`, term `archive`),
+each counting with the SAME predicate its page uses — named once so they cannot
+drift. `JobRunsService` reads it like `failed` (opt-in, null = no notion of one);
+the console shows a **Behind** badge with the magnitude. A real `failed`
+outranks it. Gate: `a-sweep-that-was-behind-and-said-nothing`.
+// GOTCHA: adding one `count()` broke six existing doubles — each must now count
+the SAME set its `findMany` draws from, or it passes against a service computing
+the backlog from the wrong predicate.
+
+## PURGING A TENANT: index the referencing columns first
+The 73 unindexed FKs into `user` this file records are harmless until somebody
+hard-deletes a tenant's users, then every delete seq-scans each of them. Measured
+removing a 1,500-school fixture: **25 min and 11 min without committing**. The
+documented remedy works exactly as written — 23 temporary indexes on the
+referencing columns built in **1.2 s**, the same delete committed **1,370,900
+rows in 3 m 6 s**, indexes dropped after. Do this before offboarding a real
+school.
 
 ## Background jobs: a sweep that skipped a school must SAY so
 `JobRunsService.failedCount` reads a **`failed`** field off each job's stored

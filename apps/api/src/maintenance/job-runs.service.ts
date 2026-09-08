@@ -270,6 +270,25 @@ export interface JobStatusDto {
    * not due). null when the job reports no such count.
    */
   lastFailed: number | null;
+  /**
+   * Work that was DUE and that this run did not reach, because it hit its own
+   * batch cap.
+   *
+   * A FOURTH fact, and none of the other three can express it. It is not
+   * `failed` (this run tried and could not), not `skipped` (not due), and not
+   * `unreachable` (a fact about the data): it is due work, queued behind a cap,
+   * that the next run will pick up — or will not, if the backlog grows faster
+   * than the cap drains it.
+   *
+   * Measured on a 3,500-school fleet with 21,918 stranded deliveries after a
+   * queue outage: the hourly recovery sweep returned
+   * `scanned=500 requeued=500 failed=0` every run — a clean bill of health —
+   * while 21,858 rows stayed pending. At 500/hour that is ~44 hours to even
+   * ATTEMPT them, and nothing anywhere said so. A capped sweep that reports only
+   * what it took looks identical whether the queue is empty or a hundred
+   * thousand deep.
+   */
+  lastBacklog: number | null;
   /** How to run it by hand, if it can be. Absent = timer only. */
   manual?: { path: string; permission: string; scope: "PLATFORM" | "SCHOOL"; where?: string };
 }
@@ -296,8 +315,17 @@ const OVERRUN_FACTOR = 3;
  * string here would otherwise render as a permanent alarm nobody could clear.
  */
 function failedCount(summary: unknown): number | null {
+  return numberField(summary, "failed");
+}
+
+/** Same opt-in contract as `failed` — see `lastBacklog`. */
+function backlogCount(summary: unknown): number | null {
+  return numberField(summary, "backlog");
+}
+
+function numberField(summary: unknown, key: "failed" | "backlog"): number | null {
   if (!summary || typeof summary !== "object") return null;
-  const value = (summary as { failed?: unknown }).failed;
+  const value = (summary as Record<string, unknown>)[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
@@ -411,6 +439,7 @@ export class JobRunsService {
         lastOk: last?.ok ?? null,
         lastTrigger: last?.trigger ?? null,
         lastSummary: last?.summary ?? null,
+        lastBacklog: backlogCount(last?.summary ?? null),
         lastFailed: failedCount(last?.summary),
         lastError: last?.error ?? null,
         neverRun: !last,

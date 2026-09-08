@@ -55,7 +55,12 @@ function makeService(rows: Row[], opts: { noDb?: boolean; queueThrows?: boolean;
   const queued: Array<{ notificationId: string; schoolId: string; userId: string }> = [];
   const client = {
     notificationDelivery: {
-      findMany: jest.fn(async () => rows),
+      // Honours `take`, and counts the SAME set the page is drawn from — a
+      // double whose findMany ignores take passes against a service that stopped
+      // bounding its read, and one whose count disagrees with it makes the
+      // backlog meaningless.
+      count: jest.fn(async () => rows.length),
+      findMany: jest.fn(async ({ take }: { take?: number } = {}) => rows.slice(0, take ?? rows.length)),
       update: jest.fn(async (a: { where: { id: string }; data: { status: string; error?: string } }) => {
         updates.push({ id: a.where.id, ...a.data });
         return {};

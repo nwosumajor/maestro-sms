@@ -42,7 +42,17 @@ function makeService(opts: { profiles?: Record<string, unknown>[]; guardians?: {
   const parentFindMany = jest.fn().mockResolvedValue(opts.guardians ?? []);
   const client = opts.noDb
     ? null
-    : { studentProfile: { findMany, update, updateMany }, parentChild: { findMany: parentFindMany } };
+    : {
+        studentProfile: {
+          findMany,
+          update,
+          updateMany,
+          // Counts the SAME set findMany draws from, so the backlog this sweep
+          // now reports is derived from the fixture rather than invented.
+          count: jest.fn(async () => (await findMany({})).length),
+        },
+        parentChild: { findMany: parentFindMany },
+      };
   const enqueue = jest.fn().mockResolvedValue(undefined);
   // Fan a grouped send into the per-recipient spy, so every assertion below
   // still asks WHAT a pupil was told rather than which call told them.
@@ -63,7 +73,7 @@ function makeService(opts: { profiles?: Record<string, unknown>[]; guardians?: {
 describe("SisNudgeService", () => {
   it("is DISABLED (no-op) without a privileged database", async () => {
     const { service, enqueue } = makeService({ noDb: true });
-    await expect(service.sweep()).resolves.toEqual({ nudged: 0, scanned: 0, failed: 0, skipped: "NO_DB" });
+    await expect(service.sweep()).resolves.toEqual({ nudged: 0, scanned: 0, failed: 0, backlog: 0, skipped: "NO_DB" });
     expect(enqueue).not.toHaveBeenCalled();
   });
 

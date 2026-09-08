@@ -58,19 +58,30 @@ export class SisNudgeService {
    *   own schoolId — taken from the verified JWT, never from request input — so a
    *   school admin can nudge their pupils without gaining a cross-tenant trigger.
    */
-  async sweep(onlySchoolId?: string): Promise<{ nudged: number; scanned: number; failed: number; skipped?: string }> {
+  /**
+   * `backlog`: profiles that were DUE a nudge and that this run did not reach,
+   * because `SIS_NUDGE_BATCH_MAX` bounds it. Without it a capped sweep reports
+   * the same clean line whether nothing is waiting or thousands are — see
+   * `JobStatus.lastBacklog`.
+   */
+  async sweep(
+    onlySchoolId?: string,
+  ): Promise<{ nudged: number; scanned: number; failed: number; backlog: number; skipped?: string }> {
     const client = this.db.client;
     // No privileged URL configured ⇒ the nudge is DISABLED, not partially working.
-    if (!client) return { nudged: 0, scanned: 0, failed: 0, skipped: "NO_DB" };
+    if (!client) return { nudged: 0, scanned: 0, failed: 0, backlog: 0, skipped: "NO_DB" };
 
     const cutoff = new Date(Date.now() - SIS_NUDGE_INTERVAL_DAYS * 24 * 60 * 60 * 1000);
+    // The predicate, named once so the COUNT and the PAGE cannot drift — a
+    // backlog computed from a different WHERE than the batch is worse than none.
+    const dueWhere = {
+      ...(onlySchoolId ? { schoolId: onlySchoolId } : {}),
+      profileStatus: { in: [...PUPIL_OWES] },
+      // Never nudged, or not since the cutoff. This predicate is the idempotence.
+      OR: [{ lastNudgedAt: null }, { lastNudgedAt: { lt: cutoff } }],
+    };
     const due = (await client.studentProfile.findMany({
-      where: {
-        ...(onlySchoolId ? { schoolId: onlySchoolId } : {}),
-        profileStatus: { in: [...PUPIL_OWES] },
-        // Never nudged, or not since the cutoff. This predicate is the idempotence.
-        OR: [{ lastNudgedAt: null }, { lastNudgedAt: { lt: cutoff } }],
-      },
+      where: dueWhere,
       select: {
         id: true,
         schoolId: true,
@@ -87,7 +98,10 @@ export class SisNudgeService {
       orderBy: { updatedAt: "asc" },
       take: SIS_NUDGE_BATCH_MAX,
     })) as ProfileRow[];
-    if (due.length === 0) return { nudged: 0, scanned: 0, failed: 0 };
+    if (due.length === 0) return { nudged: 0, scanned: 0, failed: 0, backlog: 0 };
+    // Counted with the SAME predicate as the page above.
+    const totalDue = await client.studentProfile.count({ where: dueWhere });
+    const backlog = Math.max(0, totalDue - due.length);
 
     // Guardians in ONE query for the whole batch, not one per pupil.
     const studentIds = due.map((r) => r.studentId);
@@ -164,7 +178,7 @@ export class SisNudgeService {
         this.logger.warn(`nudge stamp failed for ${batch.length} profile(s): ${(e as Error).message}`);
       }
     }
-    return { nudged, scanned: due.length, failed };
+    return { nudged, scanned: due.length, failed, backlog };
   }
 
 }

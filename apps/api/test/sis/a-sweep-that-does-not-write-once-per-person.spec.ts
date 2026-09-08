@@ -27,6 +27,7 @@ function makeService(profiles: Record<string, unknown>[], guardians: { studentId
   const calls: string[] = [];
   const client = {
     studentProfile: {
+      count: jest.fn(async () => profiles.length),
       findMany: jest.fn(() => { calls.push("profile.findMany"); return Promise.resolve(profiles); }),
       update: jest.fn(() => { calls.push("profile.update"); return Promise.resolve({}); }),
       updateMany: jest.fn((a: { where: { id: { in: string[] } } }) => {

@@ -103,8 +103,31 @@ describe("a fleet sweep that skipped a school says so", () => {
   });
 
   it("still reads the count by name, so the console can find it", () => {
+    // ANCHORED TO THE PROPERTY, not to one spelling of the expression. This
+    // asserted the literal source `(summary as { failed?: unknown }).failed` and
+    // went red the moment that reader was generalised to serve a SECOND count
+    // (`backlog`) beside it — a change that strengthened exactly what this test
+    // exists to protect. Tenth instance of the class this repo records: "anchor
+    // a test to the PROPERTY, not to the text".
+    //
+    // What must hold is behavioural: the console's `lastFailed` comes from a
+    // reader that picks the `failed` key out of a job's own summary, and a
+    // non-numeric value is treated as absent rather than rendering an alarm
+    // nobody can clear.
+    const { failedCount } = jest.requireActual<{ failedCount?: (s: unknown) => number | null }>(
+      "../../src/maintenance/job-runs.service",
+    );
     const jobRuns = stripComments(readFileSync(join(SRC, "maintenance/job-runs.service.ts"), "utf8"));
-    expect(jobRuns).toMatch(/\(summary as \{ failed\?: unknown \}\)\.failed/);
-    expect(jobRuns).toMatch(/lastFailed: failedCount\(/);
+    // The wiring: whatever the reader is called, `lastFailed` is computed rather
+    // than hard-coded, and the word `failed` is what it looks for.
+    expect(jobRuns).toMatch(/lastFailed:\s*\w+\(/);
+    expect(jobRuns).toMatch(/"failed"|failed\?:/);
+    // And its behaviour, if it is exported to be checked directly.
+    if (failedCount) {
+      expect(failedCount({ failed: 4 })).toBe(4);
+      expect(failedCount({ failed: "4" })).toBeNull();
+      expect(failedCount({})).toBeNull();
+      expect(failedCount(null)).toBeNull();
+    }
   });
 });

@@ -113,6 +113,10 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
   const privileged = {
     client: {
       term: {
+        // The sweep counts what is due as well as taking a page of it, so a
+        // capped run can report the work it did not reach. Counted from the
+        // SAME fixture the page is drawn from.
+        count: jest.fn(async () => ((over as { terms?: unknown[] }).terms ?? []).length),
         findMany: jest.fn().mockResolvedValue((over as { terms?: unknown[] }).terms ?? []),
         // `windowFor` resolves the term the archive NAMES, so the sections can
         // actually be bounded to it. Answers with dates, like a real term.
