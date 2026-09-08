@@ -14,7 +14,25 @@ const owner: Principal = { schoolId: "platform", userId: "owner", roles: ["super
 
 function makeClient() {
   const now = new Date();
-  return {
+  /**
+   * The revenue figures are AGGREGATED IN SQL now (see
+   * `a-lifetime-total-that-shrank`): a capped newest-first page summed in Node
+   * made "Revenue · all time" shrink as the platform grew.
+   *
+   * So the `$queryRaw` double below computes the aggregate FROM THE SAME FIXTURE
+   * ROWS the payment mock returns, rather than answering with a constant. A
+   * constant would make the assertions below ("naira only", "a dollar stays out
+   * of the chart") pass whatever the service did — a double must model the
+   * CONTRACT, not merely satisfy the call.
+   */
+  const paidRows = async (): Promise<Array<{ amountMinor: number; currency?: string; createdAt: Date }>> =>
+    (await client.platformSubscriptionPayment.findMany({})) as never;
+
+  const client: ReturnType<typeof build> = build();
+  return client;
+
+  function build() {
+   return {
     school: {
       findMany: jest.fn().mockResolvedValue([
         { id: "s1", name: "Alpha", status: "ACTIVE", createdAt: now },
@@ -33,6 +51,34 @@ function makeClient() {
     // count(DISTINCT "userId"), so the mock returns the already-deduplicated 1.
     $queryRaw: jest.fn(async (q: unknown) => {
       const sql = JSON.stringify(q);
+      if (sql.includes("platform_subscription_payment")) {
+        // HONOURS THE QUERY'S OWN currency predicate rather than applying one of
+        // its own. A double that always filtered to naira passed against a
+        // service that had STOPPED filtering — the fixture trap this repo keeps
+        // recording ("a stub whose findMany ignores the where passes against a
+        // service that stopped filtering"). Verified by mutation: removing
+        // `AND currency = ...` from the aggregate now fails these tests.
+        const wants = (q as { values?: unknown[] })?.values?.find(
+          (v) => typeof v === "string" && /^[A-Z]{3}$/.test(v),
+        ) as string | undefined;
+        const filtersCurrency = sql.includes("currency =") && wants !== undefined;
+        const home = filtersCurrency
+          ? (await paidRows()).filter((r) => (r.currency ?? "NGN") === wants)
+          : await paidRows();
+        if (sql.includes("date_trunc")) {
+          return home.map((r) => ({ month: r.createdAt, total: BigInt(r.amountMinor) }));
+        }
+        const since30 = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        return [
+          {
+            all_time: BigInt(home.reduce((n, r) => n + r.amountMinor, 0)),
+            last30: BigInt(
+              home.filter((r) => r.createdAt.getTime() >= since30).reduce((n, r) => n + r.amountMinor, 0),
+            ),
+            n: home.length,
+          },
+        ];
+      }
       if (sql.includes("date_trunc")) {
         return [{ month: now, count: 2 }]; // both students enrolled this month
       }
@@ -60,6 +106,7 @@ function makeClient() {
       ]),
     },
   };
+  }
 }
 
 function makeService(client: ReturnType<typeof makeClient> | null) {
@@ -131,9 +178,13 @@ describe("PlatformAnalyticsService", () => {
 
     expect(out.revenue.paidTotalMinor).toBe(500000); // naira only
     expect(out.revenue.currency).toBe("NGN"); // and it SAYS so
-    // `payments` counts every paid payment, which is why naming the currency of
-    // the money figures matters: the two are deliberately different populations.
-    expect(out.revenue.payments).toBe(2);
+    // `payments` COUNTS THE SAME SET AS THE TOTAL — one naira payment here, not
+    // two. It used to be the length of the fetched (capped, all-currency) array,
+    // so it agreed with the money beside it about neither the currency nor the
+    // number of rows: a card reading "2 payments" above a total that covered
+    // one. Two different populations under one heading is not a distinction a
+    // reader can see, and nothing on the screen drew it.
+    expect(out.revenue.payments).toBe(1);
 
     const thisMonth = out.growth[out.growth.length - 1];
     expect(thisMonth.revenueMinor).toBe(500000); // was 749900 — cents as kobo

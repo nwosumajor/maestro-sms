@@ -12826,3 +12826,65 @@ region control at all. One link added. *Present is not the same as findable.*
 FAILED read hid the whole editor — an operator would see no region control and
 conclude there isn't one, which is exactly the report that started this. `null`
 now says the catalogue could not be loaded.
+
+### "Revenue · all time" that shrank as the platform grew
+The operator console's headline revenue figure read the most recent **5,000**
+payment rows and summed them in Node. The bound was added deliberately — "the
+unbounded version grew with the platform's whole lifetime" — and it is the right
+instinct applied to the wrong half: what must not grow is the number of rows
+crossing the WIRE, not the number of rows COUNTED. An aggregate counts every row
+and returns one.
+Because the window is newest-first, older payments FALL OUT as new ones arrive.
+So a figure labelled *all time* went **down** over time, silently. Measured on a
+500-school fleet across seven currencies:
+
+| paid payments | card said | truth | missing |
+|---|---|---|---|
+| 6,508 | NGN 5,000,000.00 | NGN 30,846,756.64 | **83.8%** |
+| 21,508 | NGN 45,846,756.64 | NGN 45,846,756.64 | 0 |
+
+Nothing in the response or on the screen said a row had been left out. At 500
+schools paying termly the cap is crossed in the platform's fourth year — a bug
+with a start date, on the number the owner runs the business by.
+The same capped array fed the monthly revenue **trend**, so the historical bars
+of a growth chart shrank month by month: a chart of the platform's growth
+quietly erasing its own past. Both are `date_trunc`/`SUM` aggregates now, and
+the preview `findMany` takes the ten rows it always actually needed. Analytics
+got FASTER — 267 ms to 227 ms at 6,508 payments — because it stopped hydrating
+5,000 rows to produce two numbers.
+Also fixed beside it: `revenue.payments` was the LENGTH of that capped,
+all-currency array while the money figures were home-currency only, so the count
+and the total described different populations under one heading. It counts the
+same set now.
+// GOTCHA on the fixture: the existing spec's `$queryRaw` double filtered to
+naira ITSELF, so removing `AND currency = …` from the aggregate changed nothing
+and the mutation passed. It reads the query's own predicate now — "a stub whose
+findMany ignores the where passes against a service that stopped filtering",
+met again in a raw-SQL double. Re-validated: the mutation now fails with
+749900, naira and cents added together.
+
+### The rest of the operator console, verified at 500 schools
+Not defects — measurements worth keeping, because several of them are claims
+this file makes:
+* **`GET /operator/tenants` costs the PAGE, not the fleet**, as documented:
+  16 ms at pageSize=1, 34–49 ms at 100, and FLAT on deep paging (29 ms page 1,
+  39 ms page 26 of 26). Every headline matched SQL exactly — 503 schools, 491
+  active, 12 disabled, 48,546 students, 83 PAST_DUE.
+* **The attention queue tells the truth about its own cap**: 490 flagged, 100
+  shown, and the screen says "490 of 500 school(s) need attention — showing the
+  100 most urgent". `byKind` is fleet-wide, not page-wide. Its PAST_DUE count
+  (79) differs from the tenants filter (83) because it scans only the 491 ACTIVE
+  schools — the 4 missing are DISABLED, and a switched-off school is not chased
+  for payment. Correct, and worth writing down before somebody "fixes" it.
+* **The audit CSV announces truncation**: 53,269 rows in the database, 2,000
+  exported, and the last line says so in words.
+* **Isolation holds.** A real `school_admin` login carries 108 permissions and
+  **zero** `platform.*`; every elevation request to one is refused BY NAME; their
+  session gets 403 on the console. // GOTCHA for the next person probing this: a
+  hand-minted token CAN reach the fleet, because minting one means holding
+  `AUTH_SECRET`. That measures the signing key, not the guard — read the result
+  as a fact about the probe.
+* **No minors' PII on any operator payload.** The one `/medical/` hit in the
+  audit feed is `"action":"sis.medical.read"` — the record that somebody read a
+  medical record, which is Golden Rule #5 working. A marker that matches an
+  ACTION NAME is the probe reporting a fact about itself.

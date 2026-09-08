@@ -186,23 +186,51 @@ export class PlatformAnalyticsService {
     // money in any currency. It read correctly only because no USD payment had
     // landed yet, so it was a bug with a start date. The full per-currency
     // breakdown lives on the revenue ledger (/operator/payments).
+    // TOTALLED IN SQL, NOT BY HYDRATING ROWS.
+    //
+    // This read the most recent 5,000 payment rows and summed them in Node. The
+    // bound was added deliberately — "the unbounded version grew with the
+    // platform's whole lifetime" — and it is the right instinct applied to the
+    // wrong half: what must not grow is the number of rows crossing the wire,
+    // not the number of rows COUNTED. An aggregate counts every row and returns
+    // one.
+    //
+    // The figure is labelled "Revenue · all time" on the console, and once the
+    // platform passed 5,000 payments it stopped being that. Worse, the window is
+    // newest-first, so older payments FALL OUT as new ones arrive: a lifetime
+    // revenue figure that goes DOWN over time, silently. Measured on a
+    // 500-school fleet at 6,508 paid payments — the card read NGN 5,000,000.00
+    // against a true NGN 30,846,756.64, missing 83.8% of it, and nothing on the
+    // screen or in the response said a row had been left out.
+    //
+    // A capped newest-first list dropping the oldest rows is the defect class
+    // this codebase keeps meeting; a revenue total is simply the worst place for
+    // it, because the number stays plausible while being wrong.
+    const since30 = new Date(Date.now() - 30 * DAY_MS);
+    const [totals] = await client.$queryRaw<Array<{ all_time: bigint | null; last30: bigint | null; n: number }>>(Prisma.sql`
+      SELECT COALESCE(SUM("amountMinor"), 0)                                          AS all_time,
+             COALESCE(SUM("amountMinor") FILTER (WHERE "createdAt" >= ${since30}), 0)  AS last30,
+             count(*)::int                                                            AS n
+      FROM platform_subscription_payment
+      WHERE status = 'PAID'
+        AND currency = ${HOME_CURRENCY}
+        AND "schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+    `);
+    // SUM over int8 comes back as BigInt, which JSON.stringify THROWS on — the
+    // same trap the school archive records. These are minor units of one
+    // currency and comfortably inside Number, so they are narrowed here rather
+    // than carried out to the DTO.
+    const paidTotalMinor = Number(totals?.all_time ?? 0);
+    const last30dMinor = Number(totals?.last30 ?? 0);
+    const homeCurrencyPayments = totals?.n ?? 0;
+
+    // The preview needs TEN rows, and always did — it never needed five thousand.
     const payments = await client.platformSubscriptionPayment.findMany({
       where: { schoolId: { in: customerIds }, status: "PAID" },
       select: { schoolId: true, plan: true, amountMinor: true, currency: true, status: true, createdAt: true },
       orderBy: { createdAt: "desc" },
-      // Bounded: this feeds a headline figure and a ten-row preview, and the
-      // unbounded version grew with the platform's whole lifetime.
-      take: 5_000,
+      take: 10,
     });
-    const since30 = Date.now() - 30 * DAY_MS;
-    let paidTotalMinor = 0;
-    let last30dMinor = 0;
-    for (const pay of payments) {
-      // Only the home currency contributes to these headline figures — see above.
-      if ((pay.currency ?? CURRENCIES.NGN) !== HOME_CURRENCY) continue;
-      paidTotalMinor += toMinor(pay.amountMinor);
-      if (pay.createdAt.getTime() >= since30) last30dMinor += toMinor(pay.amountMinor);
-    }
     // The PREVIEW carries every currency — it is a list of individual payments,
     // not a total, so a dollar renewal belongs in it. What it must not do is
     // omit the currency and let the screen choose one, which is what it did.
@@ -247,16 +275,22 @@ export class PlatformAnalyticsService {
       const i = bucketOf.get(keyFor(m.month));
       if (i !== undefined) buckets[i].students += m.count;
     }
-    for (const pay of payments) {
-      // HOME CURRENCY ONLY, exactly as the headline figures above. This loop
-      // added every currency into one bar while the totals twenty-five lines
-      // up deliberately did not, and said why at length — so the same screen
-      // reported one number that excluded USD and a chart beside it that
-      // silently folded USD cents into naira kobo. Sibling asymmetry, with the
-      // reasoning already written down next to the half that was correct.
-      if ((pay.currency ?? HOME_CURRENCY) !== HOME_CURRENCY) continue;
-      const i = bucketOf.get(keyFor(pay.createdAt));
-      if (i !== undefined) buckets[i].revenueMinor += toMinor(pay.amountMinor);
+    // HOME CURRENCY ONLY, exactly as the headline figures above, and GROUPED IN
+    // SQL for the same reason they now are: this looped the capped 5,000-row
+    // array, so as the platform grew, payments fell out of the window OLDEST
+    // FIRST and the historical bars of a growth chart shrank month by month. A
+    // chart of the platform's growth that quietly erased its own past.
+    const revenueByMonth = await client.$queryRaw<Array<{ month: Date; total: bigint | null }>>(Prisma.sql`
+      SELECT date_trunc('month', "createdAt") AS month, COALESCE(SUM("amountMinor"), 0) AS total
+      FROM platform_subscription_payment
+      WHERE status = 'PAID'
+        AND currency = ${HOME_CURRENCY}
+        AND "schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+      GROUP BY 1
+    `);
+    for (const r of revenueByMonth) {
+      const i = bucketOf.get(keyFor(r.month));
+      if (i !== undefined) buckets[i].revenueMinor += Number(r.total ?? 0);
     }
 
     // --- platform-wide student demographics (from profiles across all schools) ---
@@ -284,10 +318,11 @@ export class PlatformAnalyticsService {
       schoolsByPlan,
       schoolsByStatus,
       people: { students: studentTotal, staff: staffTotal },
-      // `payments` counts EVERY paid payment, including other currencies, while
-      // the two money figures are home-currency only — say which currency they
-      // are in rather than leaving the screen to guess.
-      revenue: { paidTotalMinor, payments: payments.length, last30dMinor, currency: HOME_CURRENCY },
+      // The COUNT now describes the same set as the TOTAL — home-currency PAID
+      // payments. It was `payments.length`, the length of a capped, all-currency
+      // array, so it agreed with the money figures beside it about neither the
+      // currency nor the number of rows.
+      revenue: { paidTotalMinor, payments: homeCurrencyPayments, last30dMinor, currency: HOME_CURRENCY },
       onboardingPipeline,
       recentPayments,
       mrr: {

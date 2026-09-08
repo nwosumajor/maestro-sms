@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **268 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **270 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **268 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **270 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1664,6 +1664,23 @@ school's "Second Term" fits and a four-quarter school's ellipsize visibly.
 total is a sum of CLAMPED components and printing the raw ones gave a row that
 did not add up. All THREE printers use it — card, term scoresheet, session
 report. It preserves null, so "not marked" stays distinct from "scored zero".
+
+## A total is AGGREGATED, never summed off a fetched page
+`/operator/analytics` read the most recent 5,000 payment rows and summed them in
+Node. The bound was deliberate — an unbounded fetch grows with the platform's
+lifetime — and applied to the wrong half: bound what crosses the WIRE, not what
+is COUNTED. Because the window is newest-first, old payments fell out as new
+ones arrived, so a card labelled **"Revenue · all time"** went DOWN over time.
+Measured at 6,508 payments: NGN 5,000,000 shown against NGN 30,846,756.64 true,
+**83.8% missing**, nothing saying a row was dropped; crossed in year four at 500
+schools. The same array fed the monthly revenue trend, so a growth chart erased
+its own history. Both are SQL aggregates now and the preview takes the 10 rows
+it needed; analytics got FASTER (267ms -> 227ms). // GOTCHA: `revenue.payments`
+was the length of that capped ALL-CURRENCY array while the money was
+home-currency only — a count and a total describing different populations under
+one heading. // GOTCHA: the spec's `$queryRaw` double filtered currency ITSELF,
+so dropping `AND currency = …` from the SQL passed the mutation. A double must
+honour the query's own predicate.
 
 ## Correcting a school's region — where it lives, and what follows
 `/operator/tenants` (or the directory) -> a school -> **Profile & region** ->
