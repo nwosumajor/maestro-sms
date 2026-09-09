@@ -13308,3 +13308,42 @@ was the sibling left behind. It is also the one a pupil reads.
 // GOTCHA, for the second time in this session: my test passed jest and failed
 `pnpm typecheck`, because I invented the component's props. A green jest run is
 not the whole gate, and a component double must satisfy the real signature.
+
+### The attendance module at 5,000 schools — swept, and clean
+A full sweep across 5,000 schools in seven timezones, 22,450 registers and
+**1,062,000 attendance records**, found no defect. Recording what was actually
+exercised, because "we looked" is worth less than "here is what we drove".
+* **The three write windows behave exactly as documented.** Today and anything
+  within 7 days is applied directly (201); a teacher editing a 12-day-old
+  register raises an `ATTENDANCE_AMENDMENT` instead (`pendingApproval: true`
+  with a request id); a holder of `attendance.amend.review` editing a 13-day-old
+  one writes directly, because they are the approver.
+* **"Today" is the SCHOOL's day.** A school in `Pacific/Auckland` whose local
+  date had already rolled to the 10th while the server's UTC date was the 9th
+  could file its own today's register, and a register for the 11th was refused —
+  so the future check is judged where the school is, not where the server is.
+* **A future register is refused** at +1, +7 and +60 days, with a message that
+  names the problem rather than a status.
+* **A pupil not yet enrolled on that date cannot be marked.** My fixture enrolled
+  everyone today and the register correctly refused a backdated mark — enrolment
+  is a history, and the register reads it.
+* **The two register writers agree on a closed day.** With a holiday declared,
+  the register screen refuses (naming the holiday AND how to remove it) while
+  the scan desk answers 201, records the movement, and creates **no** register —
+  which is the documented split, and the exact place these two had drifted
+  before.
+* **Isolation holds.** A teacher reading, MARKING, or reading a pupil's history
+  in another school gets 404, indistinguishable from a class id that exists
+  nowhere. A pupil reads their own history (200), another pupil's is 404, and
+  marking themselves present is 403.
+* **Reads are flat at a million records**: one day's register 18 ms, a pupil's
+  whole history 18 ms, their summary 16 ms, the by-class rollup 20 ms, the
+  registers list 15 ms, the term lock 10 ms.
+
+// GOTCHA for the next person probing this, and it cost two false starts: the
+route is `POST /classes/:classId/attendance` with the class in the PATH, and a
+400 that looks like a defect is usually the enrolment-history check or the
+future-date guard doing its job. A 400 I first read as a broken write turned out
+to be `SchoolRegionService`'s 60-second cache still holding the timezone I had
+just changed BY RAW SQL — the operator route invalidates that cache, my UPDATE
+did not. Read the message before believing the status.
