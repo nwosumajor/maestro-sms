@@ -60,7 +60,15 @@ export class BreachDeadlineService {
     private readonly region: SchoolRegionService,
   ) {}
 
-  async sweep(): Promise<BreachDeadlineResult> {
+  /**
+   * @param onlySchoolId one school, when a school's own officer asked for it by
+   * hand. `privacy.compliance.manage` is a per-school permission held by
+   * principal and school_admin; running the fleet off it sends deadline
+   * warnings about OTHER schools' breaches to their staff, and advances those
+   * incidents' notice stages, on a press by somebody with no standing there.
+   * Omitted by the hourly scheduler, which is the thing that covers everyone.
+   */
+  async sweep(onlySchoolId?: string): Promise<BreachDeadlineResult> {
     const client = this.db.client;
     if (!client) return { scanned: 0, warned: 0, overdue: 0, failed: 0, skipped: "NO_DB" };
 
@@ -70,7 +78,12 @@ export class BreachDeadlineService {
     // this filter must not disagree with it, so it narrows on the same three
     // facts and lets the clock make the decision.
     const open = (await client.dataBreachIncident.findMany({
-      where: { status: { not: "CLOSED" }, notifiedAuthorityAt: null, noNotificationReason: null },
+      where: {
+        status: { not: "CLOSED" },
+        notifiedAuthorityAt: null,
+        noNotificationReason: null,
+        ...(onlySchoolId ? { schoolId: onlySchoolId } : {}),
+      },
       select: {
         id: true,
         schoolId: true,

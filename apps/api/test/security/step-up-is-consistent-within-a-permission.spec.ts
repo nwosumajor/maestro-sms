@@ -88,6 +88,10 @@ const ALLOWED: Record<string, string> = {
   "POST /scholarships/programs/:id/collect-results": "Gathers results already recorded elsewhere.",
   "POST /students/:studentId/readmit": "Restores a pupil's access, which is the direction that helps them rather than harms them.",
   "POST /students/:studentId/documents/release": "Releases the family's own documents to them.",
+  "POST /privacy/archives/run-term-sweep":
+    "Asks for the archives the NIGHTLY TIMER takes anyway, unattended, of terms that have already " +
+    "ended. It discloses nothing and chooses nothing: the two acts that do — taking an arbitrary " +
+    "archive (POST /privacy/archives) and reading one's bytes (:id/download) — keep their step-up.",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

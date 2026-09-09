@@ -98,17 +98,36 @@ describe("the catalogue cannot name an endpoint that does not exist", () => {
         for (const m of src.matchAll(/@Post\("([^"]*)"\)/g)) {
           const prefix = controllerPrefixAt(src, m.index!);
           if ([prefix, m[1]].filter(Boolean).join("/") !== j.manual.path) continue;
+          // BOUNDED BY THE HANDLER, not by a byte count. A fixed window spans
+          // into the NEXT route and vouches for its decorators — the trap this
+          // repo has already been caught by. Cut at the method signature, which
+          // is the first line after the decorators that does not start with `@`
+          // or a comment.
           const from = src.indexOf(m[0]);
-          decorators = src.slice(from, from + 400);
+          const rest = src.slice(from);
+          const end = rest.search(/\n  (?![@/*])[A-Za-z_]/);
+          decorators = end === -1 ? rest.slice(0, 400) : rest.slice(0, end);
         }
       }
       expect({ job: j.key, routeFound: decorators !== null }).toEqual({ job: j.key, routeFound: true });
 
-      const member = decorators!.match(/@RequirePermission\([A-Z_]+_PERMISSIONS\.([A-Z_]+)\)/)?.[1];
-      expect({ job: j.key, guarded: member !== undefined }).toEqual({ job: j.key, guarded: true });
-      expect({ job: j.key, permission: byMember.get(member!) }).toEqual({
+      // One permission or several — several mean ANY one of them opens the
+      // route, which is how a CALLER job admits both the school officer whose
+      // permission the catalogue names and the platform operator who runs the
+      // fleet. The catalogue's permission must be among them.
+      const members = [...decorators!.matchAll(/[A-Z_]+_PERMISSIONS\.([A-Z_]+)/g)]
+        .map((m) => m[1])
+        .filter((m) => byMember.has(m));
+      const guardedBy = decorators!.includes("@RequirePermission(") ? members.map((m) => byMember.get(m)!) : [];
+      expect({ job: j.key, guarded: guardedBy.length > 0 }).toEqual({ job: j.key, guarded: true });
+      expect({ job: j.key, accepts: guardedBy.includes(j.manual.permission) }).toEqual({
         job: j.key,
-        permission: j.manual.permission,
+        accepts: true,
+      });
+      // A second permission is only ever the platform operator's own.
+      expect({ job: j.key, extra: guardedBy.filter((p) => p !== j.manual.permission) }).toEqual({
+        job: j.key,
+        extra: j.manual.scope === "CALLER" ? ["platform.operate"] : [],
       });
     }
   });
@@ -160,11 +179,57 @@ describe("scope", () => {
     expect(byKey["hostel.exeatOverdue"]).toBe("SCHOOL");
   });
 
-  it("every SCHOOL-scoped job says where its control lives", () => {
-    // Otherwise the console shows a dead end: no button and no next step.
+  it("every job a school presses says where its control lives", () => {
+    // Otherwise the console shows a dead end: no button and no next step. A
+    // CALLER job needs it too — an operator gets a button, but everyone else
+    // presses it from a page in their own school.
     for (const j of withManual) {
-      if (j.manual.scope === "SCHOOL") expect(j.manual.where).toBeTruthy();
+      if (j.manual.scope === "SCHOOL" || j.manual.scope === "CALLER") expect(j.manual.where).toBeTruthy();
     }
+  });
+
+  it("marks CALLER the sweeps whose permission is a school's but whose work is the fleet's", () => {
+    const byKey = Object.fromEntries(withManual.map((j) => [j.key, j.manual.scope]));
+    // Each of these ran the whole platform off a per-school permission. They are
+    // not SCHOOL — an operator's press must still do the fleet, which is what
+    // the button in this console is for — and not PLATFORM, because a principal
+    // (or, for the delivery sweep, any teacher) can reach them.
+    expect(byKey["privacy.archive"]).toBe("CALLER");
+    expect(byKey["privacy.breachDeadline"]).toBe("CALLER");
+    expect(byKey["notifications.deliveryRecovery"]).toBe("CALLER");
+  });
+
+  it("every job a school presses HAS a control on a screen", () => {
+    // `where` is a claim, and a claim typed beside code rots. Six of these named
+    // a page that had no button on it: the endpoint existed, the operator
+    // console pointed at it, and a school had no way to press it. Driven by the
+    // path, not by the prose — a screen counts only if it actually POSTs there.
+    const web = join(__dirname, "../../../web");
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir)) {
+        if (e === "node_modules" || e === ".next") continue;
+        const full = join(dir, e);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(e)) files.push(readFileSync(full, "utf8"));
+      }
+    };
+    walk(join(web, "components"));
+    walk(join(web, "app"));
+    expect(files.length).toBeGreaterThan(100); // a walk that found nothing proves nothing
+
+    const missing = withManual
+      .filter((j) => j.manual.scope !== "PLATFORM")
+      // The WHOLE path, terminated. A bare `includes` matched
+      // "hostels/exeats/overdue/runX" for "…/run" — a substring check vouches
+      // for a neighbouring route, which is how a gate passes for the wrong
+      // reason.
+      .filter((j) => {
+        const at = new RegExp(`${j.manual.path.replace(/[/]/g, "\\/")}(?=["'\`?])`);
+        return !files.some((f) => at.test(f));
+      })
+      .map((j) => `${j.key} says its control is at "${j.manual.where}" but nothing there posts to /${j.manual.path}`);
+    expect(missing).toEqual([]);
   });
 
   it("the one job with no manual trigger is the partition roll", () => {
@@ -179,13 +244,20 @@ describe("the console renders the split", () => {
     "utf8",
   );
 
-  it("offers Run now only for PLATFORM scope", () => {
+  it("offers Run now to whoever can actually do the work", () => {
+    // SCHOOL is a dead end in this console and says so; PLATFORM and CALLER both
+    // get a button, because an operator pressing a CALLER job runs the fleet.
     expect(ui).toMatch(/j\.manual\.scope === "SCHOOL"/);
     expect(ui).toMatch(/Run now/);
   });
 
   it("checks the permission before offering the button", () => {
-    expect(ui).toMatch(/hasPermission\(permissions, j\.manual\.permission as Permission\)/);
+    // The property, not the expression: the check moved into a `canPress`
+    // helper when CALLER jobs arrived, because their catalogue permission is a
+    // SCHOOL's and nobody on this console holds it — the operator was told
+    // "Needs privacy.archive.manage" on their own console's button.
+    expect(ui).toMatch(/hasPermission\(permissions, job\.manual\.permission as Permission\)/);
+    expect(ui).toMatch(/scope === "CALLER" && hasPermission\(permissions, "platform\.operate"\)/);
   });
 
   it("refreshes the row after a run, so a successful sweep stops reading Late", () => {

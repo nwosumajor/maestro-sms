@@ -46,7 +46,10 @@ export type JobStatus = {
   manual?: {
     path: string;
     permission: string;
-    scope: "PLATFORM" | "SCHOOL";
+    /** PLATFORM = the fleet; SCHOOL = one tenant, pressed from its own page;
+     *  CALLER = the fleet for a platform operator, the presser's own school for
+     *  anyone else. See SCHEDULED_JOBS for why the third exists. */
+    scope: "PLATFORM" | "SCHOOL" | "CALLER";
     where?: string;
   };
 };
@@ -78,6 +81,19 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
    * that looks like success and means nothing — so those say where their control
    * lives instead.
    */
+  /**
+   * WHO THIS CONSOLE'S BUTTON IS FOR. A CALLER job's catalogue permission is a
+   * SCHOOL's (`privacy.archive.manage`, `notification.send`) — nobody on this
+   * console holds it, so the row read "Needs privacy.archive.manage" and the
+   * operator could never press their own console's button. Their door is
+   * `platform.operate`, and pressing it runs the fleet.
+   */
+  const canPress = (job: JobStatus) =>
+    job.manual
+      ? hasPermission(permissions, job.manual.permission as Permission) ||
+        (job.manual.scope === "CALLER" && hasPermission(permissions, "platform.operate"))
+      : false;
+
   const runNow = async (job: JobStatus) => {
     if (!job.manual) return;
     setBusy(job.key);
@@ -233,8 +249,10 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
                     <span className="text-xs text-muted-foreground">
                       Per school{j.manual.where ? ` — ${j.manual.where}` : ""}
                     </span>
-                  ) : !hasPermission(permissions, j.manual.permission as Permission) ? (
-                    <span className="text-xs text-muted-foreground">Needs {j.manual.permission}</span>
+                  ) : !canPress(j) ? (
+                    <span className="text-xs text-muted-foreground">
+                      Needs {j.manual.scope === "CALLER" ? "platform.operate" : j.manual.permission}
+                    </span>
                   ) : (
                     <Button
                       size="sm"

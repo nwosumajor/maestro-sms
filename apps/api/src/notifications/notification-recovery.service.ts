@@ -118,7 +118,17 @@ export class NotificationRecoveryService {
     @Optional() @InjectQueue(NOTIFICATION_QUEUE) private readonly queue?: Queue,
   ) {}
 
-  async recoverStranded(trigger: "SCHEDULED" | "MANUAL" = "SCHEDULED"): Promise<NotificationRecoveryResult> {
+  /**
+   * @param onlySchoolId one school, when a member of staff pressed it by hand.
+   * `notification.send` is held by every TEACHER, and this ran the fleet: one
+   * teacher's press re-queued and abandoned deliveries belonging to every other
+   * school on the platform, spending their send allowance and their message
+   * credits. The hourly scheduler is what covers everyone.
+   */
+  async recoverStranded(
+    trigger: "SCHEDULED" | "MANUAL" = "SCHEDULED",
+    onlySchoolId?: string,
+  ): Promise<NotificationRecoveryResult> {
     const client = this.db.client;
     if (!client) {
       // Say so rather than returning zeros: a sweep that could not run and a
@@ -133,7 +143,7 @@ export class NotificationRecoveryService {
     const giveUpBefore = new Date(now - GIVE_UP_AFTER_HOURS * 3_600_000);
 
     const pending = (await client.notificationDelivery.findMany({
-      where: { status: "PENDING" },
+      where: { status: "PENDING", ...(onlySchoolId ? { schoolId: onlySchoolId } : {}) },
       select: { id: true, schoolId: true, notificationId: true, attempts: true, createdAt: true, lastAttemptAt: true },
       orderBy: { createdAt: "asc" },
       take: RECOVERY_BATCH,
@@ -142,7 +152,11 @@ export class NotificationRecoveryService {
     // COUNTED IN THE DATABASE, not inferred from the page. A count of what is
     // left is the only thing that distinguishes a sweep keeping up from one
     // falling behind, and it costs one indexed count once an hour.
-    const totalPending = await client.notificationDelivery.count({ where: { status: "PENDING" } });
+    const totalPending = await client.notificationDelivery.count({
+      // The SAME predicate the page was drawn from, so a school running it by
+      // hand is told its OWN backlog rather than the fleet's.
+      where: { status: "PENDING", ...(onlySchoolId ? { schoolId: onlySchoolId } : {}) },
+    });
     const result: NotificationRecoveryResult = {
       scanned: pending.length,
       requeued: 0,

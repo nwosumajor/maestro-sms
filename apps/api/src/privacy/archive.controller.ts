@@ -9,7 +9,7 @@
 
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { z } from "zod";
-import { PRIVACY_PERMISSIONS } from "@sms/types";
+import { OPERATOR_PERMISSIONS, PRIVACY_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -61,11 +61,28 @@ export class SchoolArchiveController {
   /** Run the term sweep now — for an operator verifying it, or catching up after
    *  an outage. Idempotent: a term already archived is skipped by the database. */
   @Post("run-term-sweep")
-  @RequirePermission(PRIVACY_PERMISSIONS.ARCHIVE_MANAGE)
-  @RequireStepUp()
-  runTermSweep(): Promise<{ scanned: number; archived: number; skipped: number }> {
+  // EITHER door: the school's own officer (their school), or a platform
+  // operator (the fleet). Before this the operator — the one person the jobs
+  // console is built for — was 403'd on their own console's button, because the
+  // route asked for a permission only a school role holds.
+  @RequirePermission(PRIVACY_PERMISSIONS.ARCHIVE_MANAGE, OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  // NO step-up, unlike `create` and `download` beside it, and the difference is
+  // the point. This asks for the archives the NIGHTLY TIMER would take anyway,
+  // unattended, of terms that have already ended — it discloses nothing and
+  // chooses nothing. The sensitive acts are taking an arbitrary archive
+  // (`POST /privacy/archives`) and reading its bytes (`:id/download`), and both
+  // keep their step-up. Requiring re-authentication to ask a machine to do
+  // tonight's work early is friction with nothing behind it — and, since this
+  // route also admits `platform.operate`, it would have pulled seven unrelated
+  // operator sweeps into needing step-up by consistency.
+  runTermSweep(@CurrentPrincipal() p: Principal): Promise<{ scanned: number; archived: number; skipped: number }> {
+    // THE CALLER'S SCHOOL, unless the caller is a platform operator.
+    // `privacy.archive.manage` belongs to principal and school_admin, and this
+    // ran the fleet: one demo principal's press wrote 500 permanent archives
+    // into 500 other schools. The nightly sweep still covers everyone.
+    const fleet = p.permissions.includes(OPERATOR_PERMISSIONS.PLATFORM_OPERATE);
     return this.jobRuns.record("privacy.archive", "MANUAL", () =>
-      this.archives.archiveEndedTerms("MANUAL"),
+      this.archives.archiveEndedTerms("MANUAL", fleet ? undefined : p.schoolId),
     );
   }
 

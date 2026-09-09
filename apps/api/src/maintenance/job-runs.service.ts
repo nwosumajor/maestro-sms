@@ -43,6 +43,27 @@ export type JobTrigger = "SCHEDULE" | "MANUAL";
  * success and means nothing. Those are named here so the console can say where
  * their control actually lives rather than offering a button that lies.
  */
+/**
+ * One entry in the catalogue. Declared as a TYPE and applied with `satisfies`
+ * below, because the catalogue was a bare `as const` and nothing checked it:
+ * `documents.submissionRetention` carried a manual trigger with NO `scope` at
+ * all, so the console's scope split simply did not apply to it and no compiler
+ * or test noticed. `satisfies` keeps the literal key types `JobKey` is built
+ * from while still requiring the shape.
+ */
+export interface ScheduledJob {
+  key: string;
+  label: string;
+  everyMinutes: number;
+  manual?: {
+    path: string;
+    permission: string;
+    /** See `JobStatusDto.manual` for what the three mean. */
+    scope: "PLATFORM" | "SCHOOL" | "CALLER";
+    where?: string;
+  };
+}
+
 export const SCHEDULED_JOBS = [
   {
     key: "billing.dunning",
@@ -84,7 +105,12 @@ export const SCHEDULED_JOBS = [
     manual: {
       path: "notifications/deliveries/recovery/run",
       permission: "notification.send",
-      scope: "PLATFORM",
+      // CALLER: `notification.send` is a per-school permission every TEACHER
+      // holds, and this used to sweep the fleet — one teacher's press re-queued
+      // and abandoned other schools' deliveries. A hand-press is now the
+      // presser's own school; an operator still gets the fleet.
+      scope: "CALLER",
+      where: "Notifications → delivery problems",
     },
   },
   {
@@ -167,7 +193,10 @@ export const SCHEDULED_JOBS = [
     manual: {
       path: "privacy/compliance/breach-deadlines/run",
       permission: "privacy.compliance.manage",
-      scope: "PLATFORM",
+      // CALLER, for the same reason: the permission is principal's and
+      // school_admin's, so their press is their own school's.
+      scope: "CALLER",
+      where: "Admin → compliance",
     },
   },
   {
@@ -178,8 +207,10 @@ export const SCHEDULED_JOBS = [
     manual: {
       path: "privacy/archives/run-term-sweep",
       permission: "privacy.archive.manage",
-      scope: "SCHOOL",
-      where: "Admin → privacy",
+      // CALLER: held by principal and school_admin, and it swept the fleet —
+      // one principal's press wrote 500 archives into 500 other schools.
+      scope: "CALLER",
+      where: "Admin → long-term archives",
     },
   },
   {
@@ -200,6 +231,10 @@ export const SCHEDULED_JOBS = [
     manual: {
       path: "documents/retention/run",
       permission: "privacy.compliance.manage",
+      // CALLER: the same per-school permission, and the same fleet-wide purge.
+      // This one had no `scope` at all, which is how it escaped the split.
+      scope: "CALLER",
+      where: "Admin → compliance",
     },
   },
   {
@@ -214,6 +249,11 @@ export const SCHEDULED_JOBS = [
     manual: {
       path: "attendance/rollup/refresh",
       permission: "attendance.write",
+      // SCHOOL, and genuinely so: the handler already takes the principal and
+      // refreshes only their school. It simply had no `scope` at all, which is
+      // what a catalogue nothing type-checks lets through.
+      scope: "SCHOOL",
+      where: "Attendance",
     },
   },
   {
@@ -230,7 +270,7 @@ export const SCHEDULED_JOBS = [
       scope: "PLATFORM",
     },
   },
-] as const;
+] as const satisfies readonly ScheduledJob[];
 
 export type JobKey = (typeof SCHEDULED_JOBS)[number]["key"];
 
@@ -290,7 +330,20 @@ export interface JobStatusDto {
    */
   lastBacklog: number | null;
   /** How to run it by hand, if it can be. Absent = timer only. */
-  manual?: { path: string; permission: string; scope: "PLATFORM" | "SCHOOL"; where?: string };
+  /**
+   * `scope` says WHOSE work one press does.
+   *   PLATFORM — the fleet, exactly what the timer does. Its permission must be
+   *              a platform one, or a school role can fire the whole platform.
+   *   SCHOOL   — one tenant. Pressed from the operator console it would sweep
+   *              the platform's own org, find nothing and report success, so
+   *              the console names where the real control lives instead.
+   *   CALLER   — the fleet for a platform operator, the caller's own school for
+   *              anyone else. The sweep is cross-tenant and privileged, but its
+   *              permission belongs to a school, so the HANDLER decides: it must
+   *              pass the caller's schoolId unless they hold `platform.operate`.
+   *              See `a-fleet-sweep-one-school-could-fire.spec.ts`.
+   */
+  manual?: { path: string; permission: string; scope: "PLATFORM" | "SCHOOL" | "CALLER"; where?: string };
 }
 
 /** How far past its cadence a job may drift before the console calls it late. */

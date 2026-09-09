@@ -52,7 +52,16 @@ export class SubmissionRetentionService {
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
-  async purgeRejected(trigger: "SCHEDULED" | "MANUAL" = "SCHEDULED"): Promise<SubmissionRetentionResult> {
+  /**
+   * @param onlySchoolId one school, when its own privacy officer pressed it.
+   * `privacy.compliance.manage` is a per-school permission, and this purged the
+   * fleet — one school's officer deleting another school's applicants' identity
+   * documents, irreversibly. The nightly run is what covers everyone.
+   */
+  async purgeRejected(
+    trigger: "SCHEDULED" | "MANUAL" = "SCHEDULED",
+    onlySchoolId?: string,
+  ): Promise<SubmissionRetentionResult> {
     const client = this.db.client;
     if (!client) {
       // SAY SO. A sweep that returns zeros in silence reads as a quiet night,
@@ -72,7 +81,11 @@ export class SubmissionRetentionService {
     // vanish the day it is refused.
     // Named once so the COUNT below and the PAGE here cannot drift apart — a
     // backlog computed from a different predicate is worse than none.
-    const dueWhere = { status: "REJECTED" as const, updatedAt: { lt: cutoff } };
+    const dueWhere = {
+      status: "REJECTED" as const,
+      updatedAt: { lt: cutoff },
+      ...(onlySchoolId ? { schoolId: onlySchoolId } : {}),
+    };
     const rejected = (await client.admissionApplication.findMany({
       where: dueWhere,
       select: { id: true, schoolId: true },

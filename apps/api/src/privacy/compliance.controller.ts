@@ -4,7 +4,7 @@
 
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { z } from "zod";
-import { BREACH_RISK_LEVELS, BREACH_STATUSES, PRIVACY_PERMISSIONS } from "@sms/types";
+import { BREACH_RISK_LEVELS, BREACH_STATUSES, OPERATOR_PERMISSIONS, PRIVACY_PERMISSIONS } from "@sms/types";
 import type { BreachIncidentDto, CompliancePostureDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -87,8 +87,15 @@ export class ComplianceController {
    * manual runs are invisible is exactly the thing that area was about.
    */
   @Post("breach-deadlines/run")
-  @RequirePermission(PRIVACY_PERMISSIONS.COMPLIANCE_MANAGE)
-  runBreachDeadlines(): Promise<BreachDeadlineResult> {
-    return this.jobRuns.record("privacy.breachDeadline", "MANUAL", () => this.breachDeadlines.sweep());
+  // EITHER door — see the archive sweep: the school's own officer, or a
+  // platform operator running the fleet from the jobs console.
+  @RequirePermission(PRIVACY_PERMISSIONS.COMPLIANCE_MANAGE, OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  runBreachDeadlines(@CurrentPrincipal() p: Principal): Promise<BreachDeadlineResult> {
+    // THE CALLER'S SCHOOL, unless the caller is a platform operator — see the
+    // sweep's own note. The hourly scheduler still covers the fleet.
+    const fleet = p.permissions.includes(OPERATOR_PERMISSIONS.PLATFORM_OPERATE);
+    return this.jobRuns.record("privacy.breachDeadline", "MANUAL", () =>
+      this.breachDeadlines.sweep(fleet ? undefined : p.schoolId),
+    );
   }
 }

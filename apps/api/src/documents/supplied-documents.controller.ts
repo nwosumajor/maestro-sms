@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   MODULES,
   PRIVACY_PERMISSIONS,
+  OPERATOR_PERMISSIONS,
   REQUIREMENT_SCOPES,
   SUBMISSION_SUBJECTS,
   type DocumentRequirementDto,
@@ -143,10 +144,16 @@ export class SuppliedDocumentsController {
    * because that is whose obligation it is.
    */
   @Post("retention/run")
-  @RequirePermission(PRIVACY_PERMISSIONS.COMPLIANCE_MANAGE)
-  runRetention(): Promise<SubmissionRetentionResult> {
+  // EITHER door — see the archive sweep: the school's own privacy officer, or a
+  // platform operator running the fleet from the jobs console.
+  @RequirePermission(PRIVACY_PERMISSIONS.COMPLIANCE_MANAGE, OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  runRetention(@CurrentPrincipal() p: Principal): Promise<SubmissionRetentionResult> {
+    // THE CALLER'S SCHOOL, unless the caller is a platform operator. This purges
+    // minors' identity documents; running the fleet off a per-school permission
+    // meant one school's officer deleting another school's files.
+    const fleet = p.permissions.includes(OPERATOR_PERMISSIONS.PLATFORM_OPERATE);
     return this.jobRuns.record("documents.submissionRetention", "MANUAL", () =>
-      this.retention.purgeRejected("MANUAL"),
+      this.retention.purgeRejected("MANUAL", fleet ? undefined : p.schoolId),
     );
   }
 

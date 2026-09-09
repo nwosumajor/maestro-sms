@@ -18,6 +18,7 @@ import { z } from "zod";
 import {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_PERMISSIONS,
+  OPERATOR_PERMISSIONS,
   NOTIFICATION_TYPES,
   MUTABLE_NOTIFICATION_TYPES,
   FEES_PERMISSIONS,
@@ -112,10 +113,15 @@ export class NotificationController {
    * manual runs are invisible is exactly the thing this whole area was about.
    */
   @Post("deliveries/recovery/run")
-  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_SEND)
-  runRecovery(): Promise<NotificationRecoveryResult> {
+  // EITHER door — see the archive sweep: a member of staff for their own
+  // school, or a platform operator running the fleet from the jobs console.
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_SEND, OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  runRecovery(@CurrentPrincipal() p: Principal): Promise<NotificationRecoveryResult> {
+    // THE CALLER'S SCHOOL, unless the caller is a platform operator — see the
+    // sweep's own note. The hourly scheduler still covers the fleet.
+    const fleet = p.permissions.includes(OPERATOR_PERMISSIONS.PLATFORM_OPERATE);
     return this.jobRuns.record("notifications.deliveryRecovery", "MANUAL", () =>
-      this.recovery.recoverStranded("MANUAL"),
+      this.recovery.recoverStranded("MANUAL", fleet ? undefined : p.schoolId),
     );
   }
 
