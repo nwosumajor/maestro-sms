@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **283 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **285 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **283 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **285 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1742,6 +1742,17 @@ resolved window now, and a row with none says "all years". // GOTCHA:
 `a-field-no-screen-can-fill-in` cannot catch this class when the field name is
 common across the web (`sessionId` is on dozens of screens); it asks only
 whether the web MENTIONS it.
+
+## A COUNT-then-INSERT cap is not a cap
+`attemptQuiz` counted a pupil's attempts, compared to `maxAttempts`, then
+inserted — nothing between, and no isolation level is set. Interleaving those
+exact statements in two sessions: both counted 0, both inserted, **two attempts
+on a one-attempt quiz, both numbered 1**. Now
+`@@unique([contentId, studentId, attemptNo])` (migration `20260910000000`), with
+P2002 converted to the guard's own 409 so the race is not observable as a
+different outcome. // GOTCHA: eight concurrent HTTP attempts did NOT reproduce
+it — a concurrency test over HTTP would have called this clean. Interleave the
+statements instead.
 
 ## An error message is the SERVER's reason; a hint is only a fallback
 A status usually has several causes and the component knows one. Eleven did

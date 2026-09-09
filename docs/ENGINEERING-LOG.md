@@ -13246,3 +13246,42 @@ there. An over-wide gate is the same failure as a blind one — it teaches its n
 reader to add an exemption — so it was narrowed to the shape that was actually
 wrong rather than exempting what it wrongly caught. Both halves
 mutation-validated, each naming the offending file.
+
+### A quiz attempt cap that counted and hoped
+`attemptQuiz` reads `count(attempts)`, compares it to `maxAttempts`, then
+inserts. Nothing sits between them, and this codebase sets no isolation level —
+so at READ COMMITTED two attempts submitted together both count the same number,
+both pass the cap, and both insert.
+Proven by interleaving the service's own statements in two psql sessions on a
+5,000-school fleet: **both counted 0, both inserted, and the pupil finished with
+TWO attempts on a ONE-attempt quiz, both numbered 1.** So the cap was evaded AND
+the attempt history showed "attempt 1" twice to whoever marked it.
+// GOTCHA: eight concurrent HTTP attempts did NOT reproduce it — the window is
+narrow. That is a reason to close it cheaply, not a reason to call it safe; the
+library return reached the same conclusion about the same shape. A test that only
+fires concurrent requests would have reported this clean.
+The rule is expressible as a constraint, so it is one:
+`@@unique([contentId, studentId, attemptNo])` (migration `20260910000000`, which
+deduplicates defensively first). Re-running the identical interleave: both still
+count 0, the second insert is rejected, one attempt stands. The loser is told
+exactly what the cap guard says — verified live, guard and race both **409 "You
+have no attempts left for this quiz"** — because a guard and the race behind it
+must answer with the same status or the race becomes observable. The catch is
+narrow: a different database error still propagates, or a connection fault would
+be reported to a pupil as a spent attempt and they would stop trying.
+
+### The LMS at 5,000 schools — what held
+* **The quiz answer key does not leak.** Every quiz was seeded with a marked key
+  (`ANSWERKEY-…`) and a student swept all 17 reachable LMS reads: eight answered
+  200 and **none carried it**, while the staff-only ones refused (revisions 403,
+  attempts 403, analytics 404, progress 404, lms-grades 403, approvals 403).
+  // GOTCHA: the first run of that probe returned 403 for EVERYTHING including
+  the teacher's control, because I had guessed the permission strings. The
+  control is the only reason it was not written up as a clean sweep — a probe
+  that cannot see a leak reports a fact about itself. Real strings:
+  `lms.content.read`, `lms.quiz.attempt`, `lms.forum.post`.
+* **Relationship scoping holds in both directions.** A pupil reading another
+  SCHOOL's quiz, its class listing, and a nonexistent id all get **404** —
+  indistinguishable. A pupil reading another CLASS in their OWN school gets 404
+  on the content, 404 on the listing and 404 on an attempt, so the boundary is
+  not merely a read filter.

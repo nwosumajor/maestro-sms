@@ -742,18 +742,43 @@ export class LmsContentService {
       const picked = this.pickForStudent(quiz, p.userId, contentId);
       const result = gradeQuiz(picked, answers ?? {});
       const hasEssays = picked.questions.some((q) => q.type === "ESSAY");
-      await tx.quizAttempt.create({
-        data: {
-          schoolId: p.schoolId,
-          contentId,
-          studentId: p.userId,
-          answers: (answers ?? {}) as Prisma.InputJsonValue,
-          score: result.score, // auto (objective) score; essays add on manual marking
-          total: result.total,
-          attemptNo: used + 1,
-          status: hasEssays ? "PENDING_MANUAL" : "GRADED",
-        },
-      });
+      // THE COUNT IS THE MESSAGE; THE CONSTRAINT IS THE RULE.
+      //
+      // `used >= maxAttempts` above is a READ, and this is the write. At READ
+      // COMMITTED two attempts submitted together both count the same number,
+      // both pass the cap and both insert. Proven by interleaving these exact
+      // statements in two sessions: a pupil finished with TWO attempts on a
+      // one-attempt quiz, both numbered 1 — so the cap was evaded AND the
+      // attempt history showed "attempt 1" twice to whoever marked it.
+      //
+      // (Eight concurrent HTTP attempts did NOT reproduce it; the window is
+      // narrow. That is a reason to close it cheaply, not a reason to call it
+      // safe — the same conclusion the library return reached.)
+      //
+      // `@@unique([contentId, studentId, attemptNo])` (migration
+      // 20260910000000) is the enforcement. The loser is told exactly what the
+      // cap guard says, because a guard and the race behind it must answer with
+      // the SAME status — otherwise the race is observable as a different
+      // outcome.
+      await tx.quizAttempt
+        .create({
+          data: {
+            schoolId: p.schoolId,
+            contentId,
+            studentId: p.userId,
+            answers: (answers ?? {}) as Prisma.InputJsonValue,
+            score: result.score, // auto (objective) score; essays add on manual marking
+            total: result.total,
+            attemptNo: used + 1,
+            status: hasEssays ? "PENDING_MANUAL" : "GRADED",
+          },
+        })
+        .catch((e) => {
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+            throw new ConflictException("You have no attempts left for this quiz");
+          }
+          throw e;
+        });
       await this.emitStatement(tx, p, {
         // "passed"/"failed" once auto-graded (≥50%); "attempted" while essays await marking.
         verb: hasEssays ? "attempted" : result.score / Math.max(1, result.total) >= 0.5 ? "passed" : "failed",

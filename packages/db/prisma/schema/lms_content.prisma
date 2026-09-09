@@ -81,6 +81,9 @@ model QuizAttempt {
   @@index([schoolId])
   @@index([schoolId, contentId])
   @@index([contentId, studentId])
+  /// The attempt cap is a COUNT-then-INSERT; at READ COMMITTED two racers
+  /// both count the same number and both insert. This is what enforces it.
+  @@unique([contentId, studentId, attemptNo])
   @@map("quiz_attempt")
 }
 
