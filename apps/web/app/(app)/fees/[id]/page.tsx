@@ -118,7 +118,23 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
             <CardHeader><CardDescription>Paid</CardDescription><CardTitle className="text-2xl">{money(inv.amountPaidMinor, inv.currency)}</CardTitle></CardHeader>
           </Card>
           <Card>
-            <CardHeader><CardDescription>Balance</CardDescription><CardTitle className="text-2xl">{money(inv.balanceMinor, inv.currency)}</CardTitle></CardHeader>
+            <CardHeader>
+              <CardDescription>Balance</CardDescription>
+              <CardTitle className="text-2xl">{money(inv.balanceMinor, inv.currency)}</CardTitle>
+              {/* MONEY AWAITING APPROVAL IS WHY A BURSAR IS BLOCKED.
+                  The API counts pending payments against the outstanding
+                  balance — money queued to post is money committed — and refuses
+                  a second payment for the same balance. `pendingApprovalMinor`
+                  has been on this DTO all along and was rendered nowhere, so the
+                  figure that explains the refusal was the one number not on the
+                  screen. Shown only when there is some. */}
+              {inv.pendingApprovalMinor > 0 && (
+                <p className="pt-1 text-xs text-amber-600 dark:text-amber-400">
+                  {money(inv.pendingApprovalMinor, inv.currency)} awaiting approval — already counted against this
+                  balance, so it cannot be paid twice.
+                </p>
+              )}
+            </CardHeader>
           </Card>
         </div>
 

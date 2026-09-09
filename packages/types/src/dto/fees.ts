@@ -63,6 +63,16 @@ export interface InvoiceDetailDto {
   totalMinor: number;
   amountPaidMinor: number;
   balanceMinor: number;
+  /**
+   * Money on this invoice awaiting a second signature.
+   *
+   * The service has returned it since maker-checker was built; this interface
+   * never declared it, so the web could not read it and no screen showed it.
+   * It matters more now that the overpayment guard COUNTS it: a bursar refused a
+   * payment is refused because of this figure, and it was the one number not on
+   * the page.
+   */
+  pendingApprovalMinor: number;
   overdue: boolean;
   dueDate: Date;
   notes: string | null;

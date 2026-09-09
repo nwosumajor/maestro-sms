@@ -13176,3 +13176,37 @@ with a comparison that compiles and uses both variables.
   into two smaller ones does not evade it.
 * **Refunds always require a second signature**, whatever the amount, and are
   bounded by what was actually received.
+
+### The fix reached the API and stopped at the last hop
+A pass over the session's recent fixes, asking of each "does this reach a
+screen?". Two did not, and both were on the fees fix — the one that matters most.
+**A refusal replaced by a claim about the amount.** `RecordPaymentForm` mapped
+EVERY 400 to "Amount exceeds the allowed limit." The API distinguishes them and
+they are fixed in entirely different ways; two are not about the amount at all,
+so the sentence was false. Measured against the live API:
+
+| the API said | the bursar read |
+|---|---|
+| `Invoice is cancelled` | Amount exceeds the allowed limit. |
+| `Invoice is already paid` | Amount exceeds the allowed limit. |
+| `Issue the invoice before recording payment` | Amount exceeds the allowed limit. |
+| `Refund exceeds the amount paid 5000000` | Amount exceeds the allowed limit. |
+| `Payment exceeds the outstanding balance 0. 10000000 is already awaiting approval on this invoice.` | Amount exceeds the allowed limit. |
+
+The last one exists precisely so a bursar knows why they are blocked, and this
+line threw it away. `readApiError` already reads the server's message and falls
+back to a status interpretation when there is none — the override was needless
+as well as wrong.
+**And the number that explains the refusal was on no screen.**
+`pendingApprovalMinor` has been computed and returned since maker-checker was
+built, and `InvoiceDetailDto` never DECLARED it — so the web could not read it
+and nothing rendered it. It matters more now the overpayment guard counts it: the
+Balance card states "X awaiting approval — already counted against this balance,
+so it cannot be paid twice". Verified in rendered markup with scripts stripped.
+// GOTCHA: a service returning a field its DTO does not declare is the
+type-safety spine failing open. The compile error only appears when a CONSUMER
+reaches for it, which is to say when somebody finally tries to use the field —
+years later, if ever.
+// GOTCHA: my own test passed jest and failed `pnpm typecheck` — it omitted a
+required prop. A green jest run is not the whole gate, and a component double
+must satisfy the component's real props.

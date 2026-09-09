@@ -50,7 +50,22 @@ export function RecordPaymentForm({
     });
     setBusy(false);
     if (!res.ok) {
-      setError(res.status === 400 ? "Amount exceeds the allowed limit." : await readApiError(res));
+      // THE SERVER'S REASON, not a guess about it.
+      //
+      // Every 400 was replaced with "Amount exceeds the allowed limit", which
+      // collapsed refusals that mean entirely different things and are fixed in
+      // entirely different ways — and two of them are not about the amount at
+      // all, so the sentence was simply false. Measured against the live API:
+      //   "Invoice is cancelled"                    -> "Amount exceeds the allowed limit."
+      //   "Invoice is already paid"                 -> "Amount exceeds the allowed limit."
+      //   "Issue the invoice before recording payment"
+      //   "Refund exceeds the amount paid 5000000"
+      //   "Payment exceeds the outstanding balance 0. 10000000 is already
+      //    awaiting approval on this invoice."
+      // The last one exists precisely to tell a bursar WHY they are blocked;
+      // this line threw it away. `readApiError` already reads the server's
+      // message and falls back to a status interpretation when there is none.
+      setError(await readApiError(res));
       return;
     }
     const pay = (await res.json()) as { status?: string };
