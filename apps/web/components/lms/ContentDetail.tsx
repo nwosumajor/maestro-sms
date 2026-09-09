@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LessonBlocks } from "./LessonBlocks";
 import { interpretApiError } from "@/lib/api-error";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 type Content = Serialized<LmsContentDto>;
 type Post = Serialized<ForumPostDto>;
@@ -186,6 +187,18 @@ function AssignmentView({
   canSubmit: boolean;
   published: boolean;
 }) {
+  const { shortDate } = useFormat();
+  // THE SCHOOL'S DAY, NOT THE BROWSER'S UTC ONE.
+  //
+  // This rendered `due.toISOString().slice(0, 10)` — the UTC date — for a
+  // deadline a pupil is judged against. Measured: work due at midnight on 11
+  // September Lagos time displayed as "Due 2026-09-10", a day EARLY; and for a
+  // school west of UTC the error runs the other way, so work due on the 10th
+  // displayed as "Due 2026-09-11" and a pupil submitting on the 11th is marked
+  // late having read the screen correctly.
+  //
+  // `TakeRegister` and `MyCoverDuties` both carry a comment about this exact
+  // fix. This is the sibling that was left — and it is the one a pupil reads.
   const due = body.dueAt ? new Date(body.dueAt) : null;
   return (
     <div className="space-y-4">
@@ -193,7 +206,7 @@ function AssignmentView({
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{body.instructions}</p>
         <p className="mt-2 text-xs text-muted-foreground">
           {body.points ? `Marked out of ${body.points}. ` : ""}
-          {due ? `Due ${due.toISOString().slice(0, 10)}.` : "No due date."}
+          {due ? `Due ${shortDate(due)}.` : "No due date."}
           {body.allowLate ? " Late submissions allowed." : ""}
         </p>
       </div>
@@ -448,6 +461,7 @@ function QuizView({
   isStaff: boolean;
   priorResult: QuizAttemptResultDto | null;
 }) {
+  const { dateTime } = useFormat();
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [result, setResult] = React.useState<QuizAttemptResultDto | null>(priorResult);
   const [error, setError] = React.useState<string | null>(null);
@@ -477,7 +491,9 @@ function QuizView({
         {questions.length} question{questions.length === 1 ? "" : "s"}.
         {isStaff ? " You are viewing the answer key." : ` Attempts: ${attemptsUsed}/${maxAttempts}.`}
         {quiz.timeLimitMinutes ? ` Time limit ${quiz.timeLimitMinutes} min.` : ""}
-        {closesAt ? ` Closes ${closesAt.toISOString().slice(0, 16).replace("T", " ")} UTC.` : ""}
+        {/* In the SCHOOL's timezone. It said "… UTC", which is at least honest but
+            asks a pupil to do arithmetic on a deadline. */}
+        {closesAt ? ` Closes ${dateTime(closesAt)}.` : ""}
         {!isStaff && !windowOpen && (opensAt && now < opensAt.getTime() ? " Not open yet." : " Closed.")}
       </p>
 

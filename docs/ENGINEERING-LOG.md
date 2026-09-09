@@ -13285,3 +13285,26 @@ be reported to a pupil as a spent attempt and they would stop trying.
   indistinguishable. A pupil reading another CLASS in their OWN school gets 404
   on the content, 404 on the listing and 404 on an attempt, so the boundary is
   not merely a read filter.
+
+### A deadline shown in a timezone the pupil does not live in
+Auditing the LMS fix for UI reach found the 409 already surfaced (the error-message
+sweep had fixed that component's helper), and two OTHER things on the same
+screen: `ContentDetail` rendered an assignment's due date as
+`due.toISOString().slice(0, 10)` — the UTC date — and a quiz's close time as
+"… UTC". Both are deadlines a pupil is judged against.
+
+| school | work due | shown as |
+|---|---|---|
+| Lagos (UTC+1) | 11 Sep, midnight | **Due 2026-09-10** — a day early |
+| Toronto (UTC−4) | 10 Sep, evening | **Due 2026-09-11** — a day late |
+
+The Toronto direction is the damaging one: a pupil reads the screen correctly,
+submits on the 11th, and is marked late. The quiz time was at least LABELLED UTC,
+which is honest but asks a pupil to do arithmetic on a deadline.
+`TakeRegister` and `MyCoverDuties` each carry a comment about this exact fix, and
+`DutyRoster` and `BreachRegister` already format through `useFormat()` and use
+`toISOString` only for form values — so the sweep is bounded, and ContentDetail
+was the sibling left behind. It is also the one a pupil reads.
+// GOTCHA, for the second time in this session: my test passed jest and failed
+`pnpm typecheck`, because I invented the component's props. A green jest run is
+not the whole gate, and a component double must satisfy the real signature.
