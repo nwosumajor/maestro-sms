@@ -113,11 +113,22 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     // because nothing had asked — until the Vault began checking that a
     // document's subject is a pupil of this school, and then three assertions
     // failed on a fixture, not on the code.
-    await admin.query(
-      `INSERT INTO user_role (id,"schoolId","userId","roleId")
-       VALUES ($1,$2,$3,(SELECT id FROM role WHERE name = 'student'))`,
-      [randomUUID(), SA, STUDENT],
-    );
+    // Seeds the ROLE ITSELF if the registry has not been seeded. `role` is a
+    // global table, so a subselect for it is a dependency on somebody else's
+    // setup — and CI builds its test database with migrate + rls and no seed,
+    // where the subselect returned NULL and the insert failed the NOT NULL. It
+    // passed locally on a seeded database, which is precisely the divergence
+    // this repo already records about `db push` versus `migrate deploy`.
+    await admin.query(`INSERT INTO role (id,name) VALUES ($1,'student') ON CONFLICT (name) DO NOTHING`, [
+      randomUUID(),
+    ]);
+    const studentRole = (await admin.query(`SELECT id FROM role WHERE name = 'student'`)).rows[0] as { id: string };
+    await admin.query(`INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES ($1,$2,$3,$4)`, [
+      randomUUID(),
+      SA,
+      STUDENT,
+      studentRole.id,
+    ]);
     await admin.query(
       `INSERT INTO parent_child (id,"schoolId","parentId","studentId") VALUES ($1,$2,$3,$4)`,
       [randomUUID(), SA, GUARDIAN, STUDENT],
