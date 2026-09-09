@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **902 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **903 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -352,6 +352,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **902 routes across 90
 | GET | `/certificates/history/:subjectId` | 🔑 `certificate.issue` · 📦 `certificate` | Issuance history / reprint |
 | POST | `/certificates/issue` | 🔑 `certificate.issue` · 📦 `certificate` | Generate an ID card / certificate PDF (**school logo embedded**) |
 | POST | `/certificates/issue-class` | 🔑 `certificate.issue` · 📦 `certificate` | Register a certificate for every enrolled pupil in a class who does not already hold one of that type. |
+| GET | `/certificates/verify/:serial` | 🔑 `certificate.issue` · 📦 `certificate` | Whose certificate is this serial? — the question the document itself tells its holder to put to the school, and which the product could not answer. |
 | GET | `/members/scan/:code` | 🔑 `member.scan` · 📦 `certificate` | Resolve |
 | POST | `/members/scan/:code` | 🔑 `member.scan` · 📦 `certificate` | RECORD an action for a scanned member (check-in / check-out / library / exam). |
 | GET | `/members/scan/history/:memberId` | 🔑 `member.scan` · 📦 `certificate` | One member's movements — the answer to "when did they leave?", which the product could not give because nothing read scan_event. |
@@ -401,7 +402,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **902 routes across 90
 | POST | `/documents/requirements` | 📦 `documents` | Create Requirement |
 | PUT | `/documents/requirements/:id` | 📦 `documents` | Update Requirement |
 | POST | `/documents/requirements/seed-defaults` | 📦 `documents` | Adopt the platform's starting list. |
-| POST | `/documents/retention/run` | 🔑 `privacy.compliance.manage` · 📦 `documents` | Run the declined-applicant purge now. |
+| POST | `/documents/retention/run` | 🔑 `privacy.compliance.manage` · 🔑 `platform.operate` · 📦 `documents` | Run the declined-applicant purge now. |
 | POST | `/documents/submissions/:id/confirm` | 📦 `documents` | Confirm |
 | POST | `/documents/submissions/:id/decide` | 📦 `documents` | Decide |
 | GET | `/documents/submissions/:id/file` | 📦 `documents` | The bytes. |
@@ -924,7 +925,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **902 routes across 90
 | POST | `/notifications/credits/reconcile/run` | 🔑 `fee.reconcile.run` | Run the credit reconciliation now. |
 | POST | `/notifications/credits/verify` | 🔑 `billing.read` | Settle a credit bundle the school has just returned from paying for. billing.read: the person coming back from the gateway is whoever started the checkout, and refusing to credit a bundle already paid for because of a… |
 | GET | `/notifications/deliveries/problems` | 🔑 `notification.send` | What did NOT reach a family, and why. |
-| POST | `/notifications/deliveries/recovery/run` | 🔑 `notification.send` | Run the stranded-delivery sweep now (it also runs hourly). |
+| POST | `/notifications/deliveries/recovery/run` | 🔑 `notification.send` · 🔑 `platform.operate` | Run the stranded-delivery sweep now (it also runs hourly). |
 | GET | `/notifications/me/language` | 🔑 `notification.read` | The language the caller is written to in. |
 | PUT | `/notifications/me/language` | 🔑 `notification.read` | Set or clear it. |
 | GET · PUT | `/notifications/me/phone` | 🔑 `notification.read` | — | Own SMS/WhatsApp delivery number |
@@ -1002,8 +1003,8 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **902 routes across 90
 | GET | `/privacy/archives` | 🔑 `privacy.archive.manage` | The archives this school holds. |
 | POST | `/privacy/archives` | 🔑 `privacy.archive.manage` · ⬆️ step-up | Produce this year's archive. |
 | POST | `/privacy/archives/:id/download` | 🔑 `privacy.archive.manage` · ⬆️ step-up | A time-limited link to the archive body, plus the checksum recorded when it was made — so whoever receives it can prove the bytes were not altered in the years between. |
-| POST | `/privacy/archives/run-term-sweep` | 🔑 `privacy.archive.manage` · ⬆️ step-up | Run the term sweep now — for an operator verifying it, or catching up after an outage. |
-| POST | `/privacy/compliance/breach-deadlines/run` | 🔑 `privacy.compliance.manage` | Run the Art. 33 deadline sweep now (it also runs hourly). |
+| POST | `/privacy/archives/run-term-sweep` | 🔑 `privacy.archive.manage` · 🔑 `platform.operate` | Run the term sweep now — for an operator verifying it, or catching up after an outage. |
+| POST | `/privacy/compliance/breach-deadlines/run` | 🔑 `privacy.compliance.manage` · 🔑 `platform.operate` | Run the Art. 33 deadline sweep now (it also runs hourly). |
 | GET | `/privacy/compliance/breaches` | 🔑 `privacy.compliance.manage` | The breach register, overdue first. |
 | POST | `/privacy/compliance/breaches` | 🔑 `privacy.compliance.manage` | Record a breach. |
 | PUT | `/privacy/compliance/breaches/:id` | 🔑 `privacy.compliance.manage` | Record what was done about it. `discoveredAt` is deliberately not updatable — it is when the clock started. |

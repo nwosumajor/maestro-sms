@@ -13586,3 +13586,102 @@ so a missing needle can be told apart from a page that never rendered.
   so the 404 is a real refusal rather than a broken session.
 * **One archive run is 36 ms per term** at this fleet size (500 terms in ~18 s),
   and the anti-join is an Index Scan on the new `school_archive(termId)`.
+
+### A serial that verified nothing, on a document that told its reader to quote it
+
+Every certificate this product renders carries, along its foot:
+
+> Serial CERT-… · Issued 9 September 2026 · **Authenticity may be verified with
+> the issuing school by quoting the serial number.**
+
+It could not be. Nothing in the product accepted a serial — no route, no service
+method, no screen. Grepped across `apps/api/src` and `apps/web`: the only place
+a serial appeared outside the generator was `history/:subjectId`, which needs the
+pupil's **id**. Somebody checking a document they have been handed has the serial
+and not the identity; that is the entire case verification exists for. So a
+school telephoned by an employer holding a testimonial could not answer the
+question its own paper told them to ask, and `certificateSerial`'s comment —
+"the serial printed on the document, **and the id it is verified by**" — was
+describing something that did not exist.
+
+**And the document that serial named could not be reprinted.** Measured live on
+a pupil awarded "Best in Science" (MERIT) and later "Best in Mathematics", the
+issuer needing a replacement copy had exactly two moves and both were wrong:
+
+```
+registry: CERT-…3CE | Best in Science
+          CERT-…3DW | Best in Mathematics
+
+(a) press Generate with the title still in the box
+    -> a THIRD MERIT row. One physical award, two registry entries.
+(b) press Generate with the boxes CLEARED
+    -> a GENERIC merit certificate — no mention of any award — printed under
+       CERT-…3CE, silently choosing the OLDER of the two.
+```
+
+The register and the paper disagreed, and the serial that was meant to settle it
+identified both. The previous fix on this path (#28x, "a reprint reprints — it
+does not mint a second card") reused the SERIAL and left the rendering reading
+from the request, which on a reprint is empty: the careful half written, the
+sibling left, in the same method.
+
+**The fix, three parts.**
+
+1. A reprint renders what was REGISTERED — its words, its serial, and its
+   ISSUE date. A reprint of last year's testimonial stamped with today's date is
+   a different document again, under a serial that says otherwise.
+2. `certificateId` names WHICH certificate to reprint — the thing the history
+   list could always say and the print path could not hear. It must belong to the
+   named subject and be of the named type, so a mistyped id cannot print one
+   pupil's award onto another's document. A plain reprint of a type the person
+   holds SEVERAL of now REFUSES and names them with their awards, instead of
+   guessing: printing the wrong award under a real serial is the failure the
+   serial exists to prevent.
+3. `GET /certificates/verify/:serial` — tenant-scoped through `runAsTenant`, so
+   RLS confines it and another school's serial answers **404 in the same words**
+   as one that was never issued. Audited (it names a pupil, Golden Rule #5).
+
+Live, after: an ambiguous plain reprint is a 409 naming both serials and both
+awards; a named reprint prints **BEST IN SCIENCE** with its registered body,
+serial and "Issued 14 July 2025", and adds no registry row; a serial verifies to
+its certificate; another school's 404s while its own 200s.
+
+Web: a **Check a certificate** box on `/certificates` (the school answering the
+question its own documents pose — it shows the marks/award for a comparison a
+human can make, since a reader holding the paper is the only one who can spot an
+alteration), and a **Reprint** control on each history row, which is what makes
+the new 409 a fork rather than a dead end.
+
+Swept in the same commit: `history` was the one read in this module that
+recorded nothing, while `issue`, the scan lookup and the scan record all audit
+theirs.
+
+// GOTCHA: the existing reprint spec went red on a CORRECT service, because its
+`issuedCertificate.findMany` double handled `subjectId: { in: [...] }` (the bulk
+path) and ignored a plain `subjectId` (the reprint lookup) — so it answered a
+one-pupil question with the whole class and the service refused as ambiguous. A
+stub that honours part of a `where` reports a fact about itself.
+
+// GOTCHA: asserting the reprinted PDF's TEXT is what proves this, and
+`buffer.toString()` shows none of it — pdfkit deflates its content streams and
+writes text as hex strings. `a-letter-is-dated-in-the-schools-day.spec.ts`
+already had the extractor; reusing it is what let the test see "BEST IN SCIENCE"
+and "14 July 2025" rather than trusting the service's own return value, which is
+exactly what the defect got right while the document got it wrong.
+
+### The certificate module at 5,000 schools
+5,000 schools, 140,000 members, 12,000 pre-existing cards. Beyond the above:
+* **Isolation holds on every door**, each with a positive control: issuing for
+  another school's pupil 404s ("Subject not found in this school"), bulk-issuing
+  for its class 404s, its history reads empty, its member's QR code 404s at the
+  scan desk, and its serial 404s at verification — while the same calls against
+  the caller's own school return 200/201.
+* **The bulk run is idempotent and excludes leavers**: a class of 24 ACTIVE plus
+  2 CLOSED enrolments issues 24, and a second press issues 0 and skips 24.
+* **The scan desk records what it resolves**: CHECK_IN / LIBRARY / CHECK_OUT each
+  wrote a `scan_event`, and the CHECK_IN marked the pupil PRESENT on the school's
+  calendar day.
+* **Reads are flat across the fleet** (schools 500 → 4,999): issue-class 22–50 ms,
+  print 51–99 ms, verify 16–38 ms, scan 16–28 ms. The verification lookup is an
+  **Index Scan on `issued_certificate_serial_key`**, 0.06 ms, measured as the app
+  role under RLS with a bound parameter.

@@ -45,6 +45,15 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
+  const download = (blob: Blob, name: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const issue = async () => {
     setBusy(true);
     setMsg(null);
@@ -55,14 +64,31 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
     });
     setBusy(false);
     if (!res.ok) { setMsg(await readApiError(res)); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${type.toLowerCase()}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    download(await res.blob(), `${type.toLowerCase()}.pdf`);
     setMsg("Issued — PDF downloaded.");
+  };
+
+  /**
+   * REPRINT A NAMED CERTIFICATE — the one thing this screen could not do.
+   *
+   * Pressing Issue again was the only way to get another copy, and it had two
+   * outcomes and no third: with the title still filled in it minted a SECOND
+   * registry row for one physical award, and with the boxes cleared it printed
+   * a generic document under the existing serial. Naming the certificate prints
+   * the words that were registered against that serial, and adds no row.
+   */
+  const reprint = async (h: Issued) => {
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch("/api/sms/certificates/issue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: h.type, subjectId, certificateId: h.id }),
+    });
+    setBusy(false);
+    if (!res.ok) { setMsg(await readApiError(res)); return; }
+    download(await res.blob(), `${h.serial}.pdf`);
+    setMsg(`Reprinted ${h.serial} — same certificate, same serial. Nothing new was issued.`);
   };
 
   return (
@@ -124,13 +150,29 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
             <div className="mb-1 text-xs font-medium">
               Already issued to this person ({history.length})
             </div>
-            <ul className="space-y-0.5">
+            <ul className="space-y-1">
               {history.slice(0, 6).map((h) => (
-                <li key={h.id} className="text-xs text-muted-foreground">
-                  {h.title || h.type} · {h.serial} · {shortDate(h.issuedAt)}
+                <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {h.title || h.type} · {h.serial} · {shortDate(h.issuedAt)}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    disabled={busy}
+                    onClick={() => void reprint(h)}
+                  >
+                    Reprint
+                  </Button>
                 </li>
               ))}
             </ul>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Reprint gives another copy of that exact certificate — the same wording, serial and issue date. Use
+              Issue above only for a NEW award.
+            </p>
           </div>
         )}
       </CardContent>

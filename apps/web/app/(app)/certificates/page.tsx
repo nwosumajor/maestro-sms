@@ -5,6 +5,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { CertificateIssuer } from "@/components/certificate/CertificateIssuer";
 import { ClassIssuer } from "@/components/certificate/ClassIssuer";
+import { SerialLookup } from "@/components/certificate/SerialLookup";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +36,7 @@ export default async function CertificatesPage() {
         <PageHeader title={<>Certificates &amp; ID cards</>} subtitle={<>Generate a printable ID card or an award/completion certificate. Each issuance is logged with a serial.</>} />
         <CertificateIssuer staff={staff} />
         <ClassIssuer classes={classes} />
+        <SerialLookup />
       </div>
     </AppShell>
   );

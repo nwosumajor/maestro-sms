@@ -10,7 +10,7 @@
 // school's uploaded logo + branding theme colour make each document on-brand).
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { assertDocumentsReleasable } from "../lms/leaver-documents";
 import { randomUUID } from "node:crypto";
 import {
@@ -20,6 +20,7 @@ import {
   type Principal,
   type TenantContext,
   type TenantDatabase,
+  type TenantTx,
 } from "../integrity/integrity.foundation";
 import { BrandingService } from "../branding/branding.service";
 import { hslToHex, renderCertificate, renderIdCard } from "./certificate-templates";
@@ -69,10 +70,54 @@ export class CertificateService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
+  /**
+   * The registered certificate this print is a REPRINT of, or null for a new one.
+   *
+   * Three cases, and the third is the one that was silently wrong:
+   *  - `certificateId` given: reprint exactly that certificate. It must belong to
+   *    the named subject and be of the named type, so a mistyped id cannot print
+   *    one pupil's award onto another's document. 404, never 403 — the row may
+   *    simply be another school's, and RLS has already hidden it.
+   *  - a title or body given, and no id: the caller is describing a NEW award
+   *    ("Best in Maths" after "Best in Science"), which gets its own serial.
+   *  - neither: a plain reprint. If the subject holds exactly ONE certificate of
+   *    this type, that is unambiguously the one. If they hold SEVERAL, this used
+   *    to take the OLDEST and print a generic document under its serial. REFUSE
+   *    instead, naming them: printing the wrong award under a real serial is the
+   *    failure the serial exists to prevent, and the caller can say which.
+   */
+  private async findReprint(
+    tx: TenantTx,
+    input: { type: string; subjectId: string; title?: string; body?: string; certificateId?: string },
+  ): Promise<{ serial: string; title: string | null; body: string | null; createdAt: Date } | null> {
+    const select = { serial: true, title: true, body: true, createdAt: true } as const;
+    if (input.certificateId) {
+      const one = await tx.issuedCertificate.findFirst({
+        where: { id: input.certificateId, subjectId: input.subjectId, type: input.type },
+        select,
+      });
+      if (!one) throw new NotFoundException("That certificate is not on this school's register");
+      return one;
+    }
+    if (input.title !== undefined || input.body !== undefined) return null;
+
+    const held = await tx.issuedCertificate.findMany({
+      where: { subjectId: input.subjectId, type: input.type },
+      select: { ...select, id: true },
+      orderBy: { createdAt: "asc" },
+    });
+    if (held.length === 0) return null;
+    if (held.length === 1) return held[0];
+    throw new ConflictException(
+      `This person holds ${held.length} ${input.type} certificates — say which one to reprint. ` +
+        held.map((h) => `${h.serial}${h.title ? ` (${h.title})` : ""}`).join("; "),
+    );
+  }
+
   /** Issue an ID card or certificate -> returns the PDF bytes + a filename. */
   async issue(
     p: Principal,
-    input: { type: string; subjectId: string; title?: string; body?: string },
+    input: { type: string; subjectId: string; title?: string; body?: string; certificateId?: string },
   ): Promise<{ buffer: Buffer; filename: string }> {
     if (!TYPES.includes(input.type)) throw new BadRequestException("invalid certificate type");
     // Same gate as the report card: a leaver's certificate is released by the
@@ -119,17 +164,35 @@ export class CertificateService {
       // supplies a title or body is describing a DIFFERENT award ("Best in
       // Maths" after "Best in Science"), which is a new certificate and gets its
       // own serial. Both consumers keep working; only the duplication stops.
-      const reprint =
-        input.title === undefined && input.body === undefined
-          ? await tx.issuedCertificate.findFirst({
-              where: { subjectId: input.subjectId, type: input.type },
-              select: { serial: true },
-              orderBy: { createdAt: "asc" },
-            })
-          : null;
+      // A REPRINT REPRINTS THE DOCUMENT THAT WAS REGISTERED — its words as well
+      // as its serial.
+      //
+      // Reusing the serial and then rendering from the REQUEST was only half the
+      // job, and the half it left produced the thing the serial exists to
+      // prevent. Measured live: a pupil awarded "Best in Science" (MERIT) and
+      // later "Best in Mathematics"; the issuer needing a replacement copy has
+      // exactly two moves, and both are wrong.
+      //   - Press Generate with the title still in the box: `title` is defined,
+      //     so this is read as a NEW award and a THIRD MERIT row appears — one
+      //     physical certificate, two registry entries.
+      //   - Clear the boxes: the serial of "Best in Science" is reused and the
+      //     document printed under it is a GENERIC merit certificate that does
+      //     not mention the award at all — and it silently chose the OLDER of
+      //     the two.
+      // So there was no way to reprint a certificate the school had issued, and
+      // the paper disagreed with the register that is supposed to vouch for it.
+      //
+      // `certificateId` names WHICH one, which is what the history list has
+      // always been able to say and the print path could not hear.
+      const reprint = await this.findReprint(tx, input);
       const serial = reprint?.serial ?? certificateSerial(input.type);
+      // The registered words win. A reprint that re-words the document makes the
+      // serial identify two different papers.
+      const title = reprint ? reprint.title ?? undefined : input.title;
+      const body = reprint ? reprint.body ?? undefined : input.body;
+      let created: Date | null = reprint?.createdAt ?? null;
       if (!reprint) {
-        await tx.issuedCertificate.create({
+        const row = await tx.issuedCertificate.create({
           data: {
             schoolId: p.schoolId,
             type: input.type,
@@ -139,7 +202,9 @@ export class CertificateService {
             issuedById: p.userId,
             serial,
           },
+          select: { createdAt: true },
         });
+        created = row.createdAt;
       }
       await this.audit.record(
         {
@@ -170,16 +235,27 @@ export class CertificateService {
         principalName: principal?.name ?? null,
         accent,
         serial,
+        // The words this document is to carry — the registered ones on a
+        // reprint, the caller's on a new certificate. Returned rather than read
+        // from `input` below, because on a reprint `input` is empty and that is
+        // exactly how a generic certificate came to be printed under a named
+        // award's serial.
+        title,
+        body,
+        issuedOn: created ?? new Date(),
       };
     });
 
     // The school's uploaded logo (embedded into the document); null if unset.
     const logo = await this.branding.getLogoBytes(p.schoolId).catch(() => null);
-    const issuedOn = new Date();
+    // THE DATE IT WAS ISSUED, not the date it was printed. A reprint of last
+    // year's testimonial that prints today's date is a different document
+    // again, and the serial on it says otherwise.
+    const issuedOn = data.issuedOn;
     const buffer =
       input.type === "ID_CARD"
         ? await renderIdCard({ ...data, issuedOn }, logo)
-        : await renderCertificate({ ...data, type: input.type, title: input.title, body: input.body, issuedOn }, logo);
+        : await renderCertificate({ ...data, type: input.type, title: data.title, body: data.body, issuedOn }, logo);
     const filename = `${input.type.toLowerCase()}-${data.serial}.pdf`;
     return { buffer, filename };
   }
@@ -270,10 +346,111 @@ export class CertificateService {
     });
   }
 
+  /**
+   * WHOSE CERTIFICATE IS THIS SERIAL? — the question every certificate this
+   * product prints tells its reader to ask.
+   *
+   * The provenance strip on the document reads "Authenticity may be verified
+   * with the issuing school by quoting the serial number", and nothing in the
+   * product accepted a serial. A school telephoned by an employer holding a
+   * testimonial could not answer: the only way to see a serial was
+   * `history/:subjectId`, which needs the pupil's id — the one thing somebody
+   * checking a document they were handed does not have. Measured on a fleet of
+   * 5,000 schools holding 12,000 certificates: no route, no service method and
+   * no screen took a serial.
+   *
+   * SECURITY: runs under the caller's own tenant, so RLS confines it. A serial
+   * from another school answers 404, exactly as an unknown one does — the same
+   * 404-not-403 the scan desk gives, and for the same reason: a verification
+   * endpoint that distinguished "not ours" from "no such thing" would confirm
+   * the existence of another school's certificate to anyone who could guess a
+   * serial. Audited, because it names a pupil (Golden Rule #5).
+   */
+  async verify(
+    p: Principal,
+    serial: string,
+  ): Promise<{
+    serial: string;
+    type: string;
+    title: string | null;
+    body: string | null;
+    subjectName: string;
+    subjectRole: string;
+    issuedOn: Date;
+    issuedByName: string | null;
+  }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.issuedCertificate.findFirst({
+        where: { serial: serial.trim().toUpperCase() },
+        select: { serial: true, type: true, title: true, body: true, subjectId: true, issuedById: true, createdAt: true },
+      });
+      if (!row) throw new NotFoundException("No certificate with that serial was issued by this school");
+      const [subject, issuer] = await Promise.all([
+        tx.user.findFirst({
+          where: { id: row.subjectId },
+          select: { name: true, roles: { select: { role: { select: { name: true } } } } },
+        }),
+        row.issuedById
+          ? tx.user.findFirst({ where: { id: row.issuedById }, select: { name: true } })
+          : Promise.resolve(null),
+      ]);
+      // A certificate whose subject has since been removed is still a
+      // certificate this school issued, and saying so is the honest answer —
+      // better than a 404 that reads as "we never issued it".
+      const roleNames = subject?.roles.map((r) => r.role.name) ?? [];
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "certificate.verify",
+          entity: "issued_certificate",
+          entityId: row.serial,
+          schoolId: p.schoolId,
+          metadata: { type: row.type, subjectId: row.subjectId },
+        },
+        tx,
+      );
+      return {
+        serial: row.serial,
+        type: row.type,
+        title: row.title,
+        body: row.body,
+        subjectName: subject?.name ?? "(no longer on this school's register)",
+        subjectRole: ROLE_LABELS.find(([r]) => roleNames.includes(r))?.[1] ?? "Staff",
+        issuedOn: row.createdAt,
+        issuedByName: issuer?.name ?? null,
+      };
+    });
+  }
+
+  /**
+   * Every certificate this school has issued to one person.
+   *
+   * AUDITED, like its three siblings in this module. It names a pupil and the
+   * awards they hold, which is a read of a minor's record (Golden Rule #5) —
+   * `issue`, `verify` and the scan desk all record theirs, and this was the one
+   * that did not. It is also the surface a clerk checks before issuing, so who
+   * looked and when is the trail that explains a duplicate.
+   */
   async history(p: Principal, subjectId: string) {
-    return this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.issuedCertificate.findMany({ where: { subjectId }, orderBy: { createdAt: "desc" }, take: 100 }),
-    );
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const rows = await tx.issuedCertificate.findMany({
+        where: { subjectId },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "certificate.history.read",
+          entity: "user",
+          entityId: subjectId,
+          schoolId: p.schoolId,
+          metadata: { certificates: rows.length },
+        },
+        tx,
+      );
+      return rows;
+    });
   }
 
 }

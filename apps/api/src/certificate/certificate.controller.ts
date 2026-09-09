@@ -15,6 +15,8 @@ const issueSchema = z.object({
   subjectId: z.string().uuid(),
   title: z.string().max(160).optional(),
   body: z.string().max(600).optional(),
+  /** Reprint THIS registered certificate — its words, its serial, its date. */
+  certificateId: z.string().uuid().optional(),
 });
 const issueClassSchema = z.object({
   classId: z.string().uuid(),
@@ -54,6 +56,16 @@ export class CertificateController {
     @Body(new ZodValidationPipe(issueClassSchema)) body: z.infer<typeof issueClassSchema>,
   ) {
     return this.certificates.issueForClass(p, body);
+  }
+
+  /**
+   * Whose certificate is this serial? — the question the document itself tells
+   * its holder to put to the school, and which the product could not answer.
+   */
+  @Get("verify/:serial")
+  @RequirePermission(CERTIFICATE_PERMISSIONS.CERTIFICATE_ISSUE)
+  verify(@CurrentPrincipal() p: Principal, @Param("serial") serial: string) {
+    return this.certificates.verify(p, serial);
   }
 
   @Get("history/:subjectId")

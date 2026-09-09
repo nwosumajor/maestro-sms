@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **293 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **295 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **293 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **295 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1620,6 +1620,27 @@ why, and the printing path from a 4-character `Math.random()` suffix, a space
 2,557x smaller. One `certificateSerial()` now, and `serial` is UNIQUE
 (migration `20260907000000`) so a collision is a 409, not two cards that verify
 as one.
+// GOTCHA: **AND NOTHING COULD VERIFY ONE.** Every certificate prints
+"Authenticity may be verified with the issuing school by quoting the serial
+number", and no route, service method or screen accepted a serial — the only
+sight of one was `history/:subjectId`, which needs the pupil's ID, and somebody
+checking a document they were handed has the serial and not the identity.
+`GET /certificates/verify/:serial` answers it now: `runAsTenant` so RLS confines
+it, another school's serial 404s **in the same words** as an unknown one,
+audited because it names a pupil. Web: **Check a certificate** on
+`/certificates`.
+// GOTCHA: **the reprint fix above was half a fix.** It reused the SERIAL and
+went on rendering from the REQUEST, which on a plain reprint is empty. Measured:
+a pupil holding "Best in Science" and "Best in Mathematics" could only get a
+replacement copy by (a) pressing Generate with the title still filled in, which
+minted a THIRD row for one physical award, or (b) clearing the boxes, which
+printed a GENERIC merit certificate under "Best in Science"'s serial and picked
+the older of the two in silence. A reprint now renders the REGISTERED words,
+serial and **issue date** (today's date on last year's testimonial is a different
+document again); `certificateId` names WHICH one and is checked against the
+subject and type; a plain reprint of a type held SEVERAL times REFUSES and names
+them. Every history row has a **Reprint** control, so the refusal is a fork and
+not a dead end.
 Student/staff ID cards now carry a REAL scannable QR (pdfkit vector squares via
 the `qrcode` lib) encoding the member's global `uniqueId` — replacing the old
 decorative barcode. A tenant-scoped lookup resolves a scanned code to a member

@@ -57,12 +57,30 @@ function harness(seed: Array<{ subjectId: string; type: string; serial: string; 
         rows.filter((r) => r.subjectId === where.subjectId && r.type === where.type)
           .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0] ?? null,
       ),
-      findMany: jest.fn(async ({ where }: { where?: { subjectId?: { in: string[] }; type?: string } } = {}) =>
-        rows.filter(
-          (r) =>
-            (where?.subjectId?.in ? where.subjectId.in.includes(r.subjectId) : true) &&
-            (where?.type ? r.type === where.type : true),
-        ),
+      // Honours BOTH shapes of `subjectId`: the bulk path passes `{ in: [...] }`
+      // and the reprint lookup passes a plain id. Handling only the first made
+      // this double answer a one-pupil question with the whole class — a stub
+      // that ignores part of the `where` reports a fact about itself.
+      findMany: jest.fn(
+        async ({
+          where,
+          orderBy,
+        }: {
+          where?: { subjectId?: string | { in: string[] }; type?: string };
+          orderBy?: { createdAt?: "asc" | "desc" };
+        } = {}) => {
+          const sub = where?.subjectId;
+          const out = rows.filter(
+            (r) =>
+              (sub === undefined ? true : typeof sub === "string" ? r.subjectId === sub : sub.in.includes(r.subjectId)) &&
+              (where?.type ? r.type === where.type : true),
+          );
+          if (orderBy?.createdAt) {
+            const dir = orderBy.createdAt === "desc" ? -1 : 1;
+            out.sort((a, b) => dir * (a.createdAt.getTime() - b.createdAt.getTime()));
+          }
+          return out;
+        },
       ),
       create: jest.fn(async ({ data }: { data: { subjectId: string; type: string; serial: string } }) => {
         // UNIQUE(serial), as the database now enforces it.

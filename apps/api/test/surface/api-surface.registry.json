@@ -3608,6 +3608,10 @@
     "PUT /ultimate/consent": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /certificates/verify/:p": {
+      "kind": "ui",
+      "note": "SerialLookup on /certificates — the school answering the question its own certificates tell the reader to ask"
     }
   }
 }
