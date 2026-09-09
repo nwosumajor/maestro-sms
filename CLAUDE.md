@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **279 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **281 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **279 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **281 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1742,6 +1742,26 @@ resolved window now, and a row with none says "all years". // GOTCHA:
 `a-field-no-screen-can-fill-in` cannot catch this class when the field name is
 common across the web (`sessionId` is on dozens of screens); it asks only
 whether the web MENTIONS it.
+
+## Money AWAITING APPROVAL is money committed against the invoice
+The overpayment guard read POSTED payments only, so two payments each for the
+FULL outstanding balance both passed — neither could see the other — and
+approving both paid the invoice twice. **Not a race**: sequential, through the
+front door; the `FOR UPDATE` lock was irrelevant because both legitimately
+passed a check that ignored what was queued. Measured: a 15,000,000 invoice with
+5,000,000 posted took two payments of 10,000,000, finishing at **25,000,000
+posted, balance −10,000,000, status PAID**. `pendingApprovalMinor` was on the
+DTO and on the screen the whole time; it was not in the guard.
+TWO guards: record-time counts pending (and NAMES it in the refusal), and
+approval RE-CHECKS because an online payment can settle while one waits.
+Refunds are bounded by `paid + min(0, pending)`, closing the same hole.
+// GOTCHA on ORDER: the re-check goes AFTER the optimistic claim — before it,
+the loser of two people approving the same payment was told the invoice was
+full, which is true of the balance and the wrong answer to their question. A
+throw after the claim rolls it back with the transaction.
+// GOTCHA on doubles: a `payment.findMany` stub that ignores `where.status`
+reports POSTED rows as pending; and a `runAsTenant` double must MODEL ROLLBACK
+or "nothing is half-applied" cannot be tested.
 
 ## Timetable generate: "already scheduled" is not "could not be scheduled"
 `generate` respects existing entries and seeds its busy-sets from them, so a

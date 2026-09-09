@@ -1026,12 +1026,36 @@ export class FeesService {
         throw new BadRequestException("Invoice is already paid");
       }
 
+      // WHAT IS QUEUED COUNTS AGAINST THE BALANCE.
+      //
+      // This read POSTED payments only, and a payment awaiting a second
+      // signature is not POSTED — so two payments each for the FULL outstanding
+      // balance both passed, because neither could see the other. Both then
+      // approved, and the invoice was paid twice.
+      //
+      // Not a race: sequential, deterministic, through the front door. Measured
+      // on a GBP school (where an unset threshold correctly makes every payment
+      // reviewable): a 15,000,000 invoice with 5,000,000 posted took two
+      // payments of 10,000,000 each, both accepted, both approved, finishing at
+      // 25,000,000 posted with a balance of MINUS 10,000,000 and a status of
+      // PAID. The invoice DTO has reported `pendingApprovalMinor` all along —
+      // the number was on the screen and simply not in the guard.
       const paid = await this.paidMinor(tx, invoiceId); // net of POSTED only
-      if (kind === "PAYMENT" && input.amountMinor > inv.totalMinor - paid) {
-        throw new BadRequestException(`Payment exceeds the outstanding balance ${inv.totalMinor - paid}`);
+      const pending = await this.pendingMinor(tx, invoiceId);
+      const committed = paid + pending;
+      if (kind === "PAYMENT" && input.amountMinor > inv.totalMinor - committed) {
+        const free = inv.totalMinor - committed;
+        throw new BadRequestException(
+          pending > 0
+            ? `Payment exceeds the outstanding balance ${free}. ${pending} is already awaiting approval on this invoice.`
+            : `Payment exceeds the outstanding balance ${free}`,
+        );
       }
-      if (kind === "REFUND" && input.amountMinor > paid) {
-        throw new BadRequestException(`Refund exceeds the amount paid ${paid}`);
+      // A refund is bounded by what has actually been RECEIVED — pending
+      // refunds reduce that, pending payments do not add to it.
+      const refundable = paid + Math.min(0, pending);
+      if (kind === "REFUND" && input.amountMinor > refundable) {
+        throw new BadRequestException(`Refund exceeds the amount paid ${refundable}`);
       }
 
       const payment = await tx.payment.create({
@@ -1098,6 +1122,19 @@ export class FeesService {
       // Same invoice lock as recordPayment — the status recomputation below
       // reads the posted total, so concurrent decisions must queue.
       await tx.$executeRaw`SELECT id FROM "invoice" WHERE id = ${pay.invoiceId}::uuid FOR UPDATE`;
+      // RE-CHECKED AT APPROVAL, because the world moves in between.
+      //
+      // The record-time guard now counts what is queued, so two payments cannot
+      // both be accepted for the same balance. That is not sufficient on its
+      // own: a payment can sit pending for days while an ONLINE payment settles
+      // against the same invoice through `InvoiceSettlementService`, or a
+      // sibling pending payment is approved first. Approving is the moment the
+      // money lands, so it is the moment the balance has to hold.
+      //
+      // Refused rather than posted, and the invoice is left exactly as it was —
+      // posting is not reversible in any useful sense, and the approver can
+      // reject the payment or record the right amount. The message says what
+      // the balance actually is so they can act on it rather than guess.
       // Optimistic claim: two staff deciding the same payment at once — only
       // the first write lands; the loser matches 0 rows and is told so.
       const claimed = await tx.payment.updateMany({
@@ -1108,6 +1145,26 @@ export class FeesService {
       const inv = await tx.invoice.findFirst({ where: { id: pay.invoiceId } });
       if (!inv) throw new NotFoundException("Invoice not found");
       const net = await this.paidMinor(tx, pay.invoiceId);
+      // RE-CHECKED AT APPROVAL, because the world moves in between.
+      //
+      // The record-time guard now counts what is queued, so two payments cannot
+      // both be accepted against the same balance. That is not sufficient alone:
+      // a payment can sit pending for days while an ONLINE payment settles
+      // against the same invoice through `InvoiceSettlementService`. Approving
+      // is the moment the money lands, so it is the moment the balance has to
+      // hold.
+      //
+      // AFTER the claim, deliberately. Ordering it before meant the LOSER of two
+      // people approving the same payment was told the invoice was full rather
+      // than that somebody had already approved it — true of the balance, and
+      // the wrong answer to the question they asked. Throwing here rolls the
+      // claim back with the rest of the transaction, so nothing is half-applied.
+      if (pay.kind === "PAYMENT" && net > inv.totalMinor) {
+        throw new BadRequestException(
+          `Approving this would take the invoice past its total — only ${inv.totalMinor - (net - pay.amountMinor)} is outstanding. ` +
+            `Reject it, or record the correct amount.`,
+        );
+      }
       const invoice = await this.applyToInvoiceStatus(tx, inv, net);
       await this.log(tx, p, "fee.payment.approve", "invoice", pay.invoiceId, {
         paymentId,
@@ -1276,6 +1333,27 @@ export class FeesService {
 
   /** Net amount paid: POSTED payments minus POSTED refunds. PENDING_APPROVAL and
    *  REJECTED rows never count toward the balance. */
+  /**
+   * Money already QUEUED to post on this invoice: PENDING_APPROVAL payments,
+   * net of pending refunds.
+   *
+   * A pending payment is not money received, but it IS money committed — the
+   * only thing standing between it and the ledger is a second person clicking
+   * approve. So it has to count against the outstanding balance, or the balance
+   * can be committed twice over.
+   */
+  private async pendingMinor(tx: TenantTx, invoiceId: string): Promise<number> {
+    const pending = await tx.payment.findMany({
+      where: { invoiceId, status: "PENDING_APPROVAL" },
+      select: { amountMinor: true, kind: true },
+    });
+    return pending.reduce(
+      (n: number, pmt: { amountMinor: number; kind: string }) =>
+        n + (pmt.kind === "REFUND" ? -pmt.amountMinor : pmt.amountMinor),
+      0,
+    );
+  }
+
   private async paidMinor(tx: TenantTx, invoiceId: string): Promise<number> {
     const posted = await tx.payment.findMany({
       where: { invoiceId, status: "POSTED" },

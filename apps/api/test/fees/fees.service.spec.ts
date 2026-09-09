@@ -52,7 +52,19 @@ function makeService(f: Fakes) {
     payment: {
       create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "pay-1", ...data })),
       findFirst: jest.fn().mockResolvedValue(f.pendingPayment ?? null),
-      findMany: jest.fn().mockResolvedValue(f.posted ?? []),
+      // HONOURS `where.status`. The overpayment guard now asks for
+      // PENDING_APPROVAL rows as well as POSTED ones — money awaiting a second
+      // signature is money committed against the invoice — and a double that
+      // returns the same rows whatever status is asked for reports the POSTED
+      // fixtures as pending too, which made these cases fail with a balance
+      // error. A double must model the CONTRACT, not just the call.
+      findMany: jest.fn(({ where }: { where?: { status?: string } } = {}) =>
+        Promise.resolve(
+          ((f.posted ?? []) as Array<Record<string, unknown>>).filter((r) =>
+            where?.status ? ((r.status as string | undefined) ?? "POSTED") === where.status : true,
+          ),
+        ),
+      ),
       // The approval threshold is judged against what has already POSTED on the
       // invoice inside the window, so recordPayment always asks for that sum.
       // `recentPostedMinor` lets a case set up a SPLIT deliberately.

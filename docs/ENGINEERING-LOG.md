@@ -13115,3 +13115,64 @@ returns.
 * **A teacher's declared unavailability is a hard constraint.** Teacher 1 marked
   unavailable all Monday received 16 lessons, **none of them on Monday**, and the
   timetable still completed.
+
+### An invoice paid twice over, through the front door
+The overpayment guard read POSTED payments only, and a payment awaiting a second
+signature is not POSTED. So two payments each for the FULL outstanding balance
+both passed the check — neither could see the other — and approving both paid the
+invoice twice.
+**Not a race.** Sequential, deterministic, no concurrency, no unusual input. The
+`SELECT … FOR UPDATE` on the invoice was irrelevant, because both payments
+legitimately passed a check that ignored what was queued. Measured on a
+5,000-school fleet, on a GBP school where an unset threshold correctly makes
+every payment reviewable:
+
+| step | result |
+|---|---|
+| invoice 15,000,000, posted 5,000,000 | outstanding 10,000,000 |
+| record 10,000,000 | **201**, pending |
+| record 10,000,000 again | **201**, pending — the defect |
+| approve both | posted **25,000,000**, balance **−10,000,000**, status **PAID** |
+
+£250,000 taken against a £150,000 bill. The invoice DTO has reported
+`pendingApprovalMinor` all along — the number was on the screen and simply not in
+the guard.
+**Two guards, because one is not enough.** Record-time now counts what is queued:
+the second payment is refused with *"Payment exceeds the outstanding balance 0.
+10000000 is already awaiting approval on this invoice"* — the reason named, not
+just the refusal. And approval RE-CHECKS, because a payment can sit pending for
+days while an ONLINE payment settles against the same invoice through
+`InvoiceSettlementService`: verified live by settling 5,000,000 underneath a
+pending 10,000,000, after which approving is refused with *"only 5000000 is
+outstanding"* and the invoice is left exactly as it was.
+The same change closes the REFUND version: a refund is bounded by
+`paid + min(0, pending)`, so two pending refunds cannot both claim the same
+money — the second is refused with "Refund exceeds the amount paid 0".
+// GOTCHA on ORDER: the re-check must come AFTER the optimistic claim. Placed
+before it, the LOSER of two people approving the same payment was told the
+invoice was full — true of the balance, and the wrong answer to the question they
+asked ("has someone already done this?"). After the claim, a throw rolls the
+claim back with the transaction, so nothing is half-applied.
+// GOTCHA on the fixtures, twice: the existing `fees.service.spec` double
+returned the same rows whatever `where.status` asked for, so it reported POSTED
+fixtures as pending and three cases failed with a balance error — the guard was
+right and the double was not. And the new spec's `runAsTenant` had to MODEL
+ROLLBACK, because "nothing is half-applied" is only true because the throw aborts
+the transaction; a double that mutates in place cannot tell that property from
+its absence.
+// GOTCHA on the mutation: `if (false)` left a variable unused and the suite did
+not compile — `Tests: 0 total`, which is not a pass and proves nothing. Redone
+with a comparison that compiles and uses both variables.
+
+### The fees module at 5,000 schools — what held
+* **The record-time guard is genuinely serialised.** `SELECT … FOR UPDATE` on
+  the invoice row precedes the read, so two concurrent recorders cannot each miss
+  the other's total. The defect above was never a race — it was a guard reading
+  the wrong set.
+* **The maker-checker threshold is the SCHOOL's, and an unset one fails TIGHT.**
+  In the GBP schools above, every payment was reviewable because no figure was
+  set — which is the fail-safe pointing the right way for a control.
+* **The threshold is cumulative within a window**, so splitting a large payment
+  into two smaller ones does not evade it.
+* **Refunds always require a second signature**, whatever the amount, and are
+  bounded by what was actually received.
