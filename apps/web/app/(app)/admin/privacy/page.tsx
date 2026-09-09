@@ -9,6 +9,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ErasureReview, type ErasureRequest } from "@/components/privacy/ErasureReview";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { SweepButton } from "@/components/maintenance/SweepButton";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +97,20 @@ export default async function AdminPrivacyPage() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {canReadRuns && hasIntegrity && (
+            // The purge trigger. It runs nightly and the catalogue named this
+            // page, which showed the HISTORY of purges and had no way to ask for
+            // one — the difference that matters on the day a parent asks whether
+            // their child's telemetry is gone yet.
+            <div className="mt-3 border-t border-border pt-3">
+              <SweepButton
+                path="integrity/retention/run"
+                label="Purge telemetry now"
+                help="Deletes behavioural telemetry about pupils older than this school's retention window."
+              />
+            </div>
           )}
         </section>
 

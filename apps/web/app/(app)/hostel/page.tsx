@@ -8,6 +8,7 @@ import { HostelManager } from "@/components/hostel/HostelManager";
 import { HostelOps } from "@/components/hostel/HostelOps";
 import { Kpi } from "@/components/charts/charts";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { SweepButton } from "@/components/maintenance/SweepButton";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,21 @@ export default async function HostelPage() {
           students={students ?? []}
           canManage={canManage}
         />
+
+        {canManage && (
+          // The overdue-boarder check. It runs hourly and had no control
+          // anywhere, though the jobs catalogue said one lived on this page —
+          // and pressing it used to sweep the FLEET, alerting 499 other schools'
+          // guardians. It is this school's boarders now.
+          <section className="rounded-lg border border-border bg-card p-4">
+            <h2 className="mb-2 text-sm font-semibold">Boarders who are late back</h2>
+            <SweepButton
+              path="hostels/exeats/overdue/run"
+              label="Check overdue exeats"
+              help="Finds boarders past their return time and tells the warden and the family."
+            />
+          </section>
+        )}
       </div>
     </AppShell>
   );

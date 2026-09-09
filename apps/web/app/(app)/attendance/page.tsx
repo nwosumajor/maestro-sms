@@ -15,6 +15,7 @@ import { RegisterBoard } from "@/components/attendance/RegisterBoard";
 import { ClassAttendanceBoard } from "@/components/attendance/ClassAttendanceBoard";
 import { StudentPicker } from "@/components/attendance/StudentPicker";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { SweepButton } from "@/components/maintenance/SweepButton";
 
 export const dynamic = "force-dynamic";
 
@@ -207,6 +208,20 @@ export default async function AttendancePage({
             </Card>
           )}
         </div>
+
+        {canWrite && (
+          // The rollup refresh. Nightly, and it had no control — the catalogue
+          // named this page and there was nothing here. It touches only ENDED
+          // terms, so a register taken today is unaffected.
+          <section className="rounded-lg border border-border bg-card p-4">
+            <h2 className="mb-2 text-sm font-semibold">Attendance totals for finished terms</h2>
+            <SweepButton
+              path="attendance/rollup/refresh"
+              label="Rebuild term totals"
+              help="Recomputes the stored attendance percentages for terms that have ended. Runs nightly; press it after correcting an old register."
+            />
+          </section>
+        )}
       </div>
     </AppShell>
   );

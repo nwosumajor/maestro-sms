@@ -9,6 +9,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, regionOf } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { SweepButton } from "@/components/maintenance/SweepButton";
 
 export const dynamic = "force-dynamic";
 
@@ -168,6 +169,21 @@ export default async function AdminPage() {
             })}
           </div>
         </div>
+
+        {hasPermission(user.permissions, "rbac.manage") && (
+          // The stale-record nudge. It runs nightly and had no control anywhere,
+          // though the jobs catalogue told its reader one lived on this page.
+          <div>
+            <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Run a check now</h2>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <SweepButton
+                path="admin/sis/nudge/run"
+                label="Nudge incomplete records"
+                help="Asks the families whose pupil record is missing something to complete it. Runs nightly on its own."
+              />
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );

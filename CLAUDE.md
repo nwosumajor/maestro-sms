@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **289 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **293 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **289 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **293 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1866,6 +1866,36 @@ their pending alerts, in 12.6 s. Manual triggers are either scoped to the
 caller's school (this one now is) or gated on a platform permission, the way
 dunning and reconciliation are. Check the job catalogue's declared `scope`
 against what the handler actually does.
+// **AND WHEN THAT CHECK WAS FINALLY RUN PROPERLY, FOUR MORE WERE THERE.**
+Reading each declared `scope` against the roles that actually HOLD its
+permission found the archive sweep, the breach-deadline clock and the
+declined-applicant purge (principal + school_admin) and the stranded-delivery
+sweep (`notification.send` — every TEACHER), all running the fleet. Measured:
+one demo principal's press wrote 500 permanent archives into 500 OTHER schools,
+3,500 -> 4,000. `a-fleet-sweep-one-school-could-fire.spec.ts` reads the
+catalogue as DATA and the role map and now fails on the next one.
+// A third scope, **CALLER**, names what these are: the fleet for a platform
+operator, the caller's own school for anyone else. Its route admits EITHER
+permission (`@RequirePermission` already means "any one opens the route") —
+without that the operator was 403'd on their own console's button, because
+these asked for a permission only a school role holds and there is no
+super_admin permission bypass.
+// **A CATALOGUE NOTHING TYPE-CHECKS IS PROSE.** `SCHEDULED_JOBS` was a bare
+`as const`, so two entries carried a manual trigger with NO `scope` at all and
+the console's whole scope split silently did not apply to them. Declared
+`ScheduledJob` and applied it with `satisfies` (which keeps the literal key
+types `JobKey` is built from).
+// **AND `where` IS A CLAIM.** Six jobs named the page their control lived on
+and had no button there — including one that matched only because the page
+reads `integrity/retention/run`**s**, the run HISTORY. There is one shared
+`SweepButton` now, and `run-now.spec` walks the web tree and fails on a
+school-pressable job nothing POSTs to. Match the WHOLE path: `includes()` let
+`.../runX` vouch for `.../run`.
+// GOTCHA: those buttons sit on SERVER components, so every prop must be
+SERIALISABLE. A `describe={(r) => …}` typechecked, built, and passed 5,963
+tests, then threw `Functions cannot be passed directly to Client Components` at
+SSR — five pages rendering their loading shell and nothing else. Keep the
+wording inside the client module so the TYPE is the gate.
 
 ## Promotion: a pupil returning to a class is not "already there"
 `@@unique([classId, studentId])` means ONE enrolment row per pupil per class,

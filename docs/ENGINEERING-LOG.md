@@ -13426,3 +13426,163 @@ a REAL failure still shows as one.
 loads a class roster, its subject offerings and teacher availability on mount,
 and a blanket mock answered those with the generate body — the component died in
 `subs.map`, which reads as a component fault rather than a fixture one.
+
+### A nightly archive sweep that took the same 500 terms every night
+
+**The defect.** `SchoolArchiveService.archiveEndedTerms` selected the OLDEST 500
+ended terms and then filtered the already-archived ones out **in memory**. Once
+the first 500 had archives, every subsequent run took the same 500, skipped all
+of them, and never reached term 501.
+
+**Measured** on a 5,000-school fleet with 15,600 ended terms due:
+
+```
+run 1: 201 in 18.1s -> {"scanned":500,"archived":500,"skipped":0,"backlog":15103}
+run 2: 201 in  0.1s -> {"scanned":500,"archived":0,"skipped":500,"backlog":15103}
+nights 3..7: archived=0  skipped=500  backlog=15103   (identical, for ever)
+archives created in total: 500 — of 15,600 terms due
+```
+
+15,100 terms would never have been archived: the statutory record a school is
+told it can still produce in ten years.
+
+**Why it survived.** That line reads like health. "Nothing archived, everything
+already archived" is exactly what a caught-up sweep looks like, `lastOk` was true
+and `failed` was 0 throughout. The **backlog** counter added for the notification
+recovery sweep (#28x) is what made it visible — frozen at 15,103 for six
+consecutive runs, which is precisely the diagnosis that counter exists to give.
+
+**The fix.** The exclusion moved into the query as a raw-SQL anti-join —
+`NOT EXISTS (SELECT 1 FROM school_archive a WHERE a."termId" = t.id)` — with
+`backlog` counted over the same predicate so it FALLS as the sweep drains.
+Raw SQL because Prisma declares no relation between `Term` and `SchoolArchive`,
+and passing every archived termId back as an `IN` list is the thing that does
+not scale. Migration `20260911000000` adds `school_archive(termId)`: the only
+index carrying `termId` was `UNIQUE (schoolId, termId)`, schoolId-leading, so
+`EXPLAIN` showed a `Seq Scan` for the bare lookup.
+
+After, live, six consecutive nights:
+```
+night 1: archived=500 backlog=14600   night 4: archived=500 backlog=13100
+night 2: archived=500 backlog=14100   night 5: archived=500 backlog=12600
+night 3: archived=500 backlog=13600   night 6: archived=500 backlog=12100
+archives: 500 (frozen) -> 3,500
+```
+
+The declared return type had also omitted `failed` and `backlog`, so the
+processor could not have logged them even though the service counted them —
+the "one job dropped `failed` between the service and the processor" shape
+again. Both are on the log line now, because `archived=0 skipped=500` is what
+hid this.
+
+Gate: `a-sweep-that-archived-500-terms-and-stopped.spec.ts`. Mutation-validated
+by restoring the in-memory filter: `archived: 0` on run two, backlog frozen,
+500 of 1,200 reached.
+
+### Five sweeps a single school could fire across the whole platform
+
+Found by reading the jobs catalogue's declared `scope` against the roles that
+actually hold each trigger's permission — the check the exeat fix (#2xx) said to
+make, run properly for the first time.
+
+| job | permission | held by | ran |
+|---|---|---|---|
+| `privacy.archive` | `privacy.archive.manage` | principal, school_admin | the FLEET |
+| `privacy.breachDeadline` | `privacy.compliance.manage` | principal, school_admin | the FLEET |
+| `documents.submissionRetention` | `privacy.compliance.manage` | principal, school_admin | the FLEET |
+| `notifications.deliveryRecovery` | `notification.send` | …and every **teacher** | the FLEET |
+| `attendance.rollup` | `attendance.write` | every teacher | correctly one school |
+
+**Measured.** One demo school's principal pressed "Run now" on the archive
+sweep: the probe fleet went **3,500 → 4,000 archives**, 500 permanent snapshots
+of 500 OTHER institutions' terms, each written to storage and to their registry,
+by somebody with no standing in any of them. The declined-applicant purge is the
+same shape pointed at deletion — one school's officer irreversibly deleting
+another school's applicants' identity documents.
+
+**The fix.** Each sweep takes an optional `onlySchoolId` and each controller
+passes `p.schoolId` unless the caller holds `platform.operate`. The nightly
+scheduler still covers the fleet. Verified live: a principal's press now leaves
+the fleet at 4,000 → 4,000 while the operator's takes it 4,000 → 4,500 with the
+backlog falling 11,600 → 11,100.
+
+**Two things the fix uncovered.**
+
+1. **The operator was 403'd on their own console's button.** These routes asked
+   for a permission only a school role holds, and there is no super_admin
+   permission bypass. `@RequirePermission` already accepts several ("any one
+   opens the route"), so each now admits the school's own officer OR
+   `platform.operate`, and the console's `canPress` knows which door is theirs.
+2. **The catalogue was not type-checked against its own interface.** It was a
+   bare `as const`, so `documents.submissionRetention` carried a manual trigger
+   with **no `scope` at all** and `attendance.rollup` likewise — the console's
+   scope split simply did not apply to them and nothing noticed. Declared
+   `ScheduledJob` and applied it with `satisfies`, which keeps the literal key
+   types `JobKey` is built from.
+
+A third scope value, `CALLER`, now names what these actually are: the fleet for a
+platform operator, the caller's own school for anyone else. PLATFORM and SCHOOL
+could not express it, and forcing one of them would either have kept the hole or
+taken the operator's button away.
+
+Gate: `a-fleet-sweep-one-school-could-fire.spec.ts` reads the catalogue as DATA
+and the role map, and fails on a PLATFORM trigger a school role holds; a second
+describe drives each controller for the scoping call. Mutation-validated both
+halves.
+
+// GOTCHA: my first version read the catalogue with a regex, and adding a comment
+between `permission` and `scope` silently put two entries outside its window —
+a gate that went green having scanned fewer jobs than the run before. The
+catalogue is DATA; import it. The same run also caught the documented
+fixed-window trap in `run-now.spec.ts`, where a 400-character slice from a
+`@Post` spanned into the NEXT route and vouched for its decorators.
+
+### Six sweeps whose control lived on a screen that had no button
+
+`SCHEDULED_JOBS.manual.where` tells its reader where a school presses each
+sweep. Six named a page that had nothing there: the overdue-boarder check
+("Hostel"), the stale-record nudge ("Admin"), the end-of-term archive, the
+breach-deadline clock, the declined-applicant purge and the telemetry purge.
+The endpoints existed and the operator console pointed at them; a school had no
+way to run any of them. A route no screen can reach, six times, behind a claim
+that said otherwise.
+
+Built one shared `SweepButton` and placed it on each page, plus a hand-written
+catch-up on `ArchivePanel` (it reloads the list). Each reports what the run did
+AND what it could not do — the exeat one names the boarders it could tell nobody
+about, rather than the count it managed.
+
+Gate: `run-now.spec.ts` now walks the web tree and fails on a school-pressable
+job whose path nothing POSTs to.
+
+// GOTCHA: the first version of that gate used `includes(path)`, and a mutation
+to `…/run` **X** passed — a substring check vouches for a neighbouring route.
+Terminating the match found a seventh instance immediately: `/admin/privacy`
+matched `integrity/retention/run` only because it reads
+`integrity/retention/run`**s**, the run HISTORY. The page showed every purge that
+had happened and offered no way to ask for one.
+
+// GOTCHA, and this one cost a rebuild: all five placements are on SERVER
+components, and I passed each a `describe={(r) => …}` prop. It typechecked, the
+production build succeeded, 5,963 tests passed — and every one of those pages
+threw `Functions cannot be passed directly to Client Components` during SSR and
+rendered its loading shell and nothing else. The wording now lives inside the
+client module keyed by path, so `SweepButton`'s props are all strings and the
+TYPE is the gate.
+
+// GOTCHA about verifying it: my render check reported all seven controls
+missing, twice, for two different wrong reasons — first because every demo login
+lands on "Your password has expired" (the 30-day forced reset) so every page was
+that screen, and then because logging in per check tripped the login rate limit
+and every page returned its shell at 200. Both read exactly like "the control is
+not there". Every check now carries an ANCHOR — a string already on that page —
+so a missing needle can be told apart from a page that never rendered.
+
+### The archive module at 5,000 schools
+15,600 ended terms across 5,000 schools. Beyond the sweep defect above:
+* **Cross-tenant download is refused and says nothing.** A principal asking for
+  another school's archive by id gets **404, not 403**; their own list does not
+  contain it; and the positive control — downloading one of their own — is 201,
+  so the 404 is a real refusal rather than a broken session.
+* **One archive run is 36 ms per term** at this fleet size (500 terms in ~18 s),
+  and the anti-join is an Index Scan on the new `school_archive(termId)`.

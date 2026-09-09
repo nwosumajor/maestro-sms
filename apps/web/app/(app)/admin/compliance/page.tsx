@@ -18,6 +18,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { dateTime, regionOf } from "@/lib/format";
 import { BreachRegister } from "@/components/privacy/BreachRegister";
+import { SweepButton } from "@/components/maintenance/SweepButton";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -194,6 +195,30 @@ export default async function CompliancePage() {
             ) : (
               <BreachRegister initial={breaches} />
             )}
+
+            {/* The two sweeps this officer owns. Both run on their own — hourly
+                and nightly — and neither had a control anywhere, while the jobs
+                catalogue told its reader one lived on this page. Each runs for
+                THIS SCHOOL; the timer still covers the fleet. */}
+            <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+              <div>
+                <h2 className="text-sm font-semibold">Run a check now</h2>
+                <p className="text-xs text-muted-foreground">
+                  These run on their own — hourly for the deadline clock, nightly for the purge. Press one if you
+                  need the answer before the next run.
+                </p>
+              </div>
+              <SweepButton
+                path="privacy/compliance/breach-deadlines/run"
+                label="Check breach deadlines"
+                help={`Re-reads every open breach against the ${BREACH_NOTIFY_HOURS}-hour clock and warns whoever must act.`}
+              />
+              <SweepButton
+                path="documents/retention/run"
+                label="Purge declined applicants’ documents"
+                help="Deletes the files supplied by applicants the school turned down, once their retention window has passed."
+              />
+            </section>
 
             <p className="text-xs text-muted-foreground">
               Breach register last read {dateTime(new Date().toISOString())}. Every entry here is

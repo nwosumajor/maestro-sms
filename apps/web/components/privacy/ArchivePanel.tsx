@@ -147,6 +147,45 @@ export function ArchivePanel({
     setBusy(null);
   }
 
+  /**
+   * CATCH UP THIS SCHOOL'S ENDED TERMS. The nightly sweep already archives every
+   * term that has finished, but there was no way to ask for it — and the jobs
+   * catalogue told its reader the control lived on this page, which it did not.
+   *
+   * It runs for THIS SCHOOL only. It used to run the fleet: one principal's
+   * press wrote 500 permanent archives into 500 other schools.
+   */
+  async function catchUp() {
+    setBusy("sweep");
+    setNote(null);
+    // No step-up: this asks for the archives tonight's timer would take anyway.
+    // Taking an arbitrary archive, and downloading one, both still re-authenticate.
+    const res = await fetch("/api/sms/privacy/archives/run-term-sweep", { method: "POST" });
+    if (res.ok) {
+      const r = (await res.json()) as { archived: number; undated: number; backlog: number };
+      setNote(
+        r.archived === 0 && r.undated === 0
+          ? "Every term that has ended is already archived."
+          : [
+              r.archived === 1 ? "Archived 1 ended term." : `Archived ${r.archived} ended terms.`,
+              // REPORT WHAT IT DID NOT DO. A term with no start date cannot be
+              // bounded, so it is left — and saying so is the difference between
+              // a gap somebody fixes and a gap nobody knows about.
+              r.undated > 0
+                ? `${r.undated} could not be archived because ${r.undated === 1 ? "it has" : "they have"} no start date — set the dates on the calendar.`
+                : "",
+              r.backlog > 0 ? `${r.backlog} more are due and will be taken tonight.` : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
+      );
+      await reload();
+    } else {
+      setNote(interpretApiError(res.status, await res.text()));
+    }
+    setBusy(null);
+  }
+
   async function download(a: Serialized<Archive>) {
     setBusy(a.id);
     setNote(null);
@@ -229,6 +268,16 @@ export function ArchivePanel({
         </Button>
         <span className="text-xs text-muted-foreground">Large schools may take a minute.</span>
       </form>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        <Button type="button" size="sm" variant="outline" className="h-8" disabled={busy === "sweep"} onClick={catchUp}>
+          {busy === "sweep" ? "Catching up…" : "Catch up ended terms"}
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          Archives every term of yours that has finished and has none yet. This runs on its own each night; press it
+          if you would rather not wait.
+        </span>
+      </div>
 
       {scope?.kind === "all" && (
         <p className="mb-3 text-xs text-muted-foreground">
