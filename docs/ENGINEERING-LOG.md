@@ -13347,3 +13347,39 @@ future-date guard doing its job. A 400 I first read as a broken write turned out
 to be `SchoolRegionService`'s 60-second cache still holding the timezone I had
 just changed BY RAW SQL — the operator route invalidates that cache, my UPDATE
 did not. Read the message before believing the status.
+
+### The games module at 5,000 schools — server authority verified BY VALUE
+5,000 schools, 10,000 active games, 40,000 players. No defect. What was driven,
+and why the method matters more than the result here.
+**The existing probe greps a FIELD NAME.** `no-response-carries-a-secret.mjs`
+looks for `"targetSecret"` in a response body — which catches a secret
+serialised under its own key and would miss one serialised under any other, or
+embedded in a message. So this sweep seeded DISTINCTIVE VALUES instead
+(player A's secret `1234`, B's `5678`, the race target `9876`) and grepped for
+those. Both tests are worth having; the value test is the stronger one.
+**With a POSITIVE CONTROL, because the first two attempts had none that worked.**
+My first control assumed a player sees their own secret — they do not, for
+anyone, which is a stronger design than I had assumed, so the control failed and
+"0 leaks" meant nothing. The working control is a racer's OWN guess (`1111`),
+which they SHOULD see: A sees it, B does not. That proves the probe can read
+values out of a response AND that per-racer guess redaction works, in one check.
+Result: all three secrets exist in the database and appear in **none** of seven
+responses across two players — own duel, opponent's duel, open-games list, own
+race, rival's race, race list.
+**The one deliberate tenant crossing carries what it says it carries.** A real
+two-school arena, both pupils renamed distinctively. A pupil in one school
+reading the cross-school leaderboard receives `handle`, `schoolName`,
+`guessCount`, `elapsedMs`, `rank`, `isYou` — and NOT either pupil's real name
+(including their own school's), either secret, the other school's userId, or the
+other school's schoolId. The participant id is opaque and resolvable only within
+its owning school through `ultimate_entry_link`.
+**Reads are flat at this scale**: duel view 19 ms, open duels 11 ms, race view
+15 ms, joinable races 16 ms, cross-school leaderboard 13 ms.
+
+// GOTCHA about my own method, recorded because it has now cost time in four
+separate modules: I guessed a route or a permission string six times in this
+session and each wrong guess produced a 403/404 sweep that looked like a clean
+pass. `API.md` is GENERATED from the controllers and gated by
+`api-doc-is-current.spec.ts` — read it, or the controller, BEFORE writing a
+probe. And every leak sweep needs a positive control, or a probe that cannot see
+anything reports a fact about itself.
