@@ -13383,3 +13383,46 @@ pass. `API.md` is GENERATED from the controllers and gated by
 `api-doc-is-current.spec.ts` — read it, or the controller, BEFORE writing a
 probe. And every leak sweep needs a positive control, or a probe that cannot see
 anything reports a fact about itself.
+
+### Hostel and transport at 5,000 schools — and the timetable panel's missing test
+5,000 schools, 10,000 hostels, 72,000 riders. No defect in either module.
+* **The room capacity guard holds under real concurrency.** Eight allocations
+  into a TWO-bed room, submitted together: exactly **2 × 201 and 6 × 400 "Room is
+  at full capacity"**, and exactly 2 of 2 beds occupied. The row lock does what
+  the API doc claims for it.
+* **A boarding is filed on the SCHOOL's day.** A school in `Pacific/Auckland`
+  whose local date had rolled to the 10th while the server's UTC day was the 9th
+  recorded a pickup — and it landed on **2026-09-10**. That is what stops a wrong
+  day overwriting another journey, given `UNIQUE (passengerId, date, direction)`.
+* **Scoping is real.** A warden sees 1 hostel of 2 (their own) where an admin
+  sees both; a driver reads routes (200) and cannot create one (403).
+* **The fee-run maker-checker fires.** A warden's hostel rent run returns
+  `pendingApproval` with a request id and raises a `FEE_SCHEDULE` in
+  PENDING_REVIEW, posting NO invoices; an admin's run posts 2 directly.
+* **Reads are flat**: hostels 17 ms, allocations 16 ms, exeats 10 ms, routes
+  14 ms, assignments 14 ms, boardings 13 ms, transport summary 13 ms.
+
+// GOTCHA, and this repo already records it once: my first capacity race showed
+8 × 400 and I nearly wrote it up as the guard holding. The refusal was the GENDER
+rule — "Alpha House is a boys hostel and can't admit this student (no gender on
+the student's profile)" — because my fixture had no student profiles. **A refusal
+is not evidence until you read WHICH refusal.** With profiles added the capacity
+rule was finally the one under test.
+// GOTCHA: reading `API.md` FIRST this time — the lesson recorded in the games
+sweep — gave the routes, permissions and module gates in one place and cost no
+wrong guesses on either module's main paths. It does not carry required QUERY
+params, so `GET /transport/boardings` still 400'd until I read the controller.
+
+**And the UI audit that came with it.** Two recent fixes had UI I had reasoned
+about but never RENDERED: the timetable generate panel's `alreadyPlaced` sentence
+and the quiz 409. The quiz path was already covered — the error-message sweep
+fixed that component's helper, so the server's "You have no attempts left for
+this quiz" reaches the pupil. The timetable panel had no web test at all: the API
+side was pinned by `a-finished-timetable-that-read-as-a-failure` and the screen
+was not. Now pinned by `a-timetable-result-a-head-can-read`, which asserts a
+finished grid reads as finished, a partial run names what was already there, and
+a REAL failure still shows as one.
+// GOTCHA: that test needed a fetch double routed BY URL. The panel's parent
+loads a class roster, its subject offerings and teacher availability on mount,
+and a blanket mock answered those with the generate body — the component died in
+`subs.map`, which reads as a component fault rather than a fixture one.
