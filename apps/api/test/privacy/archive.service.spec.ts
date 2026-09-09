@@ -110,14 +110,37 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
     upload: jest.fn(async (a: { key: string; body: Buffer }) => void uploads.push(a)),
     presignDownload: jest.fn().mockResolvedValue({ url: "https://signed.example/x" }),
   };
+  /**
+   * The candidate query is RAW SQL and excludes already-archived terms in the
+   * DATABASE — so the double must honour the anti-join rather than answer with
+   * the whole fixture. A double that always returned everything would pass
+   * against a service that had stopped excluding, and a double that always
+   * excluded would pass against one that never started.
+   */
+  const dueQueries: Array<{ sql: string; values: unknown[] }> = [];
+  const runDue = (q: { strings?: string[]; values?: unknown[] }) => {
+    const sql = (q?.strings ?? []).join("?");
+    dueQueries.push({ sql, values: q?.values ?? [] });
+    const excludes = /NOT EXISTS[\s\S]*school_archive[\s\S]*"termId"/.test(sql);
+    const existing = new Set(
+      ((over as { existing?: Array<{ termId: string }> }).existing ?? []).map((e) => e.termId),
+    );
+    const all = ((over as { terms?: Array<{ id: string }> }).terms ?? []).filter(
+      (t) => !excludes || !existing.has(t.id),
+    );
+    return { sql, rows: all };
+  };
   const privileged = {
     client: {
-      term: {
+      $queryRaw: jest.fn(async (q: { strings?: string[]; values?: unknown[] }) => {
+        const { sql, rows } = runDue(q);
         // The sweep counts what is due as well as taking a page of it, so a
-        // capped run can report the work it did not reach. Counted from the
-        // SAME fixture the page is drawn from.
-        count: jest.fn(async () => ((over as { terms?: unknown[] }).terms ?? []).length),
-        findMany: jest.fn().mockResolvedValue((over as { terms?: unknown[] }).terms ?? []),
+        // capped run can report the work it did not reach — counted over the
+        // SAME predicate the page is drawn from.
+        if (/count\(\*\)/.test(sql)) return [{ n: rows.length }];
+        return rows;
+      }),
+      term: {
         // `windowFor` resolves the term the archive NAMES, so the sections can
         // actually be bounded to it. Answers with dates, like a real term.
         findFirst: jest.fn(async ({ where }: { where: { id: string } }) => {
@@ -136,7 +159,7 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
     },
   };
   const svc = new SchoolArchiveService(db as never, audit as never, storage as never, privileged as never);
-  return { svc, tx, audit, storage, uploads, created, privileged };
+  return { svc, tx, audit, storage, uploads, created, privileged, dueQueries };
 }
 
 const bundleOf = (uploads: Array<{ body: Buffer }>) => JSON.parse(uploads[0].body.toString("utf8"));
@@ -267,20 +290,29 @@ describe("the term sweep — the part a school will actually rely on", () => {
     expect(created[0]).toMatchObject({ termId: "t-1", sessionId: "sess-1", label: "First Term" });
   });
 
-  it("SKIPS a term already archived — the sweep runs daily", async () => {
+  it("never re-archives a term it already has — the sweep runs daily", async () => {
     // Without this every school gains a duplicate archive every single night.
+    // The exclusion happens in the QUERY now, so an already-archived term is not
+    // even a candidate: it is not scanned, and it does not consume one of the
+    // 500 places in tonight's batch. That last part is the whole fix — spending
+    // the batch on done work is how the sweep stopped advancing.
     const { svc, created } = makeService({ terms: [ended("t-1")], existing: [{ termId: "t-1" }] });
-    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ archived: 0, skipped: 1 });
+    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({
+      scanned: 0,
+      archived: 0,
+      backlog: 0,
+    });
     expect(created).toHaveLength(0);
   });
 
   it("waits out a grace window before archiving", async () => {
     // Late marks and corrections land in the days after a term closes; archiving
     // on the final evening would strand them outside the snapshot.
-    const { svc, privileged } = makeService({ terms: [] });
+    const { svc, dueQueries } = makeService({ terms: [] });
     await svc.archiveEndedTerms("SCHEDULED");
-    const where = (privileged.client.term.findMany as jest.Mock).mock.calls[0][0].where;
-    const daysAgo = Math.round((Date.now() - where.endDate.lt.getTime()) / 86_400_000);
+    const cutoff = dueQueries[0].values.find((v): v is Date => v instanceof Date);
+    expect(cutoff).toBeDefined();
+    const daysAgo = Math.round((Date.now() - cutoff!.getTime()) / 86_400_000);
     expect(daysAgo).toBeGreaterThanOrEqual(5);
   });
 

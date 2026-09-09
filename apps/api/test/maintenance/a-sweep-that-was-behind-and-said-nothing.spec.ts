@@ -108,7 +108,12 @@ describe("every capped sweep reports its backlog", () => {
     // to the shape rather than to any one line's wording, which has gone red on
     // changes that strengthened the thing it guarded.
     expect(src).toMatch(/backlog/);
-    expect(src).toMatch(/\.count\(/);
+    // Counted IN THE DATABASE — through the ORM or in SQL. The archive sweep
+    // moved to a raw anti-join (Prisma has no relation between Term and
+    // SchoolArchive), and this line was written as `.count(` alone, so a gate
+    // about counting in the database went red on a sweep that had started
+    // counting in the database rather harder.
+    expect(src).toMatch(/\.count\(|count\(\*\)/);
     expect(src).toMatch(/Math\.max\(0,/);
   });
 

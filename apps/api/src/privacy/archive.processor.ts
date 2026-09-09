@@ -23,7 +23,10 @@ export class TermArchiveProcessor extends WorkerHost {
       const r = await this.archives.archiveEndedTerms("SCHEDULED");
       // At WARN when it actually archived: a new permanent record of the whole
       // institution came into existence, which is worth seeing in the log.
-      const line = `Term archive: scanned=${r.scanned} archived=${r.archived} skipped=${r.skipped}`;
+      // BACKLOG IS ON THE LINE, because "archived=0 skipped=500" reads exactly
+      // like a caught-up sweep and was how this job hid a 15,100-term backlog
+      // for as long as it had existed.
+      const line = `Term archive: scanned=${r.scanned} archived=${r.archived} skipped=${r.skipped} failed=${r.failed} backlog=${r.backlog}`;
       if (r.archived > 0) this.logger.warn(line);
       else this.logger.log(line);
       return r;

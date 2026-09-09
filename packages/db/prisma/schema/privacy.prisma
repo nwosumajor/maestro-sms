@@ -148,6 +148,9 @@ model SchoolArchive {
   school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
+  /// The term sweep anti-joins on termId; the unique index is
+  /// schoolId-leading and cannot serve that lookup.
+  @@index([termId])
   @@index([schoolId, createdAt])
   /// The scheduler's guard: one archive per term, enforced by the database
   /// rather than by the sweep remembering.

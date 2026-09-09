@@ -41,6 +41,7 @@ import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.pro
 import { decryptField } from "../foundation/field-crypto";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
+import { Prisma } from "@sms/db";
 
 /** Days after a term ends before it is archived, so late marks and corrections
  *  entered in the final week are inside the snapshot rather than outside it. */
@@ -719,7 +720,15 @@ export class SchoolArchiveService {
    */
   async archiveEndedTerms(
     trigger: "SCHEDULED" | "MANUAL",
-  ): Promise<{ scanned: number; archived: number; skipped: number; undated: number }> {
+    onlySchoolId?: string,
+  ): Promise<{
+    scanned: number;
+    archived: number;
+    skipped: number;
+    undated: number;
+    failed: number;
+    backlog: number;
+  }> {
     const client = this.privileged.client;
     const result = { scanned: 0, archived: 0, skipped: 0, undated: 0, failed: 0, backlog: 0 };
     if (!client) {
@@ -731,18 +740,59 @@ export class SchoolArchiveService {
     // corrections entered in the final week are inside the snapshot rather than
     // stranded outside it.
     const cutoff = new Date(Date.now() - TERM_ARCHIVE_GRACE_DAYS * 86_400_000);
-    // Named once so the COUNT and the PAGE cannot drift apart.
-    const dueWhere = { endDate: { not: null, lt: cutoff } };
-    const terms = (await client.term.findMany({
-      where: dueWhere,
-      select: { id: true, schoolId: true, name: true, sessionId: true, endDate: true, startDate: true },
-      orderBy: { endDate: "asc" },
-      take: 500,
-    })) as Array<{ id: string; schoolId: string; name: string; sessionId: string; endDate: Date; startDate: Date | null }>;
-    // Ended terms this run did not reach — see `JobStatus.lastBacklog`. At 3,500
-    // schools a fleet with several years of history holds far more than one
-    // batch, and a capped run reported the same clean line either way.
-    result.backlog = Math.max(0, (await client.term.count({ where: dueWhere })) - terms.length);
+    // ALREADY-ARCHIVED TERMS ARE EXCLUDED BY THE QUERY, not skipped after it.
+    //
+    // This selected the OLDEST 500 ended terms and then filtered the archived
+    // ones out in memory. So once the first 500 were archived the sweep took the
+    // same 500 every single night, skipped all of them, and NEVER REACHED TERM
+    // 501. Measured on a 5,000-school fleet with 15,600 ended terms due: run one
+    // archived 500, and runs two through seven archived NOTHING — `archived=0
+    // skipped=500` on repeat, with 15,100 terms that would never be archived at
+    // all.
+    //
+    // It survived because that line reads like health. "Nothing archived,
+    // everything already archived" is exactly what a caught-up sweep looks like,
+    // and `lastOk` was true with `failed: 0` throughout. The BACKLOG counter
+    // added for the notification sweep is what made it visible — and it stayed
+    // frozen at 15,103 for six consecutive runs, which is the diagnosis that
+    // counter exists to give.
+    //
+    // Raw SQL because the exclusion is an anti-join: passing every archived
+    // termId back as an `IN` list is the thing that does not scale, and Prisma
+    // has no relation declared between Term and SchoolArchive.
+    // ONE SCHOOL WHEN A SCHOOL ASKED. `privacy.archive.manage` is a per-school
+    // permission held by principal and school_admin, and this ran the fleet: a
+    // demo principal pressing "Run now" created 500 permanent archives in 500
+    // OTHER schools — a full snapshot of each institution's term, uploaded to
+    // storage and recorded in their registry, by somebody with no standing in
+    // any of them. Measured live: the probe fleet went 3,500 -> 4,000 archives,
+    // not one of them the presser's. The nightly scheduler still sweeps
+    // everyone; a manual press is either the caller's own school or a platform
+    // operator's. See "A MANUAL TRIGGER MUST MATCH THE PERMISSION THAT GATES
+    // IT" — third instance of that class.
+    const scope = onlySchoolId ? Prisma.sql`AND t."schoolId" = ${onlySchoolId}::uuid` : Prisma.empty;
+    const dueSql = Prisma.sql`
+      FROM "term" t
+      WHERE t."endDate" IS NOT NULL
+        AND t."endDate" < ${cutoff}
+        ${scope}
+        AND NOT EXISTS (SELECT 1 FROM "school_archive" a WHERE a."termId" = t.id)
+    `;
+    const terms = (await client.$queryRaw(Prisma.sql`
+      SELECT t.id, t."schoolId", t.name, t."sessionId", t."endDate", t."startDate"
+      ${dueSql}
+      ORDER BY t."endDate" ASC
+      LIMIT 500
+    `)) as Array<{ id: string; schoolId: string; name: string; sessionId: string; endDate: Date; startDate: Date | null }>;
+    // Ended, UNARCHIVED terms this run did not reach — see
+    // `JobStatus.lastBacklog`. Counted over the same predicate the page uses, so
+    // it FALLS as the sweep works through the fleet. Counting all due terms
+    // instead made it a constant, which tells an operator nothing about whether
+    // the job is keeping up.
+    const [{ n: totalDue } = { n: 0 }] = (await client.$queryRaw(
+      Prisma.sql`SELECT count(*)::int AS n ${dueSql}`,
+    )) as Array<{ n: number }>;
+    result.backlog = Math.max(0, totalDue - terms.length);
 
     // A term with no START date cannot be archived AS a term — the window is
     // what makes the archive about that term rather than about everything.
