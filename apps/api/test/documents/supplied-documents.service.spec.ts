@@ -115,8 +115,25 @@ function build(opts: { submissions?: Row[]; requirements?: Row[]; bytes?: Buffer
     },
     user: {
       findMany: () => Promise.resolve([]),
+      // The school's people, and their KIND. `checklist` now asks whether the
+      // subject is on this school's register at all — it used to answer 200
+      // about any id, including another school's pupil and a uuid that is
+      // nobody — so the double must know who exists and which side they are on,
+      // not just echo one hard-coded id.
+      findFirst: ({ where }: { where: { id: string; roles?: unknown; NOT?: unknown } }) => {
+        const people: Record<string, "student" | "staff"> = { "stu-1": "student", "u-1": "staff", "u-2": "staff" };
+        const kind = people[where.id];
+        if (!kind) return Promise.resolve(null);
+        const wantsStudent = JSON.stringify(where.roles ?? {}).includes("student");
+        const wantsNonStudent = JSON.stringify(where.NOT ?? {}).includes("student");
+        if (wantsStudent && kind !== "student") return Promise.resolve(null);
+        if (wantsNonStudent && kind === "student") return Promise.resolve(null);
+        return Promise.resolve({ id: where.id });
+      },
+    },
+    applicant: {
       findFirst: ({ where }: { where: { id: string } }) =>
-        Promise.resolve(where.id === "stu-1" ? { id: "stu-1" } : null),
+        Promise.resolve(where.id === "cand-1" ? { id: "cand-1" } : null),
     },
   };
 

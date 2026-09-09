@@ -55,6 +55,7 @@
 
 import {
   ArgumentsHost,
+  BadRequestException,
   Catch,
   ConflictException,
   ExceptionFilter,
@@ -70,6 +71,8 @@ import { Prisma } from "@sms/db";
 const INCONSISTENT_COLUMN_DATA = "P2023";
 /** Prisma's marker for a unique constraint violation. */
 const UNIQUE_VIOLATION = "P2002";
+/** Prisma's marker for a FOREIGN KEY violation — an id that names nothing. */
+const FOREIGN_KEY_VIOLATION = "P2003";
 /** Prisma's marker for a RAW query that the database rejected. */
 const RAW_QUERY_FAILED = "P2010";
 /**
@@ -94,6 +97,24 @@ export function duplicateMessage(e: Prisma.PrismaClientKnownRequestError): strin
   if (!model) return "That already exists.";
   const words = model.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
   return `A ${words} with those details already exists.`;
+}
+
+/**
+ * "document_studentId_fkey (index)" -> "student".
+ *
+ * P2003 DOES carry a field name, unlike P2002 — Prisma puts the constraint in
+ * `meta.field_name`. Verified against the running database rather than assumed,
+ * which is the trap a previous translator in this codebase fell into.
+ */
+export function missingReferenceMessage(e: Prisma.PrismaClientKnownRequestError): string {
+  const raw = String((e.meta as { field_name?: string } | undefined)?.field_name ?? "");
+  const col = /_([A-Za-z0-9]+)_fkey/.exec(raw)?.[1];
+  if (!col) return "Something you referenced does not exist.";
+  const words = col
+    .replace(/Id$/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase();
+  return `That ${words} does not exist.`;
 }
 
 export function isMalformedUuidError(e: unknown): boolean {
@@ -174,6 +195,28 @@ export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionF
       // better than the generic one.
       this.logger.warn(`duplicate on ${req?.method} ${req?.url} -> 409`);
       super.catch(new ConflictException(duplicateMessage(exception)), host);
+      return;
+    }
+    // AN ID THAT NAMES NOTHING IS THE CALLER'S MISTAKE, NOT A FAULT.
+    //
+    // The same argument as the duplicate above, on the other half of "an id
+    // arrived in the request body". Found on `POST /documents`: a studentId
+    // that is nobody reached `document.create` with nothing having checked it,
+    // Postgres refused the foreign key, and the principal was told **500
+    // Internal server error** — which is untrue, gives no way out, and sends
+    // them to support instead of to the id they mistyped.
+    //
+    // The per-site check is still the right fix and still runs first (that
+    // route now answers 404 "Student not found in this school" before it gets
+    // here). This is the floor for every other body-supplied id in the product,
+    // for the same reason the P2002 translation lives here: fixing the sites we
+    // know about leaves the next one.
+    if (exception.code === FOREIGN_KEY_VIOLATION) {
+      const req = host.switchToHttp().getRequest<{ method?: string; url?: string }>();
+      // WARN, like the duplicate: reaching here means no call site validated an
+      // id it was handed, which is worth seeing.
+      this.logger.warn(`unknown reference on ${req?.method} ${req?.url} -> 400`);
+      super.catch(new BadRequestException(missingReferenceMessage(exception)), host);
       return;
     }
     if (!isMalformedUuidError(exception)) {

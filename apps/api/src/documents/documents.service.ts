@@ -28,6 +28,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "./storage.provider";
 import { assertDocumentsReleasable } from "../lms/leaver-documents";
+import { EVER_ENROLLED_STUDENT } from "../common/student-scope";
 
 // junior_admin is the operational tier that owns the document vault (CLAUDE.md)
 // and holds document.write; without it here, both student-doc and school-level
@@ -135,7 +136,36 @@ export class DocumentsService {
         throw new BadRequestException("A document is about a pupil or a member of staff, not both");
       }
       if (input.studentId) {
+        // IS THIS ACTUALLY A PUPIL OF THIS SCHOOL?
+        //
+        // `assertCanAccessStudent` answers "may I reach this pupil", and for a
+        // school-wide caller it returns on its first line without touching the
+        // database — correct for the four READ paths that call it, where the row
+        // was already fetched under RLS, and wrong here, where the id arrives in
+        // the REQUEST BODY. Nothing else checked it, so the only thing standing
+        // between a body-supplied id and a stored row was the foreign key.
+        //
+        // Measured live, as a principal: a REPORT_CARD attached to ANOTHER
+        // SCHOOL's pupil returned 201 (a report card in this vault about a child
+        // who is not this school's, and which nobody who should see it can
+        // reach); one attached to this school's own TEACHER returned 201; and a
+        // uuid that is nobody returned **500 Internal server error**, because
+        // the FK was doing the validating. Three shapes, one missing check.
+        //
+        // EVER_ENROLLED, not on-roll: a school still owes a leaver their
+        // records, so a document must stay attachable to a pupil who has gone.
+        //
+        // ORDER MATTERS, and the other way round leaks. Checking the pupil
+        // first told a TEACHER "Student not found in this school" for an id
+        // that is nobody and "Document not found" for a real pupil they do not
+        // teach — two refusals that differ, so the difference answers "is this
+        // uuid a real pupil here?" for someone who may not know. The
+        // relationship check runs first: it returns immediately for a
+        // school-wide caller, who can see every pupil anyway and is better
+        // served by the specific message, and gives everyone else the SAME
+        // "Document not found" in both cases.
         await this.assertCanAccessStudent(tx, p, input.studentId);
+        await this.assertIsStudentHere(tx, input.studentId);
       } else if (input.staffUserId) {
         // THEIR OWN, AND ONLY THEIR OWN.
         //
@@ -492,6 +522,20 @@ export class DocumentsService {
     // permission no teacher holds.
     for (const id of await studentIdsTaughtBy(tx, p.userId)) ids.add(id);
     return [...ids];
+  }
+
+  /**
+   * The id names a pupil OF THIS SCHOOL — checked wherever one enters from the
+   * request body. RLS bounds the lookup to the caller's tenant, so a foreign
+   * pupil is indistinguishable from one who does not exist, and both answer 404
+   * rather than confirming what they hide.
+   */
+  private async assertIsStudentHere(tx: TenantTx, studentId: string): Promise<void> {
+    const found = await tx.user.findFirst({
+      where: { id: studentId, ...EVER_ENROLLED_STUDENT },
+      select: { id: true },
+    });
+    if (!found) throw new NotFoundException("Student not found in this school");
   }
 
   private async assertCanAccessStudent(tx: TenantTx, p: Principal, studentId: string) {

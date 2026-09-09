@@ -104,6 +104,20 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
         [u, SA, u + "@rc", name],
       );
     }
+    // THE PUPIL HOLDS THE PUPIL ROLE IN THE DATABASE, not only in their JWT.
+    //
+    // This fixture gave the student a `roles: ["student"]` principal and no
+    // `user_role` row, which no real pupil is: `/students`, search, the billing
+    // seat count and every roster read define a pupil as "holds the student
+    // role", so one without the row is invisible to all of them. It passed
+    // because nothing had asked — until the Vault began checking that a
+    // document's subject is a pupil of this school, and then three assertions
+    // failed on a fixture, not on the code.
+    await admin.query(
+      `INSERT INTO user_role (id,"schoolId","userId","roleId")
+       VALUES ($1,$2,$3,(SELECT id FROM role WHERE name = 'student'))`,
+      [randomUUID(), SA, STUDENT],
+    );
     await admin.query(
       `INSERT INTO parent_child (id,"schoolId","parentId","studentId") VALUES ($1,$2,$3,$4)`,
       [randomUUID(), SA, GUARDIAN, STUDENT],
@@ -136,7 +150,11 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
   });
 
   afterAll(async () => {
-    for (const t of ["document", "notification_delivery", "notification", "parent_child", "audit_log"]) {
+    // CHILD ROWS BEFORE PARENTS — `user_role` references `user`, so it joins the
+    // list the moment the fixture grants a role. Leaving it out does not fail a
+    // test: every assertion passes and the SUITE fails in teardown, which reads
+    // as a broken spec rather than a missing DELETE.
+    for (const t of ["document", "notification_delivery", "notification", "parent_child", "user_role", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);

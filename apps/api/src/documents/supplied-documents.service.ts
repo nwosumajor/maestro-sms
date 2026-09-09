@@ -50,6 +50,7 @@ import {
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { STORAGE_PROVIDER, type StorageProvider } from "./storage.provider";
 import { baseContentType, isAcceptedUploadType, sniffUploadType } from "./sniff-upload";
+import { EVER_ENROLLED_STUDENT, NOT_A_STUDENT } from "../common/student-scope";
 
 /** Which half of the school a subject belongs to. */
 const SCOPE_OF_SUBJECT: Record<SubmissionSubject, RequirementScope> = {
@@ -117,6 +118,30 @@ export class SuppliedDocumentsService {
     if (!(REQUIREMENT_SCOPES as readonly string[]).includes(scope)) {
       throw new BadRequestException("Unknown requirement scope");
     }
+  }
+
+  /**
+   * The subject exists, in THIS school, and is the KIND the caller named.
+   *
+   * RLS bounds every lookup, so another school's subject is indistinguishable
+   * from one that does not exist and both answer 404 — a checklist that
+   * distinguished them would confirm the existence of another school's pupil.
+   */
+  private async assertSubjectHere(tx: TenantTx, kind: SubmissionSubject, subjectId: string): Promise<void> {
+    const found =
+      kind === "STUDENT"
+        ? await tx.user.findFirst({ where: { id: subjectId, ...EVER_ENROLLED_STUDENT }, select: { id: true } })
+        : kind === "STAFF"
+          ? // Any user who is NOT a pupil: the staff side covers every employed
+            // role, and listing them would be wrong the day an eighteenth is
+            // seeded. Through the shared scope, not hand-rolled — the gate in
+            // `student-scope.spec` caught this line as a fourth spelling of the
+            // one rule, which is exactly what that module exists to prevent.
+            await tx.user.findFirst({ where: { id: subjectId, ...NOT_A_STUDENT }, select: { id: true } })
+          : kind === "ADMISSION_APPLICATION"
+            ? await tx.admissionApplication.findFirst({ where: { id: subjectId }, select: { id: true } })
+            : await tx.applicant.findFirst({ where: { id: subjectId }, select: { id: true } });
+    if (!found) throw new NotFoundException("That person is not on this school's register");
   }
 
   private assertSubject(kind: string): asserts kind is SubmissionSubject {
@@ -301,6 +326,19 @@ export class SuppliedDocumentsService {
     const scope = SCOPE_OF_SUBJECT[subjectKind];
     this.assertMayManage(p, scope);
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // THE SUBJECT IS SOMEBODY THIS SCHOOL HAS.
+      //
+      // The id arrives in the query string and nothing looked at it, so the
+      // checklist answered 200 about ANY id: measured live, another school's
+      // pupil, this school's own teacher and a uuid that is nobody each came
+      // back "missing all 5 documents, 0% complete". It discloses nothing —
+      // the submissions read is RLS-scoped and finds none — but a confident
+      // wrong answer is its own defect: it sends a registrar chasing a family
+      // that is not theirs and does not exist.
+      //
+      // The write sibling of this (`DocumentsService.createDocument`) had the
+      // same gap and stored a row from it.
+      await this.assertSubjectHere(tx, subjectKind, subjectId);
       const requirements = await this.requirementsInTx(tx, scope);
       const submissions = (await tx.documentSubmission.findMany({
         where: { subjectKind, subjectId },

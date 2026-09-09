@@ -13685,3 +13685,118 @@ exactly what the defect got right while the document got it wrong.
   print 51–99 ms, verify 16–38 ms, scan 16–28 ms. The verification lookup is an
   **Index Scan on `issued_certificate_serial_key`**, 0.06 ms, measured as the app
   role under RLS with a bound parameter.
+
+### A report card filed against a child this school does not have
+
+`DocumentsService.createDocument` takes `studentId` from the REQUEST BODY and
+passed it to `assertCanAccessStudent`, which answers "may I reach this pupil" —
+and for a school-wide caller **returns on its first line without touching the
+database**. Correct for the four READ paths that call it, where the row was
+already fetched under RLS. Wrong here, where the id has just arrived from
+outside, and nothing else looked at it: the only thing between a body-supplied
+id and a stored row was the foreign key.
+
+Measured live as a principal, on a 5,000-school fleet:
+
+```
+REPORT_CARD attached to ANOTHER SCHOOL's pupil   -> 201
+REPORT_CARD attached to this school's own TEACHER -> 201
+REPORT_CARD attached to a uuid that is nobody     -> 500 Internal server error
+```
+
+The first is a report card in this vault about a child who is not this school's,
+which nobody who ought to see it can reach. The second is the documented "check
+the KIND, not merely that it exists". The third is the foreign key doing the
+validating and surfacing as a fault of ours.
+
+**The fix** is one check where the id enters, against the shared
+`EVER_ENROLLED_STUDENT` — ever-enrolled and not on-roll, because a school still
+owes a leaver their records and a transcript must stay attachable to a pupil who
+has gone. All three now answer **404 "Student not found in this school"**.
+
+// GOTCHA on ORDER, and the test found it rather than the reasoning: checking
+the pupil FIRST told a TEACHER "Student not found in this school" for an id that
+is nobody and "Document not found" for a real pupil they do not teach. Two
+refusals that differ, so the difference answers "is this uuid a real pupil
+here?" for somebody who may not know. The relationship check runs first — it
+returns immediately for a school-wide caller, who can see every pupil anyway and
+is better served by the specific message, and gives everyone else the SAME
+answer in both cases. The assertion that caught it had first been written as
+`expect(typeof msg).toBe("string")`, which is true of any two refusals and of
+any two messages; strengthening it to `expect(notMine).toBe(nobody)` is what
+turned it up.
+
+**The read sibling, swept in the same commit.** `GET /documents/checklist` took
+its `subjectId` from the query string and checked nothing: another school's
+pupil, this school's own teacher and a uuid that is nobody each returned **200 —
+missing all 5 documents, 0% complete**. Nothing leaks (the submissions read is
+RLS-scoped and finds none), but a confident answer about a person the school
+does not have sends a registrar chasing a family that is not theirs. It now
+validates the subject per KIND — pupil, staff, applicant, application — and
+answers 404 identically for a foreign subject and an unknown one.
+
+**And the floor.** `MalformedIdFilter` already turns P2002 into a 409 on the
+argument that "fixing eight call sites would leave the ninth". P2003, the other
+half of "an id arrived in the request body", was still falling through to a 500.
+It now becomes a **400 naming the field** — P2003 carries `meta.field_name`,
+unlike P2002, so "That student does not exist" rather than a bare status. This
+is defence in depth rather than a second live fix: probing five other creates
+with an unknown id found none still answering 500, because each has its own
+check. It is the floor for the next one.
+
+// GOTCHA: an existing test used P2003 as its example of "a genuine fault that
+must stay a loud 500". Reading it, that was a stand-in for "some other error"
+rather than a ruling — its point was that the pool-exhaustion branch must not
+swallow everything. It now uses P2021 (the table does not exist), which is
+unambiguously ours and nothing a caller can act on.
+
+// GOTCHA, and the gate caught me: the STAFF branch of the new subject check
+hand-rolled `NOT: { roles: { some: { role: { name: "student" } } } }`, and
+`student-scope.spec` failed naming the file and line. That module exists because
+this rule once had ten spellings. `NOT_A_STUDENT` is the eleventh place it now
+does not — expressed as "not a pupil" rather than as a list of employed roles,
+which would be wrong the day an eighteenth is seeded.
+
+// GOTCHA, the most instructive one: three report-card e2e assertions went red
+on a FIXTURE. It created its pupil with `roles: ["student"]` in the principal
+and **no `user_role` row**, which no real pupil is — `/students`, search and the
+billing seat count all define a pupil as "holds the student role", so one
+without the row is invisible to every one of them. It had passed for as long as
+it existed because nothing had ever asked. Worse, the vault write it broke is
+best-effort and swallowed, so the failure surfaced two assertions later as a
+missing document. Adding the row then broke the teardown's FK order — every test
+passed and the SUITE failed, which reads as a broken spec rather than a missing
+DELETE.
+
+### The document vault at 5,000 schools
+5,000 schools, 60,060 documents. Beyond the above:
+* **Scoping holds on every door, with positive controls.** A teacher filtering
+  for a pupil they do not teach and a parent filtering past their own child both
+  get 404 while the same filter for a pupil in scope returns rows; a pupil
+  reading another pupil's document by id gets 404 on `GET`, on `download` AND on
+  `file`. Cross-tenant: read, download, stream and delete all 404.
+* **The leaver gate holds on BOTH download doors.** An exited pupil's
+  REPORT_CARD is 403 on `download` and on `file`, naming who releases it; their
+  RECEIPT is not gated, because withholding personal data over a debt is
+  unlawful rather than firm.
+* **An exited pupil cannot authenticate at all**, so the gate is about who reads
+  their records, not about them.
+* **Paging is exact where it is hardest.** 62 documents for one pupil, 40 of
+  them sharing a single `createdAt` to the millisecond: 7 pages, 62 rows, 0
+  duplicates, 0 missed against a single unpaged read. Prisma's cursor positions
+  within the `[createdAt desc, id desc]` order, so the tie is broken by the
+  cursor column itself.
+* **A script cannot be served as one.** HTML uploaded as `text/html` and an SVG
+  carrying a `<script>` are both downgraded to `application/octet-stream` with
+  `Content-Disposition: attachment`; HTML declared as `application/pdf` is
+  stored but still served as an attachment, so nothing renders inline.
+* **The public path sniffs magic bytes and the vault does not, and that is
+  correct** — not the sibling asymmetry it looks like. `ACCEPTED_UPLOAD_TYPES`
+  is three formats (PDF/JPEG/PNG) because a family uploads a photo or a scan;
+  the vault takes any content type, so a school can file a .docx or a
+  spreadsheet. Sniffing there would reject legitimate uploads to protect against
+  a threat the attachment header already covers.
+* **Requirement seeding is idempotent**: `{created: 5, existing: 0}` then
+  `{created: 0, existing: 5}`.
+* **Reads are flat across the fleet** (schools 500 → 5,000): list 12–24 ms,
+  filtered 12–19 ms, create 19–28 ms, presign 11–15 ms, checklist 24–46 ms.

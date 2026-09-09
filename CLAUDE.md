@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **295 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **297 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **295 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **297 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1021,6 +1021,15 @@ These are the rules; the log is why each one exists.
   able to SEE what the decision turns on. Both have their own gates.
 - **Never trust an id from the body.** Check the KIND (a pupil made a subject
   teacher, a guardian attached to a member of staff), not merely that it exists.
+  A permission helper that answers "MAY I reach this pupil" is not the same
+  question as "IS this a pupil of ours", and for a school-wide caller the first
+  returns without touching the database: the Vault stored a report card against
+  ANOTHER SCHOOL's pupil, and against its own teacher, on 201s. Check with the
+  shared scope (`EVER_ENROLLED_STUDENT`, `NOT_A_STUDENT`) — ever-enrolled, since
+  a school still owes a leaver their records. **Order the two checks so the
+  refusals cannot differ**: told apart, they answer "is this uuid real here?".
+  And an id the caller supplied that names nothing is a **400 (P2003 in
+  `MalformedIdFilter`)**, not the 500 the foreign key used to produce.
 - **Read-then-write at READ COMMITTED is not a guard.** Prefer a UNIQUE INDEX
   where the rule is expressible, an advisory lock where it is not — and a guard
   and the race behind it must answer with the SAME status, or the race becomes

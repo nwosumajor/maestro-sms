@@ -56,6 +56,20 @@ export const EVER_ENROLLED_STUDENT: Prisma.UserWhereInput = {
 };
 
 /**
+ * NOT A PUPIL — anyone employed rather than taught.
+ *
+ * The complement of the two above, and it belongs here for the same reason they
+ * do: a call site that hand-rolls `NOT: { roles: { some: { role: { name:
+ * "student" } } } }` is a fourth spelling of the one rule, and this module
+ * exists because there were ten. Deliberately expressed as "not a pupil" rather
+ * than as a list of staff roles — the employed roles are seventeen and growing,
+ * and a list would be wrong the day the eighteenth is seeded.
+ */
+export const NOT_A_STUDENT: Prisma.UserWhereInput = {
+  NOT: { roles: { some: { role: { name: STUDENT_ROLE } } } },
+};
+
+/**
  * ON ROLL, expressed against `user_role` — for a caller that starts from role
  * rows rather than from users.
  *

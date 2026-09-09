@@ -18,7 +18,7 @@
 // a proxy.
 // =============================================================================
 
-import { ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import { MalformedIdFilter } from "../../src/common/malformed-id.filter";
 
@@ -100,9 +100,39 @@ describe("a full connection pool", () => {
 
   it("a genuine fault is STILL a loud 500 — busy must not become a blanket excuse", () => {
     const { f, seen } = filterCatching();
-    const boom = prismaError("P2003", "Foreign key constraint failed");
+    // P2021 — the table does not exist. Unambiguously a fault of ours, and
+    // nothing a caller can act on, so it must reach Nest untranslated.
+    //
+    // This used to be P2003, chosen as a stand-in for "some other error" rather
+    // than as a ruling that a foreign-key violation belongs in a 500. It does
+    // not: see the case below.
+    const boom = prismaError("P2021", "The table `document` does not exist in the current database.");
     f.catch(boom, httpHost().host);
     // Passed through untouched, so Nest renders it as the 500 it is.
     expect(seen[0]).toBe(boom);
+  });
+
+  it("an id that names NOTHING is the caller's mistake, and says which id", () => {
+    // The other half of "an id arrived in the request body", and the same
+    // argument as the duplicate above. Found on POST /documents: a studentId
+    // that is nobody reached document.create unchecked, Postgres refused the
+    // foreign key, and the principal was told "Internal server error" — untrue,
+    // no way out, and it sends them to support rather than to the id they
+    // mistyped.
+    const { f, seen } = filterCatching();
+    const e = prismaError("P2003", "Foreign key constraint violated");
+    (e as unknown as { meta: unknown }).meta = { field_name: "document_studentId_fkey (index)" };
+    f.catch(e, httpHost().host);
+    expect(seen[0]).toBeInstanceOf(BadRequestException);
+    // NAMES THE FIELD. P2003 carries one in meta.field_name, unlike P2002 —
+    // "That student does not exist" is actionable where "Bad Request" is not.
+    expect((seen[0] as BadRequestException).message).toBe("That student does not exist.");
+  });
+
+  it("...and still says something useful when Prisma names no field", () => {
+    const { f, seen } = filterCatching();
+    f.catch(prismaError("P2003", "Foreign key constraint violated"), httpHost().host);
+    expect(seen[0]).toBeInstanceOf(BadRequestException);
+    expect((seen[0] as BadRequestException).message).toBe("Something you referenced does not exist.");
   });
 });
