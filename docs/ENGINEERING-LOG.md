@@ -13056,3 +13056,62 @@ violations**, in 147 ms.
 // GOTCHA for the next person probing this: `POST /messages/threads` takes
 `recipientId`, SINGULAR. Guessing `recipientIds` produced a 400 with no message
 that read exactly like a rejected send — a probe reporting a fact about itself.
+
+### A finished timetable that reported itself as a total failure
+`generate` respects existing entries rather than wiping them, and seeds its
+busy-sets from them. So a re-run over a FINISHED grid found every slot busy and
+reported every offering's lessons as UNPLACED — with the reason "the class
+already has a lesson in every slot", which is exactly what an OVER-ALLOCATED
+school sees. Two opposite facts rendered identically, on the one screen an
+operator uses to decide whether their timetable worked.
+Reaching it needs nobody to do anything odd, and the route there is its own
+defect. Measured at 5,000-school scale on a 60-class secondary (2,400 lessons):
+
+| | |
+|---|---|
+| `generate` runtime | **110.5 s** |
+| nginx `location /` timeout | **60 s** (the default; none was set) |
+| what the browser got | **504 Gateway Time-out**, a raw nginx HTML page |
+| what the server then did | finished and wrote **all 2,400 lessons** |
+| what the retry said | `placed: 0, complete: false, unplaced: 2400` |
+
+So the operator was told twice that generation had failed, over a timetable that
+was complete. An offering's quota is now reduced by what it already holds and
+the difference reported as `alreadyPlaced`: the same retry now answers
+`placed: 0, alreadyPlaced: 2400, complete: true, unplaced: 0`, and the console
+says "Nothing to place — all 2,400 lessons are already on the timetable" instead
+of "0 lessons placed — every quota satisfied", which was its own small riddle.
+The count is discounted only when NOT replacing — `replace` deletes the targeted
+classes first, so crediting rows about to be removed would be a second lie — and
+a genuinely impossible timetable still reports its unplaced lessons, which is the
+regression the third case pins.
+**The timeout half.** One action in this product legitimately takes minutes, and
+it is deliberately synchronous because the operator is sitting there waiting for
+the grid. `location /` had no `proxy_read_timeout` at all, so nginx's 60 s
+default applied to every page including this one. Raised to 300 s, which covers
+the largest school the step budget can produce; the same 60-class generate now
+answers **HTTP 201 after 84.5 s** with `placed: 2400, complete: true`.
+// GOTCHA for the cloud: an ALB has its own idle timeout (60 s by default) and
+CloudFront its own. Raising nginx alone is not enough there and the same 504
+returns.
+
+### The timetable module at 5,000 schools — what held
+* **Double-booking is enforced by the DATABASE, not merely checked.** Three
+  unique indexes — class, teacher and room, each on
+  `(schoolId, X, dayOfWeek, periodId)`. Raced live: 6 admins saving into one
+  class/slot gave **1 × 201 and 5 × 409**; the same teacher into 2 classes at one
+  slot, 1 and 1; the same room likewise. The loser is told "That slot was taken
+  while you were saving", which is the RACE path — the unique index caught it,
+  not the pre-check.
+* **The guard and the race answer with the same status.** Sequentially the
+  pre-check gives a more specific message ("This class already has a lesson in
+  that slot") with the same **409**, so the race is never observable as a
+  different outcome.
+* **The solver is honest about what it cannot do.** 1,200 lessons into exactly
+  1,200 slots — a perfect packing with zero slack — solved complete. Asked for
+  168 lessons where 120 slots exist, it filled all 120, returned
+  `complete: false`, named all 48 unplaced with reasons, and gave preflight
+  diagnostics per class (`demand 56, capacity 40`).
+* **A teacher's declared unavailability is a hard constraint.** Teacher 1 marked
+  unavailable all Monday received 16 lessons, **none of them on Monday**, and the
+  timetable still completed.

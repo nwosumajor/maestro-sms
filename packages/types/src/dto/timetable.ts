@@ -47,6 +47,16 @@ export interface TimetableDiagnosticDto {
 export interface TimetableGenerateResultDto {
   /** Lessons written to the grid. */
   placed: number;
+  /**
+   * Lessons that were ALREADY on the grid, and so needed no placing.
+   *
+   * Without this a re-run over a finished timetable reported `placed: 0,
+   * complete: false, unplaced: <everything>` with the reason "the class already
+   * has a lesson in every slot" — which is what an OVER-ALLOCATED school sees,
+   * rendered identically. Two opposite facts, one screen. Measured on a
+   * 60-class school whose grid was complete: the retry read as a total failure.
+   */
+  alreadyPlaced: number;
   /** True when the CSP search satisfied EVERY quota (no best-effort fallback). */
   complete: boolean;
   /** Lessons that could not be placed, with the blocking constraint. */

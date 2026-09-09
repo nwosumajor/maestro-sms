@@ -424,12 +424,23 @@ function AutoGeneratePanel() {
       {error && <p className="text-sm text-destructive">{error}</p>}
       {result && (
         <div className="space-y-2 rounded-md border border-border p-3 text-sm">
-          <p>
-            <strong>{result.placed}</strong> lesson{result.placed === 1 ? "" : "s"} placed
-            {result.complete
-              ? " — every quota satisfied."
-              : " (best effort — see what couldn't fit below)."}
-          </p>
+          {/* "0 placed — every quota satisfied" is a confusing thing to read. It
+              is what a re-run over a FINISHED timetable produces, and that case
+              deserves its own sentence: the work is done, not undone. */}
+          {result.placed === 0 && (result.alreadyPlaced ?? 0) > 0 && result.complete ? (
+            <p>
+              Nothing to place — all <strong>{result.alreadyPlaced}</strong> lesson
+              {result.alreadyPlaced === 1 ? " is" : "s are"} already on the timetable.
+            </p>
+          ) : (
+            <p>
+              <strong>{result.placed}</strong> lesson{result.placed === 1 ? "" : "s"} placed
+              {(result.alreadyPlaced ?? 0) > 0 ? `, ${result.alreadyPlaced} already scheduled` : ""}
+              {result.complete
+                ? " — every quota satisfied."
+                : " (best effort — see what couldn't fit below)."}
+            </p>
+          )}
           {result.diagnostics.length > 0 && (
             <div className="space-y-1">
               <p className="font-medium text-amber-600 dark:text-amber-400">Impossible demand detected:</p>

@@ -487,6 +487,37 @@ export class TimetableService {
             roomId: true,
           },
         });
+        // WHAT IS ALREADY SCHEDULED IS NOT WHAT COULD NOT BE SCHEDULED.
+        //
+        // `keep` seeds the busy-sets from existing entries, so on a re-run over a
+        // finished grid EVERY slot is busy and EVERY offering's lessons come back
+        // as unplaced with "the class already has a lesson in every slot" — which
+        // is exactly what an OVER-ALLOCATED school sees. Two opposite facts
+        // rendered identically, on the one screen an operator uses to decide
+        // whether their timetable worked.
+        //
+        // It is reachable without anyone doing anything odd: a 60-class school's
+        // generate takes ~110 s, nginx times the request out at 60, the server
+        // finishes and writes all 2,400 lessons, and the operator — who saw a
+        // 504 — presses the button again. Measured: `placed: 0, complete: false,
+        // unplaced: 2400` over a COMPLETE timetable.
+        //
+        // So an offering's quota is reduced by what it already holds, and the
+        // difference is reported as `alreadyPlaced`. A finished timetable then
+        // says it is finished.
+        const existingForOfferings = input.replace
+          ? []
+          : ((await (tx.timetableEntry.groupBy as unknown as (a: unknown) => Promise<unknown>)({
+              by: ["classId", "subjectId", "teacherId"],
+              _count: { _all: true },
+              // reason: Prisma's groupBy overloads cannot infer a by-list built
+              // from a literal array here; the row shape is asserted instead and
+              // is exactly what the three keys + _count produce.
+            })) as Array<{ classId: string; subjectId: string; teacherId: string; _count: { _all: number } }>);
+        const alreadyBy = new Map(
+          existingForOfferings.map((r) => [`${r.classId}|${r.subjectId}|${r.teacherId}`, r._count._all]),
+        );
+
         const classBusy: Record<string, Set<string>> = {};
         const teacherBusy: Record<string, Set<string>> = {};
         const roomBusy: Record<string, Set<string>> = {};
@@ -508,9 +539,22 @@ export class TimetableService {
           ),
         );
 
+        // Applied AFTER the busy-sets are built from the same rows, so the two
+        // views of the grid cannot disagree.
+        let alreadyPlaced = 0;
+        const outstanding = offerings
+          .map((o) => {
+            const have = alreadyBy.get(`${o.classId}|${o.subjectId}|${o.teacherId}`) ?? 0;
+            const counted = Math.min(have, o.lessonsPerWeek);
+            alreadyPlaced += counted;
+            return { ...o, lessonsPerWeek: o.lessonsPerWeek - counted };
+          })
+          .filter((o) => o.lessonsPerWeek > 0);
+
         return {
           slots,
-          offerings,
+          offerings: outstanding,
+          alreadyPlaced,
           targetClassIds,
           teacherIds,
           classBusy,
@@ -523,6 +567,7 @@ export class TimetableService {
     const {
       slots,
       offerings,
+      alreadyPlaced,
       targetClassIds,
       teacherIds,
       classBusy,
@@ -641,6 +686,7 @@ export class TimetableService {
       await this.log(tx, p, "timetable.generate", "timetable", "auto", {
         classes: targetClassIds.length,
         placed: result.placed.length,
+        alreadyPlaced,
         unplaced: result.unplaced.length,
         complete: result.complete,
         diagnostics: diagnostics.length,
@@ -648,6 +694,7 @@ export class TimetableService {
       });
       return {
         placed: result.placed.length,
+        alreadyPlaced,
         complete: result.complete,
         unplaced: result.unplaced.map((u) => ({
           className: className.get(u.classId) ?? u.classId,
