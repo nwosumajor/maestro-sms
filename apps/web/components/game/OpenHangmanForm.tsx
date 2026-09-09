@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusLine, postSms } from "./play-ui";
+import { interpretApiError } from "@/lib/api-error";
 
 const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"] as const;
 
@@ -46,7 +47,7 @@ export function OpenHangmanForm({ classes }: { classes: Serialized<IdNameDto>[] 
     setBusy(false);
     if (!r.ok || !r.data) {
       setErr(true);
-      setMsg(r.error ?? `Failed (${r.status}).`);
+      setMsg(r.error ?? interpretApiError(r.status));
       return;
     }
     router.push(`/games/hangman/${r.data.id}`);

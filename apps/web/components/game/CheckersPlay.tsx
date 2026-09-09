@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { BoardClocks, ResultBanner, StatusLine, liveClockMs, postSms, useCelebratable, useNowTick, usePolled } from "./play-ui";
+import { interpretApiError } from "@/lib/api-error";
 
 type Game = Serialized<CheckersGameDto>;
 // Serialized<> flattens the [number,number] tuples to number[], so compare loosely.
@@ -43,7 +44,7 @@ export function CheckersPlay({ initial }: { initial: Game }) {
     const r = await fn();
     if (!r.ok) {
       setErr(true);
-      setMsg(r.error ?? `Failed (${r.status}).`);
+      setMsg(r.error ?? interpretApiError(r.status));
     }
     await refresh();
   };

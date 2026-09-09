@@ -82,7 +82,7 @@ export function SalaryChanges({
     const res = await postWithStepUp(`hr/salary/changes/${id}/decide`, { approve });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setMsg(res.status === 403 ? "A salary change must be approved by someone other than the requester." : await readApiError(res));
+    else setMsg(await readApiError(res, "A salary change must be approved by someone other than the requester."));
   };
 
   return (

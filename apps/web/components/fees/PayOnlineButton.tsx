@@ -46,7 +46,7 @@ export function PayOnlineButton({
       return;
     }
     setBusy(false);
-    setMsg(res.status === 503 ? "Online payments are not configured for this school." : await readApiError(res));
+    setMsg(await readApiError(res, "Online payments are not configured for this school."));
   };
 
   if (unavailable) {

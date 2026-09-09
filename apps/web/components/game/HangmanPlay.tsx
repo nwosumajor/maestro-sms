@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Celebrate, StatusLine, postSms, useCelebratable, usePolled } from "./play-ui";
+import { interpretApiError } from "@/lib/api-error";
 
 type Game = Serialized<HangmanGameDto>;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -39,7 +40,7 @@ export function HangmanPlay({ initial }: { initial: Game }) {
     const r = await fn();
     if (!r.ok) {
       setErr(true);
-      setMsg(r.error ?? `Failed (${r.status}).`);
+      setMsg(r.error ?? interpretApiError(r.status));
     }
     await refresh();
   };

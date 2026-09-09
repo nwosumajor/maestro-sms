@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { LessonBlockEditor } from "./LessonBlockEditor";
 import { ContentItemTools } from "./ContentReuse";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { interpretApiError } from "@/lib/api-error";
 
 type Content = Serialized<LmsContentDto>;
 
@@ -61,7 +62,7 @@ async function send(
   });
   if (res.ok) return { ok: true, error: null };
   const text = await res.text();
-  let error = `Failed (${res.status}).`;
+  let error = interpretApiError(res.status);
   try {
     const j = JSON.parse(text) as { message?: string | string[] };
     if (j.message) error = Array.isArray(j.message) ? j.message.join(", ") : j.message;

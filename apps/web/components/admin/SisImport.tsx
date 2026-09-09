@@ -112,7 +112,7 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         setMsg(`Approved — created ${b.summary?.created ?? 0}, skipped ${b.summary?.skipped ?? 0}.`);
       } else setMsg("Batch rejected.");
       router.refresh();
-    } else setMsg(res.status === 403 ? "A different admin (not the uploader) must approve." : await readApiError(res));
+    } else setMsg(await readApiError(res, "A different admin (not the uploader) must approve."));
   };
 
   const pending = batches.filter((b) => b.status === "PENDING");

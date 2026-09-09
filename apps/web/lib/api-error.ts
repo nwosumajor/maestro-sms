@@ -23,12 +23,44 @@ const INTERPRETATION: Record<number, string> = {
  * The server detail leads; the interpretation is appended only when it adds
  * something the detail doesn't already say.
  */
-export function interpretApiError(status: number, serverMessage?: string | null): string {
-  const detail = serverMessage?.trim();
+/**
+ * Nest's DEFAULT reason phrases. They carry no information the status has not
+ * already given, and gluing one to the front produces "Forbidden — You don't
+ * have permission for this action", which reads like two sentences from two
+ * different people. Treated as no detail at all.
+ */
+const GENERIC_DETAIL = new Set([
+  "bad request",
+  "unauthorized",
+  "forbidden",
+  "not found",
+  "conflict",
+  "internal server error",
+  "service unavailable",
+  "too many requests",
+  "unprocessable entity",
+]);
+
+/**
+ * @param fallback a caller's own hint, used ONLY when the server gave no
+ *   specific reason. It must never REPLACE the server's message: a status often
+ *   has several causes and the component knows one of them.
+ *
+ *   Measured on `POST /payments/:id/approve`, where the UI asserted "You can't
+ *   approve a payment you recorded" for every 403: the recorder gets exactly
+ *   that from the API, and somebody merely lacking `fee.approve` gets
+ *   "Forbidden" — and was told they had recorded a payment they had never seen.
+ */
+export function interpretApiError(status: number, serverMessage?: string | null, fallback?: string): string {
+  const raw = serverMessage?.trim();
+  const detail = raw && !GENERIC_DETAIL.has(raw.toLowerCase()) ? raw : undefined;
   const why = INTERPRETATION[status] ?? `The request failed (HTTP ${status}).`;
-  // 400/409 server messages are the full explanation; don't drown them.
-  if (detail && (status === 400 || status === 409)) return detail;
-  if (detail) return `${detail} — ${why}`;
+  // A SPECIFIC server message IS the explanation. Appending the generic clause
+  // can flatly contradict it — "You cannot approve a payment you recorded" is
+  // not a permission problem, and telling someone it might be sends them to ask
+  // for access they already have.
+  if (detail) return detail;
+  if (fallback?.trim()) return fallback.trim();
   return why;
 }
 
@@ -39,7 +71,7 @@ export function interpretApiError(status: number, serverMessage?: string | null)
  * through interpretApiError, so no caller re-implements body parsing or leaks a
  * bare "Failed (403)".
  */
-export async function readApiError(res: Response): Promise<string> {
+export async function readApiError(res: Response, fallback?: string): Promise<string> {
   let serverMessage: string | null = null;
   const text = await res.text().catch(() => "");
   if (text) {
@@ -50,5 +82,5 @@ export async function readApiError(res: Response): Promise<string> {
       serverMessage = text;
     }
   }
-  return interpretApiError(res.status, serverMessage);
+  return interpretApiError(res.status, serverMessage, fallback);
 }

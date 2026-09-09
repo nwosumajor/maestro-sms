@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { GuessForm, LiveDot, ScorePips, StatusLine, postSms, useLiveGame } from "./play-ui";
+import { interpretApiError } from "@/lib/api-error";
 
 type Comp = Serialized<UltimateCompetitionDto>;
 type Entry = Serialized<UltimateEntryDto>;
@@ -78,7 +79,7 @@ export function UltimatePlay({
     const r = await postSms<{ dead: number; wounded: number }>(`ultimate/competitions/${comp.id}/guess`, { value });
     if (!r.ok) {
       setErr(true);
-      setMsg(r.error ?? `Failed (${r.status}).`);
+      setMsg(r.error ?? interpretApiError(r.status));
       return;
     }
     if (r.data) setLast(r.data);

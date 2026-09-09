@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { interpretApiError } from "@/lib/api-error";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
 import { requiresContactEmail } from "@sms/types";
@@ -49,7 +50,7 @@ export function CreateUserForm({ roles }: { roles: string[] }) {
       setContactEmail("");
       router.refresh();
     } else {
-      setResult(`Failed (${res.status}). ${res.error ?? ""}`);
+      setResult(res.error ?? interpretApiError(res.status));
     }
   };
 

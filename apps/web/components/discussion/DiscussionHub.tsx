@@ -4,6 +4,7 @@
 // comments; members post and comment. A selected group expands to show its posts.
 
 import type { DiscussionGroupDto, DiscussionPostDto, Serialized } from "@sms/types";
+import { interpretApiError } from "@/lib/api-error";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
@@ -34,7 +35,7 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
     setBusy(true); setMsg(null);
     const res = await fn();
     setBusy(false);
-    if (res.ok) { setMsg(ok); if (reload) await loadPosts(reload); else router.refresh(); } else setMsg(res.error ?? `Failed (${res.status}).`);
+    if (res.ok) { setMsg(ok); if (reload) await loadPosts(reload); else router.refresh(); } else setMsg(res.error ?? interpretApiError(res.status));
   };
 
   // Posts arrive one keyset page at a time. Without `cursor` this is a fresh open
@@ -182,5 +183,5 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
 // DELETE via the BFF (postSms is POST-only).
 async function deleteSms(path: string): Promise<{ ok: boolean; status: number; error: string | null }> {
   const res = await fetch(`/api/sms/${path}`, { method: "DELETE" });
-  return { ok: res.ok, status: res.status, error: res.ok ? null : `Failed (${res.status})` };
+  return { ok: res.ok, status: res.status, error: res.ok ? null : interpretApiError(res.status) };
 }

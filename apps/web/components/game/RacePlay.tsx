@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Celebrate, GuessForm, GuessList, LiveDot, StatusLine, postSms, useCelebratable, useLiveGame } from "./play-ui";
+import { interpretApiError } from "@/lib/api-error";
 
 type Race = Serialized<RaceDto>;
 
@@ -30,7 +31,7 @@ export function RacePlay({ initial, canOpen }: { initial: Race; canOpen: boolean
     const r = await fn();
     if (!r.ok) {
       setErr(true);
-      setMsg(r.error ?? `Failed (${r.status}).`);
+      setMsg(r.error ?? interpretApiError(r.status));
     }
     await refresh();
   };

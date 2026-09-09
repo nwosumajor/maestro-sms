@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { postSms } from "./play-ui";
 import { readApiError } from "@/lib/api-error";
+import { interpretApiError } from "@/lib/api-error";
 
 type Person = Serialized<IdNameDto>;
 
@@ -32,7 +33,7 @@ export function EnrollSchoolButton({ competitionId, enrolled }: { competitionId:
           const r = await postSms(`ultimate/competitions/${competitionId}/enroll`);
           setBusy(false);
           if (r.ok) router.refresh();
-          else setMsg(r.error ?? `Failed (${r.status}).`);
+          else setMsg(r.error ?? interpretApiError(r.status));
         }}
       >
         {busy ? "…" : "Enroll our school"}
@@ -160,7 +161,7 @@ export function CreateUltimateForm() {
           if (r.ok) {
             setName("");
             router.refresh();
-          } else setMsg(r.error ?? `Failed (${r.status}).`);
+          } else setMsg(r.error ?? interpretApiError(r.status));
           setBusy(false);
         }}
       >

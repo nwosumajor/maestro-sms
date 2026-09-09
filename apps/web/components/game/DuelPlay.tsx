@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { GuessForm, LiveDot, ResultBanner, ScorePips, StatusLine, digitsValid, postSms, useCelebratable, useLiveGame } from "./play-ui";
 import { Input } from "@/components/ui/input";
+import { interpretApiError } from "@/lib/api-error";
 
 type Game = Serialized<GameDto>;
 
@@ -43,7 +44,7 @@ export function DuelPlay({
     const r = await fn();
     if (!r.ok) {
       setErr(true);
-      setMsg(r.error ?? `Failed (${r.status}).`);
+      setMsg(r.error ?? interpretApiError(r.status));
     }
     await refresh();
   };

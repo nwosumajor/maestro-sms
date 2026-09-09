@@ -51,7 +51,7 @@ export function PayrollManager({
     });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setMsg(res.status === 409 ? "A run already exists for that period." : await readApiError(res));
+    else setMsg(await readApiError(res, "A run already exists for that period."));
   };
 
   return (

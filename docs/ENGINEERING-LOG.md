@@ -13210,3 +13210,39 @@ years later, if ever.
 // GOTCHA: my own test passed jest and failed `pnpm typecheck` — it omitted a
 required prop. A green jest run is not the whole gate, and a component double
 must satisfy the component's real props.
+
+### Error messages: one that was untrue, and forty that were a number
+A sweep of every failure message the web shows, prompted by the
+`RecordPaymentForm` fix. Two shapes, both swept.
+**A STATUS OFTEN HAS SEVERAL CAUSES, and the component asserted one.** Eleven
+components did `res.status === 403 ? "<a specific claim>" : await
+readApiError(res)`. The else-branch proves they know how to read the server's
+reason; they simply declined to for one status. Measured live on
+`POST /payments/:id/approve`, which returns 403 for two different reasons:
+
+| who | the API said | the UI said |
+|---|---|---|
+| the person who recorded it | `You cannot approve a payment you recorded` | You can't approve a payment you recorded. |
+| anyone lacking `fee.approve` | `Forbidden` | You can't approve a payment you recorded. |
+
+The second person had never seen the payment. The hint is now a FALLBACK —
+`readApiError(res, hint)` — used only when the server gave nothing specific, so
+it can never overwrite the truth.
+**A BARE STATUS NUMBER IS NOT A MESSAGE.** Forty sites fell back to
+`Failed (403).` — in a codebase whose shared interpreter exists precisely so
+"a bare 'Failed (403)' never reaches the screen". All route through it now.
+`interpretApiError` also gained two corrections: a SPECIFIC server message is now
+the whole answer rather than having the generic clause appended (appending
+"you don't have permission" to "You cannot approve a payment you recorded" is a
+contradiction that sends someone to ask for access they already have), and Nest's
+default reason phrases — "Forbidden", "Bad Request", "Not Found" — are treated as
+no detail, so a user reads one sentence instead of "Forbidden — You don't have
+permission for this action".
+// GOTCHA: my first version of the gate flagged EVERY status-conditional literal
+and caught nine legitimate ones. A 404 hint on a SCOPED READ ("You don't teach
+this class") is the correct reading of this platform's 404-not-403 convention and
+better than the generic 404 text, because the server sends nothing specific
+there. An over-wide gate is the same failure as a blind one — it teaches its next
+reader to add an exemption — so it was narrowed to the shape that was actually
+wrong rather than exempting what it wrongly caught. Both halves
+mutation-validated, each naming the offending file.

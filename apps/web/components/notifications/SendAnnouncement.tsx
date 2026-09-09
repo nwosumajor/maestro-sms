@@ -44,7 +44,7 @@ export function SendAnnouncement({ users }: { users: User[] }) {
     });
     setBusy(false);
     if (res.ok) { setTitle(""); setBody(""); setMsg("Sent."); router.refresh(); }
-    else setMsg(res.status === 403 ? "You can't send to that recipient." : await readApiError(res));
+    else setMsg(await readApiError(res, "You can't send to that recipient."));
   };
 
   return (

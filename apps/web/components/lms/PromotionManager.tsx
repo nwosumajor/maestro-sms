@@ -91,7 +91,7 @@ export function PromotionManager({
       );
       setOutcomes({});
       router.refresh();
-    } else setMsg(res.status === 400 ? "Nothing to promote (no active students or no target)." : await readApiError(res));
+    } else setMsg(await readApiError(res, "Nothing to promote (no active students or no target)."));
   };
 
   const decide = async (id: string, action: "approve" | "reject") => {
@@ -99,7 +99,7 @@ export function PromotionManager({
     const res = await fetch(`/api/sms/promotions/${id}/${action}`, { method: "POST" });
     setBusy(false);
     if (res.ok) { setMsg(action === "approve" ? "Promotion approved — enrollments moved." : "Promotion rejected."); router.refresh(); }
-    else setMsg(res.status === 403 ? "A different person (not the initiator) must approve." : await readApiError(res));
+    else setMsg(await readApiError(res, "A different person (not the initiator) must approve."));
   };
 
   const pending = batches.filter((b) => b.status === "PENDING");

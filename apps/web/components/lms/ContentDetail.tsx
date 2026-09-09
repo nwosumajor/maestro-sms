@@ -30,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LessonBlocks } from "./LessonBlocks";
+import { interpretApiError } from "@/lib/api-error";
 
 type Content = Serialized<LmsContentDto>;
 type Post = Serialized<ForumPostDto>;
@@ -45,7 +46,7 @@ async function post<T = unknown>(
   });
   const text = await res.text();
   if (res.ok) return { ok: true, data: text ? (JSON.parse(text) as T) : null, error: null };
-  let error = `Failed (${res.status}).`;
+  let error = interpretApiError(res.status);
   try {
     const j = JSON.parse(text) as { message?: string | string[] };
     if (j.message) error = Array.isArray(j.message) ? j.message.join(", ") : j.message;

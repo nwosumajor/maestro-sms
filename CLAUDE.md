@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **282 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **283 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **282 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **283 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1742,6 +1742,21 @@ resolved window now, and a row with none says "all years". // GOTCHA:
 `a-field-no-screen-can-fill-in` cannot catch this class when the field name is
 common across the web (`sessionId` is on dozens of screens); it asks only
 whether the web MENTIONS it.
+
+## An error message is the SERVER's reason; a hint is only a fallback
+A status usually has several causes and the component knows one. Eleven did
+`res.status === 403 ? "<claim>" : await readApiError(res)` — measured on
+`payments/:id/approve`, which 403s both for separation of duties AND for a
+missing permission, so someone lacking `fee.approve` was told they had recorded
+a payment they had never seen. Pass the hint to `readApiError(res, hint)`
+instead: it is used ONLY when the server gave nothing specific. Forty other
+sites fell back to `Failed (403).`; they route through `interpretApiError` now,
+which also stops appending its generic clause to a specific message (it can
+contradict it) and treats Nest's default phrases ("Forbidden", "Bad Request") as
+no detail. Gate: `an-error-message-that-is-true`. // GOTCHA: its first version
+flagged every status-conditional literal and caught nine LEGITIMATE 404 hints on
+scoped reads, where the hint is the right reading of 404-not-403 and the server
+says nothing. Narrowed rather than exempted.
 
 ## Money AWAITING APPROVAL is money committed against the invoice
 The overpayment guard read POSTED payments only, so two payments each for the

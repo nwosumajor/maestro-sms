@@ -11,6 +11,7 @@
 
 import type { LmsAwardDto, Serialized } from "@sms/types";
 import { shortDate, type DisplayRegion } from "@/lib/format";
+import { interpretApiError } from "@/lib/api-error";
 import { useFormat } from "@/components/shell/RegionProvider";
 import { LMS_BADGES, badgeMeta } from "@sms/types";
 import * as React from "react";
@@ -32,7 +33,7 @@ async function req(method: string, path: string, body?: unknown) {
   const data = raw ? JSON.parse(raw) : null;
   if (res.ok) return { ok: true as const, data };
   const j = data as { message?: string | string[] } | null;
-  const error = j?.message ? (Array.isArray(j.message) ? j.message.join(", ") : j.message) : `Failed (${res.status}).`;
+  const error = interpretApiError(res.status, Array.isArray(j?.message) ? j.message.join(", ") : j?.message);
   return { ok: false as const, error };
 }
 

@@ -27,7 +27,7 @@ export function PendingPayments({ payments }: { payments: PendingPayment[] }) {
     const res = await fetch(`/api/sms/payments/${id}/${action}`, { method: "POST" });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setMsg(res.status === 403 ? "You can't approve a payment you recorded." : await readApiError(res));
+    else setMsg(await readApiError(res, "You can't approve a payment you recorded."));
   };
 
   if (payments.length === 0) return null;

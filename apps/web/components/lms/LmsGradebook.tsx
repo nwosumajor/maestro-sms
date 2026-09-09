@@ -14,6 +14,7 @@
 // =============================================================================
 
 import type { LmsContentDto, LmsGradebookDto, Serialized } from "@sms/types";
+import { interpretApiError } from "@/lib/api-error";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,7 @@ async function req(method: string, path: string, body?: unknown): Promise<{ ok: 
   const data = raw ? JSON.parse(raw) : null;
   if (res.ok) return { ok: true, data, error: null };
   const j = data as { message?: string | string[] } | null;
-  const error = j?.message ? (Array.isArray(j.message) ? j.message.join(", ") : j.message) : `Failed (${res.status}).`;
+  const error = interpretApiError(res.status, Array.isArray(j?.message) ? j.message.join(", ") : j?.message);
   return { ok: false, data: null, error };
 }
 

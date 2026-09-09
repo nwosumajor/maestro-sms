@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusLine, postSms, sendSms } from "./play-ui";
+import { interpretApiError } from "@/lib/api-error";
 
 const THEMES = ["GEOGRAPHY", "SCIENCE", "ART", "LITERATURE", "GENERAL"] as const;
 const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"] as const;
@@ -69,7 +70,7 @@ export function QuizHostConsole({
     const body = { title: title.trim(), theme, difficulty, questions: cleaned };
     const r = editingId ? await sendSms("PUT", `quizzes/${editingId}`, body) : await postSms("quizzes", body);
     setBusy(false);
-    if (!r.ok) return fail(r.error ?? `Failed (${r.status}).`);
+    if (!r.ok) return fail(r.error ?? interpretApiError(r.status));
     setMsg(editingId ? "Quiz updated." : "Quiz saved. Open a session below to host it.");
     setErr(false);
     resetForm();
@@ -107,7 +108,7 @@ export function QuizHostConsole({
     setMsg(null);
     setErr(false);
     const r = await sendSms("DELETE", `quizzes/${quizId}`);
-    if (!r.ok) return fail(r.error ?? `Failed (${r.status}).`);
+    if (!r.ok) return fail(r.error ?? interpretApiError(r.status));
     if (editingId === quizId) resetForm();
     setMsg("Quiz deleted.");
     router.refresh();
@@ -121,7 +122,7 @@ export function QuizHostConsole({
   const openSession = async (quizId: string, classId: string) => {
     if (!classId) return fail("Pick a class to host for.");
     const r = await postSms<{ id: string }>("quiz-sessions", { quizId, classId });
-    if (!r.ok || !r.data) return fail(r.error ?? `Failed (${r.status}).`);
+    if (!r.ok || !r.data) return fail(r.error ?? interpretApiError(r.status));
     router.push(`/games/quiz/${r.data.id}`);
   };
 

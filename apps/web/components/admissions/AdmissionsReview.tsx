@@ -47,7 +47,7 @@ export function AdmissionsReview({
     });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setNote(res.status === 403 ? "You are not the approver for the current stage." : await readApiError(res));
+    else setNote(await readApiError(res, "You are not the approver for the current stage."));
   };
 
   const schedule = async (id: string, examDate: string, examNote: string) => {

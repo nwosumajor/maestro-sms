@@ -56,7 +56,7 @@ export function ElevationPanel({
   const act = async (id: string, action: "approve" | "revoke") => {
     const res = await fetch(`/api/sms/security/elevation/${id}/${action}`, { method: "POST" });
     if (res.ok) router.refresh();
-    else setMsg(res.status === 403 ? "You can't approve your own request." : await readApiError(res));
+    else setMsg(await readApiError(res, "You can't approve your own request."));
   };
 
   return (

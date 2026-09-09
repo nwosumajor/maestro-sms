@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { postSms } from "./play-ui";
+import { interpretApiError } from "@/lib/api-error";
 
 type ClassRow = Serialized<IdNameDto>;
 
@@ -62,7 +63,7 @@ export function OpenRaceForm({ classes }: { classes: ClassRow[] }) {
           if (r.ok && r.data) router.push(`/games/race/${r.data.id}`);
           else {
             setBusy(false);
-            setMsg(r.error ?? `Failed (${r.status}).`);
+            setMsg(r.error ?? interpretApiError(r.status));
           }
         }}
       >

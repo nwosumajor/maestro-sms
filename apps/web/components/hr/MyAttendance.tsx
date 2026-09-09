@@ -13,6 +13,7 @@ import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
+import { interpretApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +60,7 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
       if (h.ok) setHistory((await h.json()) as Mark[]);
     } else {
       const j = data as { message?: string } | null;
-      setErr(j?.message ?? `Failed (${res.status}).`);
+      setErr(interpretApiError(res.status, Array.isArray(j?.message) ? j.message.join(", ") : j?.message));
     }
   }
 

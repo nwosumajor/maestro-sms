@@ -82,7 +82,7 @@ export function MessageCreditsCard({
       return;
     }
     setBusy(null);
-    setMsg(res.status === 503 ? "Online payments are not configured." : await readApiError(res));
+    setMsg(await readApiError(res, "Online payments are not configured."));
   };
 
   return (

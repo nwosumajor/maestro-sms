@@ -10,6 +10,7 @@
 // =============================================================================
 
 import type { LmsContentDto, Serialized } from "@sms/types";
+import { interpretApiError } from "@/lib/api-error";
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -32,7 +33,7 @@ async function review(id: string, action: "APPROVE" | "REJECT" | "REQUEST_REVISI
   } catch {
     /* fall through */
   }
-  return `Failed (${res.status}).`;
+  return interpretApiError(res.status);
 }
 
 export function ApprovalQueue({ initial }: { initial: Content[] }) {

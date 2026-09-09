@@ -15,6 +15,7 @@ import type { Serialized, StaffLoanDto } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postWithStepUp } from "@/lib/stepup";
+import { interpretApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,7 +49,7 @@ export function LoansAdmin({ initial, canApprove }: { initial: Loan[]; canApprov
       router.refresh();
     } else {
       const j = (await res.json().catch(() => null)) as { message?: string } | null;
-      setErr(j?.message ?? `Failed (${res.status}).`);
+      setErr(interpretApiError(res.status, Array.isArray(j?.message) ? j.message.join(", ") : j?.message));
     }
   }
 
