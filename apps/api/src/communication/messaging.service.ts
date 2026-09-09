@@ -15,7 +15,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { type AuditLogService } from "../foundation/audit-log.service";
 import { Prisma } from "@sms/db";
 import { EVER_ENROLLED_STUDENT } from "../common/student-scope";
-import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
+import { decodeCursor, pageLimit, seekWhere, seekWhereOn, toPage, toPageOn } from "../common/keyset-cursor";
 
 // =============================================================================
 // Who may START a conversation with whom
@@ -260,12 +260,30 @@ export class MessagingService {
       // read is bounded by the PAGE and correct for any inbox size. The
       // participant rows are then fetched for the page only, which is where
       // lastReadAt is actually needed.
+      // ORDERED BY LAST ACTIVITY, not by when the conversation was started.
+      //
+      // `reply` bumps `messageThread.updatedAt` on every message — a write whose
+      // only purpose is to record recency — and this list ordered by `createdAt`
+      // and read it for nothing. So a thread never moved: an inbox was a list of
+      // conversations in the order they were OPENED, permanently.
+      //
+      // Measured on a teacher with 400 conversations: a parent replied at
+      // 06:15, and the teacher's page 1 showed threads whose last activity was
+      // 06:09-06:11 — all older — while the one with today's unread message sat
+      // at POSITION 400, four pages down. The busier the teacher, the deeper
+      // today's message is buried, which is precisely backwards.
+      //
+      // `createdAt` was not an oversight: there is an index for it
+      // (`schoolId, createdAt DESC, id DESC`) and it is IMMUTABLE, so keyset
+      // paging over it can never skip or repeat. Migration `20260909000000` adds
+      // the matching `updatedAt` index; the cost of a mutable sort key is
+      // documented on `seekWhereOn`.
       const rows = (await tx.messageThread.findMany({
-        where: { participants: { some: { userId: p.userId } }, ...seekWhere(cursor) },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        where: { participants: { some: { userId: p.userId } }, ...seekWhereOn(cursor, "updatedAt") },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         take: limit + 1,
       })) as Array<{ id: string; subject: string; updatedAt: Date; createdAt: Date }>;
-      const page = toPage(rows, limit);
+      const page = toPageOn(rows, limit, "updatedAt");
       if (page.items.length === 0) return { items: [], nextCursor: null };
       const lastRead = new Map(
         (

@@ -13009,3 +13009,50 @@ them again" — works exactly as written: **23 temporary indexes built in 1.2 s*
 the same delete then committed **1,370,900 rows in 3 m 6 s**, indexes dropped.
 Worth knowing before anyone offboards a real school, and worth scripting if that
 becomes routine.
+
+### An inbox ordered by when each conversation was OPENED
+`reply` bumps `messageThread.updatedAt` on every message — a write whose only
+purpose is to record recency — and `listThreads` ordered by `createdAt` and read
+it for nothing. So a conversation never moved: an inbox was a list of threads in
+the order they were STARTED, permanently.
+Measured at 5,000-school scale on a teacher with 400 conversations. A parent
+replied at **06:15:28**; the teacher's page 1 showed threads whose last activity
+was 06:09–06:11, all older, and the thread carrying today's unread message sat at
+**position 400** — four pages down. The busier the teacher, the deeper today's
+message is buried, which is exactly backwards. The DTO already carried
+`updatedAt` and the row already showed the last message's body; only the ORDER
+ignored it.
+`createdAt` was not an oversight. There is an index built for it
+(`schoolId, createdAt DESC, id DESC`) and it is IMMUTABLE, so keyset paging over
+it can never skip or repeat. Migration `20260909000000` adds the matching
+`updatedAt` index and `seekWhereOn`/`toPageOn` cut the cursor on the same column
+the query orders by.
+// GOTCHA, stated rather than discovered: **paging on a MUTABLE sort key is not
+free.** A thread bumped while the caller is part-way through their inbox can be
+seen twice, or slip past a page boundary unseen, because the value the cursor was
+cut on has moved. Every mail client has this, it self-corrects on reload, and the
+measured alternative was a message from today at position 400.
+// GOTCHA the second test exists for: a cursor cut on `createdAt` against an
+`updatedAt` ordering does not merely mis-sort — it seeks from a value the
+ordering does not follow, and whole runs of threads are never returned at all.
+Ordering and seeking must name the SAME column; `toPageOn` takes it explicitly
+for that reason.
+Verified after the fix on the same 400-thread inbox: the replied-to thread leads,
+and walking every page returned **400 distinct threads, 0 duplicates, 0 ordering
+violations**, in 147 ms.
+
+### The messaging module at 5,000 schools — what held
+* **Isolation.** A teacher reading another school's thread gets **404**, a
+  thread id that exists nowhere gets **404**, and a reply into a foreign thread
+  gets **404** — indistinguishable, so a refusal never confirms what it hides.
+  A cross-tenant recipient is "Recipient not found", which does not disclose that
+  the person exists elsewhere.
+* **Who may write to whom.** A parent may open a thread with a teacher (201) and
+  their contact list contains exactly the staff they may reach. The relationship
+  scoping added when this rule was widened still narrows the rows.
+* **Scale.** 600 teachers opening their inbox across 36,560 threads: p50 226 ms,
+  p95 329 ms, max 401 ms, zero errors — the read is bounded by the page, not by
+  the size of the inbox or of the fleet.
+// GOTCHA for the next person probing this: `POST /messages/threads` takes
+`recipientId`, SINGULAR. Guessing `recipientIds` produced a 400 with no message
+that read exactly like a rejected send — a probe reporting a fact about itself.

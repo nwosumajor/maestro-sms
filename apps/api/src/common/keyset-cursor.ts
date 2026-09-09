@@ -52,11 +52,31 @@ export function pageLimit(requested: number | undefined, fallback = 50, max = 10
  * Returns `{}` for the first page.
  */
 export function seekWhere(cursor: KeysetCursor | null): Record<string, unknown> {
+  return seekWhereOn(cursor, "createdAt");
+}
+
+/**
+ * The same seek, on a NAMED timestamp column.
+ *
+ * Most lists here are ordered by when a row was CREATED, and for those the
+ * cursor and the ordering agree by default. A messaging inbox is the exception:
+ * it must be ordered by LAST ACTIVITY, or a reply to an old conversation stays
+ * wherever that conversation started.
+ *
+ * // GOTCHA: paging on a MUTABLE column is not free. A thread bumped while the
+ * caller is part-way through their inbox can be seen twice, or slip past a page
+ * boundary unseen, because the value the cursor was cut on has moved. That is
+ * the accepted cost of a recency-ordered list — every mail client has it, it
+ * self-corrects on reload, and the alternative measured worse: with a stable
+ * `createdAt` order, a message sent TODAY sat at position 400 of a teacher's
+ * inbox, below 399 conversations with older activity.
+ */
+export function seekWhereOn(cursor: KeysetCursor | null, field: "createdAt" | "updatedAt"): Record<string, unknown> {
   if (!cursor) return {};
   return {
     OR: [
-      { createdAt: { lt: cursor.createdAt } },
-      { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+      { [field]: { lt: cursor.createdAt } },
+      { [field]: cursor.createdAt, id: { lt: cursor.id } },
     ],
   };
 }
@@ -69,4 +89,24 @@ export function toPage<T extends { id: string; createdAt: Date }>(rows: T[], lim
   const hasMore = rows.length > limit;
   const items = hasMore ? rows.slice(0, limit) : rows;
   return { items, nextCursor: hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]) : null };
+}
+
+/**
+ * `toPage`, cutting the cursor on a NAMED column — it MUST be the same column
+ * the query ordered by, or the next page seeks from a value the ordering does
+ * not follow and rows are skipped wholesale.
+ */
+export function toPageOn<T extends { id: string; createdAt: Date; updatedAt?: Date }>(
+  rows: T[],
+  limit: number,
+  field: "createdAt" | "updatedAt",
+): Page<T> {
+  const hasMore = rows.length > limit;
+  const items = hasMore ? rows.slice(0, limit) : rows;
+  const last = items[items.length - 1];
+  const at = last ? ((last as Record<string, unknown>)[field] as Date) : null;
+  return {
+    items,
+    nextCursor: hasMore && last && at ? `${at.toISOString()}_${last.id}` : null,
+  };
 }
