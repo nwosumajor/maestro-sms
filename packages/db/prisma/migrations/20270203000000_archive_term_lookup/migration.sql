@@ -6,4 +6,10 @@
 -- Harmless while the table is small and quietly quadratic once it is not: the
 -- sweep runs nightly over every ended term in the fleet, and this table grows
 -- for ever by design ("kept indefinitely" is what the archive is for).
+-- STAMPED AFTER 20261127000000, which is what creates this table. It was first
+-- written as 20260911000000 and applied cleanly on every already-migrated DB —
+-- including mine — because the table was long since there. A FRESH
+-- `migrate deploy` died on `relation "school_archive" does not exist` (42P01).
+-- The migration history replays from scratch; a stamp is a position in that
+-- replay, not the date you wrote it.
 CREATE INDEX "school_archive_termId_idx" ON "school_archive" ("termId");
