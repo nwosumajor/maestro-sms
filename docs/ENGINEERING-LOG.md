@@ -14149,3 +14149,82 @@ a real ordering defect just as readily as it invented one.
 * **The scan costs two queries per 500 pending.** 666 pending is 64 ms against
   22 ms for a school with 40; the cost tracks the school's own backlog, which is
   the thing the screen is about.
+
+### "30 reminded", and not one family was told
+
+Found by a CROSS-MODULE audit — 5,000 schools aged three years, built to be
+shared by several modules rather than read by one — and neither module is wrong
+on its own, which is why neither module's tests catch it.
+
+`sendFeeReminders` incremented `reminded` once per INVOICE, whether or not
+anybody heard. An invoice for a pupil with no guardian linked counted exactly
+like one that reached a parent, so the number a school reads to decide whether
+its families have been chased for money was a count of its own loop:
+
+```
+school with 30 billable invoices, 0 guardian links
+  the sweep returned      { reminded: 30, invoices: 30 }
+  FEE_REMINDER rows ever   0
+fleet-wide, schools that would report reminders and reach nobody:  5,000 of 5,000
+```
+
+It now counts the families TOLD and names the shortfall as `unreachable` — the
+fourth fact this repo already uses for the alumni broadcast, and for the same
+reason: it is not `failed` (nothing went wrong) and not `skipped` (the invoice
+was due); it is work with nobody to deliver it to, and a school can fix it by
+linking a guardian. The weekly sweep carries both up, and gained the `failed`
+counter every other cross-tenant sweep has.
+
+Live, before and after, on the same school:
+```
+{"reminded":30,"invoices":30}                        -> nobody told
+{"reminded":0,"invoices":30,"unreachable":30}        -> and it says so
+{"reminded":2,"invoices":30,"unreachable":28}        -> two guardians linked
+```
+The three facts sum, so a reader can trust the shortfall.
+
+// The button on /fees/reports said "Sent 30 reminder(s)". It now says how many
+families were told and, separately, how many could not be — naming the fix
+(link a guardian) rather than reporting a number that reads as success.
+
+### What the cross-module audit found HOLDING
+Most of what an audit like this does is establish that the composition is sound,
+and saying so is worth as much as a finding. Each of these was DRIVEN, not read:
+
+* **Every module agrees on the roll.** Billing seats, the roster and the class
+  detail all moved from 24 → 23 → and 26 → 25 together when a pupil was exited
+  through the real two-stage chain. Money agrees too: analytics and
+  `/fees/reports` both report 450,000,000 invoiced / 75,000,000 collected /
+  375,000,000 outstanding, with the aging buckets summing.
+* **A leaver is closed out everywhere, and their records survive.** After the
+  exit: enrolment refuses them (400, naming the reason), the register refuses
+  them, they cannot log in — while their invoices and attendance summary still
+  read 200. That is the shape a school needs: gone from the working set, present
+  in the record.
+* **`exit/preview` genuinely composes.** It named the class, the exact
+  outstanding balance in the right currency, and unreturned books — a
+  cross-module read that was accurate to the fixture.
+* **The doors that would break the invariants are guarded.** A teacher cannot be
+  enrolled as a pupil ("only pupils on roll can be put in a class"), a pupil
+  cannot be made a guardian ("does not have the parent role"), another school's
+  pupil is 404, a uuid that is nobody is 404 rather than a 500, and re-adding a
+  pupil with a closed enrolment is a 409 pointing at reactivation.
+* **The unsatisfiable-chain guard fires in composition.** A student exit could
+  not even be RAISED in a school with one qualifying approver, which is why the
+  audit had to appoint a head teacher before the leaver case could be tested at
+  all.
+
+### An observation the owner should decide on, not a fix I made
+Linking a guardian to a pupil who has been **exited** and re-running the sweep
+gives `reminded: 3` — the departed family is chased for the outstanding fees.
+
+`NotificationService.persist` suppresses external delivery when the RECIPIENT is
+not ACTIVE, and its comment names this very case: *"A withdrawn child's guardian
+being texted about next term's fees is the shape of complaint this produces."*
+The check cannot cover it, because the recipient is the GUARDIAN — still ACTIVE,
+as a parent remains — while the departed party is the SUBJECT.
+
+Left alone deliberately: a leaver may genuinely owe money and a school is
+entitled to pursue a debt, so suppressing this is a commercial decision rather
+than a defect to fix unilaterally. Recorded here with the evidence so it is a
+decision somebody makes rather than one nobody noticed.

@@ -237,7 +237,10 @@ export class FeesService {
    *  (ISSUED / PARTIALLY_PAID). Optionally only overdue ones (dueDate < today).
    *  Reuses the guardian-notify path (in-app + email/SMS via the channel provider).
    *  Staff-triggered (fee.manage). Returns how many reminders were sent. */
-  async sendFeeReminders(p: Principal, opts: { overdueOnly?: boolean } = {}): Promise<{ reminded: number; invoices: number }> {
+  async sendFeeReminders(
+    p: Principal,
+    opts: { overdueOnly?: boolean } = {},
+  ): Promise<{ reminded: number; invoices: number; unreachable: number }> {
     const today = new Date();
     const targets = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = { status: { in: ["ISSUED", "PARTIALLY_PAID"] } };
@@ -291,9 +294,32 @@ export class FeesService {
       )) as Array<{ studentId: string; parentId: string }>;
       for (const l of links) guardiansBy.set(l.studentId, [...(guardiansBy.get(l.studentId) ?? []), l.parentId]);
     }
+    // COUNT THE FAMILIES TOLD, NOT THE INVOICES WALKED.
+    //
+    // `reminded++` fired once per invoice whether or not anybody heard. An
+    // invoice for a pupil with NO guardian linked incremented it exactly like
+    // one that reached a parent, so the operator console read "30 reminded" for
+    // a school that had told nobody anything.
+    //
+    // Measured on a 5,000-school fleet: every school with billable invoices and
+    // no guardian links reported a full count of reminders and produced ZERO
+    // FEE_REMINDER notifications. The number a school reads to decide whether
+    // its families have been chased was a count of its own loop.
+    //
+    // `unreachable` is the fourth fact this repo already uses elsewhere — the
+    // alumni broadcast reports it for records with no linked account, and for
+    // the same reason: it is not `failed` (nothing went wrong) and not `skipped`
+    // (the invoice was due); it is work that had nobody to deliver to, and the
+    // school can fix it by linking a guardian.
     let reminded = 0;
+    let unreachable = 0;
     for (const inv of targets) {
       const overdue = inv.dueDate < today;
+      const guardians = guardiansBy.get(inv.studentId) ?? [];
+      if (guardians.length === 0) {
+        unreachable++;
+        continue;
+      }
       await this.notifyGuardians(p, inv.studentId, {
         type: "FEE_REMINDER",
         title: overdue ? "Overdue fee reminder" : "Fee payment reminder",
@@ -303,10 +329,10 @@ export class FeesService {
         // a HUNDREDTH of what they owe — in a message asking them to pay it.
         body: `Invoice ${inv.reference} has an outstanding balance of ${this.money(inv.outstanding, inv.currency)}${overdue ? ` (due ${inv.dueDate.toISOString().slice(0, 10)})` : ""}.`,
         data: { invoiceId: inv.id, outstandingMinor: inv.outstanding },
-      }, [], guardiansBy.get(inv.studentId) ?? []);
+      }, [], guardians);
       reminded++;
     }
-    return { reminded, invoices: targets.length };
+    return { reminded, invoices: targets.length, unreachable };
   }
 
   /** DRAFT -> ISSUED, then notify the student's guardians of the amount due. */

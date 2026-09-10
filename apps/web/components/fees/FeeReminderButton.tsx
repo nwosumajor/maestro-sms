@@ -12,9 +12,30 @@ export function FeeReminderButton() {
   const run = async (overdueOnly: boolean) => {
     setBusy(true);
     setMsg(null);
-    const res = await postSms<{ reminded: number; invoices: number }>(`fees/reminders/run?overdueOnly=${overdueOnly}`);
+    const res = await postSms<{ reminded: number; invoices: number; unreachable: number }>(
+      `fees/reminders/run?overdueOnly=${overdueOnly}`,
+    );
     setBusy(false);
-    if (res.ok && res.data) setMsg(`Sent ${res.data.reminded} reminder(s) across ${res.data.invoices} invoice(s).`);
+    if (res.ok && res.data) {
+      // WHO WAS TOLD, AND WHO COULD NOT BE. This said "Sent N reminder(s)"
+      // where N counted invoices walked, not families reached — so a school
+      // whose pupils have no guardian on file was told it had chased 30
+      // families having chased none. The shortfall is nameable and fixable:
+      // link a guardian.
+      const { reminded, invoices, unreachable } = res.data;
+      setMsg(
+        invoices === 0
+          ? "No invoice is overdue."
+          : [
+              `Told ${reminded} famil${reminded === 1 ? "y" : "ies"} across ${invoices} invoice${invoices === 1 ? "" : "s"}.`,
+              unreachable > 0
+                ? `${unreachable} could not be sent — no guardian is linked to those pupils, so nobody was told. Link one on the pupil's record.`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
+      );
+    }
     else setMsg(res.error ?? "Failed.");
   };
 

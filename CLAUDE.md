@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **307 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **310 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **307 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **310 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -951,6 +951,13 @@ These are the rules; the log is why each one exists.
   `what-the-help-page-promises`, `api-doc-is-current`.
 - **A comment asserting agreement is not agreement.** Two files each carried
   "same rule as the report card" while disagreeing with it and with each other.
+- **A COUNTER MUST COUNT WHAT WAS DELIVERED, NOT WHAT WAS ITERATED.** The fee
+  reminder sweep incremented `reminded` once per INVOICE regardless of whether a
+  guardian existed: a school with 30 billable invoices and no guardian links was
+  told "30 reminded" having told nobody, and every school in a 5,000-school
+  fleet would have. Count the recipients, and name the shortfall (`unreachable`)
+  — found by a CROSS-MODULE audit, because fees counts its loop and
+  notifications decides who hears, and neither is wrong alone.
 - **REPORT WHAT YOU DID NOT DO.** Silent partial success is the commonest shape
   here: a roll call that named nobody missing, a sweep that marked every overdue
   boarder handled including those it told nobody about, `notified: 2500` of

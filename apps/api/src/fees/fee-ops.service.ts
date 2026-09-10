@@ -650,11 +650,17 @@ export class FeeOpsService {
 
   /** Weekly overdue-reminder sweep: the staff-triggered reminder, run for every
    *  school under a SYSTEM principal (overdue-only — never nags early). */
-  async reminderSweep(): Promise<{ schools: number; reminded: number; skipped?: boolean }> {
+  async reminderSweep(): Promise<{
+    schools: number;
+    reminded: number;
+    unreachable: number;
+    failed: number;
+    skipped?: boolean;
+  }> {
     const client = this.privileged.client;
     if (!client) {
       this.logger.warn("Overdue-reminder sweep requested but no privileged DB — skipping. No guardian was reminded.");
-      return { schools: 0, reminded: 0, skipped: true };
+      return { schools: 0, reminded: 0, unreachable: 0, failed: 0, skipped: true };
     }
     // Same rule as the late-fee sweep next door: a switched-off school does not
     // send reminders to its families. This one reaches PEOPLE — an email or an
@@ -664,16 +670,26 @@ export class FeeOpsService {
       select: { id: true },
     });
     let reminded = 0;
+    // Families the sweep could not reach because the pupil has no guardian
+    // linked — carried up so the jobs console shows it beside the count, rather
+    // than a total that reads as "everyone was told".
+    let unreachable = 0;
+    // A school this run could not do at all. `lastFailed` reads this, and a
+    // cross-tenant sweep that catches per school never throws, so without it a
+    // run that skipped four schools looks exactly like a clean one.
+    let failed = 0;
     for (const school of schools) {
       try {
         const system: Principal = { userId: SYSTEM_ACTOR_ID, schoolId: school.id, roles: [], permissions: [] };
         const r = await this.fees.sendFeeReminders(system, { overdueOnly: true });
         reminded += r.reminded;
+        unreachable += r.unreachable;
       } catch (e) {
+        failed += 1;
         this.logger.warn(`reminder sweep failed for school ${school.id}: ${(e as Error).message}`);
       }
     }
-    return { schools: schools.length, reminded };
+    return { schools: schools.length, reminded, unreachable, failed };
   }
 
   // ---------------------------------------------------------------------------
