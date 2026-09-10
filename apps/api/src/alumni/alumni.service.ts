@@ -18,7 +18,7 @@ import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import type { Queue } from "bullmq";
 import { ALUMNI_BROADCAST_QUEUE, ALUMNI_BROADCAST_JOB } from "./alumni.constants";
-import type { AlumnusDto } from "@sms/types";
+import { ALUMNI_PAGE_SIZE, type AlumniPageDto, type AlumnusDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -103,13 +103,45 @@ export class AlumniService {
     });
   }
 
-  async list(p: Principal, opts: { year?: number; q?: string } = {}): Promise<AlumnusDto[]> {
+  /**
+   * A page of the register, and how many there are in all.
+   *
+   * It was `take: 500` with no page and no total. This is the one table in the
+   * product that only ever grows: a school adds a whole cohort every year and
+   * nobody stops being an alumnus — which the broadcast below states in its own
+   * comment, and counts in the database because of it. The list beside it was
+   * capped and silent.
+   *
+   * Measured on a school with three cohorts of 200: 600 held, 500 returned, no
+   * total, no page. And because the order is newest-cohort-first, the 100 that
+   * vanished were the OLDEST — backwards for alumni, whose established cohorts
+   * are the ones a school wants for a reunion or an appeal. At ten years the
+   * default view would show a quarter of the register and say nothing about the
+   * rest.
+   *
+   * `id` breaks the tie: two alumni can share a name and a year, and offset
+   * paging over a partial order skips and repeats.
+   */
+  async list(
+    p: Principal,
+    opts: { year?: number; q?: string; page?: number } = {},
+  ): Promise<AlumniPageDto> {
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = ALUMNI_PAGE_SIZE;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = {};
       if (opts.year) where.graduationYear = opts.year;
       if (opts.q?.trim()) where.name = { contains: opts.q.trim(), mode: "insensitive" };
-      const rows = await tx.alumnus.findMany({ where, orderBy: [{ graduationYear: "desc" }, { name: "asc" }], take: 500 });
-      return rows.map((a) => this.dto(a));
+      const [rows, total] = await Promise.all([
+        tx.alumnus.findMany({
+          where,
+          orderBy: [{ graduationYear: "desc" }, { name: "asc" }, { id: "asc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        tx.alumnus.count({ where }),
+      ]);
+      return { items: rows.map((a) => this.dto(a)), total, page, pageSize };
     });
   }
 

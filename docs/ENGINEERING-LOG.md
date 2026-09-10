@@ -14228,3 +14228,63 @@ Left alone deliberately: a leaver may genuinely owe money and a school is
 entitled to pursue a debt, so suppressing this is a commercial decision rather
 than a defect to fix unilaterally. Recorded here with the evidence so it is a
 decision somebody makes rather than one nobody noticed.
+
+### 600 alumni, 500 shown, and the ones that vanished were the oldest
+
+`AlumniService.list` was `take: 500`, ordered newest-cohort-first, with no page
+and no total — on the ONE table in this product that only ever grows. A school
+adds a whole cohort every year and nobody stops being an alumnus.
+
+The broadcast **in the same file** says exactly that, and counts in the database
+because of it:
+
+> "An alumni roll only ever grows — nobody stops being an alumnus — so hydrating
+> every row to answer a question about three numbers is exactly the 'count in the
+> database, never findMany().length' rule this codebase already states."
+
+The careful half was written and its sibling was left capped and silent — the
+commonest shape in this log, here with the reasoning sitting a few lines above
+the code that ignores it.
+
+Measured on a school with three real cohorts of 200:
+
+```
+holds 600, the list returned 500, as a BARE ARRAY — no total, no page
+```
+
+And because it reads newest-first, the 100 that fell off were the class of 2024:
+the OLDEST cohort, which for alumni is precisely backwards — the established
+years are the ones a school wants for a reunion or an appeal. At ten years the
+default view would show a quarter of the register and say nothing about the rest.
+
+Now paged with a total: page 1 is 50 of 600, twelve pages reach all 600 distinct
+across all three cohorts, and the year filter still narrows to 200. The screen
+says "Showing 1–50 of 600" with Newer/Older cohort links.
+
+**The broadcast was NOT affected and is left alone.** Driven on the same school
+it reported `{queued: 501, unreachable: 99, noEmail: 99}` — 600 accounted for,
+counted in the database, with the shortfall named. The send path was already
+right; only the register that a human reads was short.
+
+// Also fixed on the page: `apiGet(...) ?? []` rendered "no alumni" — a statement
+about a school's own history — whenever the read failed. It distinguishes the
+two now, like the rest of the app.
+
+// GOTCHA, for the THIRD time in this repo: the paging test PASSED with the `id`
+tiebreaker removed. `Array.prototype.sort` is stable in V8, so a double that
+merely sorts hands back the same sequence for a partial order as for a total
+one. The double shuffles before sorting now, and the mutation fails on three
+consecutive runs. Two alumni can share a name and a year, so
+`graduationYear, name` is genuinely partial.
+
+### The alumni module at 5,000 schools, three cohorts deep
+450,510 alumni, and one school carrying a real secondary's 600.
+* **Only the register list was capped.** The broadcast counts in the database,
+  targets the register's OWN email rather than a closed account, reports
+  `unreachable` and `noEmail`, and records the reason in the audit row — the
+  question "why did the class of 2015 never hear from us" is answerable a year
+  later.
+* **The year filter and search always reached every cohort**, which is what kept
+  this from being a total loss: the data was there, the default view was short.
+* **Reads are flat**: 51 ms for page 1 of 600, 29 ms for a small school's whole
+  register.
