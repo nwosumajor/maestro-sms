@@ -13881,3 +13881,78 @@ blocked total its own holder lookup disagrees with.
   `alreadyConverted: true` rather than a second pupil.
 * **Reads are flat across the fleet** (schools 500 → 5,000): list 24–37 ms,
   search 18–26 ms, get 11–15 ms; the 606-row queue lists in 47 ms.
+
+### Marks that grew with the pupil, under a heading that said "this term"
+
+`listMyGrades` read EVERY submission the pupil had ever made, fed those ids back
+as an `IN` list, and returned every published grade against them — no page, no
+cap, no period. A parent's view unions their children, so a family multiplies it.
+
+Measured on a fleet aged **three years** (5,000 schools, nine terms each), one
+school carrying a realistic three-year record:
+
+```
+                                marks   response   time
+a pupil, 3 years in               810    277 KB     59 ms
+a parent of three, 3 years in   2,430    831 KB    116 ms
+```
+
+Nothing was dropped — there is no cap to drop anything — so it degrades
+invisibly, which is what makes an O(lifetime) read the shape it is. The figure
+tracks how long the pupil has been at the school and nothing on the screen: at
+six years that parent fetches ~1.7 MB to look at this week's marks.
+
+**And the screen already claimed a period it did not have.** `MyMarks` is headed
+"Marks so far" and its empty state reads *"Nothing has been marked yet this
+term"*, over a list that was all-time. A pupil three years in was shown three
+years of work under a heading about this term, with no way to tell which was
+which.
+
+So the period is real now: the school's CURRENT term by default, any term on
+request, paged within it, through the submission RELATION rather than an `IN`
+list of every submission id the pupil has ever produced. The response carries the
+school's terms so the screen can offer them — bounding a read is only honest if
+the rest is still somewhere. After: 17.8 KB and 50 rows for that same parent,
+with all nine terms still summing to exactly 2,430.
+
+// GOTCHA, and it was MY OWN and caught by driving it: `gradedAt` alone is not a
+total order — a teacher marking a set stamps the whole batch within the same
+second — and offset paging over a partial order lets Postgres return tied rows
+in a different order per page. The first version paged the parent's 270 marks in
+six pages and returned **239 distinct rows**, with nothing in the response saying
+31 were missing. `orderBy: [{ gradedAt: "desc" }, { id: "desc" }]` makes it
+total. The byte count had already dropped 47x at that point, which is exactly how
+a "performance fix" ships a correctness bug.
+
+// GOTCHA on the test for that: it PASSED with the tiebreaker removed.
+`Array.prototype.sort` is stable in V8, so a double that merely sorted handed
+back the same sequence for a partial order as for a total one. The double now
+shuffles before sorting, which is what makes a partial order behave like the
+database's — mutation-validating the gate is the only reason this was noticed.
+
+// GOTCHA: `a-filter-nobody-validated` caught the new `page` param going through
+a raw `Number()`. There is a shared `pageNumber` helper, already imported into
+that very controller.
+
+// GOTCHA: `failed-read-is-not-empty` went red on the exact sentence "Nothing has
+been marked yet this term" — a fixed-text assertion failing on a change that made
+the claim TRUER, since the list behind it had been all-time. Tenth instance in
+this repo; re-anchored to the property.
+
+### The gradebook at 5,000 schools, aged three years
+5,000 schools × 9 terms = 45,000 terms, 540,432 submissions and grades, and one
+school carrying 810 marks per pupil. What the age was for: separating reads
+bounded by a term or a session from reads bounded by the pupil's time at the
+school. Only the second kind changes shape after three years, and only against
+real accumulation.
+* **Only `/grades/mine` was lifetime-shaped.** Everything else is bounded by a
+  term or a session by construction, and measures FLAT however far back you
+  reach: session report 19 ms for the oldest session and 20 ms for the newest;
+  broadsheet 19 ms / 27 ms; term analytics 11 ms / 17 ms.
+* **The session report is bounded by the session** and the peer/rank read by the
+  classes the pupil studied in — three years of history does not widen either.
+* **A term id from another school is 404**, not silently widened to everything.
+* **A parent still sees only their own children's marks**, term-bounded.
+* **Untagged work stays visible in every term** — the same fail-open the report
+  card takes, so a school part-way through tagging assessments does not have its
+  history vanish.

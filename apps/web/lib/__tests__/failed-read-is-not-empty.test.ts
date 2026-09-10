@@ -39,7 +39,13 @@ describe("the two components that collapsed the states", () => {
     // And says so in words that stop the reader believing the empty state.
     expect(src).toMatch(/does not\s*\n?\s*mean nothing has been marked|does not mean nothing has been marked/);
     // The genuine empty state survives — it is the normal one early in a term.
-    expect(src).toMatch(/Nothing has been marked yet this term/);
+    //
+    // Anchored to the PROPERTY, not the sentence. This asserted the exact words
+    // "Nothing has been marked yet this term", and went red when the card began
+    // NAMING the term it was showing — a change that made the claim truer,
+    // since the list behind it had been all-time. That is the tenth time a
+    // fixed-text assertion in this repo has failed on a strengthening.
+    expect(src).toMatch(/Nothing has been marked/);
   });
 
   it("ProfileReviewQueue does not hide itself when it simply could not ask", () => {

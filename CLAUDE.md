@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **299 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **301 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **299 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **301 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -996,7 +996,18 @@ These are the rules; the log is why each one exists.
   index a pooled application will not get; a dev-sized table picks the other
   plan; and a fixture giving one pupil all 5,000 invoices measures nothing.
 - **O(lifetime), not O(size)** is the shape that degrades invisibly — it tracks
-  how long a school has been on the platform. And **an index nothing selects is
+  how long a school has been on the platform, or a PUPIL has been at the school.
+  `/grades/mine` returned every mark ever, unpaged, through an `IN` list of every
+  submission id: 810 marks / 277 KB for a pupil three years in, 2,430 / 831 KB
+  for a parent of three, to look at this week's work. Bound the read to the
+  period the SCREEN claims — and return the other periods, because bounding a
+  read is only honest if the rest is still reachable.
+- **Offset paging needs a TOTAL order.** `gradedAt` alone is not one — a teacher
+  marks a set within the same second — and tied rows come back in a different
+  order per page, silently skipping some and repeating others: 239 distinct of
+  270 across six pages. Add `id` as the tiebreaker. And note the test for it
+  passed until the double SHUFFLED before sorting: `Array.sort` is stable in V8
+  and Postgres is not. And **an index nothing selects is
   write amplification**: measure the variant before adding it.
 - **Count in the database**; never `findMany().length`. Never a query per row —
   `.map(r => this.toDto(tx, r))` is a query multiplier.

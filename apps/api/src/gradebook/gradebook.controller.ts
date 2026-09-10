@@ -3,7 +3,7 @@ import type { Response } from "express";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
-import { GRADEBOOK_PERMISSIONS, GRADE_TOTAL_MAX } from "@sms/types";
+import { GRADEBOOK_PERMISSIONS, GRADE_TOTAL_MAX, type MyMarksPageDto } from "@sms/types";
 import type { SubjectAnalyticsDto, SubjectSelectionPageDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { narrowStatus, pageNumber } from "../common/status-filter";
@@ -88,10 +88,26 @@ export class GradebookController {
   }
 
   /** A student's / parent's own published grades. */
+  /**
+   * The caller's own marks (and their children's) for ONE TERM, paged.
+   *
+   * `?termId=` picks another of the school's terms — the response carries the
+   * list, so the screen can offer them rather than leaving earlier work
+   * unreachable now that the read is bounded.
+   */
   @Get("grades/mine")
   @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_READ)
-  myGrades(@CurrentPrincipal() p: Principal) {
-    return this.gradebook.listMyGrades(p);
+  myGrades(
+    @CurrentPrincipal() p: Principal,
+    @Query("termId") termId?: string,
+    @Query("page") page?: string,
+  ): Promise<MyMarksPageDto> {
+    return this.gradebook.listMyGrades(p, {
+      termId: termId || undefined,
+      // Through the SHARED helper, so a typed page number is refused in the
+      // same words everywhere rather than becoming a silent NaN here.
+      page: pageNumber(page),
+    });
   }
 
   // --- term-weighted subject results (report-card grades) -------------------
