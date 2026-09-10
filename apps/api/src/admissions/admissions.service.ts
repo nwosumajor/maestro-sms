@@ -330,7 +330,7 @@ export class AdmissionsService {
         : {}),
     };
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const [rows, total, undecidedTotal] = await Promise.all([
+      const [rows, total, undecidedTotal, blockedTotal] = await Promise.all([
         tx.admissionApplication.findMany({
           where,
           orderBy: { createdAt: "desc" },
@@ -341,23 +341,26 @@ export class AdmissionsService {
         // School-wide, NOT narrowed by the filter: a search must not be able to
         // hide the fact that a family is still waiting.
         tx.admissionApplication.count({ where: { status: { in: [...ADMISSION_UNDECIDED] } } }),
+        this.blockedCount(tx, p.schoolId),
       ]);
+      const unstaffed = await this.unstaffedStages(tx, rows as unknown as AppRow[]);
       return {
-        items: (rows as unknown as AppRow[]).map((r) => this.toDto(r)),
+        items: (rows as unknown as AppRow[]).map((r) => this.toDto(r, unstaffed)),
         total,
         page,
         pageSize,
         undecidedTotal,
+        blockedTotal,
       };
     });
   }
 
   async get(p: Principal, id: string): Promise<AdmissionApplicationDto> {
-    const row = await this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.admissionApplication.findFirst({ where: { id } }),
-    );
-    if (!row) throw new NotFoundException("Application not found");
-    return this.toDto(row as unknown as AppRow);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = (await tx.admissionApplication.findFirst({ where: { id } })) as AppRow | null;
+      if (!row) throw new NotFoundException("Application not found");
+      return this.toDto(row, await this.unstaffedStages(tx, [row]));
+    });
   }
 
   /**
@@ -381,6 +384,19 @@ export class AdmissionsService {
 
       // The actor must hold THIS stage's granular permission…
       if (!p.permissions.includes(stage.permission)) {
+        // …and if NOBODY in this school does, say THAT, because it is the fact
+        // the reader can act on. The plain refusal is true and useless here:
+        // measured live, a registrar whose principal had left was told "You are
+        // not the Principal (final) approver" for both APPROVE and REJECT, with
+        // nothing anywhere saying the application could no longer be decided by
+        // anyone. A refusal must name the way out.
+        if ((await this.approverCount(tx, stage.permission)) === 0) {
+          throw new ConflictException(
+            `Nobody at this school can decide the ${stage.label} stage — the role is vacant, so this application ` +
+              `cannot be approved or rejected by anyone. Appoint a ${stage.label} on the roles page and it will ` +
+              `move again; the family is still waiting.`,
+          );
+        }
         throw new ForbiddenException(`You are not the ${stage.label} approver`);
       }
       // …and must not have already decided a stage on this application (SoD).
@@ -603,10 +619,58 @@ export class AdmissionsService {
     return ` Please send us the documents we still need for ${app.childName}: ${base}/apply/documents?token=${token} — the link is personal to this application and works for ${UPLOAD_TOKEN_TTL_DAYS} days.`;
   }
 
-  private toDto(r: AppRow): AdmissionApplicationDto {
+  /**
+   * WHICH STAGE PERMISSIONS THIS SCHOOL HAS NOBODY FOR.
+   *
+   * Counted ONCE for the whole page, not once per row: the chain has two
+   * stages, so this is at most two counts however many applications are on
+   * screen. `.map(r => this.toDto(tx, r))` is a query multiplier and this repo
+   * has the entry to prove it.
+   */
+  /**
+   * How many undecided applications school-wide sit at a stage nobody can
+   * decide.
+   *
+   * Two queries whatever the volume: one grouped extraction of the awaited
+   * permission out of the stored chain, then one holder count per DISTINCT
+   * permission (the chain has two). Counting per application would be a query
+   * multiplier over a table that only grows.
+   */
+  private async blockedCount(tx: TenantTx, schoolId: string): Promise<number> {
+    const rows = (await tx.$queryRaw(Prisma.sql`
+      SELECT (a.stages -> a."currentStage" ->> 'permission') AS perm, count(*)::int AS n
+        FROM admission_application a
+       WHERE a."schoolId" = ${schoolId}::uuid
+         AND a.status IN ('NEW', 'REVIEWING')
+       GROUP BY 1
+    `)) as Array<{ perm: string | null; n: number }>;
+    let blocked = 0;
+    for (const r of rows) {
+      if (!r.perm) continue;
+      if ((await this.approverCount(tx, r.perm)) === 0) blocked += r.n;
+    }
+    return blocked;
+  }
+
+  private async unstaffedStages(tx: TenantTx, rows: AppRow[]): Promise<Set<string>> {
+    const waiting = rows.filter((r) => r.status !== "ACCEPTED" && r.status !== "REJECTED");
+    const perms = new Set<string>();
+    for (const r of waiting) {
+      const perm = this.stagesOf(r)[r.currentStage]?.permission;
+      if (perm) perms.add(perm);
+    }
+    const unstaffed = new Set<string>();
+    for (const perm of perms) {
+      if ((await this.approverCount(tx, perm)) === 0) unstaffed.add(perm);
+    }
+    return unstaffed;
+  }
+
+  private toDto(r: AppRow, unstaffed: ReadonlySet<string> = new Set()): AdmissionApplicationDto {
     const stages = this.stagesOf(r);
     const approvals = (r.approvals as AdmissionApprovalDto[] | null) ?? [];
     const terminal = r.status === "ACCEPTED" || r.status === "REJECTED";
+    const awaiting = terminal ? null : (stages[r.currentStage] ?? null);
     return {
       id: r.id,
       applicantName: r.applicantName,
@@ -619,7 +683,10 @@ export class AdmissionsService {
       details: (r.details as AdmissionDetails | null) ?? null,
       currentStage: r.currentStage,
       stageCount: stages.length,
-      stageLabel: terminal ? null : (stages[r.currentStage]?.label ?? null),
+      stageLabel: awaiting?.label ?? null,
+      // Nobody in this school holds the permission this stage needs, so the
+      // application cannot be approved OR rejected by anyone.
+      stageBlocked: awaiting ? unstaffed.has(awaiting.permission) : false,
       approvals,
       examDate: r.examDate,
       examNote: r.examNote,

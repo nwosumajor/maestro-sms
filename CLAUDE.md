@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **297 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **299 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **297 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **299 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1019,6 +1019,15 @@ These are the rules; the log is why each one exists.
   (`assertStillHere`, `holdersOf`). Addressing a leaver is addressing nobody.
 - **A stage-holder must be able to open its own door**, and an approver must be
   able to SEE what the decision turns on. Both have their own gates.
+- **A chain resolved at SUBMIT goes stale when somebody LEAVES.** Admissions
+  drops an unstaffable stage at submit and refuses an approval that would strand
+  the rest — both look FORWARD, and neither reaches the approver who exits while
+  the item waits. Measured: 252 of 5,000 schools' applications sat at a stage
+  with no ACTIVE holder, undecidable in BOTH directions (approve and reject both
+  403) and shown as ordinary pending work. There is no reassign and no reset, so
+  the fix is to SAY it — on the row, in a school-wide count no filter can hide,
+  and in the refusal, which must name the vacancy rather than describe the
+  caller.
 - **Never trust an id from the body.** Check the KIND (a pupil made a subject
   teacher, a guardian attached to a member of staff), not merely that it exists.
   A permission helper that answers "MAY I reach this pupil" is not the same

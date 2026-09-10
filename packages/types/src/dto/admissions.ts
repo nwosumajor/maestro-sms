@@ -52,6 +52,14 @@ export interface AdmissionApplicationPageDto {
   pageSize: number;
   /** NEW + REVIEWING school-wide, whatever the current filter is. */
   undecidedTotal: number;
+  /**
+   * How many of this school's undecided applications are waiting at a stage
+   * NOBODY here can decide — school-wide, and deliberately not narrowed by the
+   * filter, for the same reason `undecidedTotal` is not: a registrar who has
+   * filtered to ACCEPTED must not thereby stop being told that twelve families
+   * are stuck behind a vacant role.
+   */
+  blockedTotal: number;
 }
 
 export interface AdmissionApplicationDto {
@@ -70,6 +78,27 @@ export interface AdmissionApplicationDto {
   stageCount: number;
   /** Label of the stage awaiting a decision, or null when terminal. */
   stageLabel: string | null;
+  /**
+   * TRUE when this school has NOBODY who can decide the stage it is waiting at.
+   *
+   * The chain is resolved to what the school could staff WHEN THE APPLICATION
+   * ARRIVED and stored on the row, and two guards keep it satisfiable from
+   * there: a stage nobody could staff is dropped at submit, and an approval
+   * that would leave the rest of the chain impossible is refused. Neither can
+   * reach the case where the approver LEAVES while the application waits.
+   *
+   * Measured on a 5,000-school fleet: 252 applications — 5% of everything
+   * waiting at the principal stage — sat at a stage with no ACTIVE holder, and
+   * the queue showed them as ordinary pending work. The registrar could neither
+   * approve nor reject (403 both ways), the departed principal could not log in
+   * at all, and there is no reassign and no reset. Each one is a family waiting
+   * for an answer that can never come.
+   *
+   * Surfacing it is the fix, because the school already holds the lever: appoint
+   * somebody to the role and the application moves. What was missing was any way
+   * to know they needed to.
+   */
+  stageBlocked: boolean;
   approvals: AdmissionApprovalDto[];
   /** Entrance-exam scheduling (communicated to the applicant on acceptance). */
   examDate: Date | null;

@@ -13800,3 +13800,84 @@ DELETE.
   `{created: 0, existing: 5}`.
 * **Reads are flat across the fleet** (schools 500 → 5,000): list 12–24 ms,
   filtered 12–19 ms, create 19–28 ms, presign 11–15 ms, checklist 24–46 ms.
+
+### A family waiting on a chair nobody is sitting in
+
+The admissions chain — School administrator → Principal (final) — is resolved to
+what the school could staff WHEN THE APPLICATION ARRIVED, and stored on the row.
+Two guards keep it satisfiable, and both look FORWARD:
+
+* `resolveChain` drops a stage nobody can staff at SUBMIT time;
+* `review` refuses an approval that would leave the rest of the chain impossible
+  — *"You are the only Principal (final) approver, and each stage must be decided
+  by a different person."*
+
+Neither can reach the case where the approver **leaves while the application
+waits**. Driven end to end: a registrar approves stage 1, the principal exits the
+school, and then
+
+```
+the departed principal logs in   -> 401   (exited users cannot authenticate)
+the registrar tries to APPROVE   -> 403   "You are not the Principal (final) approver"
+the registrar tries to REJECT    -> 403   the same
+the queue shows it               -> REVIEWING, indistinguishable from live work
+```
+
+There is no reassign and no reset — the service's own comment says so. The family
+waits for an answer that can never come, and nothing anywhere says so.
+
+**Measured across a 5,000-school fleet: 252 applications — 5% of everything
+waiting at the principal stage — sat at a stage with no ACTIVE holder.**
+
+The school already holds the lever: appoint somebody to the role and the
+application moves. What was missing was any way to know they needed to. So the
+fix is to say it, in the three places a registrar would look:
+
+1. `stageBlocked` on the row, so the queue stops showing it as ordinary work.
+2. `blockedTotal` on the page — **school-wide and unfiltered**, for the same
+   reason `undecidedTotal` already is: a registrar who filtered to ACCEPTED must
+   not thereby stop being told that twelve families are stuck.
+3. The refusal itself. *"You are not the Principal (final) approver"* is true and
+   useless — it describes the caller when the fact that matters is that nobody
+   here can decide it. It now names the vacancy and the way out, and answers
+   REJECT identically, because a registrar reaching for the other button must not
+   be told something else.
+
+Web: a destructive banner on `/admin/admissions` and a per-row alert, both
+linking to the roles page; Approve and Reject are disabled rather than hidden,
+because the reader still needs to see that a decision is what this is waiting for.
+
+Costs two queries per page however deep the queue: one grouped extraction of the
+awaited permission out of the stored chain, then one holder count per DISTINCT
+permission — the chain has two. A count per application would be a query
+multiplier over a table that only grows.
+
+// GOTCHA: the vacancy message must not swallow the everyday case. A pinned test
+drives the ordinary refusal too, or the first version would have told a registrar
+the principal's chair was empty while the principal was sitting in it.
+
+// GOTCHA: the existing list spec's `tx` double had no `$queryRaw` and failed in
+a way that reads as a code fault. It now models the contract — honouring the
+query's own NEW/REVIEWING predicate and grouping by the awaited permission — and
+drives the holder count from the SAME fixture, so the double cannot report a
+blocked total its own holder lookup disagrees with.
+
+### The admissions module at 5,000 schools
+5,000 schools, 30,600 applications. Beyond the above:
+* **The public intake is rate-limited** (10/min per IP on both `POST
+  /public/admissions` and the form-fee retry) and resolves the school by slug: an
+  unknown slug is 404, and an application is written under a placeholder GUC into
+  the resolved school only.
+* **The chain enforces separation of duties, both ways.** A principal who also
+  holds `admission.review` is refused at stage 1 with the forward-looking
+  message; the registrar takes stage 1; the registrar is then 403 at stage 2
+  ("You are not the Principal (final) approver"); the principal completes it.
+* **Cross-tenant is 404 on every door** — read, review, exam and convert — each
+  with a positive control returning 200/201 on the caller's own.
+* **The queue is a record, not a page.** 606 applications paged in 13 pages:
+  606 distinct ids, none dropped or repeated, reaching the oldest. A search for a
+  family 599 rows deep returns it, so the filter narrows the QUERY.
+* **Convert is idempotent**: the second press returns the same `studentId` with
+  `alreadyConverted: true` rather than a second pupil.
+* **Reads are flat across the fleet** (schools 500 → 5,000): list 24–37 ms,
+  search 18–26 ms, get 11–15 ms; the 606-row queue lists in 47 ms.

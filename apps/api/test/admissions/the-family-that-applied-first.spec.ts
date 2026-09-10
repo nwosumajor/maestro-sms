@@ -22,8 +22,14 @@ import type { Principal, TenantContext, TenantTx } from "../../src/integrity/int
 
 type Args = Record<string, unknown>;
 
-function makeService() {
-  const seen: { findMany: Args[]; count: Args[] } = { findMany: [], count: [] };
+/**
+ * @param blocked awaited-stage permissions this school has NOBODY for, keyed to
+ * how many applications wait on each. Drives the raw grouped count and the
+ * holder count together, so the double cannot report a blocked total the
+ * holder lookup disagrees with.
+ */
+function makeService(blocked: Record<string, number> = {}) {
+  const seen: { findMany: Args[]; count: Args[]; raw: string[] } = { findMany: [], count: [], raw: [] };
   const tx = {
     admissionApplication: {
       findMany: jest.fn((a: Args) => {
@@ -33,6 +39,23 @@ function makeService() {
       count: jest.fn((a: Args) => {
         seen.count.push(a);
         return Promise.resolve(7);
+      }),
+    },
+    // The grouped extraction of the awaited stage's permission. A double
+    // missing a method every real client has fails in a way that reads as a
+    // code fault; one that ignores the query's own predicate reports a fact
+    // about itself.
+    $queryRaw: jest.fn((q: { strings?: string[] }) => {
+      const sql = (q?.strings ?? []).join("?");
+      seen.raw.push(sql);
+      if (!/admission_application/.test(sql)) return Promise.resolve([]);
+      return Promise.resolve(Object.entries(blocked).map(([perm, n]) => ({ perm, n })));
+    }),
+    // Nobody holds the permissions named in `blocked`; anything else has one.
+    user: {
+      count: jest.fn(({ where }: { where: Record<string, unknown> }) => {
+        const asked = JSON.stringify(where);
+        return Promise.resolve(Object.keys(blocked).some((perm) => asked.includes(perm)) ? 0 : 1);
       }),
     },
   } as unknown as TenantTx;

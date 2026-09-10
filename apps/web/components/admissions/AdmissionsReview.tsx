@@ -6,6 +6,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { titleCase } from "@/lib/format";
@@ -129,6 +130,27 @@ function AdmissionRow({
           </div>
         </div>
 
+        {/* NOBODY CAN DECIDE THIS ONE.
+            The chain is resolved when the application arrives and stored on the
+            row; if the person who staffs a stage LEAVES while it waits, it can
+            be neither approved nor rejected by anyone, and it looked exactly
+            like ordinary pending work. Measured on a 5,000-school fleet: 252
+            applications sat like this. The school already holds the lever —
+            appoint somebody — so what it needed was to be told. */}
+        {a.stageBlocked && (
+          <Alert variant="destructive">
+            <AlertTitle>Nobody at this school can decide this stage</AlertTitle>
+            <AlertDescription className="text-xs">
+              The <strong>{a.stageLabel}</strong> role is vacant, so this application cannot be approved or rejected
+              by anyone — and the family is still waiting. Appoint someone on the{" "}
+              <a href="/admin/roles" className="underline">
+                roles page
+              </a>
+              , and it will move again.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Maker-checker trail */}
         {a.approvals.length > 0 && (
           <div className="flex flex-wrap gap-1">
@@ -159,10 +181,14 @@ function AdmissionRow({
 
         {!terminal && (
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-            <Button size="sm" disabled={busy} onClick={() => onReview(a.id, "APPROVE")}>
+            {/* Disabled rather than hidden: the reader needs to see that a
+                decision is what this is waiting for, and the alert above says
+                why they cannot make it. A button that 409s is a worse answer
+                than a button that explains itself. */}
+            <Button size="sm" disabled={busy || a.stageBlocked} onClick={() => onReview(a.id, "APPROVE")}>
               Approve stage
             </Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onReview(a.id, "REJECT")}>
+            <Button size="sm" variant="ghost" disabled={busy || a.stageBlocked} onClick={() => onReview(a.id, "REJECT")}>
               Reject
             </Button>
             <span className="mx-1 text-xs text-muted-foreground">Entrance exam:</span>
