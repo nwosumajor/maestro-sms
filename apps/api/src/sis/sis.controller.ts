@@ -1,8 +1,9 @@
 import { isoDay } from "../common/calendar-day";
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { ContactDto, MedicalRecordDto, ProfileReviewRowDto, StudentProfileDto, SisCompletionDto, StudentGuardianDto } from "@sms/types";
+import type { ContactDto, MedicalRecordDto, ProfileReviewPageDto, StudentProfileDto, SisCompletionDto, StudentGuardianDto } from "@sms/types";
+import { pageNumber } from "../common/status-filter";
 import { z } from "zod";
 import { SIS_PERMISSIONS, ADMIN_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -201,7 +202,10 @@ export class SisQueueController {
    */
   @Get("profile-reviews")
   @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
-  profileReviews(@CurrentPrincipal() p: Principal): Promise<ProfileReviewRowDto[]> {
-    return this.sis.profileReviewQueue(p);
+  profileReviews(
+    @CurrentPrincipal() p: Principal,
+    @Query("page") page?: string,
+  ): Promise<ProfileReviewPageDto> {
+    return this.sis.profileReviewQueue(p, { page: pageNumber(page) });
   }
 }

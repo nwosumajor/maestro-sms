@@ -14288,3 +14288,74 @@ consecutive runs. Two alumni can share a name and a year, so
   this from being a total loss: the data was there, the default view was short.
 * **Reads are flat**: 51 ms for page 1 of 600, 29 ms for a small school's whole
   register.
+
+### 1,200 submitted, 500 shown, and no number anywhere
+
+The SIS profile review queue read `take: 500` ordered oldest-first, with no page
+and no total. The service's own comment beside it already named the case:
+
+> "At the start of a term a large school submits far more than 500 at once."
+
+**This is the second time this queue's cap has been wrong, and the two faults are
+different.** The first was that the cap bounded the wrong ROWS — it read the 500
+oldest in the school and then kept the caller's own, so a supervisor whose class
+submitted late saw an empty screen (`a-cap-must-bound-your-own-rows.spec.ts`).
+That was fixed by moving the relationship into the WHERE clause. What was left is
+this: the cap now bounds the right rows and still says nothing about how many
+there are.
+
+Measured on a secondary of 1,200 who all submitted at term start — which is what
+the product asks families to do:
+
+```
+1,200 waiting, 500 returned, as a bare array
+the last row on screen was dated  2026-09-01
+submissions actually ran to       2026-09-09
+```
+
+Oldest-first means the RIGHT rows were visible, and that half is kept: the newest
+fall off and will be there tomorrow. The bad half is that a reviewer who cleared
+the screen had nothing to tell them 700 sat behind it.
+
+Now paged with a total, tiebroken on `studentId` because a term-start surge puts
+dozens of submissions on one date. After: 24 pages reach all 1,200, ending at
+2026-09-09, oldest still first. The card is headed "Profiles waiting for you
+(1,200)" with a footer saying which slice is on screen.
+
+### The shape this keeps taking — a scan of all 65 capped reads
+This is the fourth "capped list, no total" in this session (billing history,
+the approvals queue, the alumni register, and now this), so rather than wait for
+the fifth I scanned every `findMany` in the API carrying a literal `take:` with
+no `skip`/`cursor` beside it: **65 of them**.
+
+Most are legitimate. The rule that separates them is already written down: *a cap
+is right for LIVE WORK and wrong whenever the list is also the record a school
+reads later.* A "recent games" list, a live-quiz session list, open meeting slots
+— all fine capped. What the scan flags as worth a second look, because each is a
+record rather than a queue, is a shortlist rather than a to-do list:
+
+```
+privacy/compliance.service.ts:275   dataBreachIncident  take:500   a statutory register
+scholarship/scholarship.service.ts  scholarshipApplication take:500
+library/library.service.ts:751      bookLoan            take:300   loan history
+hostel/hostel.service.ts:756        hostelExeat         take:300
+exam/exam.service.ts:462            examSitting         take:200
+fees/fees.service.ts:1131           payment             take:200   payment history
+certificate/certificate.service.ts  issuedCertificate   take:100   the serial register
+hr/exit.service.ts:345              staffExit           take:100
+```
+
+Left for a decision rather than changed en masse: each needs the same judgement
+(record or queue?) and its own measurement, and a sweeping change to eight
+services in one commit is exactly the kind nobody can review. Recorded so the
+next one is found by reading this rather than by another simulation.
+
+### SIS at 5,000 schools, three years deep
+301,140 profiles, one school carrying a real secondary's 1,200-strong term-start
+surge.
+* **The cap was the only defect.** The two-stage rule holds — a supervisor sees
+  their own class awaiting stage 1, the office sees both stages, a teacher who
+  supervises nobody sees nothing — and the queue never offers a row the action
+  would refuse.
+* **Reads are flat**: 58 ms for page 1 of 1,200; 38 ms for a small school's whole
+  queue.

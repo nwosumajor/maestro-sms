@@ -132,3 +132,28 @@ export interface StudentGuardianDto {
   /** False when the account cannot receive email — the usual cause of "we were never told". */
   reachableByEmail: boolean;
 }
+
+/** How many profiles one screen of the review queue carries. */
+export const PROFILE_REVIEW_PAGE_SIZE = 50;
+
+/**
+ * A page of the profile review queue, and how many are waiting in all.
+ *
+ * The queue was `take: 500` with no page and no total, and the service's own
+ * comment beside it already said why that matters: "At the start of a term a
+ * large school submits far more than 500 at once."
+ *
+ * Measured on a secondary of 1,200 who all submitted at term start, which is
+ * exactly what the product asks families to do: 1,200 waiting, 500 shown, as a
+ * bare array. The ordering is oldest-first, so the RIGHT ones were on screen —
+ * but the last row was dated eight days before the newest submission, and a
+ * reviewer who cleared the screen had nothing to tell them that 700 more were
+ * behind it.
+ */
+export interface ProfileReviewPageDto {
+  items: ProfileReviewRowDto[];
+  /** Waiting on this reviewer in all — not the page. */
+  total: number;
+  page: number;
+  pageSize: number;
+}

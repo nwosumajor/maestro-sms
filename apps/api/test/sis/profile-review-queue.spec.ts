@@ -60,7 +60,17 @@ function makeService(opts: { supervises?: string[] } = {}) {
   const { supervises = ["stu-1"] } = opts;
   const tx = {
     studentProfile: {
-      findMany: jest.fn(async (a: { where: Record<string, unknown> }) => PROFILES.filter((r) => matches(r, a.where))),
+      findMany: jest.fn(async (a: { where: Record<string, unknown>; skip?: number; take?: number }) => {
+        const hit = PROFILES.filter((r) => matches(r, a.where));
+        return hit.slice(a.skip ?? 0, (a.skip ?? 0) + (a.take ?? hit.length));
+      }),
+      // COUNTS THE SAME SET the page is drawn from. A double whose count
+      // ignored the `where` would pass against a service computing the total
+      // from the wrong predicate — the trap this repo has hit before, and the
+      // reason the queue's total is worth a test at all.
+      count: jest.fn(async (a: { where: Record<string, unknown> }) =>
+        PROFILES.filter((r) => matches(r, a.where)).length,
+      ),
     },
     enrollment: {
       findMany: jest.fn(async (a: { where: Record<string, unknown> }) => {
@@ -89,7 +99,7 @@ function makeService(opts: { supervises?: string[] } = {}) {
 describe("who sees what in the queue", () => {
   it("a supervisor sees the pupil awaiting THEIR check", async () => {
     const { service } = makeService({ supervises: ["stu-1"] });
-    const rows = await service.profileReviewQueue(supervisor);
+    const rows = (await service.profileReviewQueue(supervisor)).items;
     expect(rows.map((r) => r.studentId)).toEqual(["stu-1"]);
     expect(rows[0]).toMatchObject({ stage: "SUPERVISOR", studentName: "Ada", className: "JSS 1A" });
   });
@@ -97,25 +107,25 @@ describe("who sees what in the queue", () => {
   it("a supervisor does NOT see one already passed to the office", async () => {
     // They cannot act on it, so offering it would only produce a refusal.
     const { service } = makeService({ supervises: ["stu-1", "stu-2"] });
-    const rows = await service.profileReviewQueue(supervisor);
+    const rows = (await service.profileReviewQueue(supervisor)).items;
     expect(rows.map((r) => r.studentId)).not.toContain("stu-2");
   });
 
   it("a teacher who supervises neither sees nothing", async () => {
     const { service } = makeService({ supervises: [] });
-    expect(await service.profileReviewQueue(outsider)).toEqual([]);
+    expect((await service.profileReviewQueue(outsider)).items).toEqual([]);
   });
 
   it("the office sees BOTH stages, because it can act on both", async () => {
     // school_admin is school-wide: the supervisor check is open to them too.
     const { service } = makeService();
-    const rows = await service.profileReviewQueue(office);
+    const rows = (await service.profileReviewQueue(office)).items;
     expect(rows.map((r) => r.stage).sort()).toEqual(["ADMIN", "SUPERVISOR"]);
   });
 
   it("names the stage, so two reviewers do not each assume the other has it", async () => {
     const { service } = makeService();
-    const rows = await service.profileReviewQueue(office);
+    const rows = (await service.profileReviewQueue(office)).items;
     expect(rows.find((r) => r.studentId === "stu-2")?.stage).toBe("ADMIN");
   });
 });
@@ -137,9 +147,25 @@ describe("what the queue reads", () => {
     expect(call.where).toMatchObject({ status: "ACTIVE", class: { supervisorId: "sup-1" } });
   });
 
-  it("does not walk the roster — it starts from submitted profiles", async () => {
+  it("does not walk the roster — it starts from submitted profiles, BOUNDED", async () => {
+    // The property is that the read is bounded and starts from the profiles,
+    // not that the bound is any particular number. It asserted `take: 500`, and
+    // 500 was the whole trouble: a term start submits far more than that at
+    // once, and the queue returned a bare array with no count, so a reviewer who
+    // cleared the screen had nothing to tell them what was behind it.
     const { service, tx } = makeService();
     await service.profileReviewQueue(office);
-    expect((tx.studentProfile.findMany as jest.Mock).mock.calls[0][0]).toMatchObject({ take: 500 });
+    const call = (tx.studentProfile.findMany as jest.Mock).mock.calls[0][0];
+    expect(call.where).toMatchObject({ profileStatus: "SUBMITTED" });
+    expect(typeof call.take).toBe("number");
+    expect(call.take).toBeLessThanOrEqual(100);
+  });
+
+  it("says how many are WAITING, not how many fit on the screen", async () => {
+    const { service } = makeService();
+    const page = await service.profileReviewQueue(office);
+    expect(page.total).toBe(page.items.length);
+    expect(page.page).toBe(1);
+    expect(page.pageSize).toBeGreaterThan(0);
   });
 });

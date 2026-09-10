@@ -23,7 +23,7 @@ import { teachesStudent } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import type { MedicalRecordDto, StudentGuardianDto } from "@sms/types";
 import { missingProfileFields, deliverableEmail } from "@sms/types";
-import type { ProfileReviewRowDto, SisCompletionDto } from "@sms/types";
+import { PROFILE_REVIEW_PAGE_SIZE, type ProfileReviewPageDto, type SisCompletionDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
   AUDIT_LOG_SERVICE,
@@ -107,7 +107,12 @@ export class SisService {
    * A school-wide role sees both, because they can act on both. One indexed
    * query over submitted profiles, then names; the roster is never walked.
    */
-  async profileReviewQueue(p: Principal): Promise<ProfileReviewRowDto[]> {
+  async profileReviewQueue(
+    p: Principal,
+    opts: { page?: number } = {},
+  ): Promise<ProfileReviewPageDto> {
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = PROFILE_REVIEW_PAGE_SIZE;
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const wide = this.isSchoolWide(p);
       const canApprove = wide || p.permissions.includes("rbac.manage");
@@ -139,13 +144,29 @@ export class SisService {
           ? { profileStatus: "SUBMITTED", OR: [{ supervisorReviewedAt: { not: null } }, mine] }
           : { profileStatus: "SUBMITTED", ...mine };
 
-      const visible = (await tx.studentProfile.findMany({
-        where,
-        select: { studentId: true, submittedAt: true, supervisorReviewedAt: true },
-        orderBy: { submittedAt: "asc" },
-        take: 500,
-      })) as Array<{ studentId: string; submittedAt: Date | null; supervisorReviewedAt: Date | null }>;
-      if (visible.length === 0) return [];
+      // A PAGE, AND THE COUNT BESIDE IT.
+      //
+      // This took 500 and said nothing about the rest — with the comment above
+      // already naming the case: a large school submits far more than that at
+      // term start. Measured on a secondary of 1,200 who all submitted at once,
+      // which is what the product asks families to do: 1,200 waiting, 500 shown,
+      // and the last row on screen dated eight days before the newest
+      // submission. Oldest-first meant the RIGHT rows were visible; what was
+      // missing was any way to know 700 sat behind them.
+      //
+      // `studentId` breaks the tie: a term-start surge puts many submissions on
+      // one timestamp, and offset paging over a partial order skips and repeats.
+      const [visible, total] = await Promise.all([
+        tx.studentProfile.findMany({
+          where,
+          select: { studentId: true, submittedAt: true, supervisorReviewedAt: true },
+          orderBy: [{ submittedAt: "asc" }, { studentId: "asc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }) as Promise<Array<{ studentId: string; submittedAt: Date | null; supervisorReviewedAt: Date | null }>>,
+        tx.studentProfile.count({ where }),
+      ]);
+      if (visible.length === 0) return { items: [], total, page, pageSize };
 
       const ids = visible.map((r) => r.studentId);
       const [users, enrolments] = await Promise.all([
@@ -159,14 +180,19 @@ export class SisService {
       const classOf = new Map(
         (enrolments as Array<{ studentId: string; class: { name: string } | null }>).map((e) => [e.studentId, e.class?.name ?? null]),
       );
-      return visible.map((r) => ({
-        studentId: r.studentId,
-        studentName: nameOf.get(r.studentId) ?? "Pupil",
-        className: classOf.get(r.studentId) ?? null,
-        stage: (r.supervisorReviewedAt ? "ADMIN" : "SUPERVISOR") as "ADMIN" | "SUPERVISOR",
-        submittedAt: r.submittedAt,
-        supervisorReviewedAt: r.supervisorReviewedAt,
-      }));
+      return {
+        items: visible.map((r) => ({
+          studentId: r.studentId,
+          studentName: nameOf.get(r.studentId) ?? "Pupil",
+          className: classOf.get(r.studentId) ?? null,
+          stage: (r.supervisorReviewedAt ? "ADMIN" : "SUPERVISOR") as "ADMIN" | "SUPERVISOR",
+          submittedAt: r.submittedAt,
+          supervisorReviewedAt: r.supervisorReviewedAt,
+        })),
+        total,
+        page,
+        pageSize,
+      };
     });
   }
 

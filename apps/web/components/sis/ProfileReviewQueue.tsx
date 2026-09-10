@@ -19,19 +19,34 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 type Row = Serialized<ProfileReviewRowDto>;
 
 export function ProfileReviewQueue() {
+  // ONE PAGE, AND HOW MANY ARE WAITING.
+  //
+  // This fetched a bare array capped at 500 and rendered it whole. At a term
+  // start a large school submits far more than that at once — measured at 1,200
+  // — so a reviewer saw a screenful, cleared it, and had nothing anywhere to
+  // say that 700 more sat behind it. Oldest-first means the right rows were on
+  // top; the count is what was missing.
   const [rows, setRows] = React.useState<Row[] | null>(null);
+  const [total, setTotal] = React.useState(0);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(50);
   const [failed, setFailed] = React.useState(false);
 
   React.useEffect(() => {
     void (async () => {
-      const res = await fetch("/api/sms/students/profile-reviews", { cache: "no-store" });
+      const res = await fetch(`/api/sms/students/profile-reviews${page > 1 ? `?page=${page}` : ""}`, { cache: "no-store" });
       // A failed read stays null. `[]` hides the card, which reads to a reviewer
       // as "nothing is waiting for you" — the one thing a queue must never say
       // when it does not know.
-      if (res.ok) setRows((await res.json()) as Row[]);
+      if (res.ok) {
+        const j = (await res.json()) as { items: Row[]; total: number; page: number; pageSize: number };
+        setRows(j.items);
+        setTotal(j.total);
+        setPageSize(j.pageSize);
+      }
       else setFailed(true);
     })();
-  }, []);
+  }, [page]);
 
   if (failed) {
     return (
@@ -52,9 +67,12 @@ export function ProfileReviewQueue() {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Profiles waiting for you</CardTitle>
+        <CardTitle className="text-base">
+          Profiles waiting for you{total > 0 ? ` (${total})` : ""}
+        </CardTitle>
         <CardDescription>
-          Pupil profiles that have been submitted. Open one to check it, ask for changes, or approve it.
+          Pupil profiles that have been submitted, longest wait first. Open one to check it, ask for changes, or
+          approve it.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -90,6 +108,37 @@ export function ProfileReviewQueue() {
             ))}
           </tbody>
         </table>
+
+        {/* WHAT IS SHOWN OUT OF WHAT IS WAITING. A screenful with no number
+            reads as the whole queue — and at a term start it is a third of it. */}
+        {total > pageSize && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground">
+            <span>
+              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} waiting
+            </span>
+            <span className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((n) => Math.max(1, n - 1))}
+                className="underline underline-offset-2 disabled:no-underline disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span>
+                Page {page} of {Math.max(1, Math.ceil(total / pageSize))}
+              </span>
+              <button
+                type="button"
+                disabled={page * pageSize >= total}
+                onClick={() => setPage((n) => n + 1)}
+                className="underline underline-offset-2 disabled:no-underline disabled:opacity-40"
+              >
+                Next
+              </button>
+            </span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -85,7 +85,7 @@ describe("the SIS profile review queue", () => {
     });
     const rows = await new SisService(db, { record: jest.fn() } as never, { enqueue: jest.fn() } as never)
       .profileReviewQueue(supervisor);
-    expect(rows.map((r) => r.studentId)).toEqual(["mine-1"]);
+    expect(rows.items.map((r) => r.studentId)).toEqual(["mine-1"]);
   });
 
   it("still shows an approver rows past supervisor stage, for pupils they do not supervise", async () => {
@@ -105,8 +105,8 @@ describe("the SIS profile review queue", () => {
     const approver = { ...(supervisor as object), permissions: ["student.profile.review", "rbac.manage"] } as never;
     const rows = await new SisService(db, { record: jest.fn() } as never, { enqueue: jest.fn() } as never)
       .profileReviewQueue(approver);
-    expect(rows.map((r) => r.studentId)).toEqual(["passed-up"]);
-    expect(rows[0].stage).toBe("ADMIN");
+    expect(rows.items.map((r) => r.studentId)).toEqual(["passed-up"]);
+    expect(rows.items[0].stage).toBe("ADMIN");
   });
 
   it("shows a supervisor nothing when they supervise nobody", async () => {
@@ -117,7 +117,7 @@ describe("the SIS profile review queue", () => {
     });
     const rows = await new SisService(db, { record: jest.fn() } as never, { enqueue: jest.fn() } as never)
       .profileReviewQueue(supervisor);
-    expect(rows).toEqual([]);
+    expect(rows.items).toEqual([]);
   });
 });
 
