@@ -43,6 +43,7 @@ const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "o
 export function WorkflowInbox({
   initial,
   total,
+  totalIsExact = true,
   page,
   pageSize,
   filters,
@@ -51,6 +52,8 @@ export function WorkflowInbox({
 }: {
   initial: WorkflowDto[];
   total: number;
+  /** False when `total` is a FLOOR — see WorkflowPageDto. */
+  totalIsExact?: boolean;
   page: number;
   pageSize: number;
   filters: { type: string; state: string; q: string; mine: boolean };
@@ -437,7 +440,12 @@ export function WorkflowInbox({
                 {/* Say what is being SHOWN out of what MATCHES. A register that
                     silently truncates reads as a complete answer. */}
                 <span>
-                  Showing {from}–{to} of {total}
+                  {/* "of at least" only where the scan genuinely stopped short.
+                      A count that might be a floor must not be printed as a
+                      count — that is the shape this queue was fixed for: it
+                      reported its own cap of 500 while 666 waited. */}
+                  Showing {from}–{to} of {totalIsExact ? "" : "at least "}
+                  {total}
                   {filters.q || filters.type || filters.state || filters.mine ? " matching" : ""}.
                 </span>{" "}
                 {/* The one fact on this page that nobody will ever find out any

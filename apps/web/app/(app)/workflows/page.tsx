@@ -79,6 +79,7 @@ export default async function WorkflowsPage({
           <WorkflowInbox
             initial={requests.items}
             total={requests.total}
+            totalIsExact={requests.totalIsExact}
             page={requests.page}
             pageSize={requests.pageSize}
             filters={{ type: sp.type ?? "", state: sp.state ?? "", q: sp.q ?? "", mine: sp.mine === "1" }}

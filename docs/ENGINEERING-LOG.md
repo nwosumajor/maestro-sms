@@ -14081,3 +14081,71 @@ while the page was correct. Read the payload before believing a negative.
   age.
 * **The receipt route itself was never the problem** — it serves any payment the
   school owns, which is exactly what made the list's silence the whole defect.
+
+### 666 waiting, 500 reported, and the oldest 166 unreachable
+
+The approvals queue (`GET /workflows?mine=1`) read the **500 most-recent**
+PENDING_REVIEW rows and narrowed them in memory. The reasoning was written down:
+whether a request awaits YOU depends on the current stage's permission inside a
+JSON column, which is not something to filter on in SQL — but it only applies to
+PENDING_REVIEW rows, and those are *"bounded by what the school is actually
+working on rather than by its history"*.
+
+Three years of data says otherwise. A request leaves PENDING_REVIEW only when
+somebody **decides** it, and some never are — a leave request overtaken by
+events, a fee schedule nobody finished, a grade publish raised twice. The
+undecided pile up, so the live set is bounded by what the school has never got
+round to, which is not the same thing at all.
+
+Measured on a school in its fourth year with 666 pending, every one at this
+approver's stage:
+
+```
+the queue reported a total of                    500   (the cap)
+pages walked / distinct rows reached              20 / 500
+awaiting them and unreachable at any page        166
+one of the missing, asked for by id              200
+```
+
+They were the **oldest** — exactly the row a review queue exists to surface,
+because a pending row is pending precisely because nobody has dealt with it. The
+data was there and the route worked; only the queue dropped it. And `total: 500`
+was the cap presented as a count, so an approver could work all twenty pages,
+reach the end, and be told nothing remained.
+
+**The fix keeps ONE definition of the rule.** Writing the five clauses of
+`canDecideWorkflowNow` into SQL would have been a second copy — the shape this
+repo has been bitten by repeatedly. Instead the queue SCANS: batches of pending
+rows **oldest-first**, each narrowed by the same predicate the engine enforces,
+until the pending work runs out. A school's undecided pile is finite by nature;
+`MINE_SCAN_MAX` bounds the scan against pathology and `totalIsExact` REPORTS a
+floor rather than rounding one down in silence.
+
+Oldest-first is the other half. A queue is worked from the longest wait, and the
+old newest-first order is what made the cap drop exactly those rows.
+
+After, live: 27 pages, total 666, all 666 reachable, 0 unreachable, 64 ms — and
+the queue opens on a request from **2023-02-22**. A typical school (40 pending)
+is unchanged at 22 ms, and the history path is untouched: newest-first, paged in
+the database.
+
+Web: the footer already said "Showing X–Y of Z" and now tells the truth about Z;
+it says "of at least N" only where a scan genuinely stopped short.
+
+// GOTCHA in my own fixture: the double compared dates with
+`String(a[field])`, so "Sun Jan 01" sorted against "Mon Jan 02"
+lexicographically — it reported the NEWEST row at the top of an oldest-first
+query and failed a correct service. A double that cannot order would have hidden
+a real ordering defect just as readily as it invented one.
+
+### The approvals engine at 5,000 schools, aged three years
+601,280 requests, a third of them still undecided.
+* **Only the `mine` queue was capped.** The history path was already paged in
+  SQL with a matching total (the fix recorded earlier in this log), and measures
+  flat: 1,600 requests in one school, page 2 in milliseconds.
+* **The stalled-request signal survives the change** — `stalled` is computed per
+  batch now rather than per page, so a request whose stage nobody can decide is
+  still named on the screen.
+* **The scan costs two queries per 500 pending.** 666 pending is 64 ms against
+  22 ms for a school with 40; the cost tracks the school's own backlog, which is
+  the thing the screen is about.

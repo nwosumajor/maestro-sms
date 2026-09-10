@@ -270,6 +270,18 @@ export interface WorkflowPageDto {
   total: number;
   page: number;
   pageSize: number;
+  /**
+   * FALSE when `total` is a floor rather than a count.
+   *
+   * The `mine` queue used to read one capped window of 500 pending requests and
+   * report what it found as the total. A school in its fourth year with 666
+   * undecided requests was told 500, and the 166 oldest — the people who had
+   * waited longest — could not be reached at any page. The queue scans now, so
+   * this is true in every ordinary case; it goes false only where a school's
+   * undecided pile is larger than any queue can help with, and then it says so
+   * instead of rounding down in silence.
+   */
+  totalIsExact: boolean;
 }
 
 /** A senior staff member the initiator can route an approval stage to

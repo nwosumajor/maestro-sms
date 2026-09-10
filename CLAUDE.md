@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **305 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **307 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **305 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **307 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -990,6 +990,13 @@ These are the rules; the log is why each one exists.
   rows: every school crosses the cap in year four, and a receipt its auditor asks
   for is then unreachable while the route that serves it works perfectly. Ask
   what a dropped row was the key to.
+- **"Live work is bounded" is an assumption, not a fact.** The approvals queue
+  read the newest 500 PENDING_REVIEW rows and narrowed in memory, reasoning that
+  live work is bounded by what a school is working on. It is bounded by what the
+  school has never got round to DECIDING, and that grows: at three years, 666
+  pending, a reported total of 500, and the 166 OLDEST unreachable at any page.
+  Scan in batches oldest-first against the one shared predicate rather than
+  writing a second copy of it in SQL, and report a floor as a floor.
 - **A register is not a queue.** A capped newest-first list DROPS the oldest —
   which is exactly the row a review queue exists to surface, because a pending
   row is pending precisely because nobody has dealt with it. Page and count **in

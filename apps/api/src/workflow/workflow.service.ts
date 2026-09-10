@@ -55,6 +55,19 @@ import {
 import { holdersOf, noApproverAtAllMessage, noSecondApproverMessage } from "../common/approvers";
 import { WorkflowHooksService } from "./workflow-hooks.service";
 
+/**
+ * How many pending requests the `mine` queue reads at a time, and the point at
+ * which it stops and says the total is a floor.
+ *
+ * The queue used to read one capped window of 500 and call what it found "the
+ * total". A school in its fourth year with 666 undecided requests was told 500,
+ * and the 166 oldest — the people who had waited longest — were unreachable at
+ * any page. Scanning replaces the cap; these bound the scan itself, and hitting
+ * the second one is REPORTED rather than rounded away.
+ */
+const MINE_SCAN_BATCH = 500;
+const MINE_SCAN_MAX = 20_000;
+
 const REVIEW_PERMS = new Set(["workflow.review", "workflow.veto"]);
 
 interface StageApproval {
@@ -367,118 +380,182 @@ export class WorkflowService {
         ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
       };
       const page = Math.max(1, Math.floor(opts.page ?? 1));
-      const rows = await tx.workflowRequest.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        // A `mine` page is narrowed in memory below, so it reads the live set
-        // (capped) rather than a database page that would count the wrong rows.
-        skip: opts.mine ? 0 : (page - 1) * WORKFLOW_PAGE_SIZE,
-        take: opts.mine ? (LIST_CAP as number) : (WORKFLOW_PAGE_SIZE as number),
-      });
+      // THE CAP WAS THE ANSWER, AND IT WAS WRONG.
+      //
+      // `mine` used to read the 500 most-recent PENDING_REVIEW rows and narrow
+      // them in memory, on the reasoning that live work is "bounded by what the
+      // school is actually working on rather than by its history". Three years
+      // of data says otherwise: a request leaves PENDING_REVIEW only when
+      // somebody DECIDES it, and some never are — a leave request overtaken by
+      // events, a fee schedule nobody finished. The undecided pile up.
+      //
+      // Measured on a school in its fourth year with 666 pending, all of them
+      // at this approver's stage: the queue reported a total of **500** — the
+      // cap, presented as a count — and 166 requests awaiting them could not be
+      // reached at any page. They were the OLDEST, which is exactly the row a
+      // review queue exists to surface, and each one answered 200 when asked
+      // for by id. The data was there; only the queue dropped it.
+      //
+      // So it SCANS instead, oldest-first, in batches, applying the one shared
+      // predicate to each — no second copy of the rule in SQL, and no cap
+      // standing in for a count. A school's undecided work is finite by nature;
+      // if it ever were not, `scanExhausted` says so rather than rounding down
+      // in silence.
+      const rows = opts.mine
+        ? []
+        : await tx.workflowRequest.findMany({
+            where,
+            orderBy: { createdAt: "desc" },
+            skip: (page - 1) * WORKFLOW_PAGE_SIZE,
+            take: WORKFLOW_PAGE_SIZE as number,
+          });
       const total = opts.mine ? 0 : await tx.workflowRequest.count({ where });
 
-      // A ROUTED stage names one approver, and the engine lets anyone eligible
-      // act once that person has LEFT. Deciding `awaitingMe` needs to know
-      // which of them are still here — asked ONCE for the whole page rather
-      // than per row, and only for rows where it can change the answer.
-      const routedElsewhere = [
-        ...new Set(
-          rows
-            .filter((r) => r.state === "PENDING_REVIEW")
-            .map((r) => ((r.stages as WorkflowStage[] | null) ?? [])[r.currentStage]?.approverId)
-            .filter((id): id is string => !!id && id !== p.userId),
-        ),
-      ];
-      const stillHere = new Set<string>(
-        routedElsewhere.length
-          ? (
-              (await tx.user.findMany({
-                where: { id: { in: routedElsewhere }, status: "ACTIVE" },
-                select: { id: true },
-              })) as Array<{ id: string }>
-            ).map((u) => u.id)
-          : [],
-      );
-
-      // WHICH PENDING REQUESTS CAN NOBODY MOVE.
-      //
-      // Raising a request into an undecidable chain is refused now. That says
-      // nothing about the ones already in flight: a school whose head teacher
-      // leaves in October strands every request sitting at that stage, and the
-      // applicant goes on seeing "pending" with nothing anywhere — no person,
-      // page or sweep — to say otherwise. The guard prevents new dead ends; a
-      // school still needs to be able to SEE the ones it already has.
-      //
-      // One query per DISTINCT stage permission on the page, which in practice
-      // is two or three, rather than one per row.
-      const pendingPermissions = [
-        ...new Set(
-          rows
-            .filter((r) => r.state === "PENDING_REVIEW")
-            .map((r) => ((r.stages as WorkflowStage[] | null) ?? [])[r.currentStage]?.permission)
-            .filter((k): k is NonNullable<typeof k> => !!k),
-        ),
-      ];
-      const holdersByPermission = new Map<string, string[]>();
-      for (const permission of pendingPermissions) {
-        holdersByPermission.set(permission, await holdersOf(tx, permission));
-      }
-
-      const items = rows.map((r) => {
-        const stages = (r.stages as WorkflowStage[] | null) ?? [];
-        const pending = r.state === "PENDING_REVIEW" ? (stages[r.currentStage]?.label ?? null) : null;
-        return {
-          id: r.id,
-          type: r.type,
-          title: r.title,
-          state: r.state,
-          initiatorId: r.initiatorId,
-          createdAt: r.createdAt,
-          currentStage: r.currentStage,
-          stageCount: stages.length,
-          stageLabel: pending,
-          // ONE named field, never the raw payload. An approver needs the facts
-          // behind a request — a title alone is not enough to decide on, least
-          // of all one that ends a child's access — but payloads carry ids and
-          // whatever a future type puts there, so only a summary a service
-          // deliberately wrote for the approver is surfaced.
-          summary: (r.payload as { summary?: unknown } | null)?.summary
-            ? String((r.payload as { summary: unknown }).summary).slice(0, 300)
-            : null,
-          // Whether this caller can act on it NOW — the same rule the engine
-          // enforces, so the page stops offering buttons that 403.
-          awaitingMe: canDecideWorkflowNow(
-            {
-              state: r.state,
-              initiatorId: r.initiatorId,
-              currentStage: r.currentStage,
-              stages,
-              approvals: (r.approvals as RecordedApproval[] | null) ?? [],
-            },
-            p,
-            !stages[r.currentStage]?.approverId || stillHere.has(stages[r.currentStage]?.approverId ?? ""),
+      /**
+       * Turn a batch of rows into items, including `awaitingMe` and `stalled`.
+       *
+       * A FUNCTION OF A BATCH, because the `mine` queue now scans rather than
+       * reading one capped window — and its two lookups (who is still here, who
+       * holds each pending stage) must be asked per batch rather than once for
+       * a page that no longer exists.
+       */
+      const enrich = async (batch: typeof rows) => {
+        // A ROUTED stage names one approver, and the engine lets anyone eligible
+        // act once that person has LEFT. Deciding `awaitingMe` needs to know
+        // which of them are still here — asked ONCE for the whole page rather
+        // than per row, and only for rows where it can change the answer.
+        const routedElsewhere = [
+          ...new Set(
+            batch
+              .filter((r) => r.state === "PENDING_REVIEW")
+              .map((r) => ((r.stages as WorkflowStage[] | null) ?? [])[r.currentStage]?.approverId)
+              .filter((id): id is string => !!id && id !== p.userId),
           ),
-          // Nobody can move this one. Its current stage's permission is held by
-          // nobody still at the school — or only by the person who raised it,
-          // which separation of duties makes the same thing.
-          stalled:
-            !!pending &&
-            !(holdersByPermission.get(stages[r.currentStage]?.permission ?? "") ?? []).some(
-              (id) => id !== r.initiatorId,
+        ];
+        const stillHere = new Set<string>(
+          routedElsewhere.length
+            ? (
+                (await tx.user.findMany({
+                  where: { id: { in: routedElsewhere }, status: "ACTIVE" },
+                  select: { id: true },
+                })) as Array<{ id: string }>
+              ).map((u) => u.id)
+            : [],
+        );
+
+        // WHICH PENDING REQUESTS CAN NOBODY MOVE.
+        //
+        // Raising a request into an undecidable chain is refused now. That says
+        // nothing about the ones already in flight: a school whose head teacher
+        // leaves in October strands every request sitting at that stage, and the
+        // applicant goes on seeing "pending" with nothing anywhere — no person,
+        // page or sweep — to say otherwise. The guard prevents new dead ends; a
+        // school still needs to be able to SEE the ones it already has.
+        //
+        // One query per DISTINCT stage permission on the page, which in practice
+        // is two or three, rather than one per row.
+        const pendingPermissions = [
+          ...new Set(
+            batch
+              .filter((r) => r.state === "PENDING_REVIEW")
+              .map((r) => ((r.stages as WorkflowStage[] | null) ?? [])[r.currentStage]?.permission)
+              .filter((k): k is NonNullable<typeof k> => !!k),
+          ),
+        ];
+        const holdersByPermission = new Map<string, string[]>();
+        for (const permission of pendingPermissions) {
+          holdersByPermission.set(permission, await holdersOf(tx, permission));
+        }
+
+        return batch.map((r) => {
+          const stages = (r.stages as WorkflowStage[] | null) ?? [];
+          const pending = r.state === "PENDING_REVIEW" ? (stages[r.currentStage]?.label ?? null) : null;
+          return {
+            id: r.id,
+            type: r.type,
+            title: r.title,
+            state: r.state,
+            initiatorId: r.initiatorId,
+            createdAt: r.createdAt,
+            currentStage: r.currentStage,
+            stageCount: stages.length,
+            stageLabel: pending,
+            // ONE named field, never the raw payload. An approver needs the facts
+            // behind a request — a title alone is not enough to decide on, least
+            // of all one that ends a child's access — but payloads carry ids and
+            // whatever a future type puts there, so only a summary a service
+            // deliberately wrote for the approver is surfaced.
+            summary: (r.payload as { summary?: unknown } | null)?.summary
+              ? String((r.payload as { summary: unknown }).summary).slice(0, 300)
+              : null,
+            // Whether this caller can act on it NOW — the same rule the engine
+            // enforces, so the page stops offering buttons that 403.
+            awaitingMe: canDecideWorkflowNow(
+              {
+                state: r.state,
+                initiatorId: r.initiatorId,
+                currentStage: r.currentStage,
+                stages,
+                approvals: (r.approvals as RecordedApproval[] | null) ?? [],
+              },
+              p,
+              !stages[r.currentStage]?.approverId || stillHere.has(stages[r.currentStage]?.approverId ?? ""),
             ),
-        };
-      });
+            // Nobody can move this one. Its current stage's permission is held by
+            // nobody still at the school — or only by the person who raised it,
+            // which separation of duties makes the same thing.
+            stalled:
+              !!pending &&
+              !(holdersByPermission.get(stages[r.currentStage]?.permission ?? "") ?? []).some(
+                (id) => id !== r.initiatorId,
+              ),
+          };
+        });
+      };
 
       if (opts.mine) {
-        const waiting = items.filter((i) => i.awaitingMe);
+        // OLDEST FIRST, and every one of them.
+        //
+        // A queue is worked oldest-first — the request that has waited longest
+        // is the one somebody is waiting on — and the old order made the cap
+        // drop precisely those. Scanned in batches until the pending work runs
+        // out, applying the SAME predicate the engine enforces.
+        const waiting: Awaited<ReturnType<typeof enrich>> = [];
+        let scanned = 0;
+        let scanExhausted = false;
+        for (;;) {
+          const batch = await tx.workflowRequest.findMany({
+            where,
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            skip: scanned,
+            take: MINE_SCAN_BATCH,
+          });
+          if (batch.length === 0) {
+            scanExhausted = true;
+            break;
+          }
+          scanned += batch.length;
+          waiting.push(...(await enrich(batch)).filter((i) => i.awaitingMe));
+          if (batch.length < MINE_SCAN_BATCH) {
+            scanExhausted = true;
+            break;
+          }
+          // A school with more undecided work than this has a problem no queue
+          // can fix, and the count below says the total is a FLOOR rather than
+          // quietly rounding it down.
+          if (scanned >= MINE_SCAN_MAX) break;
+        }
         return {
           items: waiting.slice((page - 1) * WORKFLOW_PAGE_SIZE, page * WORKFLOW_PAGE_SIZE),
           total: waiting.length,
           page,
           pageSize: WORKFLOW_PAGE_SIZE,
+          // False only where the scan stopped short: the caller is told the
+          // total is at least this, never handed a cap dressed as a count.
+          totalIsExact: scanExhausted,
         };
       }
-      return { items, total, page, pageSize: WORKFLOW_PAGE_SIZE };
+      return { items: await enrich(rows), total, page, pageSize: WORKFLOW_PAGE_SIZE, totalIsExact: true };
     });
   }
 
