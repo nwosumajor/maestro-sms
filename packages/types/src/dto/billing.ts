@@ -37,14 +37,37 @@ export interface BillingQuoteDto {
 }
 
 /** The full billing overview screen payload. */
+/** How many payments one screen of the billing history carries. */
+export const PLATFORM_PAYMENTS_PAGE_SIZE = 50;
+
 export interface BillingOverviewDto {
   subscription: SubscriptionDto;
   /** Active students billed against (per-seat basis). */
   activeStudents: number;
   /** One quote per (sellable tier × cycle), for the upgrade cards. */
   quotes: BillingQuoteDto[];
-  /** Most-recent-first payment history. */
+  /**
+   * Most-recent-first payment history — ONE PAGE of it.
+   *
+   * This was `take: 50` with no page and no total, on the school's record of
+   * what it has paid the platform. `platform_subscription_payment` is
+   * append-only by design, and a school accumulates far more than one row a
+   * month: renewals, seat true-ups, add-on purchases, message credits. Measured
+   * on a fleet aged three years, it stood at 48 rows — so every school on the
+   * platform crosses 50 in its FOURTH year, and then the oldest simply stop
+   * being there.
+   *
+   * The loss is navigational and total: the only place a payment's id appears is
+   * this list, and the receipt route takes that id. Driven at 90 payments — 50
+   * shown, 40 gone, and a receipt for one of the missing ones served perfectly
+   * well when asked for directly. A school asked by its auditor for a receipt
+   * from two years ago had no path to it.
+   */
   payments: PlatformPaymentDto[];
+  /** How many payments this school has in all — so a page cannot read as the record. */
+  paymentsTotal: number;
+  paymentsPage: number;
+  paymentsPageSize: number;
   /** Saved-card auto-renew: opted in, and the stored card's display hint
    *  (null = no card saved yet — one successful card payment saves it). */
   autoRenew: boolean;

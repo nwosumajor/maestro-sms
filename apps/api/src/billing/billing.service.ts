@@ -16,6 +16,7 @@
 
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, Optional} from "@nestjs/common";
 import {
+  PLATFORM_PAYMENTS_PAGE_SIZE,
   type AddonOfferDto,
   type ModuleKey,
   addonProrationMinor,
@@ -289,22 +290,47 @@ export class BillingService {
   }
 
   /** Current subscription + live per-tier quotes + payment history. */
-  async getOverview(p: Principal): Promise<BillingOverviewDto> {
+  async getOverview(p: Principal, opts: { paymentsPage?: number } = {}): Promise<BillingOverviewDto> {
+    const paymentsPage = Math.max(1, Math.floor(opts.paymentsPage ?? 1));
+    const paymentsPageSize = PLATFORM_PAYMENTS_PAGE_SIZE;
     const resolved = await this.entitlements.resolve(p.schoolId);
     const subscription = this.entitlements.dtoFrom(p.schoolId, resolved);
 
-    const { activeStudents, payments, autoRenew, cardLast4, subRow } = await this.db.runAsTenant(
+    const { activeStudents, payments, paymentsTotal, autoRenew, cardLast4, subRow } = await this.db.runAsTenant(
       this.ctx(p),
       async (tx) => {
         const seats = await this.activeStudents(tx);
-        const rows = await tx.platformSubscriptionPayment.findMany({
-          orderBy: { createdAt: "desc" },
-          take: 50,
-        });
+        // A PAGE, AND THE TOTAL BESIDE IT.
+        //
+        // This took the 50 most recent and said nothing about the rest, on the
+        // school's own record of what it has paid the platform. That table is
+        // append-only by design and a school adds more than a row a month —
+        // renewals, seat true-ups, add-ons, message credits. At three years it
+        // holds 48, so every school crosses the cap in its fourth year and the
+        // oldest quietly stop being there.
+        //
+        // What made it worse than an ordinary truncation: the ONLY place a
+        // payment's id appears is this list, and the receipt route takes that
+        // id. Driven at 90 payments — 50 shown, 40 gone, and a receipt for one
+        // of the missing ones served perfectly well when asked for directly. The
+        // record existed and there was no path to it.
+        //
+        // `id` breaks the tie: several rows can share a `createdAt` when a
+        // webhook settles a batch, and offset paging over a partial order skips
+        // and repeats.
+        const [rows, total] = await Promise.all([
+          tx.platformSubscriptionPayment.findMany({
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: (paymentsPage - 1) * paymentsPageSize,
+            take: paymentsPageSize,
+          }),
+          tx.platformSubscriptionPayment.count(),
+        ]);
         const sub = await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } });
         return {
           activeStudents: seats,
           payments: rows.map((r) => this.toPaymentDto(r)),
+          paymentsTotal: total,
           autoRenew: sub?.autoRenew ?? false,
           // A saved card exists only after a successful charge; last4 is display-only.
           cardLast4: sub?.paystackAuthorizationEnc ? (sub.cardLast4 ?? "····") : null,
@@ -400,6 +426,9 @@ export class BillingService {
       activeStudents,
       quotes,
       payments,
+      paymentsTotal,
+      paymentsPage,
+      paymentsPageSize,
       autoRenew,
       cardLast4,
       planChangeCreditMinor,

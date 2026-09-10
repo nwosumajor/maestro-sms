@@ -14021,3 +14021,63 @@ for ever, and nothing removes one.
   three years of history does not widen them.
 * **Maker-checker on payroll holds**: a run cannot be finalized by the person who
   created it.
+
+### The 51st payment, and the receipt nobody could reach
+
+The billing screen's payment history was `take: 50`, most recent first, with no
+page and no total — on the school's own record of what it has paid the platform.
+`platform_subscription_payment` is append-only by design, and a school adds more
+than one row a month: renewals, seat true-ups, add-on purchases, message credits.
+
+Measured on a fleet aged **three years**: **48 rows per school**. So this is not
+an edge case, it is the ordinary trajectory — every school on the platform
+crosses 50 in its FOURTH year, and from then on the oldest simply stop being
+there. The card even said `(latest 50)`, naming a limit and offering nothing past
+it.
+
+What makes it worse than an ordinary truncation is where a payment's ID lives.
+The receipt route is `GET /billing/payments/:id/receipt.pdf`, and the only place
+that id appears is this list. Driven at 90 payments:
+
+```
+the school has                                  90
+the screen showed                               50
+unreachable                                     40
+a receipt for one of them, asked for directly   200, 1,675 bytes
+```
+
+The record existed, the school was entitled to it, and there was no path to it. A
+school asked by its auditor for a receipt from two years ago could not produce
+one.
+
+Now paged, with `paymentsTotal` beside it and `?paymentsPage=` to walk back —
+"Showing 51–90 of 90", Newer/Older, every row's receipt linked. Verified live:
+page two renders, links its receipts, and one of the previously unreachable ones
+fetches at 200.
+
+// GOTCHA: the tiebreaker lesson from the gradebook, applied before it could
+bite. Several payments share a `createdAt` when a webhook settles a batch, and
+offset paging over a partial order skips and repeats — `[{createdAt: desc}, {id:
+desc}]`.
+
+// GOTCHA on the test for THAT: it passed with the tiebreaker removed. The
+fixture put five rows on each second, so a page boundary only SOMETIMES lands
+inside a tie group — a property test that holds probabilistically holds for
+nothing. Every row now shares ONE instant, and the mutation fails on three
+consecutive runs.
+
+// GOTCHA on the probe rather than the product: my render check reported
+"Showing 1–50 of 90" missing. It was there — React's flight payload splits
+interpolated numbers into separate array entries, so the regex matched nothing
+while the page was correct. Read the payload before believing a negative.
+
+### Platform billing at 5,000 schools, aged three years
+240,000 subscription payments, and one school taken to 90 rows.
+* **The overview is flat** whatever the history: 90 ms at 48 payments, 49 ms at
+  90 — it was never slow, it was silently short.
+* **Everything else in billing is bounded by the subscription, not by time.**
+  `/billing/status` resolves one cached entitlement; quotes are per tier × cycle;
+  add-ons per module; credits a balance. None of them grows with the school's
+  age.
+* **The receipt route itself was never the problem** — it serves any payment the
+  school owns, which is exactly what made the list's silence the whole defect.

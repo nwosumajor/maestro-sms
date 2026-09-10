@@ -12,7 +12,7 @@
 // verified against the raw body, mirroring the Paystack posture.
 // =============================================================================
 
-import { Body, Controller, Get, Headers, Param, Post, Put, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Put, Query, Req, Res } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, MAX_BILLING_PERIODS, PLANS,
@@ -22,6 +22,7 @@ import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, MAX_BILLING_PERIODS, P
 } from "@sms/types";
 import type { AddonOfferDto, BillingOverviewDto, CheckoutInitResultDto, ReferralInfoDto, SubscriptionDto } from "@sms/types";
 import { z } from "zod";
+import { pageNumber } from "../common/status-filter";
 import { Public } from "../auth/public.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -74,11 +75,20 @@ export class BillingController {
     private readonly settlement: InvoiceSettlementService,
   ) {}
 
-  /** The billing screen: current subscription + per-tier quotes + history. */
+  /**
+   * The billing screen: current subscription + per-tier quotes + history.
+   *
+   * `?paymentsPage=` walks back through the payment history, which is the
+   * school's record of what it has paid the platform and the only place a
+   * payment's id — and therefore its receipt — can be found.
+   */
   @Get()
   @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
-  overview(@CurrentPrincipal() p: Principal): Promise<BillingOverviewDto> {
-    return this.billing.getOverview(p);
+  overview(
+    @CurrentPrincipal() p: Principal,
+    @Query("paymentsPage") paymentsPage?: string,
+  ): Promise<BillingOverviewDto> {
+    return this.billing.getOverview(p, { paymentsPage: pageNumber(paymentsPage, "paymentsPage") });
   }
 
   /** Light subscription posture for the AppShell renewal banner (cheap: one

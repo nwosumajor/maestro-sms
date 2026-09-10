@@ -2,6 +2,7 @@ import type { AddonOfferDto, BillingOverviewDto, ReferralInfoDto, Serialized } f
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import Link from "next/link";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +50,7 @@ const PAYMENT_STATE: Record<
 export default async function BillingPage({
   searchParams,
 }: {
-  searchParams: { verify?: string; verifyCredits?: string };
+  searchParams: { verify?: string; verifyCredits?: string; paymentsPage?: string };
 }) {
   const session = await auth();
   const user = session!.user;
@@ -61,8 +62,13 @@ export default async function BillingPage({
   // rendered nothing. Redirecting is what the rest of the app does.
   if (!hasPermission(user.permissions, "billing.read")) redirect("/dashboard");
 
+  // WHICH PAGE OF THE PAYMENT RECORD. The history used to be the 50 most recent
+  // with no way past them: a school crosses 50 in its fourth year, and the only
+  // place a payment's id — and so its receipt — appears is this list.
+  const paymentsPage = Math.max(1, Number(searchParams?.paymentsPage ?? 1) || 1);
+
   const [data, addonOffers, referral, credits] = await Promise.all([
-    apiGet<Overview>("/billing"),
+    apiGet<Overview>(`/billing${paymentsPage > 1 ? `?paymentsPage=${paymentsPage}` : ""}`),
     // The add-on shop. Falls back to empty independently: a failure here must
     // not blank the subscription overview beside it.
     apiGet<Serialized<AddonOfferDto>[]>("/billing/addons").then((r) => r ?? []),
@@ -230,8 +236,7 @@ export default async function BillingPage({
               <CardHeader>
                 <CardTitle>Payment history</CardTitle>
                 <CardDescription>
-                  Your platform subscription payments, most recent first{" "}
-                  {data.payments.length >= 50 ? "(latest 50)" : ""}. Only rows marked
+                  Your platform subscription payments, most recent first. Only rows marked
                   <span className="font-medium"> Paid</span> were charged.
                 </CardDescription>
               </CardHeader>
@@ -288,6 +293,45 @@ export default async function BillingPage({
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+
+                {/* WHAT IS SHOWN OUT OF WHAT WAS PAID, and a way back through it.
+                    The card used to say "(latest 50)" and stop there — naming a
+                    limit while offering no way past it. Every payment's receipt
+                    is reachable only through its row, so the older rows being
+                    absent meant the receipts were too. */}
+                {data.paymentsTotal > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>
+                      Showing {(data.paymentsPage - 1) * data.paymentsPageSize + 1}–
+                      {Math.min(data.paymentsPage * data.paymentsPageSize, data.paymentsTotal)} of{" "}
+                      {data.paymentsTotal}
+                    </span>
+                    {data.paymentsTotal > data.paymentsPageSize && (
+                      <span className="flex items-center gap-3">
+                        {data.paymentsPage > 1 && (
+                          <Link
+                            href={`/billing?paymentsPage=${data.paymentsPage - 1}`}
+                            className="underline underline-offset-2"
+                          >
+                            Newer
+                          </Link>
+                        )}
+                        <span>
+                          Page {data.paymentsPage} of{" "}
+                          {Math.max(1, Math.ceil(data.paymentsTotal / data.paymentsPageSize))}
+                        </span>
+                        {data.paymentsPage * data.paymentsPageSize < data.paymentsTotal && (
+                          <Link
+                            href={`/billing?paymentsPage=${data.paymentsPage + 1}`}
+                            className="underline underline-offset-2"
+                          >
+                            Older
+                          </Link>
+                        )}
+                      </span>
+                    )}
                   </div>
                 )}
               </CardContent>
