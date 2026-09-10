@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **301 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **303 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **301 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **303 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -989,7 +989,11 @@ These are the rules; the log is why each one exists.
   row is pending precisely because nobody has dealt with it. Page and count **in
   SQL**; a filter applied in memory only ever sees the rows that survived the
   cap. Work a queue **oldest-first**; a count must not be narrowed by the filter.
-- **No silent truncation.** An export is complete or it says it is short.
+- **No silent truncation.** An export is complete or it says it is short — and
+  every row in it must be IDENTIFIABLE. The NDPR staff bundle returned thirty-six
+  payslips as `{gross, net}` with no period, no date and no run: complete, and
+  unreadable. Carry the period, the kind of run, and the status; LABEL a draft
+  rather than dropping it, so no month goes missing from the sequence.
 - **Measure as the APP ROLE under RLS, with a BOUND PARAMETER, on volume, with a
   realistic distribution.** Every one of those four has produced a wrong answer:
   `postgres` bypasses RLS and plans differently; a literal makes Postgres pick an

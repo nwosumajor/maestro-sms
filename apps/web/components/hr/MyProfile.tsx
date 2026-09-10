@@ -77,7 +77,16 @@ export function MyProfile({ profile }: { profile: Profile | null }) {
           <div className="space-y-1.5"><Label htmlFor="mp-acct">Bank account</Label><Input id="mp-acct" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} /></div>
           <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
             <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save profile"}</Button>
-            <a href="/api/sms/hr/me/export" className="text-sm text-primary underline">Export my data (NDPR)</a>
+            {/* A FILE THEY CAN KEEP, not JSON in a browser tab. This is the
+                answer to a data-subject access request: the point is that the
+                person ends up holding it. Same-origin, so `download` names it. */}
+            <a
+              href="/api/sms/hr/me/export"
+              download="my-hr-data.json"
+              className="text-sm text-primary underline"
+            >
+              Export my data (NDPR)
+            </a>
             <Button type="button" variant="outline" disabled={busy} onClick={erasePersonal}>Erase personal details</Button>
             {msg && <span className="text-sm text-muted-foreground">{msg}</span>}
           </div>

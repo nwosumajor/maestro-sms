@@ -256,12 +256,61 @@ export class HrService {
         tx.trainingRecord.findMany({ where: { userId: p.userId } }),
         tx.staffDocument.findMany({ where: { userId: p.userId }, select: { kind: true, name: true, expiresAt: true, createdAt: true } }),
       ]);
-      const payslips = e
-        ? (await tx.payslip.findMany({ where: { userId: p.userId } })).map((s) => ({
-            grossMinor: s.grossEnc ? Number(decryptField(s.grossEnc, p.schoolId)) : null,
-            netMinor: s.netEnc ? Number(decryptField(s.netEnc, p.schoolId)) : null,
-          }))
+      // A PAYSLIP THAT DOES NOT SAY WHICH MONTH IT IS FOR IS NOT A RECORD OF
+      // ANYTHING.
+      //
+      // This returned `{grossMinor, netMinor}` and nothing else. Driven on three
+      // years of payroll: a member of staff exercising their right of access got
+      // THIRTY-SIX indistinguishable objects — two figures each, no period, no
+      // date, no run. They cannot tell which month any figure belongs to, cannot
+      // check one month against a payslip they hold, and cannot use the export
+      // as evidence of anything, which is what an access request is for.
+      //
+      // The sibling read of the same rows — `PayrollService.myPayslips`, behind
+      // the staff self-service screen — has carried the period all along. One of
+      // the two was written carefully and the other reduced to its numbers.
+      //
+      // DEDUCTIONS are included too. They are on the row already, and they are
+      // the part of a payslip somebody actually queries: tax, pension, a loan
+      // repayment. An export that shows gross and net and omits the difference
+      // invites the question it exists to answer.
+      //
+      // Every payslip, DRAFT runs included, each labelled with its run's status —
+      // an export drops nothing silently. A draft is not yet a payment, and
+      // saying so is better than omitting the row and leaving a gap in a
+      // sequence of months that the reader will notice and cannot explain.
+      const slipRows = e ? await tx.payslip.findMany({ where: { userId: p.userId } }) : [];
+      const slipRuns = slipRows.length
+        ? ((await tx.payrollRun.findMany({
+            where: { id: { in: slipRows.map((s) => s.payrollRunId) } },
+            select: { id: true, periodYear: true, periodMonth: true, status: true, finalizedAt: true, runType: true },
+          })) as Array<{
+            id: string;
+            periodYear: number;
+            periodMonth: number;
+            status: string;
+            finalizedAt: Date | null;
+            runType: string;
+          }>)
         : [];
+      const runOf = new Map(slipRuns.map((r) => [r.id, r]));
+      const money = (v: string | null) => (v ? Number(decryptField(v, p.schoolId)) : null);
+      const payslips = slipRows
+        .map((s) => {
+          const run = runOf.get(s.payrollRunId);
+          return {
+            periodYear: run?.periodYear ?? null,
+            periodMonth: run?.periodMonth ?? null,
+            runType: run?.runType ?? null,
+            status: run?.status ?? null,
+            finalizedAt: run?.finalizedAt ?? null,
+            grossMinor: money(s.grossEnc),
+            deductionsMinor: money(s.deductionsEnc),
+            netMinor: money(s.netEnc),
+          };
+        })
+        // Newest first, the order a person reads their own pay history in.
+        .sort((a, b) => (b.periodYear ?? 0) - (a.periodYear ?? 0) || (b.periodMonth ?? 0) - (a.periodMonth ?? 0));
       await this.audit.record(
         { actorId: p.userId, action: "hr.self.export", entity: "user", entityId: p.userId, schoolId: p.schoolId },
         tx,

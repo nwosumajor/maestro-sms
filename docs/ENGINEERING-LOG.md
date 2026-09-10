@@ -13956,3 +13956,68 @@ real accumulation.
 * **Untagged work stays visible in every term** — the same fail-open the report
   card takes, so a school part-way through tagging assessments does not have its
   history vanish.
+
+### Thirty-six payslips, and no way to tell one from another
+
+`GET /hr/me/export` is the NDPR self-service bundle: what this platform holds
+about a member of staff, handed to them on request. Its payslip section returned
+`{grossMinor, netMinor}` and nothing else.
+
+Driven on a fleet aged **three years** (5,000 schools × 36 monthly runs = 180,000
+runs, 1.8M payslips), a member of staff exercising their right of access got
+**thirty-six indistinguishable objects** — two figures each, no period, no date,
+no run:
+
+```
+[{"grossMinor":…,"netMinor":…},{"grossMinor":…,"netMinor":…}, … x36 ]
+```
+
+They cannot tell which month any figure belongs to, cannot check one month
+against a payslip they hold, and cannot use the export as evidence of anything —
+which is the whole purpose of an access request.
+
+The sibling read of the same rows — `PayrollService.myPayslips`, behind the staff
+self-service screen — has carried the period all along. One of the two was
+written carefully and the other reduced to its numbers.
+
+Each row now identifies itself: `periodYear`, `periodMonth`, `runType`, the run's
+`status`, `finalizedAt`, and gross / **deductions** / net, newest first.
+
+* **Deductions** were on the row already and are the part of a payslip somebody
+  actually queries — tax, pension, a loan repayment. Showing the two ends and
+  omitting the difference invites the question the export exists to answer.
+* **`runType`**, so a thirteenth-month or bonus run is not read as an ordinary
+  month's pay.
+* **DRAFT runs are LABELLED, not dropped.** A draft is not yet a payment, and
+  saying so beats leaving a gap in a sequence of months that the reader will
+  notice and cannot explain — an export omits nothing in silence.
+* One lookup for the runs, not one per payslip: thirty-six rows today, and this
+  table grows by one per person per month for as long as the school exists.
+
+Verified against REAL ciphertext by driving actual payroll through the API
+rather than the SQL fixture: an employee created with a ₦300,000 salary, a run
+created and refused at finalize by the same person ("Payroll must be finalized by
+a different person" — maker-checker holding), and the export reading back gross
+30,000,000 / deductions 5,652,667 / net 24,347,333, which is Nigerian PAYE plus
+8% pension and sums exactly.
+
+Web: the export was a plain `<a href>`, so a data subject got raw JSON in a
+browser tab rather than a file. It downloads as `my-hr-data.json` now — the point
+of an access request is that the person ends up holding it.
+
+### HR and payroll at 5,000 schools, aged three years
+180,000 payroll runs and 1.8M payslips. What the age was for: payroll is the
+clearest table bounded by TIME rather than size — one row per person per month,
+for ever, and nothing removes one.
+* **Nothing else in HR is lifetime-shaped in a way that bites.** `listRuns` and
+  `myPayslips` are unpaged but grow by 12 rows a year: 36 runs is 16.5 KB and 36
+  payslips 5.7 KB, and both measure FLAT across the fleet (runs 22–24 ms, my
+  payslips 15–17 ms, export 20–21 ms, analytics 25–27 ms at schools 500, 2,500
+  and 5,000). Noted rather than changed — a decade is 120 rows.
+* **A three-year-old run is still fully readable**: the oldest run in the fleet
+  (2023-10) returns its detail in 22 ms, its bank export in 47 ms, and its PAYE
+  and pension remittance schedules on demand.
+* **Staff attendance and the daily sweeps are date-bounded by construction**, so
+  three years of history does not widen them.
+* **Maker-checker on payroll holds**: a run cannot be finalized by the person who
+  created it.
