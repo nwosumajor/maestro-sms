@@ -1,16 +1,15 @@
 import { CareersBoard } from "@/components/public/CareersBoard";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { apiBaseUrl } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
 // PUBLIC page — no authentication. A school's open vacancies + application form.
 // Server-fetches the openings; the form posts through the public BFF proxy.
 export default async function CareersPage({ params }: { params: { slug: string } }) {
   let data: { school: string; jobs: { id: string; title: string; department: string | null; description: string | null; openings: number }[] } | null = null;
   try {
-    const res = await fetch(`${API_BASE}/public/careers/${params.slug}`, { cache: "no-store" });
+    const res = await fetch(`${apiBaseUrl()}/public/careers/${params.slug}`, { cache: "no-store" });
     if (res.ok) data = await res.json();
   } catch {
     /* API unreachable — render the not-found state */

@@ -268,6 +268,15 @@ Common causes, in the order they actually occur:
 - **Migration left the schema half-applied** — the deploy's migrate task failed
   but services rolled anyway. §5.5.
 - **OOM** — `exitCode: 137`. Raise task memory, then find the leak.
+- **The web tier does not know where the API is** — `exitCode: 1`, and the last
+  line of the task log is `[boot] API_BASE_URL is not set…` or `[boot]
+  API_BASE_URL must be http or https…`. **This is the check working**, not a
+  fault to route around: the container refuses to serve rather than answer every
+  page with 200 and "we couldn't load this just now". Fix the value in the task
+  definition (`ecs.tf` sets it to the API's Cloud Map DNS,
+  `http://<api-service>.<ns>:3001`) and redeploy. Do NOT unset the check —
+  before it existed, this misconfiguration deployed GREEN and the site was dead
+  with nothing in any log naming the cause.
 
 **If the edge is 403 but the API is healthy — that is WAF.** `waf.tf` attaches
 AWSManagedRulesCommonRuleSet (p1), KnownBadInputs (p2) and a per-IP rate limit to

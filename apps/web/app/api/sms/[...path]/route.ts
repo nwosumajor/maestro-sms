@@ -10,14 +10,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { forwardedFor } from "@/lib/forwarded";
 import { bearerForSession } from "@/lib/apiToken";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "@/lib/env";
 
 async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   const token = await bearerForSession();
   if (!token) return new NextResponse("Unauthorized", { status: 401 });
 
-  const target = `${API_BASE}/${ctx.params.path.join("/")}${req.nextUrl.search}`;
+  const target = `${apiBaseUrl()}/${ctx.params.path.join("/")}${req.nextUrl.search}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     // The client's address — the API's per-tenant and per-IP limits are both

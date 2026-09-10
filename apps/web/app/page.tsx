@@ -60,6 +60,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { HeroCarousel } from "@/components/public/HeroCarousel";
 import { SiteHeader } from "@/components/marketing/SiteHeader";
+import { apiBaseUrl } from "@/lib/env";
 
 // Auto-sliding hero photos — polished, international education imagery.
 const HERO_IMAGES = [
@@ -264,8 +265,6 @@ const PLAN_META: Record<Plan, { tagline: string; highlight: boolean }> = {
   ENTERPRISE: { tagline: "Everything, including HR & payroll", highlight: false },
 };
 
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
-
 /** Whole numbers stay whole (₦1,425); fractional amounts get 2dp (₦2,137.50). */
 function fmtAmount(n: number): string {
   return n.toLocaleString("en-NG", { minimumFractionDigits: n % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 });
@@ -278,7 +277,7 @@ async function effectivePlans() {
     // the Next data-cache window here (revalidate) hid updates for minutes. The
     // per-request cost is one API call answered from PlanPricingService's
     // in-memory cache (dropped instantly on write, incl. across replicas).
-    const res = await fetch(`${API_BASE}/public/plan-pricing`, { cache: "no-store" });
+    const res = await fetch(`${apiBaseUrl()}/public/plan-pricing`, { cache: "no-store" });
     if (res.ok) rows = (await res.json()) as PlanPriceDto[];
   } catch {
     // API unreachable (e.g. static build) -> platform default pricing below.

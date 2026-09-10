@@ -3,10 +3,9 @@ import type { PublicSchoolDto } from "@sms/types";
 import { EnrollForm } from "@/components/public/EnrollForm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { apiBaseUrl } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
 // NULL means "we could not ask", [] means "there genuinely are none". Collapsed
 // into [], a failed fetch rendered "No schools are available right now" — on an
@@ -14,7 +13,7 @@ const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 // broken page, and the parent leaves instead of retrying.
 async function getSchools(): Promise<PublicSchoolDto[] | null> {
   try {
-    const res = await fetch(`${API_BASE}/public/schools`, { cache: "no-store" });
+    const res = await fetch(`${apiBaseUrl()}/public/schools`, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as PublicSchoolDto[];
   } catch {

@@ -2,17 +2,16 @@ import Link from "next/link";
 import type { PublicSchoolDto } from "@sms/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { apiBaseUrl } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
 // NULL means "we could not ask", [] means "there genuinely are none". Both were
 // returned as [], so an API blip told a prospective parent this platform has no
 // schools — on the page whose whole job is to show them there are.
 async function getSchools(): Promise<PublicSchoolDto[] | null> {
   try {
-    const res = await fetch(`${API_BASE}/public/schools`, { cache: "no-store" });
+    const res = await fetch(`${apiBaseUrl()}/public/schools`, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as PublicSchoolDto[];
   } catch {

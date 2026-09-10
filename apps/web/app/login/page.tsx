@@ -5,17 +5,15 @@ import type { PublicBrandingDto } from "@sms/types";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { LoginShowcase } from "@/components/auth/LoginShowcase";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
-
+import { apiBaseUrl } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
 /** Public, pre-auth fetch of a school's branding by slug (?school=slug). */
 async function getBranding(slug: string | undefined): Promise<PublicBrandingDto | null> {
   if (!slug) return null;
   try {
-    const res = await fetch(`${API_BASE}/public/schools/${encodeURIComponent(slug)}/branding`, { cache: "no-store" });
+    const res = await fetch(`${apiBaseUrl()}/public/schools/${encodeURIComponent(slug)}/branding`, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as PublicBrandingDto;
   } catch {

@@ -31,8 +31,7 @@
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "@/lib/env";
 
 /** Public webhook path → the API route that verifies it. Nothing else passes. */
 function resolveTarget(path: string[]): string | null {
@@ -80,7 +79,7 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   const body = Buffer.from(await req.arrayBuffer());
 
   try {
-    const res = await fetch(`${API_BASE}${target}`, { method: req.method, headers, body });
+    const res = await fetch(`${apiBaseUrl()}${target}`, { method: req.method, headers, body });
     return new NextResponse(await res.text(), {
       status: res.status,
       headers: { "Content-Type": res.headers.get("content-type") ?? "application/json" },

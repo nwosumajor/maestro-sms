@@ -14359,3 +14359,96 @@ surge.
   would refuse.
 * **Reads are flat**: 58 ms for page 1 of 1,200; 38 ms for a small school's whole
   queue.
+
+### A web tier that did not know where the API was, and said "refresh in a moment"
+
+`process.env.API_BASE_URL ?? "http://localhost:3001"` was written out in
+**sixteen** files — every server component, both API proxies, the auth layer.
+Two faults in one expression.
+
+**`??` is blind to an empty string.** A mistyped secret name, a task definition
+missing the entry, a deploy outside the Terraform that sets it — each yields
+`API_BASE_URL=""`, which passes straight through the `??` and leaves the web tier
+addressing `http://localhost:3001` from inside its own container. Nothing listens
+there.
+
+**Measured on the built site with the variable unset**, `/schools` — the page
+whose entire job is to show a prospective parent that this platform has schools:
+
+```
+status 200        14,363 bytes
+"We couldn't load the school list just now — this isn't a sign that none are
+ available. Please refresh in a moment."
+container log: 0 mentions of API_BASE_URL, ECONNREFUSED, or localhost:3001
+```
+
+A **200**, a rendered page, and an invitation to retry a condition that will
+never clear. The deploy succeeds; the site is dead; nothing anywhere names the
+cause.
+
+**Three attempts, and the first two were not fail-closed.**
+
+1. *Validate in the accessor.* `apiBaseUrl()` throws on missing, empty, or
+   non-absolute values. **Insufficient** — every caller sits inside a `try/catch`
+   that exists for a good reason (`getSchools` returns `null` so an API blip
+   cannot claim the platform has no schools), and that catch swallows a
+   configuration fault identically. A guard a caller can catch is not a guard.
+2. *Throw from `instrumentation.ts`.* Runs once at bootstrap, before any handler.
+   **Also insufficient** — Next catches it, prints `Failed to prepare server`,
+   then prints `✓ Ready` and serves the broken site anyway. Measured, in that
+   order. That is the same dead deployment with one more line in a log nobody is
+   reading yet.
+3. *Exit.* The hook logs the reason and calls `process.exit(1)`. The container
+   dies at startup, the task fails, the deploy rolls back, and the last line in
+   the log names the variable and what to set it to.
+
+Verified against `node .next/standalone/apps/web/server.js` — what the container
+actually runs, not `next start`, which refuses `output: standalone` outright:
+
+| `API_BASE_URL` | exit | last log line |
+|---|---|---|
+| unset | 1 | `[boot] API_BASE_URL is not set. Refusing to serve…` |
+| `""` | 1 | same |
+| `backend:3001` | 1 | `[boot] API_BASE_URL must be http or https (got "backend:")` |
+| `http://…:3001` | serves | `/schools` 200, **17,866 bytes, real school names, 0 fallbacks** |
+
+// GOTCHA: **`new URL("backend:3001")` PARSES**, with protocol `backend:`. A
+shape check that only asks "does this parse" accepts a bare host. The protocol
+is checked by name.
+
+// GOTCHA: the check is **LAZY, never module-level**. `next build` runs with
+`NODE_ENV=production` and the variable is legitimately absent — it is a runtime
+concern. A module-level throw would fail the Docker build. Confirmed: the build
+compiles clean with the variable unset.
+
+// GOTCHA: `instrumentationHook: true` in `next.config.mjs` is what makes Next 14
+load the file at all. Without it the boot check is a file nobody runs — so the
+flag is itself under test.
+
+Production fails closed; outside production the localhost default stays, the same
+split `assertFieldCryptoConfigured` makes in the API tier and for the same reason:
+the protection is for the deployment, not the developer. The accessor keeps its
+throw as a second layer — a value that changes after boot, or a runtime that
+skipped instrumentation, still cannot quietly address localhost.
+
+Gate: `apps/web/lib/__tests__/an-api-base-that-must-be-set.test.ts`, 16 cases,
+mutation-validated nine ways — restoring `??`-blindness, removing the production
+throw, dropping the protocol check, leaving the trailing slash, reintroducing one
+local fallback (the scan names the file), throwing instead of exiting, exiting 0,
+exiting silently, and unwiring `instrumentationHook`. The scan asserts it walked
+more than 200 files, because a walk that finds nothing produces no offenders and
+passes green.
+
+// GOTCHA on the probe itself: `pkill -f "standalone.*server.js"` matches its own
+command line and kills the shell that ran it. Two "failures" here were that, not
+the code.
+
+**And the rename broke a security test for the tenth time in this repo.**
+`front-door.spec.ts` asserted the public proxy's source matched
+`` /\$\{API_BASE\}\/public\// `` — the base expression's NAME, not the property.
+Moving the base behind `apiBaseUrl()` turned it red while *strengthening* exactly
+what it guards. The property is that the caller's path is concatenated after a
+hard-coded `/public/`, so no path segment can reach another surface; it is now
+written that way (`` `${…}/public/${ctx.params.path.join("/")}` ``, any base) and
+mutation-checked by dropping the prefix — the real regression — which fails it.
+Anchor to the property, not to the spelling.

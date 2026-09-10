@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **315 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **316 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **315 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **316 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1137,8 +1137,18 @@ These are the rules; the log is why each one exists.
 
 ### Operational safety
 - **Fail closed at BOOT** where a mis-set value is unrecoverable afterwards
-  (encryption key, auth secret, storage provider, public URL, email sender). An
+  (encryption key, auth secret, storage provider, public URL, email sender, and
+  now `API_BASE_URL` — `apps/web/lib/env.ts` + `apps/web/instrumentation.ts`). An
   env var set to an EMPTY STRING is not unset, and `??` is blind to it.
+  // GOTCHA: **"boot" means the process EXITS.** Two weaker versions of this
+  check were built first and neither failed closed. A throw in the ACCESSOR is
+  caught by the caller's own try/catch — `/schools` answered **200** with
+  "refresh in a moment" and no log line naming the cause. A throw in
+  `instrumentation.ts` is caught by Next, which prints `Failed to prepare
+  server`, then prints `✓ Ready`, and serves. Only `process.exit(1)` fails the
+  deploy. Verify against `node .next/standalone/…/server.js`, not `next start`,
+  which refuses `output: standalone`; keep the check LAZY, since `next build`
+  runs with `NODE_ENV=production` and the variable is legitimately absent then.
 - **A secret's SHAPE is not its PROVENANCE** — a well-formed key published in
   this repo is compromised for ever (`PUBLISHED_SECRETS`).
 - **One school's failure must not end the fleet's sweep.** Catch per school,

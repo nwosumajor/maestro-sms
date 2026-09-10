@@ -9,11 +9,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { forwardedFor } from "@/lib/forwarded";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "@/lib/env";
 
 async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
-  const target = `${API_BASE}/public/${ctx.params.path.join("/")}${req.nextUrl.search}`;
+  const target = `${apiBaseUrl()}/public/${ctx.params.path.join("/")}${req.nextUrl.search}`;
   // The client's address. Without it the API sees only this web task and
   // rate-limits the whole world against one bucket — see lib/forwarded.ts.
   const headers: Record<string, string> = { ...forwardedFor(req) };

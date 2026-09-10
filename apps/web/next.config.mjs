@@ -12,6 +12,10 @@ const nextConfig = {
   // (Next 14.2 moved this key under `experimental`.)
   experimental: {
     outputFileTracingRoot: path.join(__dirname, "../../"),
+    // Runs `instrumentation.ts` when the server bootstraps, which is where the
+    // API_BASE_URL check has to live: a throw inside a request handler is caught
+    // by that page's own error handling and rendered as "try again later".
+    instrumentationHook: true,
   },
   // Internal workspace packages ship raw TS; Next compiles them.
   transpilePackages: ["@sms/types", "@sms/tokens"],

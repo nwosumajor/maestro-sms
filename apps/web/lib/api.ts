@@ -2,8 +2,7 @@ import "server-only";
 import { bearerForSession } from "@/lib/apiToken";
 import { redirect } from "next/navigation";
 import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "@/lib/env";
 
 /**
  * Server-side GET against the API, authenticated with a freshly-minted Bearer
@@ -63,7 +62,7 @@ export async function apiGet<T>(path: string): Promise<T | null> {
   if (!token) return null;
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await fetch(`${apiBaseUrl()}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
     });

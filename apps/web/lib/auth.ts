@@ -16,8 +16,7 @@ import { PLATFORM_REGION } from "@/lib/format";
 import { sessionPermissions } from "./permissions";
 import { CredentialsSignin } from "next-auth";
 import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "@/lib/env";
 
 // --- Dual-secret rotation window ---------------------------------------------
 // AUTH_SECRET signs everything new; AUTH_SECRET_PREVIOUS (when set, during a
@@ -133,7 +132,7 @@ const doRefresh = async (key: string): Promise<RefreshedClaims | "revoked" | nul
       { algorithm: "HS256", expiresIn: "5m" },
     );
     try {
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
+      const res = await fetch(`${apiBaseUrl()}/auth/refresh`, {
         headers: { Authorization: `Bearer ${bearer}` },
         cache: "no-store",
       });
@@ -223,7 +222,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = String(creds?.password ?? "");
         const mfaCode = creds?.code ? String(creds.code) : undefined;
         if (!email || !password) return null;
-        const res = await fetch(`${API_BASE}/auth/login`, {
+        const res = await fetch(`${apiBaseUrl()}/auth/login`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

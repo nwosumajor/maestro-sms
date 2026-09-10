@@ -10,8 +10,8 @@
 
 import type { IntegrityClientConfig } from "@/lib/integrity/hooks";
 import { bearerForSession } from "@/lib/apiToken";
+import { apiBaseUrl } from "@/lib/env";
 
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 // Browser-facing base: the same-origin BFF proxy, which injects auth server-side
 // (so the browser never holds a verifiable API token). See app/api/sms/[...path].
 const PUBLIC_API_BASE = "/api/sms";
@@ -51,7 +51,7 @@ export async function fetchAssessmentForTaking(
 ): Promise<TakeResult> {
   const token = await bearerForSession();
   if (!token) return { ok: false, status: 401 };
-  const res = await fetch(`${API_BASE}/assessments/${assessmentId}/take`, {
+  const res = await fetch(`${apiBaseUrl()}/assessments/${assessmentId}/take`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });

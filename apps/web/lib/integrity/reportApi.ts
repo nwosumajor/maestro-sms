@@ -9,8 +9,7 @@
 
 import type { IntegrityReportDto } from "@sms/types/integrity-report";
 import { bearerForSession } from "@/lib/apiToken";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+import { apiBaseUrl } from "@/lib/env";
 
 export type ReportResult =
   | { ok: true; report: IntegrityReportDto }
@@ -23,7 +22,7 @@ export async function fetchIntegrityReport(
   const token = await bearerForSession();
   if (!token) return { ok: false, status: 401 };
   const res = await fetch(
-    `${API_BASE}/assessments/${assessmentId}/submissions/${submissionId}/integrity-report`,
+    `${apiBaseUrl()}/assessments/${assessmentId}/submissions/${submissionId}/integrity-report`,
     {
       headers: { Authorization: `Bearer ${token}` },
       // Integrity data is sensitive + per-request; never cache it.

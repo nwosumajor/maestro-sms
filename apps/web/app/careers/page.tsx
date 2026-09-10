@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { apiBaseUrl } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
 type CareerSchool = { id: string; name: string; slug: string; openings: number | null };
 
@@ -24,7 +23,7 @@ export default async function CareersIndexPage() {
   let schools: CareerSchool[] = [];
   let reachable = true;
   try {
-    const res = await fetch(`${API_BASE}/public/careers`, { cache: "no-store" });
+    const res = await fetch(`${apiBaseUrl()}/public/careers`, { cache: "no-store" });
     if (res.ok) schools = (await res.json()) as CareerSchool[];
     else reachable = false;
   } catch {

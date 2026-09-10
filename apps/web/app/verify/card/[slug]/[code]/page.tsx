@@ -1,10 +1,9 @@
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import type { ReportCardAttestationDto, Serialized } from "@sms/types";
 import { shortDate } from "@/lib/format";
+import { apiBaseUrl } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
 // PUBLIC page — no authentication, because the audience is whoever is HOLDING
 // the card and was not party to issuing it: a receiving school, an employer, a
@@ -32,7 +31,7 @@ export default async function VerifyCardPage({
 }) {
   let data: Serialized<ReportCardAttestationDto> | null = null;
   try {
-    const res = await fetch(`${API_BASE}/public/report-card/verify/${params.slug}/${params.code}`, {
+    const res = await fetch(`${apiBaseUrl()}/public/report-card/verify/${params.slug}/${params.code}`, {
       cache: "no-store",
     });
     if (res.ok) data = await res.json();

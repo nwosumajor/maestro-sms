@@ -19,10 +19,10 @@
 //   - the authenticated BFF requires a session token and forwards exactly four
 //     headers: Authorization (server-minted), x-forwarded-for, x-stepup, and
 //     the original Content-Type;
-//   - its target is `${API_BASE}/${path}`, so a path segment cannot change the
+//   - its target is `${apiBaseUrl()}/${path}`, so a path segment cannot change the
 //     HOST — the worst a caller can do is name another API route, which the
 //     API's own guards then judge;
-//   - the PUBLIC proxy is prefix-constrained to `${API_BASE}/public/…`, and
+//   - the PUBLIC proxy is prefix-constrained to `${apiBaseUrl()}/public/…`, and
 //     traversal does not escape it: `%2e%2e/metrics`, `..%2fmetrics`,
 //     `%2e%2e%2fmetrics` and `a/%2e%2e/%2e%2e/metrics` all answered 404/403
 //     through the real stack while `plan-pricing` answered 200;
@@ -108,7 +108,16 @@ describe("what the web tier passes on", () => {
 
 describe("the unauthenticated doors", () => {
   it("the public proxy can only reach /public/…", () => {
-    expect(WEB("app/api/public/[...path]/route.ts")).toMatch(/\$\{API_BASE\}\/public\//);
+    // The PROPERTY is that the caller's path is concatenated AFTER a hard-coded
+    // `/public/`, so no path segment can reach another surface. It is NOT what
+    // the base expression happens to be called: this assertion was written as
+    // `${API_BASE}/public/` and went red when the base moved behind
+    // `apiBaseUrl()` — a change that strengthened the thing it guards (the base
+    // is now validated at boot instead of defaulting to localhost). That is the
+    // fixed-text failure this repo has now made ten times. Match any base.
+    expect(WEB("app/api/public/[...path]/route.ts")).toMatch(
+      /const target = `\$\{[^`]*\}\/public\/\$\{ctx\.params\.path\.join\("\/"\)\}/,
+    );
   });
 
   it("the webhook proxy is an allowlist, not a general opening", () => {
