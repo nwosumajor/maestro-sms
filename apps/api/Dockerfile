@@ -77,6 +77,13 @@ RUN pnpm --filter @sms/db generate \
 
 # ---- runtime: prod deps + dist only, drop root ------------------------------
 FROM base AS runtime
+# LINKS THE PACKAGE TO THIS REPOSITORY on GitHub Container Registry. Without it
+# the package arrives orphaned: it does not appear on the repo page, does not
+# inherit the repo's access, and connecting it afterwards means pushing the
+# whole image again. The OCI `source` label is what ghcr.io reads.
+LABEL org.opencontainers.image.source="https://github.com/nwosumajor/maestro-sms"
+LABEL org.opencontainers.image.description="MAESTRO-SMS — API (NestJS)"
+LABEL org.opencontainers.image.licenses="UNLICENSED"
 ENV NODE_ENV=production
 # psql for the RLS policies (openssl already in base for the Prisma engine).
 RUN apk add --no-cache postgresql-client \
