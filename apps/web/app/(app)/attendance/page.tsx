@@ -57,6 +57,12 @@ export default async function AttendancePage({
   // cannot be reached by URL by someone the nav hides it from.
   if (!hasPermission(user.permissions, "attendance.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "attendance.write");
+  // WHO CHASES A MISSING REGISTER. Not only the people who take one: a head
+  // teacher approves the maker-checker amendment once the 7-day window has
+  // closed, so they are precisely the person who needs to see the gap while it
+  // can still be fixed without one. The board was gated on `attendance.write`,
+  // which they do not hold.
+  const canChase = canWrite || hasPermission(user.permissions, "attendance.amend.review");
 
   const page = Math.max(Number(searchParams.page ?? 1) || 1, 1);
 
@@ -99,7 +105,7 @@ export default async function AttendancePage({
 
         {/* Missing registers first: it is the only thing on this page that is
             time-critical, and the 7-day correction window is why. */}
-        {canWrite && <RegisterBoard canConfigure={hasPermission(user.permissions, "rbac.manage")} />}
+        {canChase && <RegisterBoard canConfigure={hasPermission(user.permissions, "rbac.manage")} />}
 
         {/* The reminder runs on its own each afternoon in the school's own time.
             The button is for the morning a head of year wants to chase now —

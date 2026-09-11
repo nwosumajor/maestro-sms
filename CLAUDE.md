@@ -2178,6 +2178,16 @@ holidays all along.
 register has been taken today" whenever nothing was outstanding — INCLUDING when
 the sweep had not looked. Reporting a school that is never chased as a school
 with nothing to chase is the silent-success class; `skipped > 0` now says so.
+// GOTCHA: **head_teacher was a DEAD GRANT here** — they hold `attendance.read`
+AND `attendance.amend.review`, which makes them the second person on the chain
+that corrects a stale register, and the API returned them ZERO classes because
+they were missing from `SCHOOL_WIDE_ROLES`. An approver who cannot see what the
+decision turns on. The constant's own neighbour had been asserting the intent
+all along ("Principal, head teacher and junior_admin see every register"), which
+is a comment claiming an agreement that did not exist. Fixed — and it grants
+SIGHT, not cover: `REGISTER_COVER_ROLES` stays `school_admin` alone, because the
+register records who physically looked at the room. The board is gated on
+"who CHASES a register" (write OR amend.review), not on who may take one.
 // `GET /attendance/registers` now carries the class teacher, and `RegisterBoard`
 on /attendance shows BOTH lists — still-to-take with the person to ask, and a
 collapsed "Taken (n)" — where it used to show only a count of the gaps. The

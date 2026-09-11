@@ -46,7 +46,21 @@ import { dateWindow } from "../common/status-filter";
 // 404'd on every register, so it belongs in the school-wide set. It lacks
 // attendance.amend.review, so stale (>7-day) edits still route through
 // maker-checker like any non-approver. Mirrors the SIS fix.
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin"]);
+//
+// head_teacher was MISSING, and the comment on REGISTER_COVER_ROLES ten lines
+// below had been asserting for as long as it existed that "Principal, head
+// teacher and junior_admin see every register" — intent the constant never
+// implemented. A comment claiming agreement is not agreement.
+//
+// It was a DEAD GRANT of the kind this repo records: they hold
+// `attendance.read` AND `attendance.amend.review`, which makes them the person
+// who APPROVES a correction to a stale register — and the API returned them
+// zero classes, so the board was empty and the approval had nothing behind it.
+// An approver must be able to see what the decision turns on.
+//
+// This grants SIGHT, not cover: REGISTER_COVER_ROLES stays school_admin alone,
+// because the register records who physically looked at the room.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin", "head_teacher"]);
 /**
  * Roles that may take ANY class's register, to cover an absent supervisor.
  *

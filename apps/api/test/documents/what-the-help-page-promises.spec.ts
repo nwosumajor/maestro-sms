@@ -123,8 +123,13 @@ describe("what the help page promises", () => {
   it("neither document claims a junior administrator takes the register", () => {
     // REGISTER_COVER_ROLES is school_admin only — taking a register records who
     // physically looked at the room. Measured: a junior_admin is 403 on it.
-    const cover = readFileSync(join(API, "attendance/attendance.service.ts"), "utf8");
-    const declared = cover.match(/REGISTER_COVER_ROLES[^=]*=\s*(?:new Set\()?\[([^\]]*)\]/);
+    // COMMENTS STRIPPED, and bound to the DECLARATION. This read the raw source
+    // and matched `REGISTER_COVER_ROLES[^=]*=` — which, the moment the name was
+    // mentioned in a comment above a DIFFERENT constant, ran on to that
+    // constant's array and asserted against the wrong set. The file already
+    // strips comments for the help page four lines up; this line did not.
+    const cover = stripComments(readFileSync(join(API, "attendance/attendance.service.ts"), "utf8"));
+    const declared = cover.match(/const REGISTER_COVER_ROLES\s*=\s*new Set\(\[([^\]]*)\]\)/);
     expect(declared).not.toBeNull();
     expect(declared?.[1]).not.toMatch(/junior_admin/);
 
