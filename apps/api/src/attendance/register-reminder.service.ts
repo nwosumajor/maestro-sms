@@ -29,6 +29,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { NotificationService } from "../notifications/notification.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { resolveRegion, schoolTimeString } from "@sms/types";
+import { isWeekendDay, outsideTermDates, reminderOffReason } from "./register-window";
 
 /**
  * The school's own local hour at which a missing register is worth a nudge.
@@ -116,21 +117,31 @@ export class RegisterReminderService {
 
         out.schools += 1;
 
-        // NOT ON A DAY THE SCHOOL IS NOT OPEN. A reminder on a Saturday is
-        // noise, and noise is how a reminder stops being read.
-        const dow = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
-        if (dow === 0 || dow === 6) {
-          out.skipped += 1;
-          continue;
-        }
-
-        // Only inside the current term. Outside it there is no register to take,
-        // and a school between terms would otherwise be nagged every weekday.
-        const term = (await client.term.findFirst({
-          where: { schoolId: school.id, isCurrent: true },
-          select: { startDate: true, endDate: true },
-        })) as { startDate: Date | null; endDate: Date | null } | null;
-        if (!this.withinTerm(term, localDate)) {
+        // IS THIS A DAY WORTH CHASING? Decided by `reminderOffReason`, the ONE
+        // definition — the board on /attendance asks the same function, so it
+        // cannot tell a head that registers are being chased while this sweep
+        // quietly skips the school.
+        const day = new Date(`${localDate}T00:00:00.000Z`);
+        const [term, holiday] = await Promise.all([
+          client.term.findFirst({
+            where: { schoolId: school.id, isCurrent: true },
+            select: { startDate: true, endDate: true },
+          }) as Promise<{ startDate: Date | null; endDate: Date | null } | null>,
+          // HOLIDAYS, which this sweep did not know about at all until it began
+          // sharing the predicate: it would have reminded every teacher in the
+          // school on a mid-term break.
+          client.schoolHoliday.findFirst({
+            where: { schoolId: school.id, startDate: { lte: day }, endDate: { gte: day } },
+            select: { name: true },
+          }) as Promise<{ name: string } | null>,
+        ]);
+        const off = reminderOffReason({
+          isWeekend: isWeekendDay(localDate),
+          hasCurrentTerm: !!term,
+          outsideTermDates: outsideTermDates(term, day),
+          holiday: !!holiday,
+        });
+        if (off) {
           out.skipped += 1;
           continue;
         }
@@ -199,17 +210,6 @@ export class RegisterReminderService {
     if (out.failed > 0 || out.unreachable > 0) this.logger.warn(line);
     else this.logger.log(line);
     return out;
-  }
-
-  /** Is this local day inside the current term? Fail OPEN when a term carries no
-   *  dates — a school mid-setup should still be reminded, and the alternative is
-   *  silence nobody would notice. */
-  private withinTerm(term: { startDate: Date | null; endDate: Date | null } | null, localDate: string): boolean {
-    if (!term) return false;
-    const day = `${localDate}T00:00:00.000Z`;
-    if (term.startDate && new Date(day) < new Date(term.startDate)) return false;
-    if (term.endDate && new Date(day) > new Date(term.endDate)) return false;
-    return true;
   }
 
   /**

@@ -27,7 +27,14 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
-import { currentTermStartInTx, holidayOn, registerClosedReason } from "./register-window";
+import {
+  currentTermStartInTx,
+  holidayOn,
+  isWeekendDay,
+  outsideTermDates,
+  registerClosedReason,
+  reminderOffReason,
+} from "./register-window";
 import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
@@ -883,7 +890,9 @@ export class AttendanceService {
               select: { id: true, name: true, supervisorId: true },
             })) as Array<{ id: string; name: string; supervisorId: string | null }>;
           })();
-      if (classes.length === 0) return { date: iso, classes: [] };
+      if (classes.length === 0) {
+        return { date: iso, classes: [], remindersActive: true, remindersOffReason: null };
+      }
 
       const classIds = classes.map((c) => c.id);
       // Three BATCHED queries regardless of class count — sessions for the day, a
@@ -915,6 +924,24 @@ export class AttendanceService {
       // supervisor is reported as such rather than silently blank: "nobody is
       // assigned to this class" is a different problem from "the teacher has
       // not taken it", and only one of them is fixed by a reminder.
+      // WILL THE REMINDER CHASE THIS DAY? Asked through the SAME function the
+      // sweep uses, so the board cannot tell a head that registers are being
+      // chased while the sweep skips the school. The one that matters is a
+      // school with no current term: never chased, and nothing said so.
+      const [currentTerm, holidayRow] = await Promise.all([
+        tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true, endDate: true } }) as Promise<{
+          startDate: Date | null;
+          endDate: Date | null;
+        } | null>,
+        holidayOn(tx, date),
+      ]);
+      const remindersOffReason = reminderOffReason({
+        isWeekend: isWeekendDay(iso),
+        hasCurrentTerm: !!currentTerm,
+        outsideTermDates: outsideTermDates(currentTerm, date),
+        holiday: !!holidayRow,
+      });
+
       const supervisorIds = [...new Set(classes.map((c) => c.supervisorId).filter((id): id is string => !!id))];
       const teachers = supervisorIds.length
         ? ((await tx.user.findMany({
@@ -926,6 +953,8 @@ export class AttendanceService {
 
       return {
         date: iso,
+        remindersActive: remindersOffReason === null,
+        remindersOffReason,
         classes: classes.map((c) => {
           const sessionId = sessionByClass.get(c.id);
           const teacher = c.supervisorId ? teacherById.get(c.supervisorId) : undefined;

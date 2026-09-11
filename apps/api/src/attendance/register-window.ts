@@ -100,3 +100,79 @@ export async function registerClosedReason(
   }
   return null;
 }
+
+// =============================================================================
+// Will the daily reminder chase this day — and if not, WHY NOT
+// =============================================================================
+// `registerClosedReason` above answers "may a register be WRITTEN for this
+// date", which is a teacher's question and rightly fails open. The reminder asks
+// something stricter: "is this a day whose missing registers are worth chasing".
+// A holiday, a weekend or a school between terms is not.
+//
+// ONE definition, shared by the sweep that sends the reminders and the board
+// that tells a head whether they are running. Two copies of this rule would
+// drift, and the drift is invisible in the worst direction: a board saying
+// registers are being chased while the sweep quietly skips the school.
+//
+// THE CASE THIS EXISTS FOR is `NO_CURRENT_TERM`. A school that has never set up
+// its academic calendar gets no reminders AT ALL, for ever, and the only trace
+// is a `skipped` count in an operator console the school never opens. Silence
+// nobody can see is the failure this repo records over and over.
+// =============================================================================
+
+export type ReminderOffReason =
+  /** No term is flagged current — the reminder cannot run, and nothing says so. */
+  | "NO_CURRENT_TERM"
+  /** There is a current term and this day falls outside it. */
+  | "OUTSIDE_TERM"
+  /** Saturday or Sunday. */
+  | "NON_SCHOOL_DAY"
+  /** A school holiday covers this day. */
+  | "HOLIDAY";
+
+export interface ReminderWindowFacts {
+  isWeekend: boolean;
+  hasCurrentTerm: boolean;
+  /** True only when the term carries the dates to decide it — absent dates fail OPEN. */
+  outsideTermDates: boolean;
+  holiday: boolean;
+}
+
+/**
+ * Null when the reminder will chase this day; otherwise why it will not.
+ *
+ * Order matters and is deliberate: a school with no calendar at all is the
+ * finding worth reporting, so it outranks "it is a Saturday" — telling a head
+ * "no registers are chased at weekends" when the real answer is "no registers
+ * are ever chased" would be true and useless.
+ */
+export function reminderOffReason(f: ReminderWindowFacts): ReminderOffReason | null {
+  if (!f.hasCurrentTerm) return "NO_CURRENT_TERM";
+  if (f.outsideTermDates) return "OUTSIDE_TERM";
+  if (f.holiday) return "HOLIDAY";
+  if (f.isWeekend) return "NON_SCHOOL_DAY";
+  return null;
+}
+
+/** Saturday or Sunday, for a `YYYY-MM-DD` in the SCHOOL's own calendar. */
+export function isWeekendDay(localDate: string): boolean {
+  const dow = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
+  return dow === 0 || dow === 6;
+}
+
+/**
+ * Does this day fall outside the term's dates?
+ *
+ * Fails OPEN on absent dates: a term that carries none cannot rule a day out,
+ * and refusing to chase on that basis is silence nobody would notice. The
+ * separate `NO_CURRENT_TERM` reason covers the case that really is a gap.
+ */
+export function outsideTermDates(
+  term: { startDate: Date | null; endDate: Date | null } | null,
+  day: Date,
+): boolean {
+  if (!term) return false;
+  if (term.startDate && day < new Date(term.startDate)) return true;
+  if (term.endDate && day > new Date(term.endDate)) return true;
+  return false;
+}

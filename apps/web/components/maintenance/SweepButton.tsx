@@ -41,8 +41,16 @@ const DESCRIBE: Record<string, (r: unknown) => string> = {
     notified: number;
     unreachable: number;
     failed: number;
+    skipped: number;
   }>((r) =>
-    r.outstanding === 0
+    // SKIPPED IS NOT "ALL DONE". This read "Every register has been taken
+    // today" whenever nothing was outstanding — including when the sweep had
+    // not looked, because the school has no current term set. Reporting a
+    // school that is never chased as a school with nothing to chase is the
+    // silent-success shape this repo keeps recording.
+    r.skipped > 0 && r.outstanding === 0
+      ? "Nothing was chased: this school has no current term set, or today is a holiday or weekend. Registers are only chased on school days inside the current term."
+      : r.outstanding === 0
       ? "Every register has been taken today — nobody needed reminding."
       : [
           `${r.outstanding} ${plural(r.outstanding, "register")} still outstanding.`,

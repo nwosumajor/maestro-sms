@@ -35,6 +35,8 @@ interface World {
   /** Users who are not ACTIVE. */
   departed?: string[];
   term?: { startDate: Date | null; endDate: Date | null } | null;
+  /** A school holiday covering the day. */
+  holiday?: string;
   throws?: boolean;
 }
 
@@ -50,6 +52,11 @@ function makeService(world: World, opts: { now?: Date } = {}) {
       findFirst: jest.fn(async () =>
         world.term === undefined ? { startDate: null, endDate: null } : world.term,
       ),
+    },
+    schoolHoliday: {
+      // The sweep asks about holidays now — a stub missing a method every real
+      // client has fails in a way that reads as a code fault.
+      findFirst: jest.fn(async () => (world.holiday ? { name: world.holiday } : null)),
     },
     class: {
       findMany: jest.fn(async () => {
@@ -151,6 +158,38 @@ describe("it does not nag on a day there is no register to take", () => {
     );
     const r = await svc.run();
     expect(r.skipped).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
+  it("skips a SCHOOL HOLIDAY — it would otherwise remind everyone mid-break", async () => {
+    // The sweep did not know holidays existed until it began sharing the
+    // predicate with the board; `registerClosedReason` has always known.
+    const { svc, sent } = makeService(
+      {
+        timezone: "Africa/Lagos",
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+        holiday: "Mid-term break",
+      },
+      { now: localAt("Africa/Lagos", REGISTER_REMINDER_LOCAL_HOUR) },
+    );
+    expect((await svc.run()).skipped).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
+  it("skips a school with NO CURRENT TERM — and the board says so", async () => {
+    // The silent-off case: such a school is never chased, for ever, and the only
+    // trace was a `skipped` count nobody opens. /attendance now states it.
+    const { svc, sent } = makeService(
+      {
+        timezone: "Africa/Lagos",
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+        term: null,
+      },
+      { now: localAt("Africa/Lagos", REGISTER_REMINDER_LOCAL_HOUR) },
+    );
+    expect((await svc.run()).skipped).toBe(1);
     expect(sent).toEqual([]);
   });
 

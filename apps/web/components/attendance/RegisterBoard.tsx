@@ -8,9 +8,26 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import type { RegisterStatusRowDto, Serialized } from "@sms/types";
+import type { RegisterStatusDto, RegisterStatusRowDto, Serialized } from "@sms/types";
 
 type Row = Serialized<RegisterStatusRowDto>;
+type Status = Serialized<RegisterStatusDto>;
+
+/**
+ * Why the daily reminder is not chasing this day.
+ *
+ * Wording lives HERE, keyed by the code the API returns — the same split the
+ * sweep buttons use. NO_CURRENT_TERM is the one that matters: such a school is
+ * never chased, for ever, and until now the only trace was a `skipped` count in
+ * an operator console nobody at the school opens.
+ */
+const REMINDER_OFF: Record<string, string> = {
+  NO_CURRENT_TERM:
+    "No term is set as current, so teachers are NOT being reminded about missing registers — on any day. Set the current term on the academic calendar to switch the daily reminder on.",
+  OUTSIDE_TERM: "This date falls outside the current term, so no reminder is sent for it.",
+  HOLIDAY: "This date is a school holiday, so no reminder is sent for it.",
+  NON_SCHOOL_DAY: "Weekends are not chased.",
+};
 
 /** The class teacher, or a plain statement that there is not one. */
 function Teacher({ r }: { r: Row }) {
@@ -40,11 +57,13 @@ export function RegisterBoard() {
   const { timezone } = useRegion();
   const [date, setDate] = React.useState(() => todayIn(timezone));
   const [rows, setRows] = React.useState<Row[] | null>(null);
+  const [status, setStatus] = React.useState<Status | null>(null);
   const [failed, setFailed] = React.useState(false);
 
   React.useEffect(() => {
     let live = true;
     setRows(null);
+    setStatus(null);
     (async () => {
       const res = await fetch(`/api/sms/attendance/registers?date=${date}`);
       if (!live) return;
@@ -53,7 +72,9 @@ export function RegisterBoard() {
       // on the one page whose job is naming the classes that are. A false all
       // clear is the worst answer it can give.
       if (res.ok) {
-        setRows(((await res.json()) as { classes: Row[] }).classes);
+        const body = (await res.json()) as Status;
+        setStatus(body);
+        setRows(body.classes);
         setFailed(false);
       } else {
         setFailed(true);
@@ -160,6 +181,21 @@ export function RegisterBoard() {
                   </tbody>
                 </table>
               </details>
+            )}
+
+            {/* THE REMINDER IS OFF, and the board says so. A school with no
+                current term is skipped every day and the screen used to look
+                exactly like one where everything was under control. */}
+            {status && !status.remindersActive && status.remindersOffReason && (
+              <p
+                className={
+                  status.remindersOffReason === "NO_CURRENT_TERM"
+                    ? "rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+                    : "text-xs text-muted-foreground"
+                }
+              >
+                {REMINDER_OFF[status.remindersOffReason]}
+              </p>
             )}
 
             {unassigned.length > 0 && (

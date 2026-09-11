@@ -2150,6 +2150,20 @@ outstanding registers whose class has no ACTIVE supervisor — nobody can be
 reminded about those and they are the ones most likely to go on being missed.
 The board says so too (`teacherActive: false`, "no class teacher"), because
 "nobody is assigned" is a different problem from "the teacher forgot".
+// GOTCHA, and the reason `reminderOffReason` is ONE shared function: a school
+that has never set a CURRENT TERM is skipped every day, for ever, and the only
+trace was a `skipped` count in an operator console the school never opens. The
+board looked exactly like a school whose teachers were being reminded every
+afternoon. It now states it — loudly for `NO_CURRENT_TERM` (which names the
+calendar as the fix), quietly for a weekend or holiday, which need a footnote
+rather than a banner. Sharing the predicate with the sweep also gave the sweep
+HOLIDAY awareness it never had: it would have reminded every teacher in the
+school on a mid-term break, while `registerClosedReason` had known about
+holidays all along.
+// GOTCHA in the same shape, in my own wording: the button reported "Every
+register has been taken today" whenever nothing was outstanding — INCLUDING when
+the sweep had not looked. Reporting a school that is never chased as a school
+with nothing to chase is the silent-success class; `skipped > 0` now says so.
 // `GET /attendance/registers` now carries the class teacher, and `RegisterBoard`
 on /attendance shows BOTH lists — still-to-take with the person to ask, and a
 collapsed "Taken (n)" — where it used to show only a count of the gaps. The
