@@ -2,8 +2,16 @@ import { RequireModule } from "../auth/require-module.decorator";
 import { BadRequestException, Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { BOOK_LOAN_STATUSES, LIBRARY_PERMISSIONS, MODULES, PAYMENT_METHODS } from "@sms/types";
-import { narrowStatus } from "../common/status-filter";
-import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryBorrowerDto, LibraryReportDto } from "@sms/types";
+import { narrowStatus, pageNumber } from "../common/status-filter";
+import type {
+  BookLoanDto,
+  BookLoanPageDto,
+  FineReceiptDto,
+  LibraryBookDto,
+  LibraryBookPageDto,
+  LibraryBorrowerDto,
+  LibraryReportDto,
+} from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -45,8 +53,12 @@ export class LibraryController {
   // catalogue
   @Get("books")
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_READ)
-  search(@CurrentPrincipal() p: Principal, @Query("q") q?: string): Promise<LibraryBookDto[]> {
-    return this.library.searchBooks(p, q);
+  search(
+    @CurrentPrincipal() p: Principal,
+    @Query("q") q?: string,
+    @Query("page") page?: string,
+  ): Promise<LibraryBookPageDto> {
+    return this.library.searchBooks(p, q, { page: pageNumber(page) });
   }
   @Post("books")
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)
@@ -78,10 +90,24 @@ export class LibraryController {
   // loans
   @Get("loans")
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_READ)
-  loans(@CurrentPrincipal() p: Principal, @Query("borrowerId") borrowerId?: string, @Query("status") status?: string): Promise<BookLoanDto[]> {
+  loans(
+    @CurrentPrincipal() p: Principal,
+    @Query("borrowerId") borrowerId?: string,
+    @Query("status") status?: string,
+    // The rows the strip beside this list is alarming about. Without a way to
+    // ASK for them they were unreachable: overdue loans are the oldest, and the
+    // list is newest-first.
+    @Query("overdue") overdue?: string,
+    @Query("page") page?: string,
+  ): Promise<BookLoanPageDto> {
     // Live: `?status=OUT` — a plausible guess — turned 26 loans into 0, with a
     // 200, so the page reported that the school has no books on loan.
-    return this.library.listLoans(p, { borrowerId, status: narrowStatus(status, BOOK_LOAN_STATUSES) });
+    return this.library.listLoans(p, {
+      borrowerId,
+      status: narrowStatus(status, BOOK_LOAN_STATUSES),
+      overdue: overdue === "1" || overdue === "true",
+      page: pageNumber(page),
+    });
   }
 
   /**

@@ -20,10 +20,41 @@ type Book = Serialized<LibraryBookDto>;
 type Loan = Serialized<BookLoanDto>;
 type Borrower = Serialized<LibraryBorrowerDto>;
 
+/** One page of a list, plus how many there are in all. */
+type Page<T> = { items: T[]; total: number; page: number; pageSize: number };
+
+/**
+ * What is shown, out of what there is.
+ *
+ * ONE control for both lists. A screenful with no number reads as the whole
+ * thing — which is how a librarian came to believe their school held 200 books
+ * and had 14 overdue loans.
+ */
+function Pager({ p, onPage, noun }: { p: Page<unknown>; onPage: (n: number) => void; noun: string }) {
+  if (p.total <= p.pageSize) return null;
+  const pages = Math.max(1, Math.ceil(p.total / p.pageSize));
+  return (
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
+      <span>
+        Showing {(p.page - 1) * p.pageSize + 1}&ndash;{Math.min(p.page * p.pageSize, p.total)} of {p.total} {noun}
+      </span>
+      <span className="flex items-center gap-3">
+        <button type="button" disabled={p.page <= 1} onClick={() => onPage(Math.max(1, p.page - 1))}
+          className="underline underline-offset-2 disabled:no-underline disabled:opacity-40">Previous</button>
+        <span>Page {p.page} of {pages}</span>
+        <button type="button" disabled={p.page * p.pageSize >= p.total} onClick={() => onPage(p.page + 1)}
+          className="underline underline-offset-2 disabled:no-underline disabled:opacity-40">Next</button>
+      </span>
+    </div>
+  );
+}
+
 export function LibraryManager({
-  books, loans, apiBaseUrl, canManage,
+  books: initialBooks, loans: initialLoans, apiBaseUrl, canManage,
 }: {
-  books: Book[]; loans: Loan[]; apiBaseUrl: string; canManage: boolean;
+  // NULL = the read failed. Distinct from an empty page, and the difference is
+  // the whole message: "nothing matched" vs "we could not ask".
+  books: Page<Book> | null; loans: Page<Loan> | null; apiBaseUrl: string; canManage: boolean;
 }) {
   // The SCHOOL's currency, not the platform's. `money` from `@/lib/format`
   // defaults to `PLATFORM_REGION.currency`, so these read in naira for a school
@@ -34,6 +65,69 @@ export function LibraryManager({
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [q, setQ] = React.useState("");
+
+  // ---------------------------------------------------------------------------
+  // THE CATALOGUE IS SEARCHED WHERE IT LIVES
+  // ---------------------------------------------------------------------------
+  // The box used to filter the rows this component had already been handed —
+  // the first 200 titles by name. So a librarian typing a book their school
+  // holds was told it does not exist, for 1,600 of 1,800 titles, and the
+  // barcode box behind the desk failed the same way. The server has had a
+  // working `?q=` the whole time and no screen ever sent it.
+  const EMPTY_BOOKS: Page<Book> = { items: [], total: 0, page: 1, pageSize: 100 };
+  const EMPTY_LOANS: Page<Loan> = { items: [], total: 0, page: 1, pageSize: 50 };
+  const [books, setBooks] = React.useState<Page<Book>>(initialBooks ?? EMPTY_BOOKS);
+  const [bookPage, setBookPage] = React.useState(1);
+  const [loans, setLoans] = React.useState<Page<Loan>>(initialLoans ?? EMPTY_LOANS);
+  const [loanPage, setLoanPage] = React.useState(1);
+  // OVERDUE IS A FILTER, NOT SOMETHING TO SCROLL FOR. An overdue loan is by
+  // definition an old one, and the list is newest-first, so the rows the strip
+  // above is alarming about were the ones furthest out of reach.
+  const [loanFilter, setLoanFilter] = React.useState<"all" | "overdue" | "ISSUED" | "RETURNED">("all");
+  const [listErr, setListErr] = React.useState<string | null>(
+    initialBooks === null || initialLoans === null
+      ? "Couldn't load the library just now. This does NOT mean it is empty — reload to try again."
+      : null,
+  );
+
+  const reloadKey = `${q}|${bookPage}|${loanFilter}|${loanPage}`;
+  const firstRender = React.useRef(true);
+  React.useEffect(() => {
+    // The server already rendered page 1 of both lists; re-fetch only once the
+    // reader actually changes something.
+    if (firstRender.current) { firstRender.current = false; return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void (async () => {
+        const qs = new URLSearchParams();
+        if (q.trim()) qs.set("q", q.trim());
+        if (bookPage > 1) qs.set("page", String(bookPage));
+        const ls = new URLSearchParams();
+        if (loanFilter === "overdue") ls.set("overdue", "1");
+        else if (loanFilter !== "all") ls.set("status", loanFilter);
+        if (loanPage > 1) ls.set("page", String(loanPage));
+        const [b, l] = await Promise.all([
+          fetch(`/api/sms/library/books?${qs}`, { cache: "no-store" }),
+          fetch(`/api/sms/library/loans?${ls}`, { cache: "no-store" }),
+        ]);
+        if (cancelled) return;
+        // A failed read must NOT become an empty list: "no books match" is a
+        // statement about the catalogue, and we do not know that.
+        if (b.ok && l.ok) {
+          setBooks((await b.json()) as Page<Book>);
+          setLoans((await l.json()) as Page<Loan>);
+          setListErr(null);
+        } else {
+          setListErr("Couldn't refresh the lists. This does not mean they are empty — try again.");
+        }
+      })();
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [reloadKey, q, bookPage, loanFilter, loanPage]);
+
+  // Changing what you are looking for starts at the beginning of it.
+  React.useEffect(() => { setBookPage(1); }, [q]);
+  React.useEffect(() => { setLoanPage(1); }, [loanFilter]);
   // WHO THE BOOK IS FOR. `issue` has always accepted a borrower — "librarians to
   // anyone, students to themselves" — and the only control here was "Issue to
   // me", so a librarian could not lend a book to a pupil through the product at
@@ -45,6 +139,12 @@ export function LibraryManager({
   const [lookingUp, setLookingUp] = React.useState(false);
   // new book
   const [bTitle, setBTitle] = React.useState("");
+  // THE SEARCH CARD PROMISES "by title, author, ISBN, or barcode" and the form
+  // beside it could record only a title and a barcode — so two of the four
+  // things a librarian is told they can search by were things nothing could
+  // store. The server has always accepted both.
+  const [bAuthor, setBAuthor] = React.useState("");
+  const [bIsbn, setBIsbn] = React.useState("");
   const [bBarcode, setBBarcode] = React.useState("");
   const [bCopies, setBCopies] = React.useState(1);
 
@@ -77,9 +177,8 @@ export function LibraryManager({
       borrower ? `Issued to ${borrower.name}.` : "Issued to you.",
     );
 
-  const shown = q.trim()
-    ? books.filter((b) => [b.title, b.author, b.isbn, b.barcode].some((f) => (f ?? "").toLowerCase().includes(q.trim().toLowerCase())))
-    : books;
+  // Whatever the server sent back for this query — not a second filter over it.
+  const shown = books.items;
 
   return (
     <div className="space-y-6">
@@ -160,7 +259,10 @@ export function LibraryManager({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Search the catalogue</CardTitle>
-          <CardDescription>By title, author, ISBN, or barcode.</CardDescription>
+          <CardDescription>
+            By title, author, ISBN, or barcode &mdash; searched across the whole catalogue,
+            not just this page. {books.total.toLocaleString()} title{books.total === 1 ? "" : "s"} held.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Scan barcode or type a title…" />
@@ -199,6 +301,16 @@ export function LibraryManager({
               ))}
             </tbody>
           </table>
+          {shown.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              {listErr
+                ? listErr
+                : q.trim()
+                  ? `Nothing in the catalogue matches "${q.trim()}".`
+                  : "The catalogue is empty."}
+            </p>
+          )}
+          <Pager p={books} onPage={setBookPage} noun={q.trim() ? "matching" : "titles"} />
         </CardContent>
       </Card>
 
@@ -207,19 +319,52 @@ export function LibraryManager({
           <CardHeader><CardTitle className="text-base">Add a book</CardTitle></CardHeader>
           <CardContent className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5"><Label>Title</Label><Input value={bTitle} onChange={(e) => setBTitle(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Author</Label><Input value={bAuthor} onChange={(e) => setBAuthor(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>ISBN</Label><Input value={bIsbn} onChange={(e) => setBIsbn(e.target.value)} placeholder="optional" /></div>
             <div className="space-y-1.5"><Label>Barcode</Label><Input value={bBarcode} onChange={(e) => setBBarcode(e.target.value)} placeholder="scan…" /></div>
             <div className="space-y-1.5"><Label>Copies</Label><Input className="w-20" type="number" min={1} value={bCopies} onChange={(e) => setBCopies(Number(e.target.value))} /></div>
-            <Button disabled={busy || !bTitle || !bBarcode} onClick={() => run(() => postSms("library/books", { title: bTitle, barcode: bBarcode, totalCopies: bCopies }), "Book added.")}>Add</Button>
+            <Button disabled={busy || !bTitle || !bBarcode} onClick={() => run(
+              () => postSms("library/books", {
+                title: bTitle,
+                barcode: bBarcode,
+                totalCopies: bCopies,
+                // Blank stays blank: an empty string is not an ISBN, and a row
+                // carrying "" would match a search for "".
+                author: bAuthor.trim() || null,
+                isbn: bIsbn.trim() || null,
+              }),
+              "Book added.",
+            )}>Add</Button>
             <a href={`${apiBaseUrl.replace(/\/$/, "")}/library/books/export.csv`} className="ml-auto"><Button variant="outline" type="button">Export CSV</Button></a>
           </CardContent>
         </Card>
       )}
 
       <Card>
-        <CardHeader><CardTitle className="text-base">{canManage ? "Loans" : "My loans"}</CardTitle></CardHeader>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">{canManage ? "Loans" : "My loans"}</CardTitle>
+          <CardDescription className="flex flex-wrap items-center gap-1.5 pt-1">
+            {([
+              ["all", "All"],
+              ["overdue", "Overdue"],
+              ["ISSUED", "On loan"],
+              ["RETURNED", "Returned"],
+            ] as const).map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setLoanFilter(k)}
+                className={`rounded-full border px-2.5 py-0.5 text-xs ${
+                  loanFilter === k ? "border-foreground bg-foreground text-background" : "border-border"
+                }`}>
+                {label}
+              </button>
+            ))}
+          </CardDescription>
+        </CardHeader>
         <CardContent>
-          {loans.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No loans.</p>
+          {listErr && <p className="mb-2 text-sm text-destructive">{listErr}</p>}
+          {loans.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {listErr ? "—" : loanFilter === "overdue" ? "Nothing is overdue." : "No loans."}
+            </p>
           ) : (
             <table className="w-full text-sm">
               <thead><tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -228,7 +373,7 @@ export function LibraryManager({
                 <th className="py-1 pr-3 font-medium">Fine</th><th className="py-1 font-medium"></th>
               </tr></thead>
               <tbody>
-                {loans.map((l) => (
+                {loans.items.map((l) => (
                   <tr key={l.id} className="border-b border-border/50">
                     <td className="py-1 pr-3">{l.bookTitle}</td>{canManage && <td className="py-1 pr-3">{l.borrowerName}</td>}
                     <td className="py-1 pr-3">{shortDate(l.dueAt)}</td>
@@ -255,6 +400,7 @@ export function LibraryManager({
               </tbody>
             </table>
           )}
+          <Pager p={loans} onPage={setLoanPage} noun={loanFilter === "overdue" ? "overdue" : "loans"} />
         </CardContent>
       </Card>
     </div>

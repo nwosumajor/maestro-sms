@@ -126,12 +126,21 @@ describe("LibraryService", () => {
     ]);
     const loanFindFirstOrThrow = jest.fn(); // must NOT be used (that was the N+1)
     const tx = {
-      bookLoan: { findMany: jest.fn().mockResolvedValue(loans), findFirstOrThrow: loanFindFirstOrThrow },
+      // A double must model the CONTRACT: the list is paged now, so `count`
+      // exists and must count the SAME set `findMany` draws from — a stub that
+      // returns a fixed number passes against a service counting the wrong one.
+      bookLoan: {
+        findMany: jest.fn().mockResolvedValue(loans),
+        count: jest.fn(async () => loans.length),
+        findFirstOrThrow: loanFindFirstOrThrow,
+      },
       libraryBook: { findMany: bookFindMany },
       user: { findMany: userFindMany },
     } as unknown as TenantTx;
 
-    const dtos = await svc(tx).listLoans(librarian, {});
+    const page = await svc(tx).listLoans(librarian, {});
+    const dtos = page.items;
+    expect(page.total).toBe(3);
     expect(dtos.map((d) => d.bookTitle)).toEqual(["Algebra", "History", "Algebra"]);
     expect(dtos.map((d) => d.borrowerName)).toEqual(["Ada", "Bola", "Ada"]);
     expect(dtos[0].overdue).toBe(true); // l1 is issued + past due
@@ -146,7 +155,7 @@ describe("LibraryService", () => {
   it("listLoans forces a non-librarian to their OWN loans (no cross-borrower leak)", async () => {
     const findMany = jest.fn().mockResolvedValue([]);
     const tx = {
-      bookLoan: { findMany },
+      bookLoan: { findMany, count: jest.fn(async () => 0) },
       libraryBook: { findMany: jest.fn() },
       user: { findMany: jest.fn() },
     } as unknown as TenantTx;
@@ -206,12 +215,16 @@ describe("LibraryService", () => {
         $queryRaw: queryRaw,
         bookLoan: { findMany: loanFindMany },
         libraryBook: { findMany: bookFindMany },
+        // A Ghanaian school, so a figure labelled in the PLATFORM's currency is
+        // visibly wrong rather than accidentally right.
+        school: { findFirst: jest.fn().mockResolvedValue({ currency: "GHS" }) },
       }).report(librarian, {});
 
       expect(out).toEqual({
         issued: 7, returned: 12, overdue: 3,
         finesAccruedMinor: 45_000, finesCollectedMinor: 20_000,
         totalTitles: 120, totalCopies: 300, availableCopies: 281,
+        currency: "GHS",
       });
       // The point of the change: no row-loading at all on this path.
       expect(loanFindMany).not.toHaveBeenCalled();

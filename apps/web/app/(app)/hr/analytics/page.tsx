@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { money } from "@/lib/format";
+import { money as fmtMoney, regionOf } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,12 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
 export default async function HrAnalyticsPage() {
   const session = await auth();
   const user = session!.user;
+  // THE SCHOOL'S OWN CURRENCY. Payroll cost and staff-loan balances are the
+  // school's money, and bare `money()` falls back to the PLATFORM's — so a
+  // British school's payroll trend read in naira. The region rides the session;
+  // `regionOf` is how a server component gets at it.
+  const { currency, locale } = regionOf(user);
+  const money = (minor: number) => fmtMoney(minor, currency, locale);
   if (!hasPermission(user.permissions, "hr.read")) redirect("/dashboard");
   const a = await apiGet<Serialized<HrAnalyticsDto>>("/hr/analytics");
 

@@ -20,7 +20,15 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { csvCell } from "../common/csv";
 import { Prisma } from "@sms/db";
-import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryBorrowerDto, LibraryReportDto } from "@sms/types";
+import type {
+  BookLoanDto,
+  BookLoanPageDto,
+  FineReceiptDto,
+  LibraryBookDto,
+  LibraryBookPageDto,
+  LibraryBorrowerDto,
+  LibraryReportDto,
+} from "@sms/types";
 import { formatMoney, effectiveLibraryFinePerDayMinor, FEE_SOURCES } from "@sms/types";
 import type { PaymentMethodValue } from "@sms/types";
 import {
@@ -45,6 +53,10 @@ const CATALOGUE_EXPORT_MAX = 20_000;
 // A lending desk picks from a SEARCHED list, never scrolls a whole school —
 // the same bound every other picker here carries.
 const BORROWER_PAGE = 50;
+/** Titles per page of the catalogue. */
+const CATALOGUE_PAGE = 100;
+/** Loans per page. A table a librarian reads, not a bulk export. */
+const LOAN_PAGE = 50;
 const LOAN_DAYS = 14;
 const RENEW_DAYS = 7;
 const MAX_RENEWALS = 2;
@@ -187,7 +199,13 @@ export class LibraryService {
   }
 
   /** Search the catalogue by title/author/isbn/barcode (everyone). */
-  async searchBooks(p: Principal, q?: string): Promise<LibraryBookDto[]> {
+  async searchBooks(
+    p: Principal,
+    q?: string,
+    opts: { page?: number } = {},
+  ): Promise<LibraryBookPageDto> {
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = CATALOGUE_PAGE;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where = q?.trim()
         ? {
@@ -199,9 +217,35 @@ export class LibraryService {
             ],
           }
         : {};
-      const books = await tx.libraryBook.findMany({ where, orderBy: { title: "asc" }, take: 200 });
-      return books.map((b) => this.bookDto(b));
+      // Counted in the database, over the same predicate the page draws from.
+      // The list was a bare `take: 200` with nothing saying so, and the screen
+      // beside it filtered THOSE 200 in the browser — so a librarian searching
+      // for a book their school holds was told it does not exist, for 1,600 of
+      // 1,800 titles. The search has to happen HERE, where the catalogue is.
+      const total = await tx.libraryBook.count({ where });
+      const books = await tx.libraryBook.findMany({
+        where,
+        // `title` is not unique — a school holds several editions under one
+        // name — so `id` makes the order total and paging safe.
+        orderBy: [{ title: "asc" }, { id: "asc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      });
+      return { items: books.map((b) => this.bookDto(b)), total, page, pageSize };
     });
+  }
+
+  /**
+   * The school's own currency — the ONE place this is resolved.
+   *
+   * Both the fine it BILLS and the totals it REPORTS are figures in it, and a
+   * second copy with its own fallback is how a pair drifts apart: the sibling
+   * that reads an invoice's currency already sits beside this one.
+   * A null column means the platform's home country.
+   */
+  private async schoolCurrency(tx: TenantTx, p: Principal): Promise<string> {
+    const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
+    return school?.currency ?? "NGN";
   }
 
   /** Delete a book that has NO lending history (duplicate/typo cleanup). A book
@@ -449,8 +493,7 @@ export class LibraryService {
     // The SCHOOL's currency: settlement refuses a charge whose currency differs
     // from the invoice, so a fine raised in the column default could never be
     // paid online by a school billing in anything else.
-    const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
-    const schoolCurrency = school?.currency ?? "NGN";
+    const schoolCurrency = await this.schoolCurrency(tx, p);
     // A FINE IS DUE THE MOMENT THE BOOK IS LATE, so it goes onto a LIVE debt.
     //
     // This used to attach the fine to a DRAFT invoice, or create one — and a
@@ -741,15 +784,56 @@ export class LibraryService {
     });
   }
 
-  /** A borrower's loans (self), or all loans (librarian). */
-  async listLoans(p: Principal, opts: { borrowerId?: string; status?: string } = {}): Promise<BookLoanDto[]> {
+  /**
+   * A borrower's loans (self), or all loans (librarian) — PAGED.
+   *
+   * This was the 300 most recent as a bare array. A library is a LEDGER that a
+   * school reads for years, and the cap ate the far end of it: measured on a
+   * 1,200-pupil secondary three years in, 12,000 loans, of which the list
+   * covered 24 days. Worse than losing history — an OVERDUE loan is by
+   * definition an OLD one, so newest-first discarded precisely the rows the
+   * lending desk exists to chase. 1,316 were overdue and 14 were reachable,
+   * beneath a strip that counted all 1,316 in SQL and printed the number. The
+   * screen contradicted itself and the list was the half that was wrong.
+   *
+   * `overdue` is therefore a FILTER, not something to scroll for, and it sorts
+   * OLDEST FIRST: the longest-overdue book is the top of the queue. Everything
+   * else keeps recent-activity order, which is what a desk wants on open — and
+   * carries a total, because a newest-first cap without one is how the record
+   * disappears quietly.
+   */
+  async listLoans(
+    p: Principal,
+    opts: { borrowerId?: string; status?: string; overdue?: boolean; page?: number } = {},
+  ): Promise<BookLoanPageDto> {
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = LOAN_PAGE;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const borrowerId = this.isLibrarian(p) ? opts.borrowerId : p.userId;
       const where: Record<string, unknown> = {};
       if (borrowerId) where.borrowerId = borrowerId;
       if (opts.status) where.status = opts.status;
-      const loans = await tx.bookLoan.findMany({ where, orderBy: { issuedAt: "desc" }, take: 300 });
-      if (loans.length === 0) return [];
+      // Overdue is a state, not a column: still out, and past its due date. It
+      // is derived the same way `report` derives the count beside it, so the
+      // two cannot disagree.
+      if (opts.overdue) {
+        where.status = "ISSUED";
+        where.dueAt = { lt: new Date() };
+      }
+      // Counted in the DATABASE, over the SAME predicate the page draws from.
+      const total = await tx.bookLoan.count({ where });
+      const loans = await tx.bookLoan.findMany({
+        where,
+        // `issuedAt` alone is NOT a total order — a desk issues a class set
+        // within the same second, and offset paging over a partial order skips
+        // and repeats rows. `id` is the tiebreaker.
+        orderBy: opts.overdue
+          ? [{ dueAt: "asc" }, { id: "asc" }]
+          : [{ issuedAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      });
+      if (loans.length === 0) return { items: [], total, page, pageSize };
       // Batch the book + borrower lookups into ONE query each (was 3 queries per
       // loan via loanDto — up to ~900 for a full page).
       const books = await tx.libraryBook.findMany({
@@ -762,10 +846,11 @@ export class LibraryService {
       });
       const bookById = new Map(books.map((b) => [b.id, b]));
       const nameById = new Map(borrowers.map((u) => [u.id, u.name]));
-      return loans.map((l) => {
+      const items = loans.map((l) => {
         const b = bookById.get(l.bookId);
         return mapLoanDto(l, b?.title ?? "", b?.barcode ?? "", nameById.get(l.borrowerId) ?? "");
       });
+      return { items, total, page, pageSize };
     });
   }
 
@@ -786,6 +871,11 @@ export class LibraryService {
       // render a tally.
       const from = issuedRange.gte ?? null;
       const to = issuedRange.lte ?? null;
+      // The fine figures are in the SCHOOL's currency — that is where the
+      // charge is raised. Without this the page had nothing to format with and
+      // fell back to the platform's, printing a Ghanaian school's fines as
+      // naira above a table that had them right.
+      const currency = await this.schoolCurrency(tx, p);
       const [loanAgg, bookAgg] = await Promise.all([
         tx.$queryRaw`
           SELECT
@@ -818,6 +908,7 @@ export class LibraryService {
         totalTitles: b.totalTitles,
         totalCopies: b.totalCopies,
         availableCopies: b.availableCopies,
+        currency,
       };
     });
   }

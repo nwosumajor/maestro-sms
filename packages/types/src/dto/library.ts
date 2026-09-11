@@ -12,6 +12,15 @@ export const BOOK_LOAN_STATUSES = ["ISSUED", "RETURNED"] as const;
 export type BookLoanStatus = (typeof BOOK_LOAN_STATUSES)[number];
 
 
+/** A page of the catalogue. */
+export interface LibraryBookPageDto {
+  items: LibraryBookDto[];
+  /** Titles held in all. The list was capped at 200 and said so nowhere. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface LibraryBookDto {
   id: string;
   title: string;
@@ -43,6 +52,24 @@ export interface BookLoanDto {
   overdue: boolean;
 }
 
+/**
+ * A page of loans.
+ *
+ * The list used to be a bare array capped at the 300 most recent. A library is
+ * a LEDGER, not a queue: at three years a secondary holds ~12,000 loans, and an
+ * OVERDUE loan is by definition an OLD one — so newest-first threw away exactly
+ * the rows the lending desk exists to chase. Measured on a 1,200-pupil school:
+ * 1,316 overdue, 14 of them reachable, under a strip that counted all 1,316 in
+ * SQL and printed the number.
+ */
+export interface BookLoanPageDto {
+  items: BookLoanDto[];
+  /** Matching the filter, in the school — NOT the length of `items`. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 /** Librarian report over a window: counts + fine totals. */
 export interface LibraryReportDto {
   issued: number;
@@ -53,6 +80,14 @@ export interface LibraryReportDto {
   totalTitles: number;
   totalCopies: number;
   availableCopies: number;
+  /**
+   * The currency the fine figures are in — the SCHOOL's, which is where the
+   * fine is charged (`effectiveLibraryFinePerDayMinor` reads `school.currency`).
+   * It was absent, so the page had nothing to format with and fell back to the
+   * platform's: a Ghanaian school's screen read "Fines accrued ₦300,000.00"
+   * directly above a loan table printing the same fines as GH₵200.00.
+   */
+  currency: string;
 }
 
 /** Fine receipt issued when an overdue fine is paid. */

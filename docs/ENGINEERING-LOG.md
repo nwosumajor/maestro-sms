@@ -14452,3 +14452,122 @@ hard-coded `/public/`, so no path segment can reach another surface; it is now
 written that way (`` `${…}/public/${ctx.params.path.join("/")}` ``, any base) and
 mutation-checked by dropping the prefix — the real regression — which fails it.
 Anchor to the property, not to the spelling.
+
+### The library at 5,000 schools, three years deep
+
+762,026 loans across 5,001 school libraries, with one focus school built as a
+real secondary: 1,200 pupils, 1,800 titles, 12,000 loans running from
+2023-09-27, and **on the Ghanaian cedi** — because the platform's home currency
+hides every currency defect by agreeing with the wrong default.
+
+**1,316 overdue, and the lending desk could reach 14.**
+
+`listLoans` returned the 300 most recent loans as a bare array. A library is a
+LEDGER a school reads for years, not a queue of live work, and the cap ate the
+far end of it:
+
+```
+GET /library/loans   ->  300 rows, covering 2026-08-18 .. 2026-09-11
+                         (of a history starting 2023-09-27)
+the strip above it   ->  "Overdue: 1,316"
+overdue rows listed  ->  14
+```
+
+The screen contradicted itself, and the list was the half that was wrong — the
+strip counts in SQL and had been right all along. It was the only thing on the
+page telling the truth and it had no list to hand you.
+
+**The failure is not random.** An OVERDUE loan is by definition an OLD one, so
+newest-first discarded precisely the rows the desk exists to chase. Nor was
+there a way round it: `?status=ISSUED` — which no screen sent — reached back
+only to 2026-01-11, so every book overdue since 2023, 2024 or 2025 was
+unreachable at any URL. Overdue is a FILTER now, and it sorts OLDEST first
+(`dueAt asc`), because the longest-overdue book is the top of the queue.
+
+After: 50 of 12,000 paged; `?overdue=1` returns 50 of **1,316 — the strip's own
+number**; 27 pages walked reach **1,316 distinct** rows, checked as both a
+distinct count and a row count, since a partial order shows up as repeats that a
+Set would absorb.
+
+**"We don't have that book" — said of 1,600 books the school owns.**
+
+The catalogue read `take: 200` ordered by title, and the search box on /library
+then filtered *those 200 in the browser*. The page received "Focus Title
+0001".."Focus Title 0200"; searching **Focus Title 1500** found nothing, and so
+did the barcode box behind the lending desk. The SERVER's own `?q=` found it
+immediately and had been able to the whole time — a query parameter the API
+accepted that no screen had ever sent. Two named classes at once: *a filter
+applied in memory only ever sees the rows that survived the cap*, and *a field
+the API accepts that no screen sends is a feature nobody has*.
+
+**Fines accrued ₦300,000.00 — above a table reading GH₵200.00.**
+
+On one screen, the same money in two currencies. `LibraryReportDto` carried no
+currency at all, so the server page had nothing to format with and fell back to
+the platform's; the client island beside it was already correct, with a comment
+explaining why. Sibling asymmetry, and the fix is a DTO field: the report says
+what its figures are denominated in, the way an invoice carries its own
+currency per row.
+
+// GOTCHA: currency alone was not enough. The strip then read "GHS 300,000.00"
+above a row reading "GH₵200.00" — right currency, wrong rendering, still two
+answers to one question. The LOCALE has to come from the reader too
+(`regionOf(user)`).
+
+// GOTCHA: **the currency gate could not see either site.** It scanned eight
+`components/` directories for three hand-rolled spellings — a `₦${…}` template,
+`(xMinor / 100)`, and `toLocaleString("en-NG")`. It did not scan
+`components/library`, it did not scan any `app/(app)` PAGE, and above all it did
+not look for the shared helper called with its DEFAULT argument:
+`money(amountMinor, currency = PLATFORM_REGION.currency)`. `money(x)` is a
+platform-currency site written with the *correct* helper — the subtlest spelling
+and the only one left, because everything else had been swept. Widening it to
+pages and to the default-argument case found one more live defect on the spot:
+**HR analytics printed payroll cost and staff-loan balances in naira** for every
+school on the platform. The scan skips a `money` shadowed by `useFormat()` or by
+a local `moneyIn(region)` binding, both of which are correct and both of which a
+cruder check flags.
+
+// GOTCHA on the null: `apiGet` returns null when it could not ask, and the page
+coerced it to `[]`, so a failed read rendered **"The catalogue is empty."** —
+a statement about the school that nobody there is in a position to make. Null
+goes through now and the manager says it could not load.
+
+**What held.** Borrower scoping (a pupil asking for the librarian's loans gets
+their own 10 rows); the fine's own currency on the billing path; the SQL report
+aggregate; `report` never loading a row. Reads stayed flat at scale: page 1 of
+12,000 in 67 ms, the overdue page in 59 ms, all 27 overdue pages in 1.26 s.
+
+// GOTCHA in the fix itself: the tiebreaker mutation PASSED at first — dropping
+`id` from the ordering broke nothing — because the fixture gave every row its
+own day and there were no ties to straddle a page boundary. This is the third
+time this repo has been caught by it (`Array.sort` is stable in V8, Postgres is
+not). The test that catches it is a term-start class set: 500 loans on ONE
+instant, where the order is decided by nothing but the tiebreaker.
+
+// GOTCHA on two existing gates: both asserted the literal
+`school?.currency ?? "NGN"` and went red when a second reader (the report)
+required ONE shared resolver — which is what one of them was asking for in the
+first place. Re-anchored to the property. And my own replacement regex was
+over-wide: it counted `inv?.currency ?? "NGN"` beside it, which answers a
+different question (what an EXISTING invoice was raised in).
+
+// GOTCHA, and the nicest one: removing the browser-side filter turned
+`a-field-no-screen-can-fill-in` RED on **`isbn`**. That filter —
+`[b.title, b.author, b.isbn, b.barcode]` — had been the web's ONLY mention of
+the field, so a defect was masking a second defect. The "Add a book" form takes
+a title, a barcode and a copy count, while the search card above it promises
+"By title, author, ISBN, or barcode": **two of the four things a librarian is
+told they can search by were things nothing could store.** The form takes both
+now, blank staying null (an empty string is not an ISBN, and a row carrying ""
+matches a search for ""). A ratchet earns its keep the day something it was not
+written for trips it.
+
+Gates: `a-shelf-of-overdue-books-nobody-could-see.spec.ts` (9 cases) and
+`a-catalogue-searched-where-it-lives.test.ts` (9 cases), mutation-validated
+thirteen ways — the old cap restored, the overdue filter ignored, overdue sorted
+newest-first, the tiebreaker dropped, the total measured off the fetched page,
+the count ignoring the filter, the browser-side filter restored, `?q=` not sent,
+a second Pager copy, null re-coerced to empty, the strip returned to bare
+`money()`, and the ISBN field dropped again. Plus a false-positive check that a `useFormat()`-bound `money` is not
+flagged.

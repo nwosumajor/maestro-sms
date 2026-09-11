@@ -50,8 +50,19 @@ describe("a fine is money of one kind", () => {
   });
 
   it("resolves the school currency once, not twice with different fallbacks", () => {
-    // Two spellings of one default is how a pair drifts.
-    expect(SRC).toMatch(/const schoolCurrency = school\?\.currency \?\? "NGN"/);
+    // Two spellings of one default is how a pair drifts. This was written as
+    // the literal line `const schoolCurrency = school?.currency ?? "NGN"` and
+    // went red when a SECOND reader appeared (the report, which must label its
+    // fine totals in the same currency it bills them in) and the right answer
+    // was to extract ONE resolver — the thing this test wants. Anchor on the
+    // property: exactly one fallback in the file, and every reader goes
+    // through the same named method.
+    // Only the SCHOOL's fallback. `inv?.currency ?? "NGN"` beside it answers a
+    // different question — what an EXISTING invoice was raised in — and
+    // counting both is the over-wide gate that teaches its reader to exempt.
     expect((SRC.match(/school\?\.currency \?\? "NGN"/g) ?? []).length).toBe(1);
+    expect(SRC).toMatch(/private async schoolCurrency\(/);
+    // More than one caller, or the shared resolver is just a rename.
+    expect((SRC.match(/this\.schoolCurrency\(/g) ?? []).length).toBeGreaterThan(1);
   });
 });

@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **316 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **317 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -921,7 +921,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **316 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **317 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -974,6 +974,15 @@ These are the rules; the log is why each one exists.
 - **Scale by the CURRENCY, never by 100** (`formatMoney` / `minorFrom`); 11 of
   29 catalogued currencies are zero-decimal. Gate:
   `money-is-not-divided-by-a-hundred`.
+- **A SHARED HELPER CALLED WITH ITS DEFAULT IS STILL A PLATFORM-CURRENCY SITE.**
+  `money(amountMinor, currency = PLATFORM_REGION.currency)` — so `money(x)` is
+  the bug written with the *correct* helper, and it is the spelling that
+  survived after every hand-rolled `₦${…}` had been swept. `school-currency`
+  now scans `app/(app)` PAGES as well as `components/` (it did neither for
+  server pages, which is where two live defects sat beside fixed siblings) and
+  flags a bare `money(x)`, skipping one shadowed by `useFormat()` or a local
+  `moneyIn(region)`. **And a DTO that reports money must say what currency it is
+  in** — a screen cannot format what it was never told.
 - **A gateway is ALWAYS told the currency**, and settlement REFUSES a mismatch
   before posting. One posting path (`InvoiceSettlementService`), so one guard.
 - **A naira constant is not a rule for every school.** And the two fail-safes
@@ -1004,6 +1013,11 @@ These are the rules; the log is why each one exists.
   pending, a reported total of 500, and the 166 OLDEST unreachable at any page.
   Scan in batches oldest-first against the one shared predicate rather than
   writing a second copy of it in SQL, and report a floor as a floor.
+- **AN OVERDUE ROW IS AN OLD ROW**, so a newest-first cap discards exactly what
+  the screen is alarming about. The library listed the 300 most recent loans
+  under a strip counting 1,316 overdue in SQL: 14 reachable, and nothing older
+  than 24 days reachable at ANY url. When a page shows a COUNT, the list beside
+  it must be able to produce those rows — as a FILTER, sorted oldest-first.
 - **A CAP WITH NO COUNT IS THE COMMONEST DEFECT IN THIS REPO.** Four in one
   session — billing history, the approvals queue, the alumni register, the SIS
   review queue — each a list a school reads LATER, each returning a capped page

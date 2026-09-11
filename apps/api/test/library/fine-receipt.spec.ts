@@ -201,8 +201,18 @@ describe("a fine reaches the ledger", () => {
   it("raises the invoice in the SCHOOL's currency", () => {
     // Settlement REFUSES a charge whose currency differs from the invoice, so a
     // fine raised in the column default could never be paid online.
+    //
+    // Anchored on the PROPERTY, not the spelling: this asserted the literal
+    // `school?.currency ?? "NGN"` inside billFine and went red when that line
+    // moved into ONE shared resolver — which is what its sibling gate
+    // (`a-fine-is-money-of-one-kind`) was asking for. What matters is that the
+    // charge is denominated from the SCHOOL, not from the column default.
     const bill = src.slice(src.indexOf("private async billFine"), src.indexOf("async payFine"));
-    expect(bill).toMatch(/school\?\.currency \?\? "NGN"/);
+    expect(bill).toMatch(/schoolCurrency/);
+    expect(bill).toMatch(/currency: schoolCurrency/);
+    // And the resolver it goes through really does read the school.
+    const resolver = src.slice(src.indexOf("private async schoolCurrency"));
+    expect(resolver.slice(0, 400)).toMatch(/tx\.school\.findFirst/);
   });
 
   it("posts a real POSTED payment when the fine is paid", () => {

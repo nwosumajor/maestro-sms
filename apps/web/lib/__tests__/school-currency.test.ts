@@ -37,7 +37,22 @@ const TENANT_FACING = [
   "components/gradebook",
   "components/lms",
   "components/attendance",
+  // Added after a Ghanaian school's library page read "Fines accrued
+  // ₦300,000.00" directly above a loan table printing the same fines as
+  // GH₵200.00. The client island here was already correct; the SERVER PAGE
+  // beside it was not — and neither this directory nor any page was scanned.
+  "components/library",
 ];
+
+/**
+ * SERVER PAGES that render a school's money.
+ *
+ * The scan was components-only, so every `app/(app)/…/page.tsx` was invisible
+ * to it — which is where two of these defects were living, in files whose
+ * `components/` siblings had already been fixed with a comment explaining why.
+ * Sibling asymmetry, and a gate that could not see half the pairs.
+ */
+const TENANT_PAGES = ["app/(app)"];
 
 /**
  * Surfaces that quote the PLATFORM's own prices, where its currency is correct.
@@ -65,6 +80,48 @@ function walk(dir: string, out: string[] = []): string[] {
     const f = join(dir, e);
     if (statSync(f).isDirectory()) walk(f, out);
     else if (/\.tsx?$/.test(f) && !/__tests__/.test(f)) out.push(f);
+  }
+  return out;
+}
+
+/**
+ * Does this file call the shared `money` helper with NO currency?
+ *
+ * The subtle half, and the one the three checks below cannot see. `money` from
+ * `@/lib/format` is
+ *
+ *     money(amountMinor, currency = PLATFORM_REGION.currency, locale = …)
+ *
+ * so `money(x)` is a platform-currency site written with the CORRECT helper. A
+ * component that was "fixed" by switching to `money()` and never given a
+ * currency still prints naira for every school on earth.
+ *
+ * Two spellings are fine and must not be flagged: `const { money } =
+ * useFormat()` (bound to the session's region) and a local binding such as
+ * `const money = moneyIn(region)`. Both shadow the import.
+ */
+function platformDefaultedMoney(src: string): string[] {
+  if (!/import\s*\{[^}]*\bmoney\b[^}]*\}\s*from\s*"@\/lib\/format"/.test(src)) return [];
+  // Shadowed by a region-bound binding of the same name — not the import.
+  if (/\bconst\s*\{[^}]*\bmoney\b[^}]*\}\s*=\s*useFormat\(/.test(src)) return [];
+  if (/\bconst\s+money\s*=/.test(src)) return [];
+  const out: string[] = [];
+  for (const m of src.matchAll(/\bmoney\(/g)) {
+    let i = m.index! + m[0].length;
+    let depth = 1;
+    let arg = "";
+    while (i < src.length && depth > 0) {
+      const c = src[i];
+      if ("([{".includes(c)) depth += 1;
+      else if (")]}".includes(c)) {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+      arg += c;
+      i += 1;
+    }
+    // Strip nested calls before looking for the argument separator.
+    if (arg.trim() && !/,/.test(arg.replace(/\([^)]*\)/g, ""))) out.push(`money(${arg.trim().slice(0, 40)})`);
   }
   return out;
 }
@@ -106,6 +163,36 @@ describe("tenant-facing components print the SCHOOL's currency", () => {
     const offenders = files
       .filter((f) => /toLocaleString\("en-NG"|Intl\.NumberFormat\("en-NG"/.test(readFileSync(f, "utf8")))
       .map((f) => f.slice(WEB.length + 1));
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("the SERVER PAGES too, and the helper's DEFAULT argument", () => {
+  // Every page under app/(app) is behind a session and renders one school's
+  // data. The exceptions are the surfaces that quote the PLATFORM's own prices.
+  const PLATFORM_PAGES = ["app/(app)/help", "app/(app)/billing", "app/(app)/operator"];
+  const pages = TENANT_PAGES.flatMap((d) => walk(join(WEB, d))).filter(
+    (f) => !PLATFORM_PAGES.some((p) => f.slice(WEB.length + 1).startsWith(p)),
+  );
+
+  it("covers the pages it claims to", () => {
+    // A walk that finds nothing produces no offenders and passes green.
+    expect(pages.length).toBeGreaterThan(40);
+  });
+
+  it("no school-facing page calls money() without saying which currency", () => {
+    const offenders = pages
+      .map((f) => [f.slice(WEB.length + 1), platformDefaultedMoney(readFileSync(f, "utf8"))] as const)
+      .filter(([, calls]) => calls.length > 0)
+      .map(([f, calls]) => `${f}: ${calls.join(", ")}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it("nor does a tenant-facing component", () => {
+    const offenders = TENANT_FACING.flatMap((d) => walk(join(WEB, d)))
+      .map((f) => [f.slice(WEB.length + 1), platformDefaultedMoney(readFileSync(f, "utf8"))] as const)
+      .filter(([, calls]) => calls.length > 0)
+      .map(([f, calls]) => `${f}: ${calls.join(", ")}`);
     expect(offenders).toEqual([]);
   });
 });
