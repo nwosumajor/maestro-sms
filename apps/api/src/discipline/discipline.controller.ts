@@ -1,7 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { DISCIPLINE_PERMISSIONS, MODULES } from "@sms/types";
-import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
+import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, FileTargetsDto, IdNameDto, PageDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -43,8 +43,11 @@ export class DisciplineController {
   fileTargets(
     @CurrentPrincipal() p: Principal,
     @Query("type", new ZodValidationPipe(z.enum(["STUDENT", "TEACHER"]))) type: "STUDENT" | "TEACHER",
-  ): Promise<IdNameDto[]> {
-    return this.discipline.listFileTargets(p, type);
+    // The query the picker types. Without it the list was the first 500 names
+    // in the school, so a pupil sorting past that could not be named at all.
+    @Query("q") q?: string,
+  ): Promise<FileTargetsDto> {
+    return this.discipline.listFileTargets(p, type, q);
   }
 
   @Get("complaints/:id")

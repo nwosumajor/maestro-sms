@@ -1,3 +1,4 @@
+import { Prisma } from "@sms/db";
 // =============================================================================
 // DisciplineService — complaint intake + resolution
 // =============================================================================
@@ -11,7 +12,7 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { teacherIdsOfClasses } from "../common/teaches";
-import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
+import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto, FileTargetsDto } from "@sms/types";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import { NotificationService } from "../notifications/notification.service";
@@ -624,39 +625,70 @@ export class DisciplineService {
    * relationship (e.g. board/accountant/HR) may still name any teacher — staff,
    * not a minor — but no student. Names only, never sensitive fields.
    */
-  async listFileTargets(p: Principal, type: "STUDENT" | "TEACHER"): Promise<IdNameDto[]> {
+  async listFileTargets(
+    p: Principal,
+    type: "STUDENT" | "TEACHER",
+    q?: string,
+  ): Promise<FileTargetsDto> {
+    const needle = (q ?? "").trim();
+    // Name only, and never email: this endpoint exists to name a person in a
+    // complaint, not to confirm which addresses exist.
+    const like = needle ? { name: { contains: needle, mode: Prisma.QueryMode.insensitive } } : {};
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       if (this.canManage(p)) {
-        return tx.user.findMany({
-          where: { roles: { some: { role: { name: type === "STUDENT" ? "student" : "teacher" } } } },
-          select: { id: true, name: true },
-          orderBy: { name: "asc" },
-          take: TARGET_CAP,
-        });
+        const where = {
+          ...like,
+          roles: { some: { role: { name: type === "STUDENT" ? "student" : "teacher" } } },
+        };
+        // COUNTED, because the cap decides whether a complaint can be filed at
+        // all. A roll of 1,200 returned the first 500 by name — A to K — so a
+        // pupil whose surname began with L or later could not be named in a
+        // report, and the screen simply did not list them. 690 of 1,200
+        // unreachable, silently, on a safeguarding path.
+        const [items, total] = await Promise.all([
+          tx.user.findMany({ where, select: { id: true, name: true }, orderBy: [{ name: "asc" }, { id: "asc" }], take: TARGET_CAP }),
+          tx.user.count({ where }),
+        ]);
+        return { items: items as IdNameDto[], total, searchable: true };
       }
       const classIds = await this.relatedClassIds(tx, p);
       if (type === "TEACHER") {
         // No class relationship: allow naming any teacher (non-minor staff).
         if (classIds.length === 0) {
-          return tx.user.findMany({
-            where: { roles: { some: { role: { name: "teacher" } } } },
-            select: { id: true, name: true },
-            orderBy: { name: "asc" },
-            take: TARGET_CAP,
-          });
+          const where = { ...like, roles: { some: { role: { name: "teacher" } } } };
+          const [items, total] = await Promise.all([
+            tx.user.findMany({ where, select: { id: true, name: true }, orderBy: [{ name: "asc" }, { id: "asc" }], take: TARGET_CAP }),
+            tx.user.count({ where }),
+          ]);
+          return { items: items as IdNameDto[], total, searchable: true };
         }
         const ids = await this.teacherIdsOfClasses(tx, classIds);
-        if (ids.length === 0) return [];
-        return tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+        if (ids.length === 0) return { items: [], total: 0, searchable: false };
+        // The teachers of the caller's own classes: a handful, so the whole set
+        // is returned and the screen needs no search.
+        const items = (await tx.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, name: true },
+          orderBy: [{ name: "asc" }, { id: "asc" }],
+        })) as IdNameDto[];
+        return { items, total: items.length, searchable: false };
       }
       // STUDENT targets = classmates in the caller's related classes, minus self.
-      if (classIds.length === 0) return [];
+      if (classIds.length === 0) return { items: [], total: 0, searchable: false };
       // ACTIVE only — a departed pupil is not a classmate any more, and must
       // not appear as a target a report can be filed against.
       const enr = await tx.enrollment.findMany({ where: { classId: { in: classIds }, status: "ACTIVE" }, select: { studentId: true }, distinct: ["studentId"] });
       const ids = enr.map((e: { studentId: string }) => e.studentId).filter((id: string) => id !== p.userId);
-      if (ids.length === 0) return [];
-      return tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: "asc" }, take: TARGET_CAP });
+      if (ids.length === 0) return { items: [], total: 0, searchable: false };
+      // A pupil's own classmates: bounded by the class, not by the school, so
+      // the cap never bites here and the whole set is honest.
+      const items = (await tx.user.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true },
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        take: TARGET_CAP,
+      })) as IdNameDto[];
+      return { items, total: items.length, searchable: false };
     });
   }
 

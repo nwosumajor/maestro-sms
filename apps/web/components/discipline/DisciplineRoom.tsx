@@ -7,6 +7,7 @@
 
 import type { DisciplineComplaintDto, Serialized } from "@sms/types";
 import * as React from "react";
+import { TargetPicker } from "./TargetPicker";
 import { useRouter } from "next/navigation";
 import { postSms, sendSms } from "@/components/game/play-ui";
 import { usePaged, type Paged } from "@/lib/paged";
@@ -27,9 +28,12 @@ const STATUS_VARIANT: Record<string, "secondary" | "outline" | "destructive"> = 
 };
 
 export function DisciplineRoom({
-  page, staff, teachers, students, canManage,
+  page, staff, teachers, students, canManage, studentTotal, teacherTotal,
 }: {
   page: Paged<Complaint>; staff: Person[]; teachers: Person[]; students: Person[]; canManage: boolean;
+  /** How many the caller may file against IN ALL. The seeds above are one page:
+   *  a 1,200-pupil roll arrived as 500 names, A to K. */
+  studentTotal: number; teacherTotal: number;
 }) {
   const router = useRouter();
   const { items: complaints, hasMore, loading, loadMore } = usePaged<Complaint>(page, "discipline/complaints");
@@ -40,7 +44,7 @@ export function DisciplineRoom({
   const [againstType, setAgainstType] = React.useState("STUDENT");
   // The "against" list follows the chosen type — students OR teachers, never mixed.
   const againstList = againstType === "STUDENT" ? students : teachers;
-  const [against, setAgainst] = React.useState(students[0]?.id ?? "");
+  const [against, setAgainst] = React.useState("");
   const [note, setNote] = React.useState<Record<string, string>>({});
   const [assignee, setAssignee] = React.useState<Record<string, string>>({});
 
@@ -67,7 +71,10 @@ export function DisciplineRoom({
                 onChange={(e) => {
                   const t = e.target.value;
                   setAgainstType(t);
-                  setAgainst((t === "STUDENT" ? students : teachers)[0]?.id ?? "");
+                  // Switching the type clears the choice rather than picking
+                  // someone: a silently pre-selected name on a complaint form is
+                  // how the wrong person gets reported.
+                  setAgainst("");
                 }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
@@ -76,9 +83,19 @@ export function DisciplineRoom({
             </div>
             <div className="space-y-1.5">
               <Label>Against</Label>
-              <select aria-label="Against" value={against} onChange={(e) => setAgainst(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-                {againstList.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
-              </select>
+              {/* TYPE TO FIND A PERSON, rather than enumerate the school. The
+                  dropdown here held whatever the first request returned — 500
+                  names out of 1,200 on a real roll, A to K — so 690 pupils
+                  could not be named in a complaint at all and the form gave no
+                  sign. A concern that cannot be filed is a concern that goes
+                  unrecorded. */}
+              <TargetPicker
+                type={againstType === "TEACHER" ? "TEACHER" : "STUDENT"}
+                value={against}
+                onChange={setAgainst}
+                seed={againstList}
+                total={againstType === "TEACHER" ? teacherTotal : studentTotal}
+              />
             </div>
           </div>
           <div className="space-y-1.5"><Label>Details</Label><Textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={2} /></div>

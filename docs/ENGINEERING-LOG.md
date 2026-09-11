@@ -14776,3 +14776,71 @@ ways — ordering dropped, the `id` tiebreaker dropped, the total measured off t
 fetched page, the count run unconditionally, a see-all invented for a page that
 takes no query, the extra row not read, and a category with no hits reporting
 itself anyway.
+
+### Discipline at 5,000 schools, three years deep
+
+5,001 schools with a focus secondary of 1,200 pupils whose surnames span the
+alphabet, so a name-ordered cap lands mid-roll.
+
+**690 pupils could not be reported.** `GET /discipline/file-targets` returns the
+people a caller may file a complaint AGAINST. It was a bare array, ordered by
+name, capped at 500, with no search and no count — and the form rendered it as a
+plain `<select>`:
+
+```
+returned            500 of 1,200
+range               Asurname… .. Ksurname…
+?q= accepted        NO — the parameter was ignored
+said there was more nothing
+```
+
+A pupil whose name sorted past the cap was not merely harder to find: they were
+**absent from the only control that names them**, with nothing on screen to say
+why. On a safeguarding path, a concern that cannot be filed is a concern that
+goes unrecorded.
+
+The scoping was never the problem and has not moved — a pupil may still name only
+a classmate, a filer with no class may still name a teacher and no pupil. What
+was missing was a way to REACH the people already allowed. `listFileTargets`
+takes `q`, filters in the database within the scoped set, and returns
+`{items, total, searchable}`; the form is a type-to-search picker that says
+"Showing 500 of 1,200 — type at least two letters to search the rest".
+
+After: `q=Zsurname` returns 46 of 46, `q=Zsurname0025` exactly 1, a nonsense
+query 0 of 0 — the 690 are reachable and the count is honest.
+
+// GOTCHA: the sibling was fixed and this one was not. `UserPicker` exists, and
+its own header records this very defect — "the list silently capped, so the
+guardian you wanted might not be in it at all" — for the CLASSES page's guardian
+picker. Discipline kept the dropdown. It could not simply reuse `UserPicker`
+either: that searches `/directory/people`, and who you may file against is
+relationship-scoped, so pointing the picker at the directory would have widened
+the rule while fixing the reach. The new picker queries the DISCIPLINE endpoint.
+
+// GOTCHA: the seed is only trusted when it is the WHOLE set (`seed.length >=
+total`). A local hit inside a capped page does not mean there is no better match
+past the cap — believing it is precisely what made the dropdown look complete.
+
+// GOTCHA: switching the target type used to pre-select the first name in the
+new list. On a complaint form a silently pre-selected person is how the wrong
+child gets reported; it clears now.
+
+// GOTCHA in my own test: the first draft asserted `searchable === false` for a
+pupil, against the branch where a pupil has NO class — which correctly falls
+through to "may name any teacher", the whole staff, and IS searchable. The
+bounded case is a pupil WITH a class naming a classmate. A test that exercises
+the wrong branch reports a fact about itself.
+
+// GOTCHA on verifying it: the placeholder came back as `Type a pupil&#x27;s
+name…` and the count as `Showing <!-- -->500<!-- --> of <!-- -->1,200`. Both
+were "absent" to a plain `includes`. Entity encoding and React's comment markers,
+the two traps this log already records for asserting on rendered HTML.
+
+**What held.** The complaint list itself is careful work — ordered
+`[createdAt desc, id desc]`, a total order, with `take: limit + 1` for `hasMore`
+rather than a count on every page. Confidentiality holds, and no automated
+action is taken on a pupil (Golden Rule #8).
+
+Gate: `a-pupil-nobody-could-report.spec.ts` (7 cases), mutation-validated four
+ways — the query ignored, the total measured off the capped page, a pupil's
+search reaching the whole school, and a bounded set marked searchable.
