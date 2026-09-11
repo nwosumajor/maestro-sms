@@ -10,6 +10,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AttendanceService } from "./attendance.service";
 import { AttendanceRollupService } from "./attendance-rollup.service";
+import { RegisterReminderService } from "./register-reminder.service";
 import { JobRunsService } from "../maintenance/job-runs.service";
 
 /** Query-string numbers arrive as strings; coerce and bound them at the boundary. */
@@ -34,6 +35,7 @@ export class AttendanceController {
   constructor(
     private readonly attendance: AttendanceService,
     private readonly rollup: AttendanceRollupService,
+    private readonly reminder: RegisterReminderService,
     private readonly jobRuns: JobRunsService,
   ) {}
 
@@ -74,6 +76,25 @@ export class AttendanceController {
     // Recorded like the scheduled run, so the jobs console shows one history
     // rather than a nightly sweep and an invisible manual one beside it.
     return this.jobRuns.record("attendance.rollup", "MANUAL", () => this.rollup.refreshEndedTerms(p));
+  }
+
+  /**
+   * Remind THIS SCHOOL's class teachers about registers still outstanding today.
+   *
+   * SCOPED TO THE CALLER'S OWN SCHOOL. The sweep behind it is cross-tenant, and
+   * a per-school permission that fires a fleet-wide job is the defect
+   * `a-fleet-sweep-one-school-could-fire` records — one registrar's press
+   * alerting 499 other schools' staff.
+   *
+   * `force` runs it outside the school's reminder hour, which is what makes the
+   * button useful: pressing it at 09:00 should do something.
+   */
+  @Post("attendance/register-reminder/run")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_WRITE)
+  runRegisterReminder(@CurrentPrincipal() p: Principal) {
+    return this.jobRuns.record("attendance.registerReminder", "MANUAL", () =>
+      this.reminder.run({ onlySchoolId: p.schoolId, force: true }),
+    );
   }
 
   /** Attendance BY CLASS over a window — the senior-staff overview. Each row says

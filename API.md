@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **903 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **904 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -255,6 +255,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **903 routes across 90
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
 | GET | `/attendance/by-class` | 🔑 `attendance.read` · 📦 `attendance` | Attendance BY CLASS over a window — the senior-staff overview. |
+| POST | `/attendance/register-reminder/run` | 🔑 `attendance.write` · 📦 `attendance` | Remind THIS SCHOOL's class teachers about registers still outstanding today. |
 | GET | `/attendance/registers` | 🔑 `attendance.read` · 📦 `attendance` | Which of the caller's classes have no register for ?date= (default today). |
 | POST | `/attendance/rollup/refresh` | 🔑 `attendance.write` · 📦 `attendance` | Roll up every ENDED term that has no rollup yet. |
 | GET | `/attendance/term-lock` | 🔑 `attendance.read` · 📦 `attendance` | A class register for ?date=YYYY-MM-DD, or recent sessions if omitted. |

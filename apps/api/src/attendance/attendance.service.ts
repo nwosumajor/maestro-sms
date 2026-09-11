@@ -16,7 +16,7 @@ import { classIdsTaughtBy, teachesClass, teachesStudent } from "../common/teache
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
-import type { AttendanceStatusValue } from "@sms/types";
+import type { AttendanceStatusValue, RegisterStatusDto } from "@sms/types";
 import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -853,7 +853,7 @@ export class AttendanceService {
   async getRegisterStatus(
     p: Principal,
     dateStr?: string,
-  ): Promise<{ date: string; classes: { classId: string; className: string; taken: boolean; marked: number; enrolled: number }[] }> {
+  ): Promise<RegisterStatusDto> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       // dayUtc returns a TIMESTAMP, not a Date — wrap it so the column comparison
       // gets a Date and the label is UTC-midnight, matching the @db.Date column.
@@ -865,15 +865,23 @@ export class AttendanceService {
 
       // The caller's classes, by the same relationship rule as the rest of the file.
       const classes = this.isSchoolWide(p)
-        ? ((await tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })) as Array<{ id: string; name: string }>)
+        ? ((await tx.class.findMany({
+            orderBy: { name: "asc" },
+            // WHO IS RESPONSIBLE, not merely which class. The board asked "which
+            // registers are missing" and a head teacher then had to work out for
+            // themselves whose they were — the question they actually have is
+            // "who do I need to speak to before the correction window closes".
+            select: { id: true, name: true, supervisorId: true },
+          })) as Array<{ id: string; name: string; supervisorId: string | null }>)
         : await (async () => {
             const mine = (await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })))) as Array<{ classId: string }>;
             const ids = [...new Set(mine.map((m) => m.classId))];
-            if (ids.length === 0) return [] as Array<{ id: string; name: string }>;
-            return (await tx.class.findMany({ where: { id: { in: ids } }, orderBy: { name: "asc" }, select: { id: true, name: true } })) as Array<{
-              id: string;
-              name: string;
-            }>;
+            if (ids.length === 0) return [] as Array<{ id: string; name: string; supervisorId: string | null }>;
+            return (await tx.class.findMany({
+              where: { id: { in: ids } },
+              orderBy: { name: "asc" },
+              select: { id: true, name: true, supervisorId: true },
+            })) as Array<{ id: string; name: string; supervisorId: string | null }>;
           })();
       if (classes.length === 0) return { date: iso, classes: [] };
 
@@ -903,16 +911,36 @@ export class AttendanceService {
       const markBySession = new Map(markCounts.map((m) => [m.sessionId, m._count._all]));
       const enrolByClass = new Map(enrolCounts.map((e) => [e.classId, e._count._all]));
 
+      // ONE query for every supervisor, not one per class. A class with no
+      // supervisor is reported as such rather than silently blank: "nobody is
+      // assigned to this class" is a different problem from "the teacher has
+      // not taken it", and only one of them is fixed by a reminder.
+      const supervisorIds = [...new Set(classes.map((c) => c.supervisorId).filter((id): id is string => !!id))];
+      const teachers = supervisorIds.length
+        ? ((await tx.user.findMany({
+            where: { id: { in: supervisorIds } },
+            select: { id: true, name: true, status: true },
+          })) as Array<{ id: string; name: string; status: string }>)
+        : [];
+      const teacherById = new Map(teachers.map((t) => [t.id, t]));
+
       return {
         date: iso,
         classes: classes.map((c) => {
           const sessionId = sessionByClass.get(c.id);
+          const teacher = c.supervisorId ? teacherById.get(c.supervisorId) : undefined;
           return {
             classId: c.id,
             className: c.name,
             taken: !!sessionId,
             marked: sessionId ? markBySession.get(sessionId) ?? 0 : 0,
             enrolled: enrolByClass.get(c.id) ?? 0,
+            teacherId: c.supervisorId ?? null,
+            teacherName: teacher?.name ?? null,
+            // A supervisor who has LEFT cannot be chased and will never be
+            // reminded. Naming that is the difference between a register
+            // somebody forgot and one nobody is responsible for.
+            teacherActive: teacher ? teacher.status === "ACTIVE" : false,
           };
         }),
       };

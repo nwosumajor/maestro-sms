@@ -12,10 +12,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { regionOf, shortDate, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
 import { RegisterBoard } from "@/components/attendance/RegisterBoard";
+import { SweepButton } from "@/components/maintenance/SweepButton";
 import { ClassAttendanceBoard } from "@/components/attendance/ClassAttendanceBoard";
 import { StudentPicker } from "@/components/attendance/StudentPicker";
 import { PageHeader } from "@/components/shell/PageHeader";
-import { SweepButton } from "@/components/maintenance/SweepButton";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +100,17 @@ export default async function AttendancePage({
         {/* Missing registers first: it is the only thing on this page that is
             time-critical, and the 7-day correction window is why. */}
         {canWrite && <RegisterBoard />}
+
+        {/* The reminder runs on its own each afternoon in the school's own time.
+            The button is for the morning a head of year wants to chase now —
+            and it is SCHOOL-scoped, so it reaches this school's teachers only. */}
+        {canWrite && (
+          <SweepButton
+            path="attendance/register-reminder/run"
+            label="Remind teachers now"
+            help="Tells each class teacher whose register is still outstanding today. Runs on its own every afternoon."
+          />
+        )}
 
         {/* Class-by-class attendance for senior staff. Each row carries the server's
             own canTake decision, so a supervisor sees a Take-register button only for

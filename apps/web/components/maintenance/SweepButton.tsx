@@ -36,6 +36,27 @@ const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : ma
  * partial sweep passes for a complete one.
  */
 const DESCRIBE: Record<string, (r: unknown) => string> = {
+  "attendance/register-reminder/run": fmt<{
+    outstanding: number;
+    notified: number;
+    unreachable: number;
+    failed: number;
+  }>((r) =>
+    r.outstanding === 0
+      ? "Every register has been taken today — nobody needed reminding."
+      : [
+          `${r.outstanding} ${plural(r.outstanding, "register")} still outstanding.`,
+          r.notified > 0 ? `${r.notified} ${plural(r.notified, "teacher")} reminded.` : "",
+          // NAMED, not folded into a silence: these are the ones that will go on
+          // being missed, because no reminder can reach them.
+          r.unreachable > 0
+            ? `${r.unreachable} ${plural(r.unreachable, "register has", "registers have")} no class teacher to remind — assign one on the class page.`
+            : "",
+          r.failed > 0 ? `${r.failed} could not be checked.` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+  ),
   "privacy/compliance/breach-deadlines/run": fmt<{
     scanned: number;
     warned: number;

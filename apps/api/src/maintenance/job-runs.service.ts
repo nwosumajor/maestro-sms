@@ -238,6 +238,25 @@ export const SCHEDULED_JOBS = [
     },
   },
   {
+    key: "attendance.registerReminder",
+    label: "Daily register reminder",
+    // HOURLY for a once-a-day reminder: a fleet spans timezones, so the sweep
+    // asks each school what its own clock reads and acts only on the tick that
+    // matches the school's local afternoon. Twenty-three of the twenty-four
+    // ticks correctly do nothing, which is why `skipped` is a real number here
+    // and not a sign of trouble.
+    everyMinutes: 60,
+    manual: {
+      path: "attendance/register-reminder/run",
+      permission: "attendance.write",
+      // SCHOOL, and enforced in the handler: it passes the caller's own
+      // schoolId, so a registrar pressing this cannot reach the fleet. The
+      // defect `a-fleet-sweep-one-school-could-fire` is what this guards.
+      scope: "SCHOOL",
+      where: "Attendance",
+    },
+  },
+  {
     key: "attendance.rollup",
     label: "Attendance term rollup",
     // NIGHTLY. Only ENDED terms are rolled up and the work is idempotent, so a

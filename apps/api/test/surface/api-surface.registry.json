@@ -397,6 +397,10 @@
       "kind": "ui",
       "note": "FIXED: now reached from components/certificate/CertificateIssuer.tsx"
     },
+    "GET /certificates/verify/:p": {
+      "kind": "ui",
+      "note": "SerialLookup on /certificates — the school answering the question its own certificates tell the reader to ask"
+    },
     "GET /checkers": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1832,6 +1836,10 @@
     "POST /attempts/:p/grade-essays": {
       "kind": "ui",
       "note": "reviewed: reached from components/lms/ContentDetail.tsx"
+    },
+    "POST /attendance/register-reminder/run": {
+      "kind": "ui",
+      "note": "\"Remind teachers now\" on /attendance — SCHOOL-scoped manual trigger for the hourly register reminder"
     },
     "POST /attendance/rollup/refresh": {
       "kind": "system",
@@ -3608,10 +3616,6 @@
     "PUT /ultimate/consent": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
-    },
-    "GET /certificates/verify/:p": {
-      "kind": "ui",
-      "note": "SerialLookup on /certificates — the school answering the question its own certificates tell the reader to ask"
     }
   }
 }

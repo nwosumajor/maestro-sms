@@ -122,6 +122,7 @@ describe("the catalogue matches the cron the code actually uses", () => {
     ["DEFAULT_PAYMENT_HEALTH_CRON", "payments/payment-health.constants.ts", "payments.health"],
     ["DEFAULT_MM_RECOVERY_CRON", "payments/mobile-money.service.ts", "payments.mobileMoneyRecovery"],
     ["DEFAULT_EXEAT_OVERDUE_CRON", "hostel/hostel.constants.ts", "hostel.exeatOverdue"],
+    ["DEFAULT_REGISTER_REMINDER_CRON", "attendance/attendance.constants.ts", "attendance.registerReminder"],
     ["DEFAULT_DUNNING_CRON", "billing/billing.constants.ts", "billing.dunning"],
     ["DEFAULT_FEEDBACK_DIGEST_CRON", "feedback/feedback.constants.ts", "operator.feedbackDigest"],
     ["DEFAULT_PROGRESSION_CRON", "lms/progression/academic-progression.constants.ts", "lms.progression"],

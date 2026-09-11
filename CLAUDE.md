@@ -2128,6 +2128,33 @@ scoresheet (one term) + session PDF (cumulative) remain as lightweight
 downloads off the same data. The old raw-LMS-submission report card is GONE. Workflow reactors are
 type-isolated, so GRADE_PUBLISH and ATTENDANCE_AMENDMENT never interfere.
 
+## The register nobody took — a daily reminder, and a board that names WHO
+`RegisterReminderService` (`attendance.registerReminder` in the jobs catalogue)
+tells each class teacher, once, that their register is still outstanding.
+Nothing did this before: the only attendance notification the platform sent went
+to GUARDIANS about a child already marked absent, and the teacher who had marked
+NOBODY heard nothing — which matters because an unrecorded absence is
+indistinguishable from a pupil who was present, and past `STALE_REGISTER_DAYS`
+the correction needs a second member of staff to approve it.
+// GOTCHA: **a daily reminder needs an HOURLY sweep.** A fleet spans timezones,
+so there is no single instant that is mid-afternoon everywhere — the same moment
+is 14:00 in Lagos and 09:00 in Toronto. It runs hourly and acts on a school only
+when THAT school's local clock reads `REGISTER_REMINDER_LOCAL_HOUR` (14), so
+each school is reminded once in its own afternoon and 23 of the 24 ticks
+correctly do nothing. `skipped` is therefore a large, healthy number here.
+// It does not nag: weekends and days outside the current term are skipped, a
+class with nobody on roll is not an outstanding register, and a teacher gets ONE
+message listing all their classes rather than one per class.
+// `notified` counts TEACHERS TOLD, not registers walked. `unreachable` counts
+outstanding registers whose class has no ACTIVE supervisor — nobody can be
+reminded about those and they are the ones most likely to go on being missed.
+The board says so too (`teacherActive: false`, "no class teacher"), because
+"nobody is assigned" is a different problem from "the teacher forgot".
+// `GET /attendance/registers` now carries the class teacher, and `RegisterBoard`
+on /attendance shows BOTH lists — still-to-take with the person to ask, and a
+collapsed "Taken (n)" — where it used to show only a count of the gaps. The
+manual trigger is SCHOOL-scoped (`attendance.write`), never the fleet.
+
 ## Attendance register — write windows (BUILT)
 Three tiers gate a register write (`AttendanceService.markAttendance`):
 - **≤7 days old**: applied directly.
