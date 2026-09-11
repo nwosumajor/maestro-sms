@@ -5,6 +5,7 @@ import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -52,13 +53,18 @@ function Teacher({ r }: { r: Row }) {
  *
  * Scoped by the API: a teacher sees their own classes, whole-school staff see all.
  */
-export function RegisterBoard() {
+export function RegisterBoard({ canConfigure = false }: { canConfigure?: boolean }) {
   // The SCHOOL's day — the UTC one prefills yesterday's or tomorrow's board.
   const { timezone } = useRegion();
   const [date, setDate] = React.useState(() => todayIn(timezone));
   const [rows, setRows] = React.useState<Row[] | null>(null);
   const [status, setStatus] = React.useState<Status | null>(null);
   const [failed, setFailed] = React.useState(false);
+  // THE SCHOOL'S OWN REMINDER HOUR. A column nothing can write is a setting
+  // nobody has, so the people who may change school-wide configuration get the
+  // control here, beside the thing it governs.
+  const [hour, setHour] = React.useState<{ hour: number | null; effectiveHour: number } | null>(null);
+  const [saving, setSaving] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let live = true;
@@ -84,6 +90,28 @@ export function RegisterBoard() {
       live = false;
     };
   }, [date]);
+
+  React.useEffect(() => {
+    if (!canConfigure) return;
+    void (async () => {
+      const res = await fetch("/api/sms/attendance/reminder-hour", { cache: "no-store" });
+      if (res.ok) setHour((await res.json()) as { hour: number | null; effectiveHour: number });
+    })();
+  }, [canConfigure]);
+
+  const saveHour = async (next: number | null) => {
+    setSaving(null);
+    const res = await sendSms("PUT", "attendance/reminder-hour", { hour: next });
+    if (res.ok) {
+      setHour({ hour: next, effectiveHour: next ?? 14 });
+      setSaving("Saved.");
+    } else {
+      // The SERVER's reason, with the step-up case as a fallback hint only.
+      // sendSms already interprets the server's own message; the hint is only
+      // a fallback for a status the server said nothing specific about.
+      setSaving(res.error ?? "Changing this needs a recent re-authentication.");
+    }
+  };
 
   const missing = (rows ?? []).filter((r) => !r.taken);
   const done = (rows ?? []).filter((r) => r.taken);
@@ -196,6 +224,26 @@ export function RegisterBoard() {
               >
                 {REMINDER_OFF[status.remindersOffReason]}
               </p>
+            )}
+
+            {/* WHEN the reminder goes out, for the people who may change it. */}
+            {canConfigure && hour && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+                <span>Teachers are reminded at</span>
+                <select
+                  aria-label="Reminder hour"
+                  className="rounded-md border bg-background p-1"
+                  value={hour.hour ?? ""}
+                  onChange={(e) => void saveHour(e.target.value === "" ? null : Number(e.target.value))}
+                >
+                  <option value="">{`${String(14).padStart(2, "0")}:00 (default)`}</option>
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>{`${String(h).padStart(2, "0")}:00`}</option>
+                  ))}
+                </select>
+                <span>this school&rsquo;s time.</span>
+                {saving && <span className="text-foreground">{saving}</span>}
+              </div>
             )}
 
             {unassigned.length > 0 && (

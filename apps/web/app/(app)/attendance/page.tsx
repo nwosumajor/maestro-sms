@@ -99,7 +99,7 @@ export default async function AttendancePage({
 
         {/* Missing registers first: it is the only thing on this page that is
             time-critical, and the 7-day correction window is why. */}
-        {canWrite && <RegisterBoard />}
+        {canWrite && <RegisterBoard canConfigure={hasPermission(user.permissions, "rbac.manage")} />}
 
         {/* The reminder runs on its own each afternoon in the school's own time.
             The button is for the morning a head of year wants to chase now —

@@ -305,6 +305,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /attendance/reminder-hour": {
+      "kind": "ui",
+      "note": "the reminder-hour control on /attendance's register board"
+    },
     "GET /attendance/term-lock": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -3336,6 +3340,10 @@
     "PUT /assessments/:p": {
       "kind": "ui",
       "note": "reviewed: a call in components/assessment/CreateAssessment.tsx builds this path"
+    },
+    "PUT /attendance/reminder-hour": {
+      "kind": "ui",
+      "note": "the reminder-hour control on /attendance's register board — rbac.manage + step-up, privileged write to the school registry"
     },
     "PUT /billing/auto-renew": {
       "kind": "ui",

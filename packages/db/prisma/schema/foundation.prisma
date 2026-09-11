@@ -96,6 +96,15 @@ model School {
   /// unset CONTROL must not stop protecting. Charging nothing is recoverable;
   /// putting £50 a day on a family's invoice is not.
   libraryFinePerDayMinor Int?
+
+  /// The school's own LOCAL hour (0-23) at which teachers are reminded about a
+  /// register they have not taken. Null = the platform default (14:00), which is
+  /// mid-afternoon: late enough that a morning register really is overdue, early
+  /// enough that the teacher is still on site and can fix it today rather than
+  /// needing a maker-checker amendment. A school that starts at 07:00 or runs an
+  /// afternoon shift can move it; the sweep reads it per school, so one setting
+  /// does not disturb anybody else.
+  registerReminderHour Int?
   /// Admission-form fee (kobo) charged to PUBLIC applicants before review;
   /// 0 = free applications. Set by finance staff (fee.manage + step-up,
   /// privileged write). Collected via the school's settlement split with the

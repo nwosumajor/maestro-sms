@@ -17,7 +17,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue, RegisterStatusDto } from "@sms/types";
-import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct } from "@sms/types";
+import {
+  isSchoolDay, ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -30,7 +31,6 @@ import {
 import {
   currentTermStartInTx,
   holidayOn,
-  isWeekendDay,
   outsideTermDates,
   registerClosedReason,
   reminderOffReason,
@@ -928,6 +928,9 @@ export class AttendanceService {
       // sweep uses, so the board cannot tell a head that registers are being
       // chased while the sweep skips the school. The one that matters is a
       // school with no current term: never chased, and nothing said so.
+      // The school's own REGION — its week comes from the country, so a board in
+      // Cairo must not call Sunday a weekend.
+      const region = await this.region.inTx(tx, p.schoolId);
       const [currentTerm, holidayRow] = await Promise.all([
         tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true, endDate: true } }) as Promise<{
           startDate: Date | null;
@@ -936,7 +939,7 @@ export class AttendanceService {
         holidayOn(tx, date),
       ]);
       const remindersOffReason = reminderOffReason({
-        isWeekend: isWeekendDay(iso),
+        isSchoolDay: isSchoolDay(iso, region.schoolDays),
         hasCurrentTerm: !!currentTerm,
         outsideTermDates: outsideTermDates(currentTerm, date),
         holiday: !!holidayRow,

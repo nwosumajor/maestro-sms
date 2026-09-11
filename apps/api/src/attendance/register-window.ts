@@ -131,7 +131,8 @@ export type ReminderOffReason =
   | "HOLIDAY";
 
 export interface ReminderWindowFacts {
-  isWeekend: boolean;
+  /** FALSE on a day this school's country is not open — see `isSchoolDay`. */
+  isSchoolDay: boolean;
   hasCurrentTerm: boolean;
   /** True only when the term carries the dates to decide it — absent dates fail OPEN. */
   outsideTermDates: boolean;
@@ -150,15 +151,15 @@ export function reminderOffReason(f: ReminderWindowFacts): ReminderOffReason | n
   if (!f.hasCurrentTerm) return "NO_CURRENT_TERM";
   if (f.outsideTermDates) return "OUTSIDE_TERM";
   if (f.holiday) return "HOLIDAY";
-  if (f.isWeekend) return "NON_SCHOOL_DAY";
+  if (!f.isSchoolDay) return "NON_SCHOOL_DAY";
   return null;
 }
 
-/** Saturday or Sunday, for a `YYYY-MM-DD` in the SCHOOL's own calendar. */
-export function isWeekendDay(localDate: string): boolean {
-  const dow = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
-  return dow === 0 || dow === 6;
-}
+// `isWeekendDay` used to live here and hard-coded Saturday and Sunday. It is
+// gone: the school week comes from the country catalogue (`isSchoolDay` in
+// @sms/types), because Sunday is a SCHOOL DAY in Egypt and Saudi Arabia — where
+// the assumption skipped a real school day and nagged every teacher on their
+// Friday off, both silently.
 
 /**
  * Does this day fall outside the term's dates?

@@ -1,10 +1,11 @@
 import { isoDay } from "../common/calendar-day";
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
-import { ATTENDANCE_PERMISSIONS, ATTENDANCE_STATUSES } from "@sms/types";
+import { ADMIN_PERMISSIONS, ATTENDANCE_PERMISSIONS, ATTENDANCE_STATUSES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
+import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
@@ -28,6 +29,13 @@ const markSchema = z.object({
     )
     .min(1),
 });
+
+/**
+ * The school's own local hour (0-23) for the register reminder, or NULL to go
+ * back to the platform default. Nullable AND required: a screen must be able to
+ * say "clear it", which `.optional()` alone cannot express.
+ */
+const reminderHourSchema = z.object({ hour: z.number().int().min(0).max(23).nullable() });
 
 @RequireModule(MODULES.ATTENDANCE)
 @Controller()
@@ -95,6 +103,30 @@ export class AttendanceController {
     return this.jobRuns.record("attendance.registerReminder", "MANUAL", () =>
       this.reminder.run({ onlySchoolId: p.schoolId, force: true }),
     );
+  }
+
+  /**
+   * The school's own reminder hour. Read is `attendance.read` (the board shows
+   * it); the WRITE is school-wide configuration, so it takes `rbac.manage` and
+   * step-up — the same bar the MFA policy and the money-policy card use, and
+   * deliberately NOT `attendance.write`, which a class teacher holds.
+   */
+  @Get("attendance/reminder-hour")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  reminderHour(@CurrentPrincipal() p: Principal) {
+    return this.reminder.getHour(p);
+  }
+
+  @Put("attendance/reminder-hour")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  @RequireStepUp()
+  setReminderHour(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(reminderHourSchema)) body: z.infer<typeof reminderHourSchema>,
+  ) {
+    // NULL clears it back to the platform default; that is a different answer
+    // from "leave it alone", and a screen must be able to say both.
+    return this.reminder.setHour(p, body.hour);
   }
 
   /** Attendance BY CLASS over a window — the senior-staff overview. Each row says

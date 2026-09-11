@@ -2136,6 +2136,20 @@ to GUARDIANS about a child already marked absent, and the teacher who had marked
 NOBODY heard nothing — which matters because an unrecorded absence is
 indistinguishable from a pupil who was present, and past `STALE_REGISTER_DAYS`
 the correction needs a second member of staff to approve it.
+// GOTCHA: **NOT EVERY SCHOOL WEEK IS MONDAY TO FRIDAY.** The reminder hard-coded
+a Saturday/Sunday weekend, which gets BOTH ends wrong in Egypt and Saudi Arabia
+(both in the catalogue), where the week runs Sunday to Thursday: a register
+missed on a SUNDAY would never be chased, and every teacher would be nagged on
+their FRIDAY off. `CountryProfile.schoolDays` is the week, as data — a new
+country is a row, never a branch — and `isSchoolDay` reads it. Verified live on
+one Friday: the Cairo school reported NON_SCHOOL_DAY while the Lagos school was
+chased normally.
+// The reminder HOUR is per school too (`school.registerReminderHour`, migration
+`20270204000000`, nullable so nothing moves for a school already live; the
+control is on the register board behind `rbac.manage` + step-up, privileged
+write like every other `school` registry setting). An out-of-range stored value
+is IGNORED rather than obeyed — a stored 25 would mean a school silently never
+reminded, which is the failure this sweep exists to make visible.
 // GOTCHA: **a daily reminder needs an HOURLY sweep.** A fleet spans timezones,
 so there is no single instant that is mid-afternoon everywhere — the same moment
 is 14:00 in Lagos and 09:00 in Toronto. It runs hourly and acts on a school only

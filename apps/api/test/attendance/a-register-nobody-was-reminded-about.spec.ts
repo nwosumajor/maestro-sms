@@ -27,6 +27,10 @@ type Cls = { id: string; name: string; supervisorId: string | null };
 
 interface World {
   timezone: string;
+  /** ISO country — decides the school WEEK, not just the clock. */
+  country?: string;
+  /** The school's own reminder hour, when it has set one. */
+  hour?: number | null;
   classes: Cls[];
   /** Class ids that already have a register for the day. */
   taken: string[];
@@ -42,7 +46,13 @@ interface World {
 
 function makeService(world: World, opts: { now?: Date } = {}) {
   const sent: Array<{ recipientId: string; type: string; title: string; classes: string[] }> = [];
-  const school = { id: "S1", name: "Focus", country: null as string | null, timezone: world.timezone };
+  const school = {
+    id: "S1",
+    name: "Focus",
+    country: world.country ?? null,
+    timezone: world.timezone,
+    registerReminderHour: world.hour ?? null,
+  };
 
   const client = {
     school: {
@@ -88,7 +98,15 @@ function makeService(world: World, opts: { now?: Date } = {}) {
   };
 
   if (opts.now) jest.setSystemTime(opts.now);
-  const svc = new RegisterReminderService({ client } as never, notifications as never);
+  // The tenant handle and audit are used only by the SETTING write, which this
+  // suite does not exercise — but a double must still model the constructor, or
+  // it fails in a way that reads as a code fault.
+  const svc = new RegisterReminderService(
+    { client } as never,
+    notifications as never,
+    { runAsTenant: jest.fn() } as never,
+    { record: jest.fn() } as never,
+  );
   return { svc, sent, client, notifications };
 }
 
@@ -150,6 +168,53 @@ describe("the reminder fires on the SCHOOL's clock", () => {
   });
 });
 
+describe("the hour is the SCHOOL's own", () => {
+  it("a school that set an early hour is reminded then, not at the default", async () => {
+    const early = 9;
+    const { svc, sent } = makeService(
+      {
+        timezone: "Africa/Lagos",
+        hour: early,
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+      },
+      { now: localAt("Africa/Lagos", early) },
+    );
+    expect((await svc.run()).notified).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("...and NOT at the platform default once it has chosen one", async () => {
+    const { svc, sent } = makeService(
+      {
+        timezone: "Africa/Lagos",
+        hour: 9,
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+      },
+      { now: localAt("Africa/Lagos", REGISTER_REMINDER_LOCAL_HOUR) },
+    );
+    expect((await svc.run()).schools).toBe(0);
+    expect(sent).toEqual([]);
+  });
+
+  it("IGNORES an impossible hour rather than never reminding", async () => {
+    // A stored 25 would mean a school silently never chased — the exact failure
+    // this sweep exists to make visible, reintroduced by its own setting.
+    const { svc, sent } = makeService(
+      {
+        timezone: "Africa/Lagos",
+        hour: 25,
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+      },
+      { now: localAt("Africa/Lagos", REGISTER_REMINDER_LOCAL_HOUR) },
+    );
+    expect((await svc.run()).notified).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+});
+
 describe("it does not nag on a day there is no register to take", () => {
   it("skips the weekend", async () => {
     const { svc, sent } = makeService(
@@ -158,6 +223,52 @@ describe("it does not nag on a day there is no register to take", () => {
     );
     const r = await svc.run();
     expect(r.skipped).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
+  it("treats SUNDAY as a school day in Egypt, and Friday as the weekend", async () => {
+    // THE REGIONAL DEFECT. A hard-coded Saturday/Sunday weekend gets both ends
+    // wrong where the week is Sunday to Thursday: a register missed on a Sunday
+    // is never chased, and every teacher is nagged on their Friday off. Egypt
+    // and Saudi Arabia are both in the catalogue.
+    const sunday = makeService(
+      {
+        timezone: "Africa/Cairo",
+        country: "EG",
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+      },
+      { now: localAt("Africa/Cairo", REGISTER_REMINDER_LOCAL_HOUR, "2026-09-13") }, // a Sunday
+    );
+    expect((await sunday.svc.run()).notified).toBe(1);
+
+    const friday = makeService(
+      {
+        timezone: "Africa/Cairo",
+        country: "EG",
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+      },
+      { now: localAt("Africa/Cairo", REGISTER_REMINDER_LOCAL_HOUR, "2026-09-11") }, // a Friday
+    );
+    const r = await friday.svc.run();
+    expect(r.skipped).toBe(1);
+    expect(friday.sent).toEqual([]);
+  });
+
+  it("still treats Sunday as the weekend in Nigeria", async () => {
+    // The other direction: the country row decides, so nothing moves for a
+    // school whose week really is Monday to Friday.
+    const { svc, sent } = makeService(
+      {
+        timezone: "Africa/Lagos",
+        country: "NG",
+        classes: [{ id: "c1", name: "JSS1A", supervisorId: "t1" }],
+        taken: [],
+      },
+      { now: localAt("Africa/Lagos", REGISTER_REMINDER_LOCAL_HOUR, "2026-09-13") }, // Sunday
+    );
+    expect((await svc.run()).skipped).toBe(1);
     expect(sent).toEqual([]);
   });
 
@@ -330,7 +441,12 @@ describe("the manual trigger reaches ONE school", () => {
 
 describe("with no privileged database it is a no-op, not a crash", () => {
   it("returns zeroes and sends nothing", async () => {
-    const svc = new RegisterReminderService({ client: null } as never, { enqueue: jest.fn() } as never);
+    const svc = new RegisterReminderService(
+      { client: null } as never,
+      { enqueue: jest.fn() } as never,
+      { runAsTenant: jest.fn() } as never,
+      { record: jest.fn() } as never,
+    );
     const r = await svc.run();
     expect(r).toMatchObject({ schools: 0, notified: 0, failed: 0 });
   });

@@ -24,12 +24,19 @@
 // until somebody acts trains people to dismiss it.
 // =============================================================================
 
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import {
+  AUDIT_LOG_SERVICE,
+  TENANT_DATABASE,
+  type AuditLogService,
+  type Principal,
+  type TenantDatabase,
+} from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
-import { resolveRegion, schoolTimeString } from "@sms/types";
-import { isWeekendDay, outsideTermDates, reminderOffReason } from "./register-window";
+import { isSchoolDay, resolveRegion, schoolTimeString } from "@sms/types";
+import { outsideTermDates, reminderOffReason } from "./register-window";
 
 /**
  * The school's own local hour at which a missing register is worth a nudge.
@@ -39,6 +46,21 @@ import { isWeekendDay, outsideTermDates, reminderOffReason } from "./register-wi
  * needing an amendment.
  */
 export const REGISTER_REMINDER_LOCAL_HOUR = 14;
+
+/**
+ * The hour this school is reminded at, in its OWN local time.
+ *
+ * A constant was right for one school and wrong for a fleet: a morning-shift
+ * school wants chasing before break, an afternoon-shift one hours later. Null
+ * keeps the platform default, so nothing moves for anybody already live, and an
+ * out-of-range value is IGNORED rather than obeyed — a stored 25 would mean a
+ * school silently never reminded, which is the failure mode this whole sweep
+ * exists to make visible.
+ */
+export function reminderHourFor(school: { registerReminderHour?: number | null }): number {
+  const h = school.registerReminderHour;
+  return typeof h === "number" && Number.isInteger(h) && h >= 0 && h <= 23 ? h : REGISTER_REMINDER_LOCAL_HOUR;
+}
 
 export interface RegisterReminderResult {
   /** Schools whose local clock matched the reminder hour on this tick. */
@@ -66,12 +88,66 @@ export interface RegisterReminderResult {
 
 @Injectable()
 export class RegisterReminderService {
+
   private readonly logger = new Logger(RegisterReminderService.name);
 
   constructor(
     @Inject(PrivilegedDatabaseService) private readonly db: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
+    // For the SETTING write only: the sweep itself is cross-tenant and
+    // privileged, but changing a school's reminder hour is an ordinary
+    // tenant-scoped mutation and has to leave a trail like every other one.
+    @Inject(TENANT_DATABASE) private readonly tenant: TenantDatabase,
+    @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
   ) {}
+
+  /**
+   * Read and set the school's own reminder hour.
+   *
+   * A COLUMN NOTHING CAN WRITE IS A SETTING NOBODY HAS — the defect
+   * `a-field-no-screen-can-fill-in` names. The hour lives on the RLS-exempt
+   * `school` registry, where the app role is SELECT-only, so the write goes
+   * through the privileged client exactly as the money-policy card's does.
+   *
+   * Null CLEARS it back to the platform default; that is a different answer
+   * from "leave it alone" and both have to be expressible, or a school can set
+   * an hour and never unset it.
+   */
+  async getHour(p: Principal): Promise<{ hour: number | null; effectiveHour: number }> {
+    const client = this.db.client;
+    if (!client) return { hour: null, effectiveHour: REGISTER_REMINDER_LOCAL_HOUR };
+    const row = (await client.school.findFirst({
+      where: { id: p.schoolId },
+      select: { registerReminderHour: true },
+    })) as { registerReminderHour: number | null } | null;
+    return { hour: row?.registerReminderHour ?? null, effectiveHour: reminderHourFor(row ?? {}) };
+  }
+
+  async setHour(p: Principal, hour: number | null): Promise<{ hour: number | null; effectiveHour: number }> {
+    const client = this.db.client;
+    if (!client) {
+      throw new ServiceUnavailableException("Changing the reminder hour requires the privileged database configuration");
+    }
+    await client.school.update({ where: { id: p.schoolId }, data: { registerReminderHour: hour } });
+    // EVERY MUTATION LEAVES A TRAIL. The write goes through the privileged
+    // client because `school` is SELECT-only for the app role; the audit row is
+    // written as the tenant, exactly as the money-policy card's is.
+    await this.tenant.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "attendance.reminder_hour.set",
+          entity: "school",
+          entityId: p.schoolId,
+          schoolId: p.schoolId,
+          metadata: { hour },
+        },
+        tx,
+      ),
+    );
+    this.logger.log(`Register reminder hour for ${p.schoolId} set to ${hour ?? "the platform default"}.`);
+    return { hour, effectiveHour: reminderHourFor({ registerReminderHour: hour }) };
+  }
 
   /**
    * One tick. Cross-tenant and privileged, like the dunning, staff-document and
@@ -102,18 +178,28 @@ export class RegisterReminderService {
         isPlatform: false,
         ...(opts.onlySchoolId ? { id: opts.onlySchoolId } : {}),
       },
-      select: { id: true, name: true, country: true, timezone: true },
-    })) as Array<{ id: string; name: string; country: string | null; timezone: string | null }>;
+      select: { id: true, name: true, country: true, timezone: true, registerReminderHour: true },
+    })) as Array<{
+      id: string;
+      name: string;
+      country: string | null;
+      timezone: string | null;
+      registerReminderHour: number | null;
+    }>;
 
     for (const school of schools) {
       try {
-        const tz = resolveRegion(school).timezone;
+        // THE WHOLE REGION, not just the zone: the school WEEK comes from the
+        // country too, and reading only the timezone is how the weekend came to
+        // be hard-coded in the first place.
+        const region = resolveRegion(school);
+        const tz = region.timezone;
         // The SCHOOL's clock, not the server's. `schoolTimeString` gives the
         // local wall time; the hour is what decides whether this is the tick.
         const local = schoolTimeString(tz, new Date()); // "YYYY-MM-DD HH:mm"
         const localDate = local.slice(0, 10);
         const localHour = Number(local.slice(11, 13));
-        if (!opts.force && localHour !== REGISTER_REMINDER_LOCAL_HOUR) continue;
+        if (!opts.force && localHour !== reminderHourFor(school)) continue;
 
         out.schools += 1;
 
@@ -136,7 +222,7 @@ export class RegisterReminderService {
           }) as Promise<{ name: string } | null>,
         ]);
         const off = reminderOffReason({
-          isWeekend: isWeekendDay(localDate),
+          isSchoolDay: isSchoolDay(localDate, region.schoolDays),
           hasCurrentTerm: !!term,
           outsideTermDates: outsideTermDates(term, day),
           holiday: !!holiday,
