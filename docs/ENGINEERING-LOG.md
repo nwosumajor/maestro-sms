@@ -14700,3 +14700,79 @@ there as a suite and fails one containing no tests.
 Gate: `every-notification-type-can-be-found.spec.ts` (16 cases) and
 `no-gate-hand-rolls-its-own-stripper.test.ts` (6 cases), mutation-validated
 eight ways.
+
+### Global search at 5,000 schools, three years deep
+
+201,216 users across 5,001 schools, with a focus secondary carrying a realistic
+roll: 1,200 pupils over eight surnames, so a common one matches 150 of them.
+
+**The omnibox showed six and said nothing about the rest.** Six per category is
+right for a jump-to; saying nothing about the remainder is not:
+
+```
+q="Adebayo"       150 matched,  6 shown,  nothing said
+q="Adebayo Bola"   50 matched,  6 shown,  nothing said
+q="Okonkwo"       150 matched,  6 shown,  nothing said
+q="Eze"           150 matched,  6 shown,  nothing said
+```
+
+A search matching 150 and a search matching exactly six rendered identically, so
+**"your pupil is not on the roll" could not be told apart from "your pupil is one
+of the 144 I did not show you"** — on the control a member of staff uses to find
+a child quickly.
+
+**And there was no `ORDER BY` on any of the four categories.** The six offered
+were whichever six Postgres happened to return: stable in practice, and
+explicable by nothing the reader can see. "The first six alphabetically" is an
+answer a person can reason about and then narrow; an arbitrary six is a dead end
+that looks like an answer. `name` alone is not a total order on a roll where
+fifty pupils share one — `id` decides the rest.
+
+Fixed: every category ordered `[name asc, id asc]` (invoices by `reference`), a
+`categories` block on the DTO carrying `shown` / `total` / `seeAllHref`, and the
+web rendering "Showing 6 of 150 students" with a link to the full list.
+
+**The count is paid for only where it buys something.** Each category reads
+`PER_CATEGORY + 1` rows; that one extra row says "there is more" for the price of
+a row, and the ILIKE count runs ONLY when it does. Measured on the fleet: 16 ms
+for a search matching one pupil (no count), 24 ms for one matching 150 (count
+run) — so the common search, which matches a handful, pays nothing to be told
+"3 of 3".
+
+// GOTCHA: the "see all" is offered ONLY where a destination exists. `/students`
+and `/hr` take a `?q=`; `/classes` and `/fees` do not, and those categories
+carry `seeAllHref: null` rather than a link that lands on an unfiltered page. A
+route that leads nowhere is worse than none — the same reasoning this file
+records for a refusal that must name the way out, in the other direction.
+
+// GOTCHA on my own test, and it is the one worth keeping: the assertion that
+classes get no see-all was written as `if (cat) expect(...)`, and the double
+returned no classes — so it never fired, and the mutation that invents
+`/classes?q=` PASSED. A gate that passes by finding nothing. The double now
+returns nine real forms and honours the query's `contains`, and the test asserts
+the category EXISTS before asserting anything about it.
+
+// GOTCHA: two of my fixture's findings were artefacts of the fixture and not
+the product, and both would have been wrong to report. Surname and forename were
+first derived from the same modulus, so every "Adebayo" was "Adebayo Tunde";
+decorrelating them with strides of 8 and 12 then produced only three forenames
+per surname, because gcd(8,12)=4 — which made "Adebayo Uche" look like a search
+that could not find a pupil who exists, when no such pupil existed. Check the
+fixture before believing the finding.
+
+// GOTCHA on the teardown, and it CONFIRMS the documented remedy on a second
+fixture: deleting took longer than building. `DELETE FROM "user"` ran **17m47s
+without committing** and was still going, because each of the unindexed foreign
+keys into `user` makes it seq-scan that whole table once. Cancelled; applied
+"PURGING A TENANT" exactly as written — a DO block that derives the referencing
+columns rather than listing them built **73 temporary indexes in 1.09 s** (73 of
+79, the figure this file already records), and the same delete then removed
+**201,201 users in 6m47s**. Indexes dropped afterwards. Worth knowing before
+offboarding a real school, and worth knowing that a simulation's teardown is the
+same operation.
+
+Gate: `six-of-a-hundred-and-fifty.spec.ts` (10 cases), mutation-validated seven
+ways — ordering dropped, the `id` tiebreaker dropped, the total measured off the
+fetched page, the count run unconditionally, a see-all invented for a page that
+takes no query, the extra row not read, and a category with no hits reporting
+itself anyway.

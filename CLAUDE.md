@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **318 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **319 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **318 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **319 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1039,6 +1039,14 @@ These are the rules; the log is why each one exists.
   under a strip counting 1,316 overdue in SQL: 14 reachable, and nothing older
   than 24 days reachable at ANY url. When a page shows a COUNT, the list beside
   it must be able to produce those rows — as a FILTER, sorted oldest-first.
+- **A JUMP-TO BOX IS STILL A CAP.** The omnibox showed six per category with no
+  count and no order: "Adebayo" matched 150 pupils and returned six arbitrary
+  ones, so *not on the roll* and *one of the 144 I did not show* rendered
+  identically. Six is the right page size; saying nothing is not. Return
+  `shown`/`total` and order by a TOTAL order so the six are explicable — and
+  offer "see all" ONLY where a query page exists (`/students`, `/hr` do;
+  `/classes`, `/fees` do not). Count only when the `PER_CATEGORY + 1`-th row
+  proves there is more, so the common search pays nothing.
 - **A CAP WITH NO COUNT IS THE COMMONEST DEFECT IN THIS REPO.** Four in one
   session — billing history, the approvals queue, the alumni register, the SIS
   review queue — each a list a school reads LATER, each returning a capped page

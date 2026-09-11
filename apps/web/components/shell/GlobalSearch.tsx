@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import type { SearchHitDto, SearchResultDto, Serialized } from "@sms/types";
+import type { SearchCategoryDto, SearchHitDto, SearchResultDto, Serialized } from "@sms/types";
 
 const KIND_LABEL: Record<string, string> = { student: "Student", staff: "Staff", class: "Class", invoice: "Invoice" };
 
@@ -13,6 +13,10 @@ export function GlobalSearch() {
   const router = useRouter();
   const [q, setQ] = React.useState("");
   const [hits, setHits] = React.useState<Serialized<SearchHitDto>[]>([]);
+  // HOW MANY MATCHED, not how many fit in the box. Six results out of 150 and
+  // six out of six looked identical here, so "your pupil is not on the roll"
+  // was indistinguishable from "your pupil is one of the 144 I did not show".
+  const [categories, setCategories] = React.useState<Serialized<SearchCategoryDto>[]>([]);
   const [open, setOpen] = React.useState(false);
   const [active, setActive] = React.useState(0);
   const boxRef = React.useRef<HTMLDivElement>(null);
@@ -20,6 +24,7 @@ export function GlobalSearch() {
   React.useEffect(() => {
     if (q.trim().length < 2) {
       setHits([]);
+      setCategories([]);
       return;
     }
     const id = setTimeout(async () => {
@@ -27,6 +32,7 @@ export function GlobalSearch() {
       if (res.ok) {
         const data = (await res.json()) as Serialized<SearchResultDto>;
         setHits(data.hits);
+        setCategories(data.categories ?? []);
         setActive(0);
         setOpen(true);
       }
@@ -90,6 +96,32 @@ export function GlobalSearch() {
                 {KIND_LABEL[h.kind] ?? h.kind}
               </span>
             </button>
+          ))}
+
+          {/* WHAT WAS LEFT OUT, and where the rest of it is. A category whose
+              matches all fit says nothing — the line is only worth the space
+              when it is telling the reader something they could not see. */}
+          {categories.filter((c) => c.total > c.shown).map((c) => (
+            <div
+              key={c.kind}
+              className="flex items-center justify-between gap-2 border-t border-border/60 bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground"
+            >
+              <span>
+                Showing {c.shown} of {c.total.toLocaleString()} {KIND_LABEL[c.kind] ?? c.kind}
+                {c.total === 1 ? "" : "s"}
+              </span>
+              {/* Only where a full list actually exists. A "see all" that leads
+                  nowhere is worse than none at all. */}
+              {c.seeAllHref && (
+                <a
+                  href={c.seeAllHref}
+                  className="shrink-0 underline underline-offset-2 hover:text-foreground"
+                  onClick={() => setOpen(false)}
+                >
+                  See all
+                </a>
+              )}
+            </div>
           ))}
         </div>
       )}

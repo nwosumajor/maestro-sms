@@ -12,7 +12,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { classIdsTaughtBy, studentIdsTaughtBy } from "../common/teaches";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
-import type { SearchResultDto, SearchHitDto } from "@sms/types";
+import type { SearchResultDto, SearchHitDto, SearchCategoryDto } from "@sms/types";
 import {
   TENANT_DATABASE,
   type Principal,
@@ -49,17 +49,41 @@ export class SearchService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
+  /**
+   * Turn one category's page into hits plus an HONEST statement of how many
+   * matched — ONE definition, because four categories each getting this right
+   * separately is four chances to get it wrong.
+   *
+   * Every category reads `PER_CATEGORY + 1` rows. That extra row is the whole
+   * trick: it says "there is more" for the price of one row, so the expensive
+   * part — an ILIKE count over the school's whole roll — runs ONLY when there
+   * actually is more to count. A search matching three pupils pays nothing to
+   * be told it matched three.
+   */
+  private async summarise<T>(
+    kind: SearchHitDto["kind"],
+    rows: T[],
+    countAll: () => Promise<number>,
+    seeAllHref: string | null,
+  ): Promise<{ page: T[]; category: SearchCategoryDto }> {
+    const more = rows.length > PER_CATEGORY;
+    const page = more ? rows.slice(0, PER_CATEGORY) : rows;
+    const total = more ? await countAll() : page.length;
+    return { page, category: { kind, shown: page.length, total, seeAllHref } };
+  }
+
   private has(p: Principal, perm: string): boolean {
     return p.permissions.includes(perm);
   }
 
   async search(p: Principal, rawQuery: string): Promise<SearchResultDto> {
     const q = rawQuery.trim();
-    if (q.length < 2) return { query: q, hits: [] };
+    if (q.length < 2) return { query: q, hits: [], categories: [] };
     const like = { contains: q, mode: "insensitive" as const };
 
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const hits: SearchHitDto[] = [];
+      const categories: SearchCategoryDto[] = [];
 
       // --- students (relationship-scoped) ---
       //
@@ -80,7 +104,24 @@ export class SearchService {
         const where = studentIds === "all"
           ? { ...ON_ROLL_STUDENT, name: like }
           : { id: { in: studentIds }, name: like };
-        const students = await tx.user.findMany({ where, select: { id: true, name: true, email: true }, take: PER_CATEGORY });
+        // ORDERED, and by a TOTAL order. There was no `orderBy` at all, so the
+        // six offered were whichever six Postgres happened to return — stable
+        // in practice and explicable by nothing the reader can see. A roll holds
+        // fifty pupils called "Adebayo Bola"; `name` alone is not a total order,
+        // so `id` decides the rest and the same search always answers the same.
+        const rows = await tx.user.findMany({
+          where,
+          select: { id: true, name: true, email: true },
+          orderBy: [{ name: "asc" }, { id: "asc" }],
+          take: PER_CATEGORY + 1,
+        });
+        const { page: students, category } = await this.summarise(
+          "student",
+          rows,
+          () => tx.user.count({ where }),
+          `/students?q=${encodeURIComponent(q)}`,
+        );
+        if (students.length > 0) categories.push(category);
         for (const s of students) {
           hits.push({ kind: "student", id: s.id, title: s.name, subtitle: s.email, href: `/students/${s.id}` });
         }
@@ -97,11 +138,22 @@ export class SearchService {
       const canManageRoles = p.roles.some((r) => STAFF_WIDE.has(r)) || this.has(p, "rbac.manage");
       const canReadHr = this.has(p, "hr.read");
       if (canManageRoles || canReadHr) {
-        const staff = await tx.user.findMany({
-          where: { name: like, roles: { some: { role: { name: { notIn: ["student", "parent"] } } } } },
+        const staffWhere = { name: like, roles: { some: { role: { name: { notIn: ["student", "parent"] } } } } };
+        const staffRows = await tx.user.findMany({
+          where: staffWhere,
           select: { id: true, name: true, email: true, roles: { select: { role: { select: { name: true } } } } },
-          take: PER_CATEGORY,
+          orderBy: [{ name: "asc" }, { id: "asc" }],
+          take: PER_CATEGORY + 1,
         });
+        const { page: staff, category: staffCat } = await this.summarise(
+          "staff",
+          staffRows,
+          () => tx.user.count({ where: staffWhere }),
+          // Only where the caller can actually open it — the same rule the hit's
+          // own href follows two lines down.
+          canReadHr ? `/hr?q=${encodeURIComponent(q)}` : null,
+        );
+        if (staff.length > 0) categories.push(staffCat);
         for (const u of staff) {
           const roleNames = u.roles.map((r: { role: { name: string } }) => r.role.name).join(", ");
           hits.push({
@@ -132,7 +184,20 @@ export class SearchService {
         const classIds = await this.visibleClassIds(tx, p);
         if (classIds === "all" || classIds.length > 0) {
           const where = classIds === "all" ? { name: like } : { name: like, id: { in: classIds } };
-          const classes = await tx.class.findMany({ where, select: { id: true, name: true }, take: PER_CATEGORY });
+          const classRows = await tx.class.findMany({
+            where,
+            select: { id: true, name: true },
+            orderBy: [{ name: "asc" }, { id: "asc" }],
+            take: PER_CATEGORY + 1,
+          });
+          const { page: classes, category: classCat } = await this.summarise(
+            "class",
+            classRows,
+            () => tx.class.count({ where }),
+            // /classes takes no `?q=`, so there is no honest "see all" to offer.
+            null,
+          );
+          if (classes.length > 0) categories.push(classCat);
           for (const c of classes) {
             hits.push({
               kind: "class",
@@ -153,13 +218,27 @@ export class SearchService {
           scopedIds && scopedIds !== "all"
             ? { reference: like, studentId: { in: scopedIds } }
             : { reference: like };
-        const invoices = await tx.invoice.findMany({ where, select: { id: true, reference: true, status: true }, take: PER_CATEGORY });
+        const invoiceRows = await tx.invoice.findMany({
+          where,
+          select: { id: true, reference: true, status: true },
+          // A reference is unique enough to be a total order on its own; `id`
+          // costs nothing and removes the question.
+          orderBy: [{ reference: "asc" }, { id: "asc" }],
+          take: PER_CATEGORY + 1,
+        });
+        const { page: invoices, category: invCat } = await this.summarise(
+          "invoice",
+          invoiceRows,
+          () => tx.invoice.count({ where }),
+          null,
+        );
+        if (invoices.length > 0) categories.push(invCat);
         for (const inv of invoices) {
           hits.push({ kind: "invoice", id: inv.id, title: inv.reference, subtitle: inv.status, href: `/fees/${inv.id}` });
         }
       }
 
-      return { query: q, hits };
+      return { query: q, hits, categories };
     });
   }
 
