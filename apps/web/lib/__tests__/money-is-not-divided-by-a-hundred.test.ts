@@ -30,6 +30,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "../test-support/strip-comments";
 
 const WEB = join(__dirname, "../..");
 
@@ -65,8 +66,7 @@ function walk(dir: string, out: string[] = []): string[] {
 
 /** Comments out: several of these files EXPLAIN the defect they were fixed for,
  *  and a scan that reads prose fails on the explanation of its own fix. */
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
 
 /** A line that scales MONEY by a literal 100, in either direction. */
 const MONEY_WORD = /minor|amount|price|fee|money|kobo|salary|cost|balance|total|credit|charge|pay/i;

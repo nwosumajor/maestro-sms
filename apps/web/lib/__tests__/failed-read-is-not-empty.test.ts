@@ -27,6 +27,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readdirSync, statSync } from "node:fs";
+import { stripComments } from "../test-support/strip-comments";
 
 const WEB = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(WEB, p), "utf8");
@@ -120,7 +121,7 @@ describe("the shape, wherever it appears next", () => {
     // failure branch is `[]`. It reads as a safe default and is an assertion.
     const offenders = walk("components").filter((f) => {
       if (REVIEWED_AND_LEFT.includes(f)) return false;
-      const src = readFileSync(join(WEB, f), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+      const src = stripComments(readFileSync(join(WEB, f), "utf8"));
       return /\.ok\s*\?[\s\S]{0,120}?:\s*\[\]/.test(src);
     });
     expect(offenders).toEqual([]);
@@ -130,7 +131,7 @@ describe("the shape, wherever it appears next", () => {
     // A file that has been fixed must leave the list, or the list stops meaning
     // anything and the next reader trusts it.
     const stale = REVIEWED_AND_LEFT.filter((f) => {
-      const src = readFileSync(join(WEB, f), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+      const src = stripComments(readFileSync(join(WEB, f), "utf8"));
       return !/\.ok\s*\?[\s\S]{0,120}?:\s*\[\]/.test(src);
     });
     expect(stale).toEqual([]);
@@ -170,7 +171,7 @@ describe("today, on every screen that prefills it", () => {
     const files = [...walkAll("components"), ...walkAll("app")];
     const offenders = files.filter((f) => {
       if (NOT_A_SCHOOL_DAY.includes(f)) return false;
-      const src = readFileSync(join(WEB, f), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+      const src = stripComments(readFileSync(join(WEB, f), "utf8"));
       return /new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/.test(src);
     });
     expect(offenders).toEqual([]);

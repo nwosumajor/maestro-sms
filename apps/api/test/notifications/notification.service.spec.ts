@@ -296,8 +296,12 @@ describe("allowedChannels (notification preference filtering)", () => {
   });
 
   it("a muted type drops ALL external channels", () => {
-    const pref = { emailEnabled: true, smsEnabled: true, whatsappEnabled: true, mutedTypes: ["GRADE_PUBLISH"] };
-    expect(allowedChannels(pref, "GRADE_PUBLISH", ALL)).toEqual([]);
+    // The example was "GRADE_PUBLISH", which is a WORKFLOW REQUEST type that no
+    // notification has ever carried — it sat on the mute screen governing
+    // nothing. The PROPERTY here is unchanged; only the example had to be a
+    // type the platform really sends.
+    const pref = { emailEnabled: true, smsEnabled: true, whatsappEnabled: true, mutedTypes: ["FEE_REMINDER"] };
+    expect(allowedChannels(pref, "FEE_REMINDER", ALL)).toEqual([]);
     expect(allowedChannels(pref, "ANNOUNCEMENT", ALL)).toEqual(ALL);
   });
 

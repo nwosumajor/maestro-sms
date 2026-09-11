@@ -26,6 +26,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "../test-support/strip-comments";
 
 const WEB = join(__dirname, "../..");
 
@@ -49,7 +50,7 @@ function walk(dir: string, out: string[] = []): string[] {
  * for a reason unrelated to accessibility — which is how a gate gets disabled.
  */
 function withoutComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  return stripComments(src);
 }
 
 /** Every real `<input …>` / `<select …>` / `<textarea …>` extent: scan to the

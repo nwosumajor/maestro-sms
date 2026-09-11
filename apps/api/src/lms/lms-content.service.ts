@@ -482,7 +482,12 @@ export class LmsContentService {
       try {
         await this.notifications.enqueue(this.ctx(p), {
           recipientId,
-          type: "ANNOUNCEMENT",
+          // NOT "ANNOUNCEMENT". The preferences screen has offered a separate
+          // "New lessons & materials" switch all along, keyed on this type —
+          // and nothing emitted it, so the only way a parent could silence
+          // new-lesson alerts was to silence every school announcement as well.
+          // A checkbox that governs nothing is worse than one that is missing.
+          type: "LMS_CONTENT_PUBLISH",
           title: "New learning content",
           body: `"${dto.title}" is now available in your class.`,
           data: { contentId: dto.id, classId: dto.classId, contentType: dto.type },

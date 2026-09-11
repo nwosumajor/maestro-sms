@@ -49,7 +49,16 @@ const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 export interface NotificationInput {
   recipientId: string;
-  type: NotificationTypeValue | string;
+  /**
+   * WHAT KIND OF NOTIFICATION THIS IS — and it is checked.
+   *
+   * This was `NotificationTypeValue | string`, which made the union decorative:
+   * any emitter could invent a category, and four hand-kept lists (the inbox
+   * filter, the mute screen, the essential set, the union itself) drifted away
+   * from what is actually sent. Five of the strings in those lists named types
+   * no notification has ever carried. The compiler enumerates the emitters now.
+   */
+  type: NotificationTypeValue;
   /** English fallback, and what is stored when no `key` is given. */
   title: string;
   body: string;

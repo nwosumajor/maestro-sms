@@ -8,6 +8,7 @@
 // only act on their OWN loans. Overdue fines accrue per day on return. Audited.
 // =============================================================================
 
+import type { NotificationTypeValue } from "@sms/types";
 import {
   ConflictException,
   BadRequestException,
@@ -108,7 +109,9 @@ export class LibraryService {
   private async notifyFine(
     p: Principal,
     borrowerId: string,
-    msg: { type: string; title: string; body: string; data?: Record<string, unknown> },
+    // `type` is the CATALOGUE, not a string: a helper that widened it back to
+    // `string` is how an emitter invents a category nobody can filter to.
+    msg: { type: NotificationTypeValue; title: string; body: string; data?: Record<string, unknown> },
   ): Promise<void> {
     try {
       const guardians = (await this.db.runAsTenant(this.ctx(p), (tx) =>

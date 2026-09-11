@@ -17,6 +17,7 @@
 
 import { toMajor, isZeroDecimal, minorUnits } from "@sms/types";
 import { fmtVal, nfCompact } from "../../components/charts/format-value";
+import { stripComments } from "../test-support/strip-comments";
 
 describe("converting a stored amount for a chart", () => {
   it("is a straight division for a two-decimal currency", () => {
@@ -98,9 +99,7 @@ describe("the page that draws it", () => {
     const { join } = await import("node:path");
     // Comments stripped: the note explaining this fix names the symbol, and an
     // assertion that matches its own documentation proves nothing.
-    const rc = readFileSync(join(__dirname, "../../components/charts/rc.tsx"), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
+    const rc = stripComments(readFileSync(join(__dirname, "../../components/charts/rc.tsx"), "utf8"));
     expect(rc).not.toContain("₦");
     // And no chart may format money without being told whose it is.
     expect(rc).not.toMatch(/nfCompact\((?:total|d\.value)\)/);

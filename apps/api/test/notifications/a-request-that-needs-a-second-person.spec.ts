@@ -44,7 +44,7 @@ function make(holders: string[]) {
   return { s, userRole, enqueueMany };
 }
 
-const MSG = { type: "WORKFLOW_UPDATE", title: "t", body: "b" };
+const MSG = { type: "WORKFLOW_UPDATE", title: "t", body: "b" } as const;
 
 describe("telling the people who can act", () => {
   it("resolves them from the permission, not from a role list", async () => {

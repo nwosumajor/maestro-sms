@@ -18,10 +18,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { WORKFLOW_TRANSITIONS } from "@sms/types";
+import { stripComments } from "../test-support/strip-comments";
 
 const SRC = readFileSync(join(__dirname, "..", "..", "components", "workflow", "WorkflowInbox.tsx"), "utf8");
 /** Comments stripped: a gate must not pass on the prose of its own fix. */
-const src = SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const src = stripComments(SRC);
 
 /** Every state the engine can be in, as the UI would spell it. */
 const STATES = Object.keys(WORKFLOW_TRANSITIONS);

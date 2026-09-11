@@ -16,12 +16,13 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { stripComments } from "../test-support/strip-comments";
 
 const SRC = fs.readFileSync(
   path.resolve(__dirname, "../../app/(app)/error.tsx"),
   "utf8",
 );
-const code = SRC.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
+const code = stripComments(SRC);
 
 describe("the signed-in app's error screen", () => {
   it("found the source it is about", () => {

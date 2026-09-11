@@ -14571,3 +14571,132 @@ the count ignoring the filter, the browser-side filter restored, `?q=` not sent,
 a second Pager copy, null re-coerced to empty, the strip returned to bare
 `money()`, and the ISBN field dropped again. Plus a false-positive check that a `useFormat()`-bound `money` is not
 flagged.
+
+### Notifications at 5,000 schools, three years deep
+
+352,137 notifications across 5,001 schools, with a focus parent three years in
+holding 3,320 — the inbox that grows with the PUPIL's time at the school rather
+than with the school's size.
+
+**What held, and it is most of the module.** The inbox read is careful work:
+counts are bounded at `NOTIFICATION_COUNT_CAP` and SAY SO (`1000+`), paging runs
+off `hasMore` rather than the total so the owner can still walk back to anything,
+the unread badge counts all unread rather than unread-on-this-page, and the web
+renders the capped flags. Reads were flat — 50 ms for page 1 of 3,320, 25 ms for
+a filtered page, 25 ms for page 66. Offset paging survived a 120-row tie block
+(one fan-out landing on a single instant): 3,320 fetched, 3,320 distinct, zero
+repeats. Departed users get the in-app row and no external channel. Isolation
+holds.
+
+**The defect was not in the reading. It was in the CATEGORIES.**
+
+`NotificationInput.type` was `NotificationTypeValue | string`, and the union's
+own comment admitted it: *"this registry is INCOMPLETE and does not gate
+anything"*. So four hand-kept lists of type strings grew beside it — the union,
+the ESSENTIAL set, the MUTABLE mute screen, and a `FILTERABLE_TYPES` array in the
+web written **specifically to work around** the union being incomplete. None was
+tied to what any emitter writes. Measured on that parent:
+
+```
+dropdown options offered .................. 12
+options that returned anything ............  2
+options that can NEVER match anyone ....... GRADE_POSTED, ONBOARDING
+unreachable through ANY option ............ 2,213 of 3,320  (67%)
+    GRADE_PUBLISH      553   <- the menu says "Grade Posted"
+    FEE_REMINDER       554
+    MEETING            553
+    DISCIPLINE_OUTCOME 553
+```
+
+**FIVE strings named notifications that do not exist**, and each is a different
+kind of mistake: `GRADE_POSTED` appears in **no file in apps/api/src at all**;
+`ONBOARDING` is an HR CHECKLIST type (the intake writes `ONBOARDING_REQUEST`);
+`GRADE_PUBLISH`, `LMS_CONTENT_PUBLISH` and `ADMIN_APPOINTMENT` are WORKFLOW
+REQUEST types; `LEAGUE` is a COMPETITION type.
+
+**Four of the eight mute checkboxes governed nothing.** A control that appears to
+work and does not is worse than one that is missing, because the reader stops
+looking for the real switch:
+
+* *"New lessons & materials"* — the LMS notifier sent `ANNOUNCEMENT`, so the only
+  way to silence new-lesson alerts was to silence every school announcement too.
+  Here the promise was worth keeping and the EMITTER was the half that was wrong;
+  it sends `LMS_CONTENT_PUBLISH` now.
+* *"Grade publications"* — publishing grades enqueues no notification at all; the
+  guardian hears through the report card, which is `DOCUMENT_AVAILABLE` and has
+  its own checkbox two lines up.
+* *"Game & league updates"* — the game module enqueues nothing.
+* *"Alumni broadcasts"* — the alumni broadcast deliberately bypasses the
+  notification funnel and emails directly ("an alumnus has left by definition and
+  a notification is addressed to an account they can no longer open"), so the
+  switch could never have stopped the emails a leaver actually receives, which is
+  the one thing somebody ticking it would expect.
+
+**The fix is the type system, not a fresher list.** `| string` is gone, so the
+union is enforced by the COMPILER at every emitter — the spine this repo already
+uses for permissions, where a typo'd string fails the build. Proven by mutation:
+an emitter inventing `HOSTEL_NOTICE` is **1 error** now and **0 errors** with
+`| string` restored, which is exactly how five ghosts accumulated. Completing the
+union was the change the old comment said was "worthwhile" and deferred because
+it "touches every emitter"; the compiler enumerated the emitters in one run, and
+it touched **three files**. `NOTIFICATION_TYPE_LABELS` is a
+`Record<union, string>`, so a catalogue entry with no label and a label with no
+entry are both compile errors — and the web's filter menu is DERIVED from it
+rather than being a thirteenth copy. After: 23 real categories, no ghosts, and
+the parent's reachable notifications went from 1,107 to 2,767 of 2,767 emittable.
+
+// GOTCHA on my own gate, and it is the same confusion the defect is made of:
+the first version asked "is this type emitted?" by searching the WHOLE API
+source, and a mutation reverting the LMS emitter to `ANNOUNCEMENT` passed all
+fifteen tests — because `LMS_CONTENT_PUBLISH` still appeared in that very file as
+a WORKFLOW type. A gate that cannot tell a notification type from a workflow type
+is the thing that put four dead checkboxes on the screen. It now scans only the
+argument blocks of notification calls, PLUS calls to any helper whose parameter
+is typed `NotificationTypeValue` — fees and the library both route family
+messages through such a builder, so a scan that knew only the notifier's method
+names reported `FEE_REMINDER` as unsent. Both directions were mutation-checked.
+
+// GOTCHA: two mutations printed `Tests: 0 total`, which is **not a pass** — the
+suite had failed to compile. Read as a pass they would have vouched for nothing.
+Checked properly, both are rejected by tsc naming the exact missing property,
+which is the stronger guard.
+
+// GOTCHA on the probe: `?unreadOnly=true` reported a capped total while the
+real filter is `?unread=1`. The parameter name was a GUESS and the answer was a
+fact about the probe, not the product — the trap this file already records. The
+web sends `unread=1` and it returns exactly 920 with no read rows.
+
+// GOTCHA, and it is the one I am gladdest about: an earlier draft ADDED
+`MEETING` and `TRANSPORT_ROUTE_CHANGE` to the mute screen, reasoning that they
+are emitted, not essential, and exactly the sort of thing a parent may not want
+by SMS. `a-guardian-cannot-mute-an-absence` caught it — that suite pins BY NAME
+that a type the school never made optional is delivered even when a mute request
+names it. It was right and the draft was wrong: removing four checkboxes that
+governed nothing is a DEFECT FIX; adding two that would govern something is a
+PRODUCT DECISION about what a school is willing to let a family miss, and it
+needs somebody to ask for it. Reverted. A second existing test used
+`GRADE_PUBLISH` as its example of a mutable type; the property it asserts is
+unchanged and only the example had to become a type the platform really sends.
+
+// GOTCHA, found by the suite rather than by me: my new gate hand-rolled its own
+comment stripper, and `test/support/strip-comments.spec.ts` exists precisely to
+forbid that — the two-line regex swallows real code whenever a comment contains
+a `/*` (a path glob, say), and a `not.toMatch` over a swallowed region then
+passes VACUOUSLY. Chasing it found the WEB tier had neither the shared function
+nor the gate: **nine** of its gates had each hand-rolled the regex in five
+spellings, and I had just written the tenth. A grep I ran by hand found five of
+the nine; the gate found the rest, which is the entire argument for having one.
+`apps/web/lib/test-support/strip-comments.ts` + a mirrored gate now.
+// GOTCHA on that helper's own comment: it said a LINE comment is checked before
+a block one and "that ordering is the fix". Verified by running both orders over
+the input the ordering is meant to protect — byte-identical output. It is the
+CHARACTER SCANNER that fixes this, not the sequence of two ifs; a comment
+claiming otherwise invites the next reader to preserve the wrong thing. My
+mutation of it proved nothing because it was not a defect, which is worth saying
+rather than counting as coverage.
+// GOTCHA: the helper must live OUTSIDE `__tests__` — jest treats every file in
+there as a suite and fails one containing no tests.
+
+Gate: `every-notification-type-can-be-found.spec.ts` (16 cases) and
+`no-gate-hand-rolls-its-own-stripper.test.ts` (6 cases), mutation-validated
+eight ways.

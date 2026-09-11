@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **317 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **318 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -755,12 +755,16 @@ cross-tenant case, a scoping e2e, and role-gated web UI:
   EXTERNAL-channel toggles (email/SMS/WhatsApp) + per-type mutes. The in-app
   inbox is ALWAYS created; the delivery producer filters channels through the
   pure `allowedChannels()` in `@sms/types` — ESSENTIAL types
-  (`ESSENTIAL_NOTIFICATION_TYPES` — six billing/platform types plus
+  (`ESSENTIAL_NOTIFICATION_TYPES` — the billing/platform types plus
   DISCIPLINE_OUTCOME and ATTENDANCE_ABSENCE, each added later with its reason
   beside it) ignore per-type mute but still respect channel toggles. Read the
-  constant, not this sentence: an earlier version of this line listed the first
-  six as if they were all of them, having been written before the two that
-  matter most to a family were added; NO preference row = deliver all (historical default). `/account` card.
+  constant, not this sentence — which has now rotted TWICE: it once listed the
+  billing types as if they were all of them, written before the two that matter
+  most to a family were added; and it then said "six" of them while one was
+  `ADMIN_APPOINTMENT`, a WORKFLOW type no notification has ever carried, so the
+  true figure was five. The count is gone; the constant is typed against
+  `NOTIFICATION_TYPES`, so it can no longer name a notification that does not
+  exist. NO preference row = deliver all (historical default). `/account` card.
 - **Teacher cover** (`lesson_cover`, rls/85): joins APPROVED leave × the weekly
   timetable to list each dated lesson whose regular teacher is out (bounded
   62-day window). Assign a reliever — self-cover 400, double-booking (their own
@@ -921,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **317 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **318 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -951,6 +955,23 @@ These are the rules; the log is why each one exists.
   `what-the-help-page-promises`, `api-doc-is-current`.
 - **A comment asserting agreement is not agreement.** Two files each carried
   "same rule as the report card" while disagreeing with it and with each other.
+- **A CATEGORY NOBODY EMITS IS A FILTER THAT ANSWERS NOTHING, AND A SWITCH THAT
+  GOVERNS NOTHING.** `NotificationInput.type` was `NotificationTypeValue |
+  string`, so the union gated nothing and four hand-kept lists grew beside it
+  (the union, the essential set, the mute screen, a `FILTERABLE_TYPES` array in
+  the web written to work around the union being incomplete). FIVE strings named
+  notifications that do not exist — one absent from the whole API, one an HR
+  checklist type, three workflow-request types, one a competition type. Measured:
+  67% of a parent's 3,320 notifications were unreachable through any menu option,
+  and four of eight mute checkboxes did nothing. **A control that appears to work
+  and does not is worse than one that is missing**, because the reader stops
+  looking for the real switch. The fix is the type system, not a fresher list:
+  the union is enforced at every emitter and `NOTIFICATION_TYPE_LABELS` is a
+  `Record<union, string>`, so an unreachable category is a compile error. Gate:
+  `every-notification-type-can-be-found`. // GOTCHA: a gate asking "is this type
+  emitted?" must scan only NOTIFICATION call sites — the first version searched
+  all source and passed a mutation, because the same string was a WORKFLOW type
+  in the same file. That confusion IS the defect.
 - **A COUNTER MUST COUNT WHAT WAS DELIVERED, NOT WHAT WAS ITERATED.** The fee
   reminder sweep incremented `reminded` once per INVOICE regardless of whether a
   guardian existed: a school with 30 billable invoices and no guardian links was

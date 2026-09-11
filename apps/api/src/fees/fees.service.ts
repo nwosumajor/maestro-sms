@@ -9,6 +9,7 @@
 // on full payment (receipt). Not-visible -> 404 (never 403).
 // =============================================================================
 
+import type { NotificationTypeValue } from "@sms/types";
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
@@ -1449,7 +1450,9 @@ export class FeesService {
   private async notifyGuardians(
     p: Principal,
     studentId: string,
-    msg: { type: string; title: string; body: string; data?: Record<string, unknown> },
+    // `type` is the CATALOGUE, not a string: a helper that widened it back to
+    // `string` is how an emitter invents a category nobody can filter to.
+    msg: { type: NotificationTypeValue; title: string; body: string; data?: Record<string, unknown> },
     extraRecipientIds: string[] = [],
     /** Pre-resolved guardians, for a sweep that looked them all up at once. */
     knownGuardianIds?: string[],

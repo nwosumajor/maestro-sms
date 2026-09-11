@@ -16,6 +16,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
+import { stripComments } from "../test-support/strip-comments";
 
 const API = readFileSync(join(__dirname, "../api.ts"), "utf8");
 const GUARD = readFileSync(
@@ -25,7 +26,7 @@ const GUARD = readFileSync(
 const PAGE = readFileSync(join(__dirname, "../../app/(app)/suspended/page.tsx"), "utf8");
 /** Comments stripped: the page EXPLAINS in prose why it calls no apiGet, and an
  *  assertion that reads prose as code would match that explanation. */
-const PAGE_CODE = PAGE.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const PAGE_CODE = stripComments(PAGE);
 
 describe("the two sides of the same 403", () => {
   it("the API tags a suspension with the shared code", () => {

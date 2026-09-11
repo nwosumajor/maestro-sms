@@ -20,6 +20,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "../test-support/strip-comments";
 
 const WEB = join(__dirname, "../..");
 const MANAGER = readFileSync(join(WEB, "components/library/LibraryManager.tsx"), "utf8");
@@ -28,7 +29,7 @@ const PAGE = readFileSync(join(WEB, "app/(app)/library/page.tsx"), "utf8");
 /** Source with comments stripped, so an assertion cannot be satisfied by the
  *  comment explaining its own fix — which has happened in this repo before. */
 function code(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  return stripComments(src);
 }
 
 describe("the catalogue is searched where it lives", () => {

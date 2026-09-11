@@ -1,6 +1,7 @@
 "use client";
 
-import type { NotificationInboxDto, NotificationItemDto, Serialized } from "@sms/types";
+import type { NotificationInboxDto, NotificationItemDto, NotificationTypeValue, Serialized } from "@sms/types";
+import { NOTIFICATION_TYPES, NOTIFICATION_TYPE_LABELS } from "@sms/types";
 import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -29,27 +30,19 @@ const TYPE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "ou
 const ALERT_TYPES = new Set(["OPERATOR_ALERT"]);
 
 /**
- * Types worth filtering by.
+ * The filter menu, DERIVED from the catalogue rather than typed out again.
  *
- * NOT `NOTIFICATION_TYPES` from @sms/types: that union is knowingly incomplete
- * (its own comment says so) and omits OPERATOR_ALERT, BILLING and ONBOARDING —
- * which are exactly the ones the platform owner comes here to find. A filter
- * built from it would silently offer no way to ask the most useful question.
+ * This was a hand-written list, added precisely because `NOTIFICATION_TYPES` was
+ * "knowingly incomplete" — a reasonable response to a broken constant, and it
+ * inherited the break. Measured on a parent three years in with 3,320
+ * notifications: of the twelve options offered, TWO could never match anybody
+ * (`GRADE_POSTED`, which appears in no file in the API, and `ONBOARDING`, which
+ * is an HR checklist type), and 2,213 of that parent's notifications — 67% —
+ * were unreachable through any option in the menu, because their types were
+ * never offered. The list is now the catalogue, which the compiler holds to
+ * what emitters actually send.
  */
-const FILTERABLE_TYPES = [
-  "OPERATOR_ALERT",
-  "BILLING",
-  "ONBOARDING",
-  "ANNOUNCEMENT",
-  "INVOICE_ISSUED",
-  "PAYMENT_RECEIVED",
-  "ATTENDANCE_ABSENCE",
-  "ATTENDANCE_LATE",
-  "DOCUMENT_AVAILABLE",
-  "WORKFLOW_UPDATE",
-  "GRADE_POSTED",
-  "GENERIC",
-];
+const FILTERABLE_TYPES: readonly string[] = NOTIFICATION_TYPES;
 
 export function NotificationInbox({ initial }: { initial: InboxData }) {
   // Dates follow the SCHOOL's timezone, not the platform's.
@@ -160,7 +153,7 @@ export function NotificationInbox({ initial }: { initial: InboxData }) {
           >
             <option value="">All types</option>
             {FILTERABLE_TYPES.map((t) => (
-              <option key={t} value={t}>{titleCase(t)}</option>
+              <option key={t} value={t}>{NOTIFICATION_TYPE_LABELS[t as NotificationTypeValue] ?? titleCase(t)}</option>
             ))}
           </select>
         </label>

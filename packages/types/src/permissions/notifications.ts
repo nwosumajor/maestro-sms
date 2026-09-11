@@ -36,26 +36,90 @@ export type MessageCreditBundle = (typeof MESSAGE_CREDIT_BUNDLES)[number];
 export const MESSAGE_CREDIT_LOW_THRESHOLD = 50;
 
 /**
- * // NOTE: this registry is INCOMPLETE and does not gate anything. The platform
- * // emits more than twenty types (SIS_PROFILE, HOSTEL, SCHOLARSHIP, BILLING and
- * // others are all in the live table) and `NotificationInput.type` is
- * // `NotificationTypeValue | string`, so the union imposes nothing. Completing
- * // it and dropping the `| string` is a worthwhile separate change; it is not
- * // done here because it touches every emitter. What makes the gap safe in the
- * // meantime is that an unlisted type is now never mutable, so a typo fails
- * // towards delivering rather than towards silence.
+ * EVERY notification type the platform emits — the ONE list, and it GATES.
+ *
+ * This was nine entries with a note saying it was "INCOMPLETE and does not gate
+ * anything", because `NotificationInput.type` was `NotificationTypeValue |
+ * string`. Three other lists then grew beside it — the mute screen, the
+ * essential set, and the inbox filter dropdown in the web — each hand-kept, none
+ * tied to what any emitter actually writes. Measured on a parent three years in
+ * with 3,320 notifications:
+ *
+ *   - the inbox filter offered 12 categories; TWO of them (`GRADE_POSTED`,
+ *     `ONBOARDING`) are emitted by nothing, anywhere, and return nothing for every user
+ *     forever — `GRADE_POSTED` appeared in no file in apps/api/src at all, and
+ *     `ONBOARDING` is an HR CHECKLIST type;
+ *   - 2,213 of that parent's 3,320 notifications (67%) could not be reached by
+ *     any option in the menu, because the types they carry were never offered;
+ *   - FOUR of the eight mute checkboxes governed nothing.
+ *
+ * The `| string` is gone, so this union is now enforced by the COMPILER at every
+ * emitter — the same spine the permission constants use, where a typo'd string
+ * fails the build rather than silently creating a category nobody can filter to
+ * and nobody can mute.
+ *
+ * ADDING A TYPE: add it here, and give it a label in NOTIFICATION_TYPE_LABELS so
+ * the inbox can offer it. Both are checked by
+ * `every-notification-type-can-be-found.spec.ts`.
  */
 export const NOTIFICATION_TYPES = [
+  "ANNOUNCEMENT",
   "ATTENDANCE_ABSENCE",
   "ATTENDANCE_LATE",
-  "GRADE_POSTED",
-  "WORKFLOW_UPDATE",
-  "INVOICE_ISSUED",
-  "PAYMENT_RECEIVED",
+  "BILLING",
+  "DISCIPLINE_CASE",
+  "DISCIPLINE_OUTCOME",
   "DOCUMENT_AVAILABLE",
-  "ANNOUNCEMENT",
+  "FEEDBACK_REPLY",
+  "FEE_REMINDER",
   "GENERIC",
+  "HOSTEL",
+  "INTEGRITY_SIGNAL",
+  "INVOICE_ISSUED",
+  "LMS_CONTENT_PUBLISH",
+  "MEETING",
+  "ONBOARDING_REQUEST",
+  "OPERATOR_ALERT",
+  "PAYMENT_RECEIVED",
+  "SCHOLARSHIP",
+  "SIS_PROFILE",
+  "TRANSPORT",
+  "TRANSPORT_ROUTE_CHANGE",
+  "WORKFLOW_UPDATE",
 ] as const;
+
+/**
+ * What each type is called on screen.
+ *
+ * The inbox filter DERIVES its menu from this, rather than keeping a thirteenth
+ * hand-written copy of the same strings in the web tier.
+ */
+export const NOTIFICATION_TYPE_LABELS: Record<(typeof NOTIFICATION_TYPES)[number], string> = {
+  ANNOUNCEMENT: "Announcements",
+  ATTENDANCE_ABSENCE: "Absence alerts",
+  ATTENDANCE_LATE: "Late-arrival alerts",
+  BILLING: "Billing",
+  DISCIPLINE_CASE: "Discipline cases",
+  DISCIPLINE_OUTCOME: "Discipline outcomes",
+  DOCUMENT_AVAILABLE: "New documents",
+  FEEDBACK_REPLY: "Feedback replies",
+  FEE_REMINDER: "Fee reminders",
+  GENERIC: "Other",
+  HOSTEL: "Hostel",
+  INTEGRITY_SIGNAL: "Integrity signals",
+  INVOICE_ISSUED: "Invoices issued",
+  LMS_CONTENT_PUBLISH: "New lessons & materials",
+  MEETING: "Meetings",
+  ONBOARDING_REQUEST: "Onboarding requests",
+  OPERATOR_ALERT: "Operator alerts",
+  PAYMENT_RECEIVED: "Payments received",
+  SCHOLARSHIP: "Scholarships",
+  SIS_PROFILE: "Student records",
+  TRANSPORT: "Transport",
+  TRANSPORT_ROUTE_CHANGE: "Route changes",
+  WORKFLOW_UPDATE: "Approvals",
+};
+
 export type NotificationTypeValue = (typeof NOTIFICATION_TYPES)[number];
 
 export const NOTIFICATION_PERMISSIONS = {

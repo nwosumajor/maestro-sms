@@ -28,6 +28,7 @@
 // for the next one to be missed.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "../test-support/strip-comments";
 
 const WEB = join(__dirname, "..", "..");
 
@@ -40,8 +41,7 @@ const WEB = join(__dirname, "..", "..");
  *  had been deleted and against a field that had stopped growing — matching its
  *  own commentary. Caught by mutation, and it is the trap `strip-comments.ts`
  *  already exists for on the API side. */
-const stripComments = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
 
 const read = (rel: string) => {
   try { return stripComments(readFileSync(join(WEB, rel), "utf8")); } catch { return ""; }
