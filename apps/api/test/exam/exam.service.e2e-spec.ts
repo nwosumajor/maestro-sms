@@ -361,16 +361,16 @@ d("ExamService (real Postgres)", () => {
   });
 
   it("filters sittings server-side rather than shipping the whole term", async () => {
-    const oneDay = await svc.listSittings(staff(), { date: planDay });
+    const oneDay = (await svc.listSittings(staff(), { date: planDay })).items;
     expect(oneDay.length).toBeGreaterThan(0);
     expect(oneDay.every((s) => s.date === planDay)).toBe(true);
     // A day with nothing on it returns nothing, not everything.
-    expect(await svc.listSittings(staff(), { date: "2001-01-01" })).toHaveLength(0);
+    expect((await svc.listSittings(staff(), { date: "2001-01-01" })).items).toHaveLength(0);
     // Text search covers title and subject.
-    const found = await svc.listSittings(staff(), { q: "printab" });
+    const found = (await svc.listSittings(staff(), { q: "printab" })).items;
     expect(found.map((s) => s.title)).toContain("Printable");
     // Hall filter is case-insensitive, like clash detection.
-    expect((await svc.listSittings(staff(), { hall: "hall t" })).map((s) => s.title)).toContain("Printable");
+    expect((await svc.listSittings(staff(), { hall: "hall t" })).items.map((s) => s.title)).toContain("Printable");
   });
 
   // --- the sitting's own register (append-only) -------------------------------

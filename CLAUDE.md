@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **320 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **321 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **320 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **321 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1039,6 +1039,16 @@ These are the rules; the log is why each one exists.
   under a strip counting 1,316 overdue in SQL: 14 reachable, and nothing older
   than 24 days reachable at ANY url. When a page shows a COUNT, the list beside
   it must be able to produce those rows — as a FILTER, sorted oldest-first.
+- **WHEN A LIST IS CAPPED, ASK WHETHER THE CONTROL THE READER USES REACHES PAST
+  IT.** Three consecutive sweeps found the same shape: the library catalogue
+  searched in the browser over 200 of 1,800 titles, the discipline picker
+  offering 500 of 1,200 pupils, and `/exams` returning 200 of 540 sittings while
+  the planner filtered those 200 locally — its comment calling it "fast local
+  whittling, so typing never costs a round trip", which is true only if the
+  loaded page is the whole set. **Each time the server could already answer and
+  the screen never asked**; `/exams` had accepted `q`, `hall`, `from`, `to` and
+  `scheduleId` all along, and nothing set `?schedule=` though the page read it.
+  A count is half the fix; the other half is that the filter runs in SQL.
 - **A PICKER IS THE ONLY ROUTE TO THE THING IT NAMES.** `/discipline/file-targets`
   returned the first 500 people by name with no search and no count, rendered as
   a plain `<select>`: on a 1,200-pupil roll that was A to K, so **690 pupils

@@ -14844,3 +14844,65 @@ action is taken on a pupil (Golden Rule #8).
 Gate: `a-pupil-nobody-could-report.spec.ts` (7 cases), mutation-validated four
 ways — the query ignored, the total measured off the capped page, a pupil's
 search reaching the whole school, and a bounded set marked searchable.
+
+### Exam logistics at 5,000 schools, three years deep
+
+540 sittings in the focus secondary — 9 terms × 6 year groups × 10 papers, which
+is what a school accumulates in three years.
+
+**336 of them could not be reached through the screen.**
+
+```
+held                540
+returned by /exams  200
+page covered        2025-05-15 .. 2026-05-13   (the most recent year)
+said there was more nothing
+```
+
+A sitting is a RECORD: who sat where, the attendance taken in the hall, the
+paper it belongs to. The cap is newest-first, so the far end is what goes.
+
+**And the API had the filters all along.** `/exams` has always accepted `q`,
+`hall`, `from`, `to` and `scheduleId`. The page sent NONE of them: the planner's
+search and hall controls filtered the already-loaded page in the browser — its
+own comment called that *"fast local whittling, so typing never costs a round
+trip"*, which is right only if the loaded page is the whole set — and nothing
+anywhere set `?schedule=`, though the page reads it. A head searching
+"Chemistry" saw only the last twelve months of Chemistry papers and had no
+control that would have produced the rest.
+
+After: `/exams` returns `{items, total, pageSize}`, ordered `[date desc,
+startsAt asc, id asc]`; the planner narrows on the SERVER and carries a schedule
+selector; the screen says "Showing 200 of 540 sittings". Verified live —
+`q=Chemistry` returns 54 of 54 spanning **2023-09-23 to 2026-05-10**, `hall` 90
+of 90 back to 2023, a 2023 date window 60 of 60.
+
+// GOTCHA: this is the THIRD variant of one shape in three consecutive sweeps —
+the library catalogue searched in the browser over 200 of 1,800 titles, the
+discipline picker offering 500 of 1,200 pupils, and now this. Each time the
+server could already answer and the screen never asked. When a list is capped,
+the question is not only "does it say how many" but "does the control the reader
+actually uses reach past the cap".
+
+// GOTCHA on the order: `date` alone is not a total order — a term's papers
+share days — and `startsAt` ties too when two halls both start at nine. Without
+`id` a capped read over that is not reproducible.
+
+// GOTCHA in the double: `ExamService`'s constructor registers an `onFinalized`
+workflow reactor, so a stub missing that method cannot even build the service —
+it fails as `hooks.onFinalized is not a function`, which reads as a code fault
+rather than a fixture gap.
+
+// GOTCHA on reading the screen: the count line came back as `Showing
+<!-- -->200<!-- --> of <!-- -->540`, invisible to a plain `includes`. React's
+comment markers around interpolated numbers, the same trap as the discipline
+picker one sweep earlier.
+
+**What held.** The exam-day board is bounded by a single date, so the page cap
+cannot bite it; seat and invigilator counts are batched rather than per row; the
+schedules list is well under its own cap at three years (9 of 100).
+
+Gate: `two-years-of-sittings-nobody-could-reach.spec.ts` (8 cases),
+mutation-validated four ways — the total measured off the fetched page, the
+count ignoring the filter, the `id` tiebreaker dropped, and the `scheduleId`
+filter ignored.

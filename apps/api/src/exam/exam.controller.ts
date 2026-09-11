@@ -3,7 +3,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@
 import type { Response } from "express";
 import { z } from "zod";
 import { EXAM_PERMISSIONS, TIMETABLE_PERMISSIONS } from "@sms/types";
-import type { ExamAttendanceDto, ExamDayDto, ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
+import type { ExamAttendanceDto, ExamDayDto, ExamScheduleDto, ExamSittingDto, ExamSittingPageDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -96,7 +96,7 @@ export class ExamController {
     @Query("to") to?: string,
     @Query("hall") hall?: string,
     @Query("q") q?: string,
-  ): Promise<ExamSittingDto[]> {
+  ): Promise<ExamSittingPageDto> {
     return this.exams.listSittings(p, { scheduleId, date, from, to, hall, q });
   }
 

@@ -139,3 +139,24 @@ export interface MyExamDto {
   hall: string;
   seatNo: number;
 }
+
+/**
+ * A page of exam sittings, and how many the filter actually matched.
+ *
+ * The list was a bare array capped at the 200 most recent by date. A sitting is
+ * a RECORD — who sat where, the attendance taken in the hall, the paper it
+ * belongs to — and a school accumulates them every term. Measured at three
+ * years: 540 held, 200 returned, covering only the most recent twelve months.
+ *
+ * Worse than the cap: the planner's search and hall controls filtered THOSE 200
+ * in the browser, and nothing on the page ever sent the `q`, `hall`, `from`,
+ * `to` or `scheduleId` the API has always accepted — so 336 of 540 sittings
+ * (62%), two full years, could not be reached through the UI at all.
+ */
+export interface ExamSittingPageDto {
+  items: ExamSittingDto[];
+  /** Matching the filter, in the school — NOT the length of `items`. */
+  total: number;
+  /** How many `items` can hold; the caller is looking at a page, not the set. */
+  pageSize: number;
+}

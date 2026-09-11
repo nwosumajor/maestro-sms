@@ -1,4 +1,4 @@
-import type { ExamScheduleDto, ExamSittingDto, MyExamDto, IdNameDto, CbtExamDto, Serialized } from "@sms/types";
+import type { ExamSittingPageDto, ExamScheduleDto, ExamSittingDto, MyExamDto, IdNameDto, CbtExamDto, Serialized } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -29,7 +29,7 @@ export default async function ExamsPage({
   const scheduleQuery = searchParams?.schedule ? `?scheduleId=${encodeURIComponent(searchParams.schedule)}` : "";
 
   const [sittings, myExams, myInvigilations, classes, staff, rooms, schedules, draftExams] = await Promise.all([
-    canManage ? apiGet<Serialized<ExamSittingDto>[]>(`/exams${scheduleQuery}`) : Promise.resolve([]),
+    canManage ? apiGet<Serialized<ExamSittingPageDto>>(`/exams${scheduleQuery}`) : Promise.resolve(null),
     apiGet<Serialized<MyExamDto>[]>("/exams/mine"),
     apiGet<Serialized<MyExamDto>[]>("/exams/invigilations/mine"),
     canManage ? apiGet<Serialized<IdNameDto>[]>("/classes/mine") : Promise.resolve([]),
@@ -60,7 +60,10 @@ export default async function ExamsPage({
         <ExamsClient
           canManage={canManage}
           canRelease={canRelease}
-          sittings={sittings ?? []}
+          sittings={sittings?.items ?? []}
+          sittingTotal={sittings?.total ?? 0}
+          sittingPageSize={sittings?.pageSize ?? 200}
+          activeScheduleId={searchParams?.schedule ?? ""}
           myExams={myExams ?? []}
           myInvigilations={myInvigilations ?? []}
           classes={classes ?? []}

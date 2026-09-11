@@ -35,8 +35,16 @@ export function ExamPlanner({
   rooms,
   attachableExams,
   canRelease,
+  sittingTotal,
+  sittingPageSize,
+  activeScheduleId,
 }: {
   sittings: Sitting[];
+  /** How many sittings match in ALL — the list above is one page of them. */
+  sittingTotal: number;
+  sittingPageSize: number;
+  /** The schedule the page was loaded for, from ?schedule=. */
+  activeScheduleId: string;
   schedules: Schedule[];
   classes: IdName[];
   staff: { id: string; name: string; roles?: string[] }[];
@@ -109,17 +117,44 @@ export function ExamPlanner({
     return false;
   };
 
-  // Client-side narrowing of the already-loaded page. The SERVER filters by
-  // schedule (see the page's ?schedule= param); these two are just fast local
-  // whittling, so typing never costs a round trip.
-  const visible = React.useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return sittings.filter((s) => {
-      if (hallFilter && s.hall.trim().toLowerCase() !== hallFilter.trim().toLowerCase()) return false;
-      if (!needle) return true;
-      return `${s.title} ${s.subject ?? ""} ${s.className ?? ""}`.toLowerCase().includes(needle);
-    });
-  }, [sittings, q, hallFilter]);
+  // THE SERVER NARROWS, not the browser.
+  //
+  // This filtered the already-loaded page and called it "fast local whittling",
+  // which is right only if the loaded page is the whole set. It is 200 of the
+  // school's sittings by date, newest first — measured at three years: 540 held,
+  // 200 returned, covering the most recent twelve months. Nothing on the page
+  // ever sent the `q`, `hall`, `from`, `to` or `scheduleId` the API has always
+  // accepted, so 336 of 540 sittings — two full years — could not be reached
+  // through this screen at all. A sitting is a RECORD: who sat where, and the
+  // attendance taken in the hall.
+  const [rows, setRows] = React.useState(sittings);
+  const [total, setTotal] = React.useState(sittingTotal);
+  const [loading, setLoading] = React.useState(false);
+  const [schedule, setSchedule] = React.useState(activeScheduleId);
+  const firstRender = React.useRef(true);
+
+  React.useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    let live = true;
+    const t = setTimeout(async () => {
+      setLoading(true);
+      const qs = new URLSearchParams();
+      if (q.trim()) qs.set("q", q.trim());
+      if (hallFilter.trim()) qs.set("hall", hallFilter.trim());
+      if (schedule) qs.set("scheduleId", schedule);
+      const res = await fetch(`/api/sms/exams?${qs}`, { cache: "no-store" });
+      if (!live) return;
+      if (res.ok) {
+        const body = (await res.json()) as { items: typeof sittings; total: number };
+        setRows(body.items);
+        setTotal(body.total);
+      }
+      setLoading(false);
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [q, hallFilter, schedule, sittings]);
+
+  const visible = rows;
 
   const halls = React.useMemo(
     () => [...new Set(sittings.map((s) => s.hall))].sort((a, b) => a.localeCompare(b)),
@@ -235,6 +270,20 @@ export function ExamPlanner({
               <CardDescription>Grouped by day — the way an exam officer works. Edit in place; seats and invigilators are kept.</CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {/* NARROWS ON THE SERVER. The `scheduleId` filter has always
+                  existed and no control ever set it, so a term from two years
+                  ago was unreachable however hard anybody searched. */}
+              <select
+                aria-label="Schedule"
+                className={`${input} w-48`}
+                value={schedule}
+                onChange={(e) => setSchedule(e.target.value)}
+              >
+                <option value="">All schedules</option>
+                {schedules.map((sc) => (
+                  <option key={sc.id} value={sc.id}>{sc.title}</option>
+                ))}
+              </select>
               <input placeholder="Search title, subject, class" className={`${input} w-52`} value={q} onChange={(e) => setQ(e.target.value)} />
               <select aria-label="Hall" className={input} value={hallFilter} onChange={(e) => setHallFilter(e.target.value)}>
                 <option value="">All halls</option>
@@ -244,7 +293,23 @@ export function ExamPlanner({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {visible.length === 0 && <p className="text-sm text-muted-foreground">No sittings match.</p>}
+          {visible.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              {loading ? "Searching…" : "No sittings match."}
+            </p>
+          )}
+
+          {/* WHAT IS NOT ON SCREEN. A school holds every sitting it has ever
+              run; this list is the most recent page of them. Saying so is the
+              difference between "there are no others" and "narrow it down". */}
+          {total > visible.length && (
+            <p className="border-t border-border/60 pt-2 text-xs text-muted-foreground">
+              Showing {visible.length} of {total.toLocaleString()} sittings
+              {total > sittingPageSize
+                ? " — pick a schedule, or search by subject or hall, to reach the rest."
+                : "."}
+            </p>
+          )}
           {[...days].reverse().map((day) => (
             <div key={day} className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

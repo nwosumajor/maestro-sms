@@ -38,9 +38,15 @@ export function ExamsClient({
   rooms,
   schedules,
   attachableExams,
+  sittingTotal,
+  sittingPageSize,
+  activeScheduleId,
 }: {
   canManage: boolean;
   canRelease: boolean;
+  sittingTotal: number;
+  sittingPageSize: number;
+  activeScheduleId: string;
   sittings: Sitting[];
   myExams: MyExam[];
   myInvigilations: MyExam[];
@@ -116,6 +122,9 @@ export function ExamsClient({
               rooms={rooms}
               attachableExams={attachableExams}
               canRelease={canRelease}
+          sittingTotal={sittingTotal}
+          sittingPageSize={sittingPageSize}
+          activeScheduleId={activeScheduleId}
             />
           ) : (
             <ExamDayBoard canRelease={canRelease} />

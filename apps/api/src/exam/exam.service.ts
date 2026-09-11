@@ -19,6 +19,7 @@ import type {
   ExamSeatDto,
   MyExamDto,
   InvigilationDto,
+  ExamSittingPageDto,
 } from "@sms/types";
 import {
   EXAM_SCHEDULE_CHAIN,
@@ -54,6 +55,9 @@ const MY_EXAMS_MAX = 200;
 /** How far ahead "upcoming" reaches — one term's worth of published schedule. */
 const MY_EXAMS_HORIZON_DAYS = 120;
 const MY_EXAMS_HORIZON = (): Date => new Date(Date.now() + MY_EXAMS_HORIZON_DAYS * 24 * 60 * 60 * 1000);
+
+/** Sittings per page of the planner. */
+const SITTING_PAGE = 200;
 
 @Injectable()
 export class ExamService {
@@ -440,7 +444,7 @@ export class ExamService {
   async listSittings(
     p: Principal,
     filter: { scheduleId?: string; from?: string; to?: string; date?: string; hall?: string; q?: string } = {},
-  ): Promise<ExamSittingDto[]> {
+  ): Promise<ExamSittingPageDto> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = {};
       if (filter.scheduleId) where.scheduleId = filter.scheduleId;
@@ -459,7 +463,17 @@ export class ExamService {
         const q = filter.q.trim();
         if (q) where.OR = [{ title: { contains: q, mode: "insensitive" } }, { subject: { contains: q, mode: "insensitive" } }];
       }
-      const rows = (await tx.examSitting.findMany({ where, orderBy: [{ date: "desc" }, { startsAt: "asc" }], take: 200 })) as SittingRow[];
+      // COUNTED, over the same predicate the page draws from. The list is a
+      // record a school reads for years, and a newest-first cap with no count
+      // is how the far end of it disappears without anybody noticing.
+      const total = await tx.examSitting.count({ where });
+      const rows = (await tx.examSitting.findMany({
+        where,
+        // `date` alone is not a total order — a term's papers share days — and
+        // `startsAt` ties too when two halls run at nine. `id` decides the rest.
+        orderBy: [{ date: "desc" }, { startsAt: "asc" }, { id: "asc" }],
+        take: SITTING_PAGE,
+      })) as SittingRow[];
       const ids = rows.map((r) => r.id);
       const examIds = [...new Set(rows.map((r) => r.cbtExamId).filter((x): x is string => !!x))];
       // Seat/invigilator counts + the CBT exams' status/release in a fixed number
@@ -492,7 +506,7 @@ export class ExamService {
         ? ((await tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } })) as Array<{ id: string; name: string }>)
         : [];
       const classById = new Map(classes.map((c) => [c.id, c.name]));
-      return rows.map((r) => {
+      const items = rows.map((r) => {
         const e = r.cbtExamId ? examById.get(r.cbtExamId) : undefined;
         return this.toSittingDto(
           r,
@@ -507,6 +521,7 @@ export class ExamService {
           r.classId ? classById.get(r.classId) ?? null : null,
         );
       });
+      return { items, total, pageSize: SITTING_PAGE };
     });
   }
 
@@ -531,7 +546,9 @@ export class ExamService {
   }
 
   private async examDayFor(p: Principal, date: string): Promise<ExamDayDto> {
-    const sittings = await this.listSittings(p, { date });
+    // The day board wants the day's SITTINGS, not the envelope. One day is
+    // bounded by the timetable, so the page cap can never bite here.
+    const { items: sittings } = await this.listSittings(p, { date });
     // Register tallies for the whole day in one read, so a hall shows how many
     // failed to turn up next to how many were expected.
     const tallies = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
