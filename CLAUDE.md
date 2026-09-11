@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **321 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **322 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **321 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **322 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1179,6 +1179,13 @@ These are the rules; the log is why each one exists.
 - **A gate that walks must assert it scanned something** — a walk that finds no
   files produces no offenders and passes green.
 - **A test on a helper proves nothing about its caller.** Drive the real service.
+- **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY ON THE CLOCK.** The
+  report card prints "Generated DD/MM/YYYY, HH:MM:SS", so `not.toMatch(/\b33\b/)`
+  over the extracted PDF fails ~3.3% of runs — which presents as a flaky suite
+  and is actually a wrong assertion. The POSITIVE form is worse: `toMatch(/\b29\b/)`
+  passes with the cell wrong whenever the clock reads `:29:`. Read the CELL
+  (`cells[indexOf(row) + 1]`). And pin the collision as a test rather than hoping:
+  fake `Date` only (`doNotFake` the timer family, pdfkit needs real ones).
 - **Anchor a test to the PROPERTY, not to the text.** Fixed-text assertions have
   gone red on changes that STRENGTHENED what they guard nine times.
 - **An over-wide gate is the same failure as a blind one** — it teaches its next

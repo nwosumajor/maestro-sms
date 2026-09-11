@@ -680,9 +680,21 @@ describe("a component mark above the school's own maximum", () => {
         ],
       } as never),
     );
-    // C.A. = 12 + 7 + 10 = 29, never 12 + 7 + 14 = 33.
-    expect(t).toMatch(/\b29\b/);
-    expect(t).not.toMatch(/\b33\b/);
+    // READ THE CELL, not the document — the same correction the exam-column
+    // test three above already carries, left unmade here.
+    //
+    // This was `toMatch(/\b29\b/)` and `not.toMatch(/\b33\b/)` over the whole
+    // page, and the card prints "Generated 11/09/2026, 18:57:56" at its foot. A
+    // bare 33 matches whenever the clock's MINUTE or SECOND reads 33 — about
+    // 3.3% of runs, which is exactly how this failed once in a full suite and
+    // passed alone and on re-run. The positive half was worse: `\b29\b` would
+    // have matched a clock reading :29: and passed with the cell WRONG.
+    const cells = t.split("\n");
+    const at = cells.indexOf("English");
+    expect(at).toBeGreaterThan(-1);
+    expect(cells[at + 1]).toBe("29"); // C.A. = 12 + 7 + 10, the class note clamped
+    expect(cells[at + 1]).not.toBe("33"); // never 12 + 7 + 14, the raw marks
+    expect(cells[at + 2]).toBe("30"); // and the exam, within its maximum, untouched
   });
 
   it("prints a dash for a component nobody has marked, never a zero", async () => {
@@ -715,10 +727,63 @@ describe("a component mark above the school's own maximum", () => {
     expect(cells[at + 2]).toBe("—");
   });
 
+  it("is not a coin toss on the clock", async () => {
+    // THE FLAKE ITSELF, pinned so it cannot come back quietly.
+    //
+    // The card prints "Generated DD/MM/YYYY, HH:MM:SS" at its foot, so any
+    // assertion made over the WHOLE document against a two-digit number is a
+    // lottery on the minute and the second — about 3.3% of runs. That is how
+    // this suite failed once inside a full run and passed alone and on re-run,
+    // which reads as "flaky infrastructure" rather than "the assertion is
+    // wrong". It was the assertion.
+    //
+    // The clock is pinned to 18:33:33 — the collision — and only Date is faked,
+    // because pdfkit's own stream work needs real timers.
+    jest.useFakeTimers({ doNotFake: ["setTimeout", "setInterval", "setImmediate", "nextTick", "queueMicrotask"] });
+    jest.setSystemTime(new Date("2026-09-11T18:33:33Z"));
+    try {
+      const t = textOf(
+        await render({
+          components: LOW_EXAM,
+          subjects: [
+            {
+              subjectId: "s1", subjectName: "English", exam: 30, midterm: 12, assignment: 7,
+              classNote: 14, total: 59, grade: "C", complete: true, position: 4, subjectRanked: 10,
+            },
+          ],
+        } as never),
+      );
+      // The document really does contain a stray 33 — so the OLD assertion
+      // (`not.toMatch(/\b33\b/)`) would fail right here, on a correct card.
+      expect(t).toMatch(/Generated/);
+      expect(t).toMatch(/\b33\b/);
+      // And the cell is right regardless, which is the only thing that matters.
+      const cells = t.split("\n");
+      const at = cells.indexOf("English");
+      expect(at).toBeGreaterThan(-1);
+      expect(cells[at + 1]).toBe("29");
+    } finally {
+      // CLEARED, not merely switched off: a lingering fake timer keeps the jest
+      // worker alive and is force-exited, intermittently and only when another
+      // file runs after this one in the same worker.
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
+  });
+
   it("leaves a mark within the maximum exactly as the teacher entered it", async () => {
     // Clamping must not become rounding: the ordinary case is untouched.
+    //
+    // By cell, for the reason above. `toMatch(/\b50\b/)` over the document is
+    // satisfied by a clock reading :50: — a green test that never looked at the
+    // mark. 81 cannot appear in a time, which is precisely why a rule that
+    // depends on WHICH number you assert is not a rule.
     const t = textOf(await render());
-    expect(t).toMatch(/\b50\b/);
-    expect(t).toMatch(/\b81\b/);
+    const cells = t.split("\n");
+    const at = cells.indexOf("Mathematics");
+    expect(at).toBeGreaterThan(-1);
+    expect(cells[at + 1]).toBe("31"); // C.A. = 15 + 8 + 8, all within maximum
+    expect(cells[at + 2]).toBe("50"); // the exam exactly as entered
+    expect(cells[at + 3]).toBe("81"); // and the total beside them
   });
 });

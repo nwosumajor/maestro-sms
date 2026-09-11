@@ -14906,3 +14906,48 @@ Gate: `two-years-of-sittings-nobody-could-reach.spec.ts` (8 cases),
 mutation-validated four ways — the total measured off the fetched page, the
 count ignoring the filter, the `id` tiebreaker dropped, and the `scheduleId`
 filter ignored.
+
+### The flaky report-card test was not flaky infrastructure — it was the assertion
+
+`reportcard-pdf.spec.ts` failed once inside a full run and passed alone and on
+re-run. That shape reads as environment trouble, and it was nothing of the kind.
+
+The assertion was `expect(t).not.toMatch(/\b33\b/)` over the ENTIRE extracted
+PDF, and the card prints at its foot:
+
+```
+Term weighting: Exam 40 · Midterm test 20 · … = 100.    Generated 11/09/2026, 18:57:56.
+```
+
+A bare `\b33\b` matches whenever the clock's MINUTE or SECOND reads 33 — roughly
+**3.3% of runs**, which is exactly the observed rate.
+
+**The positive half was worse.** `expect(t).toMatch(/\b29\b/)` over the same
+document would have PASSED with the cell wrong, any time the clock read `:29:` —
+a green test that never looked at the mark. A whole-document numeric assertion
+is unsound in both directions, and only the negative one announces itself.
+
+// GOTCHA, and the reason this is worth an entry: **the test THREE LINES ABOVE
+had already been fixed for this, and carried the explanation** — "READ THE CELL,
+not the document. `not.toMatch(/\b42\b/)` over the whole page went red the moment
+the card grew a generated-at timestamp, because 5:42 pm contains 42 — the same
+accident this repo has recorded three times." Somebody reasoned it out, wrote it
+down, fixed the file in front of them, and left the adjacent test. Sibling
+asymmetry inside one `describe`, twenty lines apart.
+
+Both now read the CELL (`cells[at + 1]`), like their fixed sibling. A third
+assertion in the same file — `toMatch(/\b50\b/)`, where 50 is a plausible clock
+value — was swept at the same time; its partner `\b81\b` cannot appear in a
+time, which is precisely why "is this number safe?" is not a rule anybody can
+apply.
+
+**The flake is now a TEST rather than a hope.** `is not a coin toss on the clock`
+pins the system clock to 18:33:33 — the collision — and asserts BOTH that the
+document really does contain a stray 33 (so the old assertion would fail on a
+correct card) AND that the cell still reads 29. Verified by reinstating the old
+assertion inside it: it goes red immediately. Only `Date` is faked
+(`doNotFake` the timer family), because pdfkit's stream work needs real ones,
+and the timers are CLEARED rather than merely switched off.
+
+Mutation-validated: removing the clamp entirely, and turning it into a rounding
+rule, each fail the right named tests.
