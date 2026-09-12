@@ -742,27 +742,36 @@ describe("a co-host is a host for the things that matter", () => {
           ),
         ),
       },
-      meetingSlot: {
-        // HONOURS the where. A mock that returns the row whatever is asked makes
-        // "the co-host can see it" pass even when the filter that lets them see
-        // it has been deleted — which is exactly what happened the first time.
-        findMany: jest.fn(({ where }: { where: Record<string, unknown> }) => {
+      meetingSlot: (() => {
+        const ROW = {
+          id: "sl1", teacherId: "OWNER", startsAt: new Date("2099-01-01T09:00:00Z"),
+          endsAt: new Date("2099-01-01T10:00:00Z"), capacity: 1, location: null, note: null,
+          active: true, provider: "ZOOM", joinUrl: "https://zoom.us/j/123", audienceKind: "STUDENT",
+          audienceRef: null, kind: "APPOINTMENT",
+        };
+        // HONOURS the where — scope AND the startsAt window. A mock that returns
+        // the row whatever is asked makes "the co-host can see it" pass even when
+        // the filter that lets them see it has been deleted (which is what
+        // happened the first time), and a `count` drawn from a DIFFERENT
+        // predicate than `findMany` would vouch for a total that does not
+        // describe the page.
+        const match = (where: Record<string, unknown> = {}) => {
           const or = (where?.OR ?? []) as Array<Record<string, unknown>>;
           const byOwner = where?.teacherId === "OWNER";
           const byOr = or.some(
             (c) => c.teacherId === "OWNER" || ((c.id as { in?: string[] })?.in ?? []).includes("sl1"),
           );
-          if (!byOwner && !byOr) return Promise.resolve([]);
-          return Promise.resolve([
-          {
-            id: "sl1", teacherId: "OWNER", startsAt: new Date("2099-01-01T09:00:00Z"),
-            endsAt: new Date("2099-01-01T10:00:00Z"), capacity: 1, location: null, note: null,
-            active: true, provider: "ZOOM", joinUrl: "https://zoom.us/j/123", audienceKind: "STUDENT",
-            audienceRef: null, kind: "APPOINTMENT",
-          },
-        ]);
-        }),
-      },
+          if (!byOwner && !byOr) return [];
+          const w = where?.startsAt as { gte?: Date; lt?: Date } | undefined;
+          if (w?.gte && ROW.startsAt < w.gte) return [];
+          if (w?.lt && ROW.startsAt >= w.lt) return [];
+          return [ROW];
+        };
+        return {
+          findMany: jest.fn(({ where }: { where: Record<string, unknown> }) => Promise.resolve(match(where))),
+          count: jest.fn(({ where }: { where: Record<string, unknown> }) => Promise.resolve(match(where).length)),
+        };
+      })(),
       meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), findMany: jest.fn().mockResolvedValue([]) },
       user: { findMany: jest.fn().mockResolvedValue([{ id: "t2", name: "Colleague" }]) },
       classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
@@ -781,7 +790,7 @@ describe("a co-host is a host for the things that matter", () => {
 
   it("SEES a meeting they were added to, though they do not own it", async () => {
     const out = await listHarness(["sl1"]).mySlots(colleague);
-    expect(out.map((s) => s.id)).toContain("sl1");
+    expect(out.items.map((s) => s.id)).toContain("sl1");
   });
 
   it("GETS the join link before the window, as the organiser does", async () => {
@@ -789,12 +798,12 @@ describe("a co-host is a host for the things that matter", () => {
     // the link — they are in the room, and being told to attend a call you
     // cannot open is the failure this prevents.
     const out = await listHarness(["sl1"]).mySlots(colleague);
-    expect(out[0].joinUrl).toBe("https://zoom.us/j/123");
+    expect(out.items[0].joinUrl).toBe("https://zoom.us/j/123");
   });
 
   it("lists the colleagues on the slot, so a parent knows who will be there", async () => {
     const out = await listHarness(["sl1"]).mySlots(colleague);
-    expect((out[0].cohosts ?? []).map((c) => c.name)).toContain("Colleague");
+    expect((out.items[0].cohosts ?? []).map((c) => c.name)).toContain("Colleague");
   });
 });
 

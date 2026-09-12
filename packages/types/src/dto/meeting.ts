@@ -52,3 +52,35 @@ export interface MeetingBookingDto {
   status: string;
   note: string | null;
 }
+
+/**
+ * Which end of a diary a meetings list is showing.
+ *
+ * These lists are read to answer "what is next", and both were ordered
+ * `startsAt ASC` over the WHOLE history under a cap — so the rows returned were
+ * the OLDEST ever recorded and the cap discarded the future. An ascending cap on
+ * a diary is the mirror of the newest-first cap this repo records against a
+ * register: the same defect pointed at the other end of time.
+ */
+export type MeetingWhen = "upcoming" | "past";
+
+/** A page of meeting slots, with the total its filter actually matched. */
+export interface MeetingSlotPageDto {
+  items: MeetingSlotDto[];
+  /** Counted in SQL over the same predicate the page is drawn from. */
+  total: number;
+  /** How many rows this page holds — `total > shown` means there are more. */
+  shown: number;
+  when: MeetingWhen;
+  /** The other end, so a screen can say what it is not showing. */
+  otherTotal: number;
+}
+
+/** A page of a parent's own bookings. Same shape, same reasoning. */
+export interface MeetingBookingPageDto {
+  items: MeetingBookingDto[];
+  total: number;
+  shown: number;
+  when: MeetingWhen;
+  otherTotal: number;
+}

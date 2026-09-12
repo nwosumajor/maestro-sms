@@ -24,6 +24,33 @@ type Booking = Serialized<MeetingBookingDto>;
  *  dropdown can never offer a scope the server would refuse. */
 export type AudienceChoice = { kind: string; ref: string | null; label: string };
 
+type SlotPage = { items: Slot[]; total: number; shown: number; when: "upcoming" | "past"; otherTotal: number };
+type BookingPage = { items: Booking[]; total: number; shown: number; when: "upcoming" | "past"; otherTotal: number };
+
+/**
+ * Says what the list is showing and what it is NOT — the total behind the cap,
+ * and a way to the other end of the diary. A capped list that says nothing is
+ * indistinguishable from a complete one.
+ */
+function DiaryNote({ page, base }: { page: { total: number; shown: number; when: "upcoming" | "past"; otherTotal: number }; base: string }) {
+  const other = page.when === "past" ? "upcoming" : "past";
+  return (
+    <span className="text-xs font-normal text-muted-foreground">
+      {page.total > page.shown
+        ? `showing ${page.shown} of ${page.total}`
+        : `${page.total} ${page.when === "past" ? "past" : "upcoming"}`}
+      {page.otherTotal > 0 && (
+        <>
+          {" · "}
+          <a className="underline hover:text-foreground" href={other === "past" ? `${base}?when=past` : base}>
+            {page.otherTotal} {other}
+          </a>
+        </>
+      )}
+    </span>
+  );
+}
+
 export function MeetingsClient({
   canHost,
   canBook,
@@ -35,9 +62,12 @@ export function MeetingsClient({
 }: {
   canHost: boolean;
   canBook: boolean;
-  mySlots: Slot[];
+  /** A PAGE, not an array: it carries the total its filter matched and how
+   *  many rows sit at the other end of the diary. Both lists used to arrive as
+   *  the oldest rows ever recorded under a silent cap. */
+  mySlots: SlotPage;
   openSlots: Slot[];
-  myBookings: Booking[];
+  myBookings: BookingPage;
   children: { studentId: string; studentName: string }[];
   /** Audience options for the host form, from the server. Empty = whole-school
    *  only, which is what every slot was before this existed. */
@@ -223,13 +253,23 @@ export function MeetingsClient({
         </Card>
       )}
 
-      {canHost && mySlots.length > 0 && (
+      {canHost && (mySlots.total > 0 || mySlots.otherTotal > 0) && (
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base">Your slots</CardTitle></CardHeader>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-baseline justify-between gap-3 text-base">
+              <span>Your slots{mySlots.when === "past" ? " · past" : ""}</span>
+              <DiaryNote page={mySlots} base="/meetings" />
+            </CardTitle>
+          </CardHeader>
           <CardContent className="p-0">
+            {mySlots.items.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-muted-foreground">
+                {mySlots.when === "past" ? "No past slots." : "Nothing coming up."}
+              </p>
+            ) : (
             <table className="w-full text-sm">
               <tbody>
-                {mySlots.map((s) => (
+                {mySlots.items.map((s) => (
                   <tr key={s.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-2">
                       {dateTime(s.startsAt)}
@@ -277,6 +317,7 @@ export function MeetingsClient({
                 ))}
               </tbody>
             </table>
+            )}
           </CardContent>
         </Card>
       )}
@@ -335,13 +376,23 @@ export function MeetingsClient({
         </Card>
       )}
 
-      {canBook && myBookings.length > 0 && (
+      {canBook && (myBookings.total > 0 || myBookings.otherTotal > 0) && (
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base">Your bookings</CardTitle></CardHeader>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-baseline justify-between gap-3 text-base">
+              <span>Your bookings{myBookings.when === "past" ? " · past" : ""}</span>
+              <DiaryNote page={myBookings} base="/meetings" />
+            </CardTitle>
+          </CardHeader>
           <CardContent className="p-0">
+            {myBookings.items.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-muted-foreground">
+                {myBookings.when === "past" ? "No past bookings." : "Nothing coming up."}
+              </p>
+            ) : (
             <table className="w-full text-sm">
               <tbody>
-                {myBookings.map((b) => (
+                {myBookings.items.map((b) => (
                   <tr key={b.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-2">{dateTime(b.startsAt)}</td>
                     <td className="px-4 py-2 text-muted-foreground">{b.studentName} · {b.teacherName ?? "Teacher"}{b.location ? ` · ${b.location}` : ""}</td>
@@ -352,6 +403,7 @@ export function MeetingsClient({
                 ))}
               </tbody>
             </table>
+            )}
           </CardContent>
         </Card>
       )}

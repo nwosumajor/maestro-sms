@@ -126,10 +126,50 @@ describe("a host can see who booked", () => {
     "utf8",
   ) as string;
 
-  it("their own slots carry the bookings", () => {
-    const mine = SRC.slice(SRC.indexOf("async mySlots("), SRC.indexOf("async mySlots(") + 2200);
-    expect(mine).toMatch(/bookingsForHost\(tx, slots\.map/);
-    expect(mine).toMatch(/bookings: bookings\.get\(s\.id\) \?\? \[\]/);
+  it("their own slots carry the bookings", async () => {
+    // DRIVEN, not grepped. This read a fixed 2,200-character window of the
+    // source and went red the moment `mySlots` grew a date filter — the method
+    // was longer than the window, so the assertion fell off the end of its own
+    // extract while the property it names held perfectly. A fixed source window
+    // is a trap this repo has sprung several times; the behaviour is reachable,
+    // so assert the behaviour.
+    const slot = {
+      id: "sl-1", teacherId: "teach-1", startsAt: new Date(Date.now() + 86_400_000),
+      endsAt: new Date(Date.now() + 90_000_000), capacity: 2, location: "Hall", note: null,
+      active: true, provider: null, joinUrl: null, audienceKind: "SCHOOL", audienceRef: null,
+      kind: "APPOINTMENT",
+    };
+    const tx = {
+      meetingSlot: {
+        findMany: jest.fn(async () => [slot]),
+        count: jest.fn(async () => 1),
+      },
+      meetingBooking: {
+        findMany: jest.fn(async () => [
+          { id: "bk-1", slotId: "sl-1", studentId: "stu-1", parentId: "parent-1", status: "BOOKED", note: null },
+        ]),
+        groupBy: jest.fn(async () => [{ slotId: "sl-1", _count: { _all: 1 } }]),
+      },
+      meetingCohost: { findMany: jest.fn(async () => []) },
+      user: { findMany: jest.fn(async () => [{ id: "stu-1", name: "Pupil One" }]) },
+      classSubjectTeacher: { findMany: jest.fn(async () => []) },
+      class: { findMany: jest.fn(async () => []) },
+      school: { findFirst: jest.fn(async () => ({ country: null, timezone: null })) },
+    } as unknown as TenantTx;
+    const svc = new MeetingService(
+      {
+        runAsTenant: <T,>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+        runAsTenantReadOnly: <T,>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+      } as never,
+      { record: jest.fn() } as never,
+      { enqueue: jest.fn(), enqueueMany: jest.fn() } as never,
+      { forSchool: jest.fn(async () => ({ timezone: "Africa/Lagos" })), inTx: jest.fn(async () => ({ timezone: "Africa/Lagos" })) } as never,
+    );
+    const mine = await svc.mySlots(teacher);
+    expect(mine.items).toHaveLength(1);
+    // The host gets the actual bookings, not merely a count.
+    expect(mine.items[0].bookings?.map((b) => b.id)).toEqual(["bk-1"]);
+    expect(mine.items[0].booked).toBe(1);
   });
 
   it("the PARENT-facing list does not — one family never sees another's", () => {

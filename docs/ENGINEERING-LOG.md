@@ -15037,3 +15037,95 @@ restoring the false Dockerfile comment fails the Dockerfile test.
 // succeeded with layers cached. The API had already pushed, so the run was
 // half-applied — which is why the script's verify step checks BOTH images
 // rather than trusting the exit status of the last one.
+
+### Parent-teacher meetings at 5,000 schools, three years deep
+
+A diary read to answer "what is next" answered "what was first".
+
+`mySlots` (a host's own slots) and `myBookings` (a parent's own bookings) both
+read `orderBy startsAt ASC` under a cap, with **no date filter at all**. An
+ascending cap keeps the OLDEST rows, so what it discards is the future — the
+only part of a diary anyone opens it for.
+
+Measured against the running stack on a 61-teacher secondary three years in —
+nine parents' evenings, twenty slots per teacher per evening, 10,980 slots of
+which 1,220 were still to come:
+
+    school-wide reader   returned 200   range 2023-11-12 .. 2023-11-12   upcoming 0
+    teacher, 4 yrs       returned 200   range 2022-11-12 .. 2026-03-12   upcoming 0
+    parent's bookings    returned  11   FIRST row 2022-11-12, next month's LAST
+
+The school-wide range is the sharpest fact here: **a single day, three years
+earlier**. That screen could never advance, because every slot opened from then
+on sorts after the 200 oldest. A head with 1,220 appointments ahead of them saw
+none of them, on a page that looked perfectly healthy.
+
+The teacher case crosses in **year four** — at three years they own 180 slots
+and the cap is 200, so a school piloting this for a year would see nothing
+wrong. Adding a fourth year of tenure (220 slots) was measured too: 200
+returned, ending six months ago, none of their own upcoming appointments.
+
+This is the MIRROR of the newest-first cap this log already records against a
+register. There the cap eats the oldest row and a register exists to surface the
+oldest; here it eats the newest and a diary exists to surface what is next. One
+rule covers both: **order so the cap keeps what the screen is FOR**, and say how
+much is behind it.
+
+**The correct sibling was one method away.** `listOpenSlots` — the parent's
+BOOKABLE list — filters `startsAt >= now`, pages in batches, and carries a long
+comment reasoning about exactly this failure ("the earliest slots are exactly
+the ones that fill first, so the busier the evening, the more of the list was
+already gone"). Somebody worked this out properly for one of the three lists and
+never swept the other two. The same file's meeting-REQUEST queue had also been
+paged and counted, with its own comment about why an in-memory split cannot see
+past a cap. Two of four doors guarded, and the reasoning written down beside the
+two that were not.
+
+`myBookings` went further and SAID it was right. Its docstring read
+"(BOOKED, future first)" above a query with no date filter — a comment asserting
+a behaviour the code never had, which is why nobody re-read the query.
+
+FIX. Both default to UPCOMING, soonest-first, and return `{items, total, shown,
+when, otherTotal}`. `?when=past` reaches the history, most-recent-first, so each
+end is ordered to keep the rows NEAREST today — bounding a read is only honest
+if the rest stays reachable. Totals are counted in SQL over the same predicate
+the page is drawn from. The boundary is the SCHOOL's start of day
+(`schoolToday(tz)`), not `now`: a host looking at 17:00 is still working today
+and this morning's 09:00 appointment belongs on today's list. That differs
+deliberately from `listOpenSlots`, which is right to use `now` — you cannot book
+a slot that has started.
+
+Live, after: teacher 20 upcoming with 200 history reachable; principal 200 shown
+of 1,220 with 9,800 behind; parent's next meeting first with 10 past reachable.
+Web renders `Your slots showing 200 of 1220 · 9800 past` and
+`Your bookings 1 upcoming · 10 past`, both linking to the other end.
+
+// GOTCHA: an existing gate asserted `mySlots` behaviour by slicing a FIXED
+// 2,200 characters of its source and matching a regex. Adding the date filter
+// made the method longer than the window, so the assertion fell off the end of
+// its own extract and went red while the property it named held perfectly. A
+// fixed source window has now sprung in this repo several times. It was
+// re-anchored by DRIVING the service and asserting the returned row carries its
+// bookings — then mutation-validated by emptying `bookings`, which turns it red.
+
+// GOTCHA on the double: `bookingsForHost` calls `meetingBooking.findMany` with
+// no `orderBy` and a `slotId in [...]` filter. A first draft treated an absent
+// `orderBy` as descending and ignored the id filter — it threw on
+// `JSON.stringify(undefined)`, which read as a code fault rather than a fixture
+// one. A double must model the CONTRACT, and its `count` must draw from the
+// SAME predicate as its `findMany` or it vouches for a total that does not
+// describe the page.
+
+// Not fixed, deliberately: the breach register (`listBreaches`, take 200
+// newest-first; `posture`, take 500 with NO orderBy at all) carries both shapes
+// and would be a genuine defect at volume — but a school logs single-digit
+// breaches a year, so the cap does not bite and a fixture large enough to make
+// it bite would not describe any real school. Recorded here rather than
+// manufactured into a fix.
+
+// Verified sound on the way past, worth not re-checking: the accessibility
+// exemption path. `integrity.service` resolves an active
+// StudentIntegrityExemption per student and the client gates ALL capture on
+// `integrityEnabled && consentGranted && !exempt`, so an exempt pupil gets
+// neither friction nor surveillance — the more restrictive reading, with the
+// reasoning written beside it.

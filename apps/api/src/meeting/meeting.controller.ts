@@ -2,8 +2,8 @@ import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/commo
 import { z } from "zod";
 import { MEETING_PERMISSIONS , MEETING_REQUEST_TOPICS} from "@sms/types";
 import { MEETING_PROVIDERS } from "@sms/types";
-import type { MeetingBookingDto, MeetingRequestDto,
-  MeetingRequestPageDto, MeetingSlotDto } from "@sms/types";
+import type { MeetingBookingDto, MeetingBookingPageDto, MeetingRequestDto,
+  MeetingRequestPageDto, MeetingSlotDto, MeetingSlotPageDto, MeetingWhen } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { narrowStatus, pageNumber } from "../common/status-filter";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -62,6 +62,12 @@ const meetingDecideSchema = z.object({
   note: z.string().max(2000).optional(),
 });
 
+
+/** Anything but the explicit "past" reads as the default, upcoming. */
+function whenOf(raw?: string): MeetingWhen {
+  return raw === "past" ? "past" : "upcoming";
+}
+
 @Controller("meetings")
 export class MeetingController {
   constructor(
@@ -72,8 +78,11 @@ export class MeetingController {
   // --- host (teacher / staff) ---
   @Get("slots/mine")
   @RequirePermission(MEETING_PERMISSIONS.MEETING_HOST)
-  mySlots(@CurrentPrincipal() p: Principal): Promise<MeetingSlotDto[]> {
-    return this.meetings.mySlots(p);
+  mySlots(
+    @CurrentPrincipal() p: Principal,
+    @Query("when") when?: string,
+  ): Promise<MeetingSlotPageDto> {
+    return this.meetings.mySlots(p, whenOf(when));
   }
 
 
@@ -171,8 +180,11 @@ export class MeetingController {
 
   @Get("bookings/mine")
   @RequirePermission(MEETING_PERMISSIONS.MEETING_BOOK)
-  myBookings(@CurrentPrincipal() p: Principal): Promise<MeetingBookingDto[]> {
-    return this.meetings.myBookings(p);
+  myBookings(
+    @CurrentPrincipal() p: Principal,
+    @Query("when") when?: string,
+  ): Promise<MeetingBookingPageDto> {
+    return this.meetings.myBookings(p, whenOf(when));
   }
 
   @Post("bookings")

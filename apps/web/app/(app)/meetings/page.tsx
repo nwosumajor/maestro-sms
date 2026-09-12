@@ -1,4 +1,4 @@
-import type { MeetingSlotDto, MeetingBookingDto, ChildOverviewDto, Serialized, MeetingRequestPageDto } from "@sms/types";
+import type { MeetingSlotDto, MeetingBookingDto, MeetingSlotPageDto, MeetingBookingPageDto, ChildOverviewDto, Serialized, MeetingRequestPageDto } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -12,7 +12,18 @@ export const dynamic = "force-dynamic";
 
 const EMPTY_REQUEST_PAGE = { items: [], total: 0, pendingTotal: 0, page: 1, pageSize: 50 };
 
-export default async function MeetingsPage() {
+const EMPTY_SLOT_PAGE = { items: [], total: 0, shown: 0, when: "upcoming" as const, otherTotal: 0 };
+const EMPTY_BOOKING_PAGE = { items: [], total: 0, shown: 0, when: "upcoming" as const, otherTotal: 0 };
+
+export default async function MeetingsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ when?: string }>;
+}) {
+  // The diary defaults to what is COMING; `?when=past` reaches the history.
+  // Bounding a read is only honest if the rest is still reachable.
+  const when = (await searchParams)?.when === "past" ? "past" : "upcoming";
+  const q = when === "past" ? "?when=past" : "";
   const session = await auth();
   const user = session!.user;
   const canHost = hasPermission(user.permissions, "meeting.host");
@@ -22,9 +33,9 @@ export default async function MeetingsPage() {
   if (!canHost && !canBook) redirect("/dashboard");
 
   const [mySlots, openSlots, myBookings, family, audiences, requestQueue, requestHistory, teachers] = await Promise.all([
-    canHost ? apiGet<Serialized<MeetingSlotDto>[]>("/meetings/slots/mine") : Promise.resolve([]),
+    canHost ? apiGet<Serialized<MeetingSlotPageDto>>(`/meetings/slots/mine${q}`) : Promise.resolve(null),
     canBook ? apiGet<Serialized<MeetingSlotDto>[]>("/meetings/slots/open") : Promise.resolve([]),
-    canBook ? apiGet<Serialized<MeetingBookingDto>[]>("/meetings/bookings/mine") : Promise.resolve([]),
+    canBook ? apiGet<Serialized<MeetingBookingPageDto>>(`/meetings/bookings/mine${q}`) : Promise.resolve(null),
     canBook ? apiGet<{ children: Serialized<ChildOverviewDto>[] }>("/family/overview") : Promise.resolve({ children: [] }),
     // The scopes THIS host may address, from the server — so the picker can
     // never offer one the create endpoint would refuse.
@@ -67,9 +78,9 @@ export default async function MeetingsPage() {
         <MeetingsClient
           canHost={canHost}
           canBook={canBook}
-          mySlots={mySlots ?? []}
+          mySlots={mySlots ?? EMPTY_SLOT_PAGE}
           openSlots={openSlots ?? []}
-          myBookings={myBookings ?? []}
+          myBookings={myBookings ?? EMPTY_BOOKING_PAGE}
           children={children}
           audiences={audiences ?? []}
         />

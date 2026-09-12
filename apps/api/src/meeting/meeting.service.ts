@@ -14,8 +14,8 @@
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { STILL_HERE } from "../common/still-here";
-import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
-import { CLASS_STREAM_LABELS, MEETING_PERMISSIONS, MEETING_PROVIDERS, NON_STAFF_ROLE_NAMES, SUBJECT_STAGES, describeAudience, isAppointment, isMeetingJoinOpen, meetingAudienceProblem, meetingJoinOpensAt, normalizeMeetingUrl, parseStreamRef, resolveRegion, schoolTimeString, streamAudienceRef, type MeetingAudience, type MeetingAudienceKind } from "@sms/types";
+import type { MeetingSlotDto, MeetingBookingDto, MeetingSlotPageDto, MeetingBookingPageDto, MeetingWhen } from "@sms/types";
+import { CLASS_STREAM_LABELS, MEETING_PERMISSIONS, MEETING_PROVIDERS, NON_STAFF_ROLE_NAMES, SUBJECT_STAGES, describeAudience, isAppointment, isMeetingJoinOpen, meetingAudienceProblem, meetingJoinOpensAt, normalizeMeetingUrl, parseStreamRef, resolveRegion, schoolToday, schoolTimeString, streamAudienceRef, type MeetingAudience, type MeetingAudienceKind } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -65,6 +65,14 @@ function streamLabel(stage: string | null, level: number | null, stream: string 
  * things drift. Both used `toISOString()` — the server's UTC — on the message
  * that tells a family when to turn up.
  */
+
+/**
+ * One page of a diary. Both ends are ordered so the cap keeps the rows NEAREST
+ * to today, which is what makes a cap on a diary safe: whichever end is being
+ * read, what falls off is the far distance and the total says how much.
+ */
+const SLOT_PAGE = 200;
+const BOOKING_PAGE = 100;
 
 @Injectable()
 export class MeetingService {
@@ -561,8 +569,29 @@ export class MeetingService {
     return { withdrawn: true, told };
   }
 
-  /** The caller's own hosted slots (teacher/staff) with booking counts. */
-  async mySlots(p: Principal): Promise<MeetingSlotDto[]> {
+  /**
+   * The caller's own hosted slots (teacher/staff) with booking counts.
+   *
+   * DEFAULTS TO UPCOMING. This was `orderBy startsAt ASC, take: 200` over the
+   * whole history with no date filter, which returns the OLDEST 200 slots a
+   * host has ever held — so the cap discards exactly the appointments the
+   * screen exists to show. Measured on a 61-teacher secondary three years in
+   * (10,980 slots, 1,220 of them still to come): a school-wide reader got 200
+   * rows spanning a SINGLE DAY three years earlier and ZERO upcoming; a teacher
+   * four years into their own tenure got 200 rows ending six months ago and
+   * likewise none of their own. The sibling one method down (`listOpenSlots`)
+   * had filtered `startsAt >= now` and paged all along, with a comment
+   * reasoning about this very failure — it was never swept to the host's list.
+   *
+   * The boundary is the SCHOOL's start of day, not `now`: a host looking at
+   * 17:00 is still working today, and an appointment at 09:00 this morning
+   * belongs on today's list.
+   */
+  async mySlots(p: Principal, when: MeetingWhen = "upcoming"): Promise<MeetingSlotPageDto> {
+    const region = await this.region.forSchool(p.schoolId);
+    const dayStart = schoolToday(region.timezone);
+    const window = when === "past" ? { lt: dayStart } : { gte: dayStart };
+    const other = when === "past" ? { gte: dayStart } : { lt: dayStart };
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
       // A colleague added to a meeting has to be able to SEE it, or being added
@@ -574,15 +603,23 @@ export class MeetingService {
             where: { teacherId: p.userId },
             select: { slotId: true },
           })) as Array<{ slotId: string }>);
-      const slots = await tx.meetingSlot.findMany({
-        where: staffWide
-          ? {}
-          : attending.length > 0
-            ? { OR: [{ teacherId: p.userId }, { id: { in: attending.map((a) => a.slotId) } }] }
-            : { teacherId: p.userId },
-        orderBy: { startsAt: "asc" },
-        take: 200,
-      });
+      const scope = staffWide
+        ? {}
+        : attending.length > 0
+          ? { OR: [{ teacherId: p.userId }, { id: { in: attending.map((a) => a.slotId) } }] }
+          : { teacherId: p.userId };
+      // Upcoming reads soonest-first; history reads most-recent-first. Each end
+      // is ordered so the cap keeps the rows NEAREST to today.
+      const [slots, total, otherTotal] = await Promise.all([
+        tx.meetingSlot.findMany({
+          where: { ...scope, startsAt: window },
+          orderBy: { startsAt: when === "past" ? "desc" : "asc" },
+          take: SLOT_PAGE,
+        }),
+        // Counted in SQL over the SAME predicate the page is drawn from.
+        tx.meetingSlot.count({ where: { ...scope, startsAt: window } }),
+        tx.meetingSlot.count({ where: { ...scope, startsAt: other } }),
+      ]);
       const counts = await this.bookingCounts(tx, slots.map((s: { id: string }) => s.id));
       // Host view only — see bookingsForHost.
       const bookings = await this.bookingsForHost(tx, slots.map((s: { id: string }) => s.id));
@@ -591,13 +628,14 @@ export class MeetingService {
       const cohosts = await this.cohostsFor(tx, slots as SlotRow[]);
       // A co-host must count as a host for the join link, so their ids ride on
       // the row rather than being looked up again inside toSlotDto.
-      return slots.map((s: SlotRow) => ({
+      const items = slots.map((s: SlotRow) => ({
         ...this.toSlotDto(
           { ...s, cohostIds: (cohosts.get(s.id) ?? []).map((c) => c.id) },
           counts.get(s.id) ?? 0, p, teacherNames.get(s.teacherId), namesFor(s), cohosts.get(s.id) ?? [],
         ),
         bookings: bookings.get(s.id) ?? [],
       }));
+      return { items, total, shown: items.length, when, otherTotal };
     });
   }
 
@@ -863,22 +901,42 @@ export class MeetingService {
     return { cancelled: true };
   }
 
-  /** A parent's own bookings (BOOKED, future first). */
-  async myBookings(p: Principal): Promise<MeetingBookingDto[]> {
+  /**
+   * A parent's own bookings, UPCOMING first by default.
+   *
+   * The docstring here said "BOOKED, future first" and the query had no date
+   * filter at all — `orderBy slot.startsAt ASC, take: 100` over every booking
+   * ever made. Measured on a family four years in: 11 bookings returned with
+   * the 2022 one FIRST and next month's LAST, and past the cap the upcoming
+   * meeting is the row that falls off. A comment asserting a behaviour the
+   * query never had is the shape this repo records; the fix is the filter, not
+   * a truer sentence.
+   */
+  async myBookings(p: Principal, when: MeetingWhen = "upcoming"): Promise<MeetingBookingPageDto> {
+    const region = await this.region.forSchool(p.schoolId);
+    const dayStart = schoolToday(region.timezone);
+    const window = when === "past" ? { lt: dayStart } : { gte: dayStart };
+    const other = when === "past" ? { gte: dayStart } : { lt: dayStart };
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const rows = await tx.meetingBooking.findMany({
-        where: { parentId: p.userId, status: "BOOKED" },
-        include: { slot: { select: { startsAt: true, teacherId: true, location: true } } },
-        orderBy: { slot: { startsAt: "asc" } },
-        take: 100,
-      });
+      const scope = { parentId: p.userId, status: "BOOKED" };
+      const [rows, total, otherTotal] = await Promise.all([
+        tx.meetingBooking.findMany({
+          where: { ...scope, slot: { startsAt: window } },
+          include: { slot: { select: { startsAt: true, teacherId: true, location: true } } },
+          orderBy: { slot: { startsAt: when === "past" ? "desc" : "asc" } },
+          take: BOOKING_PAGE,
+        }),
+        tx.meetingBooking.count({ where: { ...scope, slot: { startsAt: window } } }),
+        tx.meetingBooking.count({ where: { ...scope, slot: { startsAt: other } } }),
+      ]);
       type Row = BookingRow & { slot: { startsAt: Date; teacherId: string; location: string | null } };
       const withSlot = rows as Row[];
       const studentNames = await this.userNames(tx, withSlot.map((r) => r.studentId));
       const teacherNames = await this.userNames(tx, withSlot.map((r) => r.slot.teacherId));
-      return withSlot.map((r) =>
+      const items = withSlot.map((r) =>
         this.toBookingDto(r, r.slot.startsAt, studentNames.get(r.studentId) ?? "", teacherNames.get(r.slot.teacherId), r.slot.location),
       );
+      return { items, total, shown: items.length, when, otherTotal };
     });
   }
 

@@ -97,9 +97,10 @@ d("MeetingService (real Postgres)", () => {
 
   it("the parent sees their booking and can cancel it, freeing the slot", async () => {
     const mine = await svc.myBookings(parent());
-    expect(mine).toHaveLength(1);
-    await svc.cancelBooking(parent(), mine[0].id);
-    expect(await svc.myBookings(parent())).toHaveLength(0);
+    expect(mine.items).toHaveLength(1);
+    expect(mine.total).toBe(1);
+    await svc.cancelBooking(parent(), mine.items[0].id);
+    expect((await svc.myBookings(parent())).items).toHaveLength(0);
     const open = await svc.openSlots(otherParent());
     expect(open.some((s) => s.id === slotId)).toBe(true); // free again
   });
