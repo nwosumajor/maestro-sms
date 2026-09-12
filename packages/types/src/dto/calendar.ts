@@ -26,3 +26,17 @@ export interface CalendarEventDto {
   allDay: boolean;
   audience: string;
 }
+
+/**
+ * A window of the calendar, and whether anything was dropped getting it.
+ *
+ * The list used to be a bare array with two silent truncation points — the
+ * candidate read and the occurrence expansion. That silence is what let a
+ * five-year school's calendar return NOTHING while ten events sat inside the
+ * window: a full page and a complete page were indistinguishable.
+ */
+export interface CalendarWindowDto {
+  items: CalendarEventDto[];
+  /** True when the window holds more than this response could carry. */
+  truncated: boolean;
+}

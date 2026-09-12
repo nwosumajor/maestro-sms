@@ -1,6 +1,7 @@
 import type {
   AnalyticsOverviewDto,
   CalendarEventDto,
+  CalendarWindowDto,
   DashboardSummaryDto,
   GamesAnalyticsDto,
   NotificationInboxDto,
@@ -207,7 +208,7 @@ export default async function DashboardPage() {
     hasAnalytics ? apiGet<Overview>("/analytics/overview") : Promise.resolve(null),
     apiGet<Serialized<DashboardSummaryDto>>("/dashboard/summary"),
     apiGet<Inbox>("/notifications?limit=6"),
-    apiGet<Ev[]>(`/events?from=${since}`),
+    apiGet<Serialized<CalendarWindowDto>>(`/events?from=${since}`),
   ]);
 
   // apiGet returns null for ANY failure — a network error, an expired token, a
@@ -231,7 +232,7 @@ export default async function DashboardPage() {
   /** "—" reads as "not known"; 0 reads as "none", and they are not the same. */
   const num = (value: number, unknown: boolean) => (unknown ? "—" : String(value));
   const recent = (inbox?.items ?? []).slice(0, 6);
-  const upcoming = (events ?? [])
+  const upcoming = (events?.items ?? [])
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
     .slice(0, 5);
 

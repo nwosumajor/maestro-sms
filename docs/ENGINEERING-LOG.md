@@ -15219,3 +15219,66 @@ from year one returns it, where nothing could reach it before. Web renders
 // `aria-label`, never raising the ratchet: a placeholder disappears on focus and
 // is not an accessible name. Exactly the kind of exemption that becomes a hole
 // with a note on it.
+
+### The calendar that went blank at five years
+
+`listEvents` reads candidate rows `startsAt ASC, take: 500`, then expands each
+recurring series across the requested window. The candidate predicate was:
+
+    OR: [
+      { recurrence: "NONE", startsAt: { gte: from - 30d } },
+      { NOT: { recurrence: "NONE" } },          <- no lower bound at all
+    ]
+
+So EVERY recurring series ever created stayed a candidate for ever, including
+ones whose `recurrenceUntil` had passed years earlier. Ordered oldest-first, the
+dead series were fetched FIRST; `expandOccurrences` correctly returned nothing
+for each — `hardEnd` is the series' own `until`, so the walk never executes —
+and the 500-row budget was gone before the query reached anything current.
+
+Measured live on a five-year secondary: 600 weekly clubs, each run for one
+academic year and ended, plus 10 real events inside the window.
+
+    600 dead series -> 0 occurrences     calendar BLANK
+    495 dead series -> 5 occurrences     half the term missing, silently
+    480 dead series -> 10 occurrences    correct
+
+The candidate page was measured directly to confirm causation rather than
+correlation: all 500 slots held expired series, the newest of them a year old,
+and zero real events reached the page.
+
+**The middle row is the dangerous one.** A blank calendar at least looks broken.
+A calendar that has quietly dropped half of what the school put into it does
+not, and nothing on the page said a row had been left out. This is the silent-
+truncation class pointed at a screen a whole school reads.
+
+FIX, in two parts. A series that ended before the window opened cannot produce
+an occurrence in it, so it no longer qualifies as a candidate — open-ended
+series (`recurrenceUntil: null`) and still-running ones are untouched, which is
+the distinction the filter has to get right and the reason two separate tests
+guard it. And because a full page and a complete page were indistinguishable,
+the read now fetches ONE ROW PAST the cap and reports `truncated`, surfaced on
+the calendar as "This window holds more than is shown". Both truncation points —
+the candidate read and the occurrence expansion — feed that flag.
+
+Live, after: 0 -> 10 of 10 events shown with 600 dead series present, no dead
+series occupying a slot, `truncated` false; and with 520 live events in the
+window, `truncated` true and the banner rendered.
+
+// GOTCHA that cost me three probes: every page rendered 200 and showed neither
+// the events NOR the empty state. The API returned all ten when called
+// directly, the running container really did contain the new code (checked, not
+// assumed), and the web logged no error. The page was
+// **"Your password has expired"** — the 30-day forced reset had come due for the
+// demo accounts mid-session as the date rolled over, so every route redirected.
+// A probe that reads a rendered page is reading whatever the session lets it
+// see; assert something page-specific before believing an absence. Recovered by
+// snapshotting `passwordChangedAt`, refreshing it, and restoring it byte-exact
+// afterwards — never touching the bcrypt hash, which is unrecoverable.
+
+// GOTCHA in that restore: `while read ... done < file` with a `docker exec -i`
+// inside the loop restores exactly ONE row. The `-i` hands the container the
+// loop's stdin and it swallows the rest of the file. Read the rows into an
+// array first, or redirect the inner command from /dev/null. The diff against
+// the snapshot is what caught it — restoring without verifying would have left
+// two accounts silently altered.

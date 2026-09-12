@@ -20,6 +20,9 @@ const DEFAULT_WINDOW_DAYS = 120;
 const MAX_EVENT_SPAN_MS = 30 * 86_400_000;
 /** Hard cap on expanded occurrences so a wide window stays a bounded response. */
 const MAX_EXPANDED = 1000;
+// The candidate read's own bound, named so the truncation check cannot drift
+// from the `take` it is checking against.
+const CANDIDATE_CAP = 500;
 
 type EventRow = {
   id: string;
@@ -93,18 +96,44 @@ export class EventsService {
       // A row is a candidate when it starts before the window ends AND either
       // does not recur (its own end is in range) or its series may still reach
       // the window. Index-backed on (schoolId, startsAt).
-      const rows = (await tx.schoolEvent.findMany({
-        where: {
-          startsAt: { lte: to },
-          ...(staff ? {} : { audience: "ALL" }),
-          OR: [
-            { recurrence: "NONE", startsAt: { gte: new Date(from.getTime() - MAX_EVENT_SPAN_MS) } },
-            { NOT: { recurrence: "NONE" } },
-          ],
-        },
+      // A SERIES THAT HAS ENDED CANNOT REACH THIS WINDOW, and must not occupy a
+      // candidate slot. The recurring branch had no lower bound at all — every
+      // series ever created stayed a candidate for ever — and the page is
+      // `startsAt ASC`, so the OLDEST dead series were fetched first and
+      // `expandOccurrences` then returned nothing for each of them.
+      //
+      // Measured on a five-year secondary (600 weekly clubs, each run for one
+      // academic year and ended, plus 10 real events inside the window):
+      //
+      //     600 dead series -> 0 occurrences   calendar BLANK
+      //     495 dead series -> 5 occurrences   half the term missing, silently
+      //     480 dead series -> 10 occurrences  correct
+      //
+      // The middle row is the dangerous one: a calendar that looks populated
+      // and has quietly dropped half of what the school put in it.
+      const candidateWhere = {
+        startsAt: { lte: to },
+        ...(staff ? {} : { audience: "ALL" as const }),
+        OR: [
+          { recurrence: "NONE", startsAt: { gte: new Date(from.getTime() - MAX_EVENT_SPAN_MS) } },
+          {
+            NOT: { recurrence: "NONE" },
+            // Open-ended series always qualify; a bounded one only if it is
+            // still running when the window opens.
+            OR: [{ recurrenceUntil: null }, { recurrenceUntil: { gte: from } }],
+          },
+        ],
+      };
+      // One row past the cap, so truncation is DETECTED rather than assumed
+      // absent — the defect above was invisible precisely because a full page
+      // and a complete page looked identical.
+      const fetched = (await tx.schoolEvent.findMany({
+        where: candidateWhere,
         orderBy: { startsAt: "asc" },
-        take: 500,
+        take: CANDIDATE_CAP + 1,
       })) as EventRow[];
+      const truncated = fetched.length > CANDIDATE_CAP;
+      const rows = truncated ? fetched.slice(0, CANDIDATE_CAP) : fetched;
 
       const out: Array<EventRow & { occurrenceStartsAt: Date; occurrenceEndsAt: Date | null }> = [];
       for (const e of rows) {
@@ -123,7 +152,13 @@ export class EventsService {
         if (out.length >= MAX_EXPANDED) break; // bounded response
       }
       out.sort((x, y) => x.occurrenceStartsAt.getTime() - y.occurrenceStartsAt.getTime());
-      return out.slice(0, MAX_EXPANDED);
+      // Two places can drop something: the candidate read and the expansion.
+      // Both are reported, because a calendar missing events must never look
+      // like a calendar with none.
+      return {
+        items: out.slice(0, MAX_EXPANDED),
+        truncated: truncated || out.length > MAX_EXPANDED,
+      };
     });
   }
 

@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/commo
 import { MODULES } from "@sms/types";
 import { MEETING_PROVIDERS } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { CalendarEventDto } from "@sms/types";
+import type { CalendarEventDto, CalendarWindowDto } from "@sms/types";
 import { z } from "zod";
 import { COMMUNICATION_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -41,7 +41,7 @@ export class EventsController {
     @CurrentPrincipal() p: Principal,
     @Query("from") from?: string,
     @Query("to") to?: string,
-  ): Promise<CalendarEventDto[]> {
+  ): Promise<CalendarWindowDto> {
     return this.events.listEvents(p, { from, to });
   }
 

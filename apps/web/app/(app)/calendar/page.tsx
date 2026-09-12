@@ -1,4 +1,4 @@
-import type { AcademicSessionDto, CalendarEventDto, SchoolHolidayDto, Serialized } from "@sms/types";
+import type { CalendarWindowDto, AcademicSessionDto, CalendarEventDto, SchoolHolidayDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -31,7 +31,7 @@ export default async function CalendarPage() {
   const canAcademic = hasPermission(user.permissions, "class.read");
 
   const [events, sessions, holidays] = await Promise.all([
-    apiGet<Ev[]>("/events"),
+    apiGet<Serialized<CalendarWindowDto>>("/events"),
     canAcademic ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
     canAcademic ? apiGet<Serialized<SchoolHolidayDto>[]>("/academic/holidays") : Promise.resolve(null),
   ]);
@@ -40,7 +40,7 @@ export default async function CalendarPage() {
   // yesterday onward so the page always opens on what's next.
   const cutoff = Date.now() - 86_400_000;
   const entries: Entry[] = [];
-  for (const e of events ?? []) {
+  for (const e of events?.items ?? []) {
     // THE OCCURRENCE, not the series. A repeating event arrives as one row per
     // occurrence, each carrying the same `startsAt` (the first one) — so this
     // used to stack a whole term of Monday assemblies on the first Monday, and
@@ -82,6 +82,19 @@ export default async function CalendarPage() {
         <PageHeader title={<>Calendar</>} subtitle={<>Upcoming events, term boundaries and holidays.</>} />
 
         {canWrite && <EventForm />}
+
+        {/* NO SILENT TRUNCATION. A calendar that has dropped events must not
+            look like a calendar with none — which is exactly how the blank
+            five-year calendar presented before the candidate filter was
+            fixed. */}
+        {events?.truncated && (
+          <Alert variant="info">
+            <AlertTitle>This window holds more than is shown</AlertTitle>
+            <AlertDescription>
+              Some events in this period are not on the list. Narrow the dates to see them all.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {timeline.length === 0 ? (
           <Alert variant="info"><AlertTitle>Nothing upcoming</AlertTitle><AlertDescription>No events, term dates or holidays ahead.</AlertDescription></Alert>
