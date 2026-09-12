@@ -75,6 +75,16 @@ export interface PaymentFilters {
   pageSize?: number;
 }
 
+/**
+ * How many name-matching schools a revenue search may span.
+ *
+ * Bounded by the plausible FLEET, not by a page: the ids feed a `schoolId IN`
+ * that both the list AND the totals are computed from, so a low bound silently
+ * understates revenue. Crossing it sets `searchTruncated`, which the screen
+ * states — a finance figure may be narrow, but never quietly narrow.
+ */
+const SCHOOL_MATCH_CAP = 10_000;
+
 @Injectable()
 export class OperatorPaymentsService {
   constructor(
@@ -115,25 +125,45 @@ export class OperatorPaymentsService {
     return gte || lte ? { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) } : undefined;
   }
 
-  private async where(filters: PaymentFilters): Promise<Record<string, unknown>> {
+  // Returns the truncation flag rather than storing it: a Nest service is a
+  // SINGLETON, so an instance field here would be shared mutable state and two
+  // operators searching at once would read each other's answer.
+  private async where(
+    filters: PaymentFilters,
+  ): Promise<{ where: Record<string, unknown>; searchTruncated: boolean }> {
     const where: Record<string, unknown> = {};
+    let searchTruncated = false;
     const createdAt = this.range(filters.from, filters.to);
     if (createdAt) where.createdAt = createdAt;
     if (filters.status) where.status = filters.status;
     if (filters.plan) where.plan = filters.plan;
     if (filters.currency) where.currency = filters.currency.toUpperCase();
     if (filters.q?.trim()) {
+      // THE FILTER ITSELF MUST NOT TRUNCATE. This took the first 500 matching
+      // schools, and `totals` — which is careful to aggregate over the WHOLE
+      // filter rather than the page — then aggregated over that truncated
+      // predicate. Measured on a fleet where 800 schools shared a name element:
+      // the screen reported 500 payments and NGN 262,500,000 against a true 800
+      // and NGN 420,000,000, with 37.5% of the revenue missing and nothing
+      // saying so. The careful reasoning was one layer below the defect.
+      //
+      // `schoolId` is a scalar with a database-level FK and no Prisma relation
+      // (the documented pattern that keeps these models lean), so the ids have
+      // to be materialised. The bound is now the plausible FLEET size rather
+      // than an arbitrary page, and crossing it is REPORTED rather than
+      // silently applied.
       const schools = await this.client().school.findMany({
         where: { name: { contains: filters.q.trim(), mode: "insensitive" } },
         select: { id: true },
-        take: 500,
+        take: SCHOOL_MATCH_CAP + 1,
       });
+      searchTruncated = schools.length > SCHOOL_MATCH_CAP;
       // An empty match must return NOTHING, not everything. Omitting the clause
       // when a search found no school would silently widen the query to the
       // whole platform, which on a revenue screen is the wrong direction.
-      where.schoolId = { in: schools.map((s: { id: string }) => s.id) };
+      where.schoolId = { in: schools.slice(0, SCHOOL_MATCH_CAP).map((s: { id: string }) => s.id) };
     }
-    return where;
+    return { where, searchTruncated };
   }
 
   /**
@@ -241,7 +271,7 @@ export class OperatorPaymentsService {
 
   /** One page of payments plus totals for the whole filter. Audited. */
   async list(p: Principal, filters: PaymentFilters): Promise<OperatorPaymentPageDto> {
-    const where = await this.where(filters);
+    const { where, searchTruncated } = await this.where(filters);
     const page = Math.max(1, filters.page ?? 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, filters.pageSize ?? 25));
 
@@ -275,6 +305,8 @@ export class OperatorPaymentsService {
       creditPurchases: credits.rows,
       creditRevenue: credits.totals,
       seatArrears,
+      // A finance figure may be narrow, but never QUIETLY narrow.
+      searchTruncated,
     };
   }
 
@@ -464,7 +496,7 @@ export class OperatorPaymentsService {
 
   /** The same filter as a CSV for the books. Audited, formula-guarded. */
   async csv(p: Principal, filters: PaymentFilters): Promise<{ csv: string; filename: string }> {
-    const where = await this.where(filters);
+    const { where } = await this.where(filters);
     // ONE PAST THE CAP, so a truncated ledger announces itself.
     //
     // The comment below already reasons about this artifact being "the one a

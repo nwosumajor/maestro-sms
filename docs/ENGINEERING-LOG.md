@@ -15604,3 +15604,49 @@ deeper; `?status=NONSENSE` is refused with 400. The panel reads
 // absent FIGURE rather than a short list — after scholarship "Awarded 29 of 60"
 // and the settlement card's "50 release(s) on record" of 60. All three were a
 // count or a sum taken from a capped array and rendered as fact.
+
+### A revenue total narrowed by its own filter
+
+`OperatorPaymentsService.totals` is careful, and says so:
+
+    "Totals for the WHOLE filter, split by currency — never just the page.
+     A finance screen whose totals describe only the visible 25 rows is worse
+     than no totals, because it looks authoritative."
+
+It is right, and it does what it says. **The FILTER was the thing that had been
+truncated.** `schoolId` is a scalar with a database-level FK and no Prisma
+relation — the documented pattern that keeps these models lean — so a name
+search has to materialise ids, and that lookup took the first 500 matching
+schools and fed them to a `schoolId IN` that BOTH the list and the totals are
+computed from.
+
+Measured on a fleet where 800 schools share a name element ("St.", which is how
+a great many schools are named), each with one paid subscription:
+
+    truth             800 payments, 420,000,000 minor
+    total reported    500
+    revenue reported  NGN 262,500,000
+
+37.5% of the revenue missing from a finance screen, with nothing saying so — the
+exact failure the docstring one method below exists to prevent, defeated one
+layer above it. A guard on one door is not a guard, and this is the most
+instructive instance of it in the log: the careful reasoning was real, correct,
+and aimed one level too low.
+
+FIX. The bound is the plausible FLEET (`SCHOOL_MATCH_CAP`) rather than an
+arbitrary page, and crossing it sets `searchTruncated`, which the revenue screen
+states. The rule the original comment got RIGHT — an empty match must return
+nothing, not everything — is now a test, so the fix cannot quietly erase it.
+
+Live, after: the same search reports 800 and NGN 420,000,000.
+
+// GOTCHA, mine, caught before it shipped: the first version stored the flag as
+// `this.searchTruncated` on the service. A Nest provider is a SINGLETON, so
+// that is shared mutable state — two operators searching at once would read
+// each other's answer, and the bug would be rare, wrong, and nearly
+// unreproducible. It is threaded through the return value instead.
+
+// GOTCHA on the double: the payments page also reads fee revenue and seat
+// arrears through `$queryRaw`. A double without it fails as "$queryRaw is not a
+// function", which says nothing about the filter under test — the fixture trap
+// this log names, where a missing method reads as a code fault.

@@ -343,6 +343,17 @@ export interface OperatorPaymentPageDto {
   /** Metered seat growth not yet billed. A POSITION, not a period figure — it
    *  is what is owed right now, so the date filter does not apply to it. */
   seatArrears: OperatorSeatArrearsDto[];
+  /**
+   * True when a name SEARCH matched more schools than the predicate could span.
+   *
+   * The school-name filter took the first 500 matches and fed them to a
+   * `schoolId IN`, which BOTH the list and the revenue totals are computed
+   * from. Measured on a fleet where 800 schools shared a name element: 500
+   * payments and NGN 262,500,000 reported against a true 800 and
+   * NGN 420,000,000, with nothing saying so. `totals` was careful to aggregate
+   * over the whole filter; the filter itself was what had been truncated.
+   */
+  searchTruncated: boolean;
 }
 
 // --- message credits: the school's own ledger ------------------------------ //

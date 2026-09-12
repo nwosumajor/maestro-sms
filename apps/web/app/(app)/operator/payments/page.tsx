@@ -19,6 +19,9 @@ import { PageHeader } from "@/components/shell/PageHeader";
 import { PaymentFilterBar } from "@/components/operator/PaymentFilterBar";
 import { money, shortDate } from "@/lib/format";
 
+/** Mirrors SCHOOL_MATCH_CAP in operator-payments.service.ts. */
+const SCHOOL_MATCH_LIMIT = 10_000;
+
 export const dynamic = "force-dynamic";
 
 type PaymentPage = Serialized<OperatorPaymentPageDto>;
@@ -104,6 +107,22 @@ export default async function OperatorPaymentsPage({
           </Alert>
         ) : (
           <>
+            {/* A FINANCE FIGURE MAY BE NARROW, BUT NEVER QUIETLY NARROW. The
+                name search materialises school ids for a `schoolId IN`, which
+                both the list and the totals are computed from — so an
+                overflowing search would understate the revenue on a screen that
+                looks authoritative. It is bounded by the fleet now, and saying
+                so is the other half of the fix. */}
+            {data.searchTruncated && (
+              <Alert variant="info">
+                <AlertTitle>This search matched more schools than one view can span</AlertTitle>
+                <AlertDescription>
+                  The figures below cover the first {SCHOOL_MATCH_LIMIT.toLocaleString()} matching schools. Narrow
+                  the search to see a total you can rely on.
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* TOTALS PER CURRENCY, never one summed number: amountMinor counts
                 minor units of its OWN currency, so kobo added to cents is not
                 money in any currency. */}
