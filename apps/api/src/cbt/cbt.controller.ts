@@ -4,13 +4,14 @@
 
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_INTEGRITY_BATCH_MAX, MODULES } from "@sms/types";
-import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto, CbtIntegritySummaryDto } from "@sms/types";
+import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamPageDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto, CbtIntegritySummaryDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { PerCandidateRateLimit } from "../auth/per-candidate-rate-limit.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { pageNumber } from "../common/status-filter";
 import type { Principal } from "../integrity/integrity.foundation";
 import { CbtService } from "./cbt.service";
 import type { Response } from "express";
@@ -301,18 +302,32 @@ export class CbtController {
   /** Staff: every exam, all statuses. */
   @Get("exams/all")
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
-  listAllExams(@CurrentPrincipal() p: Principal, @Query("status") status?: string): Promise<CbtExamDto[]> {
+  listAllExams(
+    @CurrentPrincipal() p: Principal,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("q") q?: string,
+  ): Promise<CbtExamPageDto> {
     // Optional status narrows server-side (the exams page asks for DRAFT only).
     // Unknown values simply match nothing rather than 400 — this is a filter, not
-    // a command, and an empty list is the honest answer.
-    return this.cbt.listExams(p, true, status?.trim() || undefined);
+    // a command, and an empty list is the honest answer. `q` and `page` reach the
+    // exams behind the cap; both narrow in SQL, never in the browser.
+    // `pageNumber` REFUSES a bad page with a 400 rather than silently reading it
+    // as page one — the hand-rolled `Number(x) > 0 ? … : 1` swallows `?page=abc`
+    // and hands the caller row one while they believe they are deep in the list.
+    return this.cbt.listExams(p, true, status?.trim() || undefined, {
+      page: pageNumber(page),
+      q: q?.trim() || undefined,
+    });
   }
 
   /** Students: published exams they can sit (class-scoped, window-live). */
   @Get("exams")
   @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
-  listExams(@CurrentPrincipal() p: Principal): Promise<CbtExamDto[]> {
-    return this.cbt.listExams(p, false);
+  async listExams(@CurrentPrincipal() p: Principal): Promise<CbtExamDto[]> {
+    // The student list is bounded by a real predicate (PUBLISHED, window-live,
+    // class-open) rather than an arbitrary cap, so its wire shape stays an array.
+    return (await this.cbt.listExams(p, false)).items;
   }
 
   // --- students ------------------------------------------------------------------

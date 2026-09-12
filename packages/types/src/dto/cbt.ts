@@ -295,3 +295,21 @@ export interface CbtIntegritySummaryDto {
   /** True once staff were notified for this sitting. */
   alerted: boolean;
 }
+
+/**
+ * A page of exams for the staff console.
+ *
+ * The staff list was `orderBy startAt desc, take: 100` with no count and no
+ * search, and the exam row is the ONLY route to that exam's results, question
+ * paper, answer key and grade recording. At five years a secondary holds ~1,350
+ * papers, so 1,250 of them — and everything hanging off them — were unreachable
+ * through the console at any URL.
+ */
+export interface CbtExamPageDto {
+  items: CbtExamDto[];
+  /** Counted in SQL over the same predicate the page is drawn from. */
+  total: number;
+  shown: number;
+  page: number;
+  pageSize: number;
+}

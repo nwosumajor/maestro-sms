@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **324 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **325 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **324 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **325 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1119,6 +1119,12 @@ These are the rules; the log is why each one exists.
   passed until the double SHUFFLED before sorting: `Array.sort` is stable in V8
   and Postgres is not. And **an index nothing selects is
   write amplification**: measure the variant before adding it.
+- **THE ROW IS THE ROUTE.** The CBT staff console returned the 100 newest exams
+  of 1,350 at five years — and an exam row is the only route to that exam's
+  RESULTS, question PAPER, ANSWER KEY and grade RECORDING, every one of them
+  `cbt/exams/${id}/...` built from that list. A cap on such a list strands four
+  dependent surfaces, not one. Ask what a dropped row was the KEY to, then count
+  in SQL and give the reader a `q` and a `page` that narrow in SQL too.
 - **Count in the database**; never `findMany().length`. Never a query per row —
   `.map(r => this.toDto(tx, r))` is a query multiplier.
 - **A TENANT-LEADING INDEX SERVES EVERY READ AND NO FOREIGN-KEY CHECK.** Every
@@ -1311,6 +1317,14 @@ These are the rules; the log is why each one exists.
   will otherwise SKIP the suite. // GOTCHA: on main the DEPLOY workflow fails on
   every push and always has (no AWS credentials), so "a red run" is ambiguous —
   check WHICH workflow with `gh run list --workflow=ci.yml`.
+- **The full API suite needs `--maxWorkers=3` on a developer machine.** Jest
+  defaults to `cpus - 1` workers, each with its own ~2.2 GB V8 heap ceiling — on
+  an 8-core/15 GB box that is 7 workers against a ~15 GB peak, and the run is
+  killed at STARTUP before it writes a line, which reads as a hang rather than
+  an OOM. Running anything else beside it (a web build, a second suite) takes
+  both down. Capped at 3 it is not merely survivable but FASTER — 508 s against
+  865 s at the default — because the workers stop contending. CI sizes its own
+  runner, so this is a local constraint, not a repo one.
 - **Fake timers must be CLEARED, not just switched off.** `jest.useRealTimers()`
   alone left the worker holding a handle, so jest force-exited it — and only
   when ANOTHER file ran after it in the same worker, which is why it was

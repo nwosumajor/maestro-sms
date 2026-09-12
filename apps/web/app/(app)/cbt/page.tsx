@@ -1,4 +1,4 @@
-import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, Serialized } from "@sms/types";
+import type { CbtAuthoringOptionsDto, CbtExamPageDto, CbtBankDto, CbtExamDto, Serialized } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 //     The head teacher approves CBT publishing, so they must be able to vet what
 //     is going to students; without this branch they fell to the student view.
 //   - students (cbt.take)   -> sit their own exams
-export default async function CbtPage() {
+export default async function CbtPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const session = await auth();
   const user = session!.user;
   // Mirrors the nav's anyPerm — any ONE of these may open the section.
@@ -29,13 +29,28 @@ export default async function CbtPage() {
   let banks: Serialized<CbtBankDto>[] = [];
   let exams: Serialized<CbtExamDto>[] = [];
   let options = emptyOptions;
+  // The console's own controls, carried in the URL so a found exam has a link.
+  // They narrow in SQL: filtering the fetched page in the browser could only
+  // ever see the 100 rows that survived the cap.
+  const sp = (await searchParams) ?? {};
+  const q = (sp.q ?? "").trim();
+  const page = Number(sp.page) > 0 ? Number(sp.page) : 1;
+  let examPage: Serialized<CbtExamPageDto> = { items: [], total: 0, shown: 0, page, pageSize: 100 };
 
   if (isStaff) {
-    [banks, exams, options] = await Promise.all([
+    const query = new URLSearchParams();
+    if (q) query.set("q", q);
+    if (page > 1) query.set("page", String(page));
+    const qs = query.toString();
+    const [b, e, o] = await Promise.all([
       apiGet<Serialized<CbtBankDto>[]>("/cbt/banks").then((r) => r ?? []),
-      apiGet<Serialized<CbtExamDto>[]>("/cbt/exams/all").then((r) => r ?? []),
+      apiGet<Serialized<CbtExamPageDto>>(`/cbt/exams/all${qs ? `?${qs}` : ""}`),
       apiGet<Serialized<CbtAuthoringOptionsDto>>("/cbt/authoring-options").then((r) => r ?? emptyOptions),
     ]);
+    banks = b;
+    options = o;
+    examPage = e ?? examPage;
+    exams = examPage.items;
   } else if (isReviewer) {
     // Banks only — a reviewer authors nothing, so no authoring options are fetched.
     banks = await apiGet<Serialized<CbtBankDto>[]>("/cbt/banks").then((r) => r ?? []);
@@ -57,6 +72,10 @@ export default async function CbtPage() {
           <CbtStaffPanel
             banks={banks}
             exams={exams}
+            examTotal={examPage.total}
+            examPage={examPage.page}
+            examPageSize={examPage.pageSize}
+            examQuery={q}
             options={options}
             canManage={hasPermission(user.permissions, "cbt.manage")}
           />

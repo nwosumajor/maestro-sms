@@ -93,11 +93,20 @@ function compactQuestion(q: DraftQuestion, n: number): DraftQuestion | string {
 export function CbtStaffPanel({
   banks,
   exams,
+  examTotal,
+  examPage,
+  examPageSize,
+  examQuery,
   options,
   canManage = false,
 }: {
   banks: Bank[];
   exams: Exam[];
+  /** Counted in SQL over the whole console, never narrowed by the page. */
+  examTotal: number;
+  examPage: number;
+  examPageSize: number;
+  examQuery: string;
   options: Options;
   /** cbt.manage — an EDITOR. A cbt.review head teacher sees this panel too but
    *  must never be offered the answer key; the server refuses them anyway, and
@@ -591,6 +600,33 @@ export function CbtStaffPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* REACH. The row is the only route to an exam's results, paper,
+              answer key and grade recording, so a cap with no search strands
+              every one of them. Both controls narrow in SQL. */}
+          <form method="GET" className="flex flex-wrap items-center gap-2">
+            <input
+              type="search"
+              name="q"
+              defaultValue={examQuery}
+              // A placeholder is not an accessible name — it disappears on
+              // focus and screen readers announce the control as unlabelled.
+              aria-label="Search every exam by title"
+              placeholder="Search every exam by title"
+              className="h-8 min-w-52 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+            />
+            <Button size="sm" variant="outline" type="submit">Search</Button>
+            <span className="text-xs text-muted-foreground">
+              {examTotal > exams.length
+                ? `showing ${exams.length} of ${examTotal}`
+                : `${examTotal} exam${examTotal === 1 ? "" : "s"}`}
+              {examQuery ? ` matching “${examQuery}”` : ""}
+            </span>
+          </form>
+          {exams.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              {examQuery ? `No exam matches “${examQuery}”.` : "No exams yet."}
+            </p>
+          )}
           {exams.length > 0 && (
             <ul className="space-y-1.5">
               {exams.map((e) => {
@@ -688,6 +724,23 @@ export function CbtStaffPanel({
                 );
               })}
             </ul>
+          )}
+          {/* A cap is only safe if the rest is reachable. Links, not buttons,
+              so a page of the console can be shared and bookmarked. */}
+          {examTotal > examPageSize && (
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {examPage > 1 && (
+                <a className="underline hover:text-foreground" href={`/cbt?${new URLSearchParams({ ...(examQuery ? { q: examQuery } : {}), page: String(examPage - 1) })}`}>
+                  ← newer
+                </a>
+              )}
+              <span>page {examPage} of {Math.max(1, Math.ceil(examTotal / examPageSize))}</span>
+              {examPage * examPageSize < examTotal && (
+                <a className="underline hover:text-foreground" href={`/cbt?${new URLSearchParams({ ...(examQuery ? { q: examQuery } : {}), page: String(examPage + 1) })}`}>
+                  older →
+                </a>
+              )}
+            </div>
           )}
           <div className="grid gap-2 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-3">
             <Input placeholder="Exam title" value={exam.title} onChange={(e) => setExam({ ...exam, title: e.target.value })} />

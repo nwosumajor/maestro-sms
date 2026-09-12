@@ -1,4 +1,4 @@
-import type { ExamSittingPageDto, ExamScheduleDto, ExamSittingDto, MyExamDto, IdNameDto, CbtExamDto, Serialized } from "@sms/types";
+import type { ExamSittingPageDto, ExamScheduleDto, ExamSittingDto, MyExamDto, IdNameDto, CbtExamDto, CbtExamPageDto, Serialized } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -40,7 +40,11 @@ export default async function ExamsPage({
     canManage ? apiGet<Serialized<ExamScheduleDto>[]>("/exams/schedules") : Promise.resolve([]),
     // Only DRAFT exams can be attached (they publish via schedule approval). Asking
     // the API for just those beats fetching every exam and filtering client-side.
-    canManage ? apiGet<Serialized<CbtExamDto>[]>("/cbt/exams/all?status=DRAFT") : Promise.resolve([]),
+    // A PAGE now, not an array — unwrapped here because this picker only ever
+    // wants DRAFT exams to attach to a sitting, and a school has few of those.
+    canManage
+      ? apiGet<Serialized<CbtExamPageDto>>("/cbt/exams/all?status=DRAFT").then((r) => r?.items ?? [])
+      : Promise.resolve([]),
   ]);
 
   const attachableExams = (draftExams ?? []).filter((e) => e.status === "DRAFT").map((e) => ({ id: e.id, title: e.title }));

@@ -15129,3 +15129,93 @@ Web renders `Your slots showing 200 of 1220 · 9800 past` and
 // `integrityEnabled && consentGranted && !exempt`, so an exempt pupil gets
 // neither friction nor surveillance — the more restrictive reading, with the
 // reasoning written beside it.
+
+### The CBT exam console at 5,000 schools, five years deep
+
+Two defects on one read, and the second is what makes the first serious.
+
+`GET /cbt/exams/all` is the staff exam console. It read the 100 most recent
+exams — `orderBy startAt desc, take: 100` — with no count, no search and no
+page, then mapped each one through `toExamDto`, which issues a `count` and a
+`findFirst` PER EXAM, awaited in a sequential loop.
+
+Measured on a five-year secondary fixture (15 subjects x 6 year groups x 3 terms
+x 5 years = 1,350 papers) against the running stack:
+
+    held               1,350
+    returned             100
+    reachable            100   — no q, no page, no filter of any kind
+    queries per request  201   (1 list + 2 per exam)
+    latency           235 ms   against an 85 ms control = ~134 ms of work
+
+**The exam ROW is the only route to everything about that exam.** Results, the
+question paper, the answer key and grade recording are all
+`cbt/exams/${e.id}/...`, built from this list. So 1,250 papers were not merely
+slow to find — they and every artefact hanging off them were unreachable at any
+URL, and a school five years in could not print a paper it had set in year one.
+This is the "a capped list is worse when it is the only route to something else"
+shape, at its widest: four dependent surfaces rather than one.
+
+The N+1 is the multiplier this log already records, in its worst form —
+sequential rather than parallel, and inside a transaction holding a pooled
+connection for the whole 134 ms. At 5,000 schools that is also pool pressure,
+which this platform surfaces as the 503 a full pool already answers with.
+
+**Sibling asymmetry INSIDE one method.** The student branch of the same
+`listExams` was right all along: `status: PUBLISHED`, `endAt >= now`,
+class-scoped, ascending — bounded by a real predicate rather than an arbitrary
+cap. One method, two branches, one of them thought through.
+
+FIX. Staff get `{items, total, shown, page, pageSize}` with `q` searching titles
+and `page` reaching the rest, both narrowing in SQL — filtering the fetched page
+in the browser could only ever see the 100 rows that survived the cap. Ordering
+gained `id` as a tiebreaker. The N+1 became `toExamDtos`: one `groupBy` for
+sitting counts and one `findMany` for the caller's own sittings, so the query
+count is bounded rather than merely smaller. The student branch keeps its array
+wire shape — its bound is semantic, not arbitrary — and its controller unwraps
+`items`.
+
+Live, after: 235 ms -> **95 ms** against an 85 ms control, so the work fell from
+~134 ms to ~10 ms; `?page=13` costs the same as page 1; and a search for a paper
+from year one returns it, where nothing could reach it before. Web renders
+`showing 100 of 1350`, `page 1 of 14`, and a search box.
+
+// GOTCHA: `total` reads 1,350 against 1,353 rows in the table, and that is
+// CORRECT — two are scholarship papers excluded by the pre-existing
+// `scholarshipProgramId: null` filter (the fix that stopped a school's console
+// offering the platform's answer key) and one belongs to another school and is
+// excluded by RLS. Checked rather than assumed, because a count that looks
+// slightly wrong is exactly where a tenancy bug hides.
+
+// GOTCHA, and the second time this trap has caught me in two sessions: the
+// FIRST version of the tiebreaker test PASSED its mutation. The fixture gave
+// every exam its own day, so there were no ties to break, and the double sorted
+// with `Array.prototype.sort`, which is STABLE in V8 where Postgres is not — so
+// the double handed back a total order the database never promised. Both
+// failures are already written down in this log and I reproduced them anyway.
+// Fixed by giving a term's papers a SHARED `startAt` in blocks of 30 and
+// SHUFFLING the pool before sorting, then walking all 14 pages and asserting
+// 1,350 DISTINCT ids. Re-validated three times, since the shuffle is random and
+// a mutation that fails only sometimes is not a gate.
+
+// GOTCHA, and the reason two surface gates exist: my first pass fixed ONE of
+// the two web consumers of this endpoint. `wire-shape-agrees` found the other —
+// `app/(app)/exams/page.tsx` fetches `/cbt/exams/all?status=DRAFT` for the
+// sitting picker and still asserted `CbtExamDto[]`. My own grep had missed it
+// because I piped it through `head -10` and the match sat below the cut: a
+// probe that truncates reports a fact about itself, which is the same mistake
+// twice in one session. A guard on one door is not a guard, and here the gate
+// was the guard.
+
+// GOTCHA: `a-filter-nobody-validated` caught the page parameter being read as
+// `Number(page) > 0 ? Number(page) : 1` instead of through the shared
+// `pageNumber()`. The hand-rolled form silently reads `?page=abc` as page one,
+// so a caller deep in a list is handed row one while believing otherwise.
+// Verified live after the fix: `?page=abc`, `?page=0` and `?page=-3` all answer
+// 400; `?page=2` and no page at all answer 200.
+
+// GOTCHA: the search box failed `every-control-has-a-name` — a ratchet capped
+// at 26 placeholder-only inputs, and mine was the 27th. The fix is an
+// `aria-label`, never raising the ratchet: a placeholder disappears on focus and
+// is not an accessible name. Exactly the kind of exemption that becomes a hole
+// with a note on it.
