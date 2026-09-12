@@ -7,11 +7,12 @@ import type { RawBodyRequest } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { FEES_PERMISSIONS, INVOICE_STATUSES, PAYMENT_METHODS } from "@sms/types";
-import type { CreditBalanceDto, FeeItemDto, FeeReportDto, InvoiceAdjustmentDto, InvoiceDetailDto, InvoicePageDto, InvoiceSummaryDto, LateFeeConfigDto, PaymentPlanDto, PendingPaymentDto, SettlementAccountDto, VirtualAccountDto, FeeSourceReportDto } from "@sms/types";
+import type { CreditBalanceDto, FeeItemDto, FeeReportDto, InvoiceAdjustmentDto, InvoiceDetailDto, InvoicePageDto, InvoiceSummaryDto, LateFeeConfigDto, PaymentPlanDto, PendingPaymentDto, PendingPaymentPageDto, SettlementAccountDto, VirtualAccountDto, FeeSourceReportDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { Public } from "../auth/public.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
+import { pageNumber } from "../common/status-filter";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { FeesService } from "./fees.service";
@@ -523,8 +524,11 @@ export class FeesController {
   // --- maker-checker: the "checker" approves/rejects pending payments ---
   @Get("fees/payments/pending")
   @RequirePermission(FEES_PERMISSIONS.FEE_APPROVE)
-  pending(@CurrentPrincipal() p: Principal): Promise<PendingPaymentDto[]> {
-    return this.fees.listPendingPayments(p);
+  pending(
+    @CurrentPrincipal() p: Principal,
+    @Query("page") page?: string,
+  ): Promise<PendingPaymentPageDto> {
+    return this.fees.listPendingPayments(p, { page: pageNumber(page) });
   }
 
   @Post("payments/:id/approve")

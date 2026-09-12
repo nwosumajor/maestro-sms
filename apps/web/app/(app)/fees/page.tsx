@@ -6,7 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FeesAdmin } from "@/components/fees/FeesAdmin";
-import { PendingPayments, type PendingPayment } from "@/components/fees/PendingPayments";
+import { PendingPayments, type PendingPage } from "@/components/fees/PendingPayments";
 import { InvoiceBrowser } from "@/components/fees/InvoiceBrowser";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -14,7 +14,13 @@ export const dynamic = "force-dynamic";
 
 type InvoiceRow = Serialized<InvoiceListItemDto>;
 
-export default async function FeesPage() {
+export default async function FeesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ pendingPage?: string }>;
+}) {
+  // The approver queue's page rides the URL, so a deep page can be linked.
+  const sp = (await searchParams) ?? {};
   const session = await auth();
   const user = session!.user;
   // /invoices and /invoices/summary both require fee.read; without this the
@@ -33,7 +39,10 @@ export default async function FeesPage() {
         apiGet<{ id: string; name: string; amountMinor: number; currency: string }[]>("/fees/items"),
       ])
     : [null, null];
-  const pending = canApprove ? await apiGet<PendingPayment[]>("/fees/payments/pending") : null;
+  const pendingPage = Number(sp.pendingPage) > 0 ? Number(sp.pendingPage) : 1;
+  const pending = canApprove
+    ? await apiGet<PendingPage>(`/fees/payments/pending${pendingPage > 1 ? `?page=${pendingPage}` : ""}`)
+    : null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="fees" permissions={user.permissions}>
@@ -42,7 +51,7 @@ export default async function FeesPage() {
               ? "All invoices in your school. Open one to record a payment."
               : "Invoices for your family. Open one to see the balance and payment history."}</>} />
 
-        {canApprove && pending && pending.length > 0 && <PendingPayments payments={pending} />}
+        {canApprove && pending && pending.total > 0 && <PendingPayments page={pending} />}
 
         {canManage && students && (
           <FeesAdmin students={students} items={feeItems ?? []} />

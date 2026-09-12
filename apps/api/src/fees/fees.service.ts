@@ -9,7 +9,7 @@
 // on full payment (receipt). Not-visible -> 404 (never 403).
 // =============================================================================
 
-import type { NotificationTypeValue } from "@sms/types";
+import type { NotificationTypeValue, PendingPaymentPageDto } from "@sms/types";
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
@@ -94,6 +94,10 @@ export interface PaymentInput {
   note?: string | null;
   paidAt?: string;
 }
+
+/** One page of the approver queue. Oldest first — a queue is worked from the
+ *  front, and a cap then drops the newest arrival rather than the longest wait. */
+const PENDING_PAGE_SIZE = 200;
 
 @Injectable()
 export class FeesService {
@@ -1126,15 +1130,50 @@ export class FeesService {
     return result.payment;
   }
 
-  /** The approver queue: all PENDING_APPROVAL payments in the tenant. */
-  async listPendingPayments(p: Principal) {
-    return this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.payment.findMany({
-        where: { status: "PENDING_APPROVAL" },
-        orderBy: { createdAt: "desc" },
-        take: 200,
-      }),
-    );
+  /**
+   * The approver queue — OLDEST FIRST, counted, paged.
+   *
+   * This was `createdAt DESC, take: 200` with no count, under a docstring
+   * claiming "ALL PENDING_APPROVAL payments". A pending payment is money a
+   * family has handed over that has NOT moved the invoice balance, and it is
+   * pending precisely because nobody has dealt with it — so the backlog is
+   * bounded by what the school never got round to approving, which grows.
+   *
+   * Newest-first on such a queue hides exactly the rows it exists to surface.
+   * Measured on a five-year backlog of 901 pending payments: 200 returned,
+   * reaching back only to 2023-09-10, with 53,630,000 of 242,370,000 minor
+   * units visible — 78% of the money awaiting a second signature invisible, and
+   * nothing saying a row had been left out. The families at the far end paid
+   * years ago and their invoices still show a balance.
+   *
+   * A queue is worked oldest-first, which also makes the cap benign: what falls
+   * off is the most recent arrival rather than the longest wait.
+   *
+   * // NOTE: this returns a COUNT, not a money total, deliberately. A payment's
+   * // currency lives on its INVOICE, so summing `amountMinor` across the queue
+   * // would add naira to pounds — the one thing this repo's money rules forbid.
+   * // A money figure here needs a per-currency group, not a `_sum`.
+   */
+  async listPendingPayments(
+    p: Principal,
+    opts: { page?: number } = {},
+  ): Promise<PendingPaymentPageDto> {
+    const page = Math.max(1, opts.page ?? 1);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const where = { status: "PENDING_APPROVAL" as const };
+      const [items, total] = await Promise.all([
+        tx.payment.findMany({
+          where,
+          // `id` breaks ties: a billing run records many payments in the same
+          // second, and offset paging over a partial order skips and repeats.
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          take: PENDING_PAGE_SIZE,
+          skip: (page - 1) * PENDING_PAGE_SIZE,
+        }),
+        tx.payment.count({ where }),
+      ]);
+      return { items, total, shown: items.length, page, pageSize: PENDING_PAGE_SIZE };
+    });
   }
 
   async approvePayment(p: Principal, paymentId: string) {

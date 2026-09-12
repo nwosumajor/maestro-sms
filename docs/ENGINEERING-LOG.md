@@ -15445,3 +15445,61 @@ and a pager.
 // one — every literal `take` with no `count()` beside it, and every displayed
 // figure derived from a fetched array — is cheap and is the way to find the
 // seventh.
+
+### 901 payments awaiting a second signature, and the oldest were invisible
+
+`listPendingPayments` is the maker-checker approver queue. A payment lands here
+when it is at or above the school's threshold, and ALL refunds do — and while it
+sits here it has **not moved the invoice balance**. The family has paid; the
+invoice still shows what they owe.
+
+It read `createdAt DESC, take: 200` with no count, under a docstring saying
+"ALL PENDING_APPROVAL payments in the tenant".
+
+Measured live on a five-year backlog of 901 pending payments:
+
+    pending in the DB    901, oldest 2021-10-09
+    returned             200
+    covered              2023-09-10 onward
+    money visible        53,630,000 of 242,370,000 minor units  (78% unseen)
+    said there was more  nothing
+
+Newest-first on a queue hides exactly what a queue exists to surface: a pending
+row is pending BECAUSE nobody has dealt with it, so the backlog is bounded by
+what the school never got round to approving, and that grows. The families at
+the far end paid years ago.
+
+**The size of this queue is not hypothetical.**
+`effectivePaymentApprovalThresholdMinor` returns 0 for any school whose currency
+is not the platform's and which has not set a figure — the documented fail-safe
+where an unset control TIGHTENS. For every such school, which is the default
+state of every school outside Nigeria, EVERY fee payment requires a second
+signature and passes through this queue.
+
+FIX. Oldest first, counted in SQL, paged, with `id` breaking `createdAt` ties
+because a billing run records many payments in the same second. Working a queue
+from the front also makes the cap benign: what falls off is the most recent
+arrival rather than the longest wait.
+
+And the DTO now carries `createdAt`. The row has always had it on the wire — the
+service returns the payment row — but `PendingPaymentDto` did not declare it, so
+no screen could show it. An oldest-first queue is only actionable if the
+approver can SEE the wait: "recorded 14 months ago" and "recorded today" are
+different decisions. The panel reads "waiting since 9 Oct 2021" per row and
+"Showing the 200 that have waited longest, of 901 awaiting approval".
+
+// NOTE, deliberately not done: the response carries a COUNT, not a money total.
+// A payment's currency lives on its INVOICE, so a `_sum` over the queue would
+// add naira to pounds — the one thing this repo's money rules forbid. A money
+// figure here needs a per-currency group, not a sum, and is a separate change.
+// The comment is in the source so the next reader does not add the naive one.
+
+// GOTCHA: the SIBLING twenty lines up, `listInvoices`, carries its own fix
+// comment — "This was a flat `take: 200` with no way to reach past it, and the
+// page passed no…". The same file, the same defect, reasoned out once and left
+// beside an unfixed copy. That is the shape this log opens with, and it is
+// still the fastest way to find the next one: read what is NEXT TO a fix.
+
+// Live, after: the front page covers 2021-10-09..2022-04-26 — the longest-
+// waiting payments, previously unreachable at any URL — page 5 returns the
+// tail, and `?page=abc` is refused with 400.

@@ -86,6 +86,42 @@ export interface PendingPaymentDto {
   kind: string;
   method: string;
   invoiceId: string;
+  /**
+   * When it was recorded — i.e. how long the family has been waiting.
+   *
+   * The queue is worked oldest-first, and an approver cannot act on that
+   * without seeing the wait: "recorded 14 months ago" and "recorded today" are
+   * different decisions. The row has always carried this on the wire (the
+   * service returns the payment row); the DTO simply did not declare it, so no
+   * screen could use it.
+   */
+  createdAt: Date;
+}
+
+/**
+ * A page of the maker-checker approver queue.
+ *
+ * The queue was `createdAt DESC, take: 200` with no count, under a docstring
+ * claiming "ALL PENDING_APPROVAL payments". A pending payment is money a family
+ * has handed over that has NOT moved the invoice balance, and it is pending
+ * because nobody has dealt with it — so the backlog is bounded by what the
+ * school never approved, which grows. Measured on a five-year backlog of 901:
+ * 200 returned, reaching back only to 2023-09-10, 78% of the money awaiting a
+ * second signature invisible.
+ *
+ * Ordered OLDEST FIRST now: a queue is worked from the front, and the cap then
+ * drops the most recent arrival rather than the longest wait.
+ *
+ * There is deliberately NO money total here — a payment's currency lives on its
+ * invoice, so a `_sum` over the queue would add naira to pounds.
+ */
+export interface PendingPaymentPageDto {
+  items: PendingPaymentDto[];
+  /** Every payment awaiting approval, counted in SQL. */
+  total: number;
+  shown: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface FeeItemDto {
