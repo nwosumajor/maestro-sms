@@ -34,14 +34,25 @@ export function SettlementHolding({ schoolId, canRelease }: { schoolId: string; 
   // Which currency's payout is being recorded — a school can be owed in more
   // than one, and each is a separate bank transfer with its own reference.
   const [open, setOpen] = React.useState<string | null>(null);
+  // The release history is a PAGE. `showAll` expands the page already fetched;
+  // `page` walks further back, because a release row carries the bank reference
+  // an auditor comes here to find.
+  const [showAll, setShowAll] = React.useState(false);
+  const [page, setPage] = React.useState(1);
 
-  const load = React.useCallback(async () => {
-    const res = await fetch(`/api/sms/operator/tenants/${schoolId}/settlement-holding`, { cache: "no-store" });
-    if (res.ok) setData((await res.json()) as Holding);
+  const load = React.useCallback(async (next = 1) => {
+    const res = await fetch(
+      `/api/sms/operator/tenants/${schoolId}/settlement-holding${next > 1 ? `?page=${next}` : ""}`,
+      { cache: "no-store" },
+    );
+    if (res.ok) {
+      setData((await res.json()) as Holding);
+      setPage(next);
+    }
   }, [schoolId]);
 
   React.useEffect(() => {
-    void load();
+    void load(1);
   }, [load]);
 
   const release = async (currency: string) => {
@@ -135,17 +146,56 @@ export function SettlementHolding({ schoolId, canRelease }: { schoolId: string; 
           ))}
         </div>
       ) : (
-        <p className="text-muted-foreground">Nothing currently held. {data.releases.length} release(s) on record.</p>
+        <p className="text-muted-foreground">Nothing currently held. {data.releaseTotal} release(s) on record.</p>
+      )}
+
+      {/* WHAT HAS ACTUALLY BEEN PAID, per currency, counted in SQL. The card
+          used to print `releases.length` — the length of a 50-row page — as
+          "N release(s) on record", so a school five years into monthly
+          settlement was told 50 of 60 and 15,550,000 minor units of platform
+          payments went unaccounted for. Never sum across currencies. */}
+      {data.releasedTotals.length > 0 && (
+        <p className="mt-2 text-muted-foreground">
+          Paid to date:{" "}
+          {data.releasedTotals.map((t, i) => (
+            <span key={t.currency}>
+              {i > 0 ? " · " : ""}
+              <strong className="text-foreground">{money(t.amountMinor, t.currency)}</strong>
+            </span>
+          ))}{" "}
+          across {data.releaseTotal} release{data.releaseTotal === 1 ? "" : "s"}.
+        </p>
       )}
 
       {data.releases.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-muted-foreground">
-          {data.releases.slice(0, 3).map((r) => (
+          {data.releases.slice(0, showAll ? undefined : 3).map((r) => (
             <li key={r.id}>
               Paid {money(r.amountMinor, r.currency)} · {String(r.releasedAt).slice(0, 10)} · ref {r.reference}
             </li>
           ))}
         </ul>
+      )}
+      {/* A cap is only safe when the rest is reachable — a release row carries
+          the BANK REFERENCE, which is what an auditor comes here to find. */}
+      {data.releaseTotal > 3 && (
+        <button
+          type="button"
+          className="mt-1 text-xs underline hover:text-foreground"
+          onClick={() => setShowAll((v) => !v)}
+        >
+          {showAll ? "Show fewer" : `Show all ${Math.min(data.releases.length, data.releaseTotal)} on this page`}
+        </button>
+      )}
+      {data.releaseTotal > data.releases.length && (
+        <button
+          type="button"
+          className="mt-1 ml-3 text-xs underline hover:text-foreground"
+          disabled={busy}
+          onClick={() => void load(page + 1)}
+        >
+          Older releases →
+        </button>
       )}
 
       {msg && <p className="mt-1 text-muted-foreground">{msg}</p>}

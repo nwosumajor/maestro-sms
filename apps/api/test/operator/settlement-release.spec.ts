@@ -56,6 +56,25 @@ function makeService(opts: { held?: Held[]; releases?: unknown[]; noPrivileged?:
         return { id: `rel-${created.length}` };
       }),
       findMany: jest.fn(async () => opts.releases ?? []),
+      // The history is PAGED now, so a real client also answers `count` and
+      // `groupBy`. A double missing a method every real client has fails as a
+      // CODE fault rather than a fixture one — and both must draw from the same
+      // rows as `findMany`, or they vouch for a total that does not describe it.
+      count: jest.fn(async () => (opts.releases ?? []).length),
+      groupBy: jest.fn(async () => {
+        const by = new Map<string, { amount: number; n: number }>();
+        for (const r of (opts.releases ?? []) as Array<{ currency: string; amountMinor: number }>) {
+          const e = by.get(r.currency) ?? { amount: 0, n: 0 };
+          e.amount += r.amountMinor;
+          e.n += 1;
+          by.set(r.currency, e);
+        }
+        return [...by].map(([currency, v]) => ({
+          currency,
+          _sum: { amountMinor: v.amount },
+          _count: { _all: v.n },
+        }));
+      }),
     },
   } as unknown as TenantTx;
 

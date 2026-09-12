@@ -476,6 +476,86 @@ export interface SettlementHoldingDto {
    * all.
    */
   held: SettlementHeldDto[];
-  /** Most recent first. */
+  /** Most recent first — a PAGE of the history, not all of it. */
   releases: SettlementReleaseDto[];
+  /**
+   * Every release on record, counted in SQL.
+   *
+   * The list was capped at 50 newest-first with no count, and the operator card
+   * then printed "{releases.length} release(s) on record" from that array.
+   * Measured on a school five years into monthly settlement: 60 releases held,
+   * 50 returned, the card claiming 50 — and 15,550,000 minor units of platform
+   * payments unaccounted for, reaching back no further than 2022-09-03. This is
+   * the record of money the PLATFORM PAID a school; being quietly short by ten
+   * months of it is a reconciliation problem, not a display one.
+   */
+  releaseTotal: number;
+  /**
+   * What has actually been paid out, PER CURRENCY — the figure the card was
+   * reaching for when it summed the array.
+   *
+   * Per currency for the same reason `held` is: a payment inherits its
+   * invoice's currency, this platform bills USD beside a school's local rail,
+   * and adding kobo to cents is the one thing the money rules forbid.
+   */
+  releasedTotals: SettlementHeldDto[];
+}
+
+/**
+ * The two states a commission can be in.
+ *
+ * These existed only as string literals in the schema default and in
+ * `markCommissionPaid`, so the operator's "who do we still owe" filter had
+ * nothing to validate against. A typo'd status on a money ledger must be
+ * refused, not silently read as "everything".
+ */
+export const AGENT_COMMISSION_STATUSES = ["ACCRUED", "PAID_OUT"] as const;
+export type AgentCommissionStatus = (typeof AGENT_COMMISSION_STATUSES)[number];
+
+/** One accrued or settled agent commission, with the school it came from. */
+export interface AgentCommissionDto {
+  id: string;
+  agentId: string;
+  /** Nested, matching the wire the operator panel already consumes. */
+  agent: { name: string; code: string };
+  schoolId: string;
+  schoolName: string;
+  paymentRef: string;
+  amountMinor: number;
+  currency: string;
+  status: string;
+  paidOutAt: Date | null;
+  createdAt: Date;
+}
+
+/**
+ * A page of the agent commission ledger — money the PLATFORM OWES PEOPLE.
+ *
+ * `listCommissions` returned the newest 200 across the whole fleet, with no
+ * count, no page and no status filter, and `markCommissionPaid` takes an id
+ * obtainable from nowhere else. Measured at 1,000 attributed schools over five
+ * years (the UNIQUE(schoolId) rule makes one commission per school, so the
+ * ledger grows with the fleet):
+ *
+ *     unpaid           687 commissions, 22,081,500 minor owed
+ *     returned         200, of which 140 unpaid
+ *     owed visible     4,484,500 of 22,081,500
+ *     filter by status none
+ *
+ * So 547 unpaid commissions — and the agents behind them — could not be reached,
+ * counted, or marked paid through the product at all.
+ *
+ * `owed` is grouped by currency and by status over the WHOLE ledger, never the
+ * page: the operator's real question is "who do we still owe", and that must not
+ * be answered from whatever fits on screen.
+ */
+export interface AgentCommissionPageDto {
+  items: AgentCommissionDto[];
+  /** Matching the current filter, counted in SQL. */
+  total: number;
+  shown: number;
+  page: number;
+  pageSize: number;
+  /** Still accrued, per currency, over the whole ledger. */
+  owed: Array<{ currency: string; amountMinor: number; count: number }>;
 }

@@ -41,6 +41,10 @@ import {
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
+/** One page of the release history. The COUNT and the per-currency totals are
+ *  read separately, so the card never describes the money from the page. */
+const RELEASE_PAGE_SIZE = 50;
+
 @Injectable()
 export class SettlementReleaseService {
   constructor(
@@ -50,13 +54,46 @@ export class SettlementReleaseService {
   ) {}
 
   /** What the platform still owes this school, and what it has already paid. */
-  async holding(p: Principal, schoolId: string): Promise<SettlementHoldingDto> {
+  async holding(
+    p: Principal,
+    schoolId: string,
+    opts: { page?: number } = {},
+  ): Promise<SettlementHoldingDto> {
+    const page = Math.max(1, opts.page ?? 1);
     return this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const held = await this.heldInTx(tx, schoolId);
+      // COUNTED AND TOTALLED IN SQL. The list is a page — 50 newest — and the
+      // card used to print `releases.length` as "N release(s) on record". At
+      // five years of monthly settlement that reported 50 of 60 and left
+      // 15,550,000 minor units of platform payments unaccounted for, with
+      // nothing saying a row had been dropped. This is the record of money the
+      // PLATFORM PAID; short by ten months is a reconciliation problem.
+      //
+      // Grouped by currency, never summed across it: a payment inherits its
+      // invoice's currency and this platform bills USD beside a local rail.
+      const [releaseTotal, grouped] = await Promise.all([
+        tx.platformSettlementRelease.count({ where: { schoolId } }),
+        tx.platformSettlementRelease.groupBy({
+          by: ["currency"],
+          where: { schoolId },
+          _sum: { amountMinor: true },
+          _count: { _all: true },
+        }),
+      ]);
+      const releasedTotals = (grouped as Array<{ currency: string; _sum: { amountMinor: number | null }; _count: { _all: number } }>)
+        .map((g) => ({
+          currency: g.currency,
+          amountMinor: g._sum.amountMinor ?? 0,
+          paymentCount: g._count._all,
+        }))
+        .sort((a, b) => a.currency.localeCompare(b.currency));
       const releases = (await tx.platformSettlementRelease.findMany({
         where: { schoolId },
-        orderBy: { releasedAt: "desc" },
-        take: 50,
+        // `id` breaks ties: a multi-currency release writes one row per
+        // currency in the same transaction, at the same instant.
+        orderBy: [{ releasedAt: "desc" }, { id: "desc" }],
+        take: RELEASE_PAGE_SIZE,
+        skip: (page - 1) * RELEASE_PAGE_SIZE,
       })) as Array<{
         id: string;
         amountMinor: number;
@@ -69,6 +106,8 @@ export class SettlementReleaseService {
       return {
         schoolId,
         held,
+        releaseTotal,
+        releasedTotals,
         releases: releases.map((r) => ({
           id: r.id,
           amountMinor: r.amountMinor,

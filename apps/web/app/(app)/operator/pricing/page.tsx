@@ -20,7 +20,7 @@
 // a page whose sections have different permissions is a page half its viewers see
 // as broken.
 
-import type { ModuleAddonPriceDto, PlanPriceDto, PlatformFeeConfig } from "@sms/types";
+import type { AgentCommissionPageDto, Serialized, ModuleAddonPriceDto, PlanPriceDto, PlatformFeeConfig } from "@sms/types";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { hasPermission } from "@/lib/permissions";
@@ -39,7 +39,21 @@ import { CurrencyCoverage } from "@/components/operator/CurrencyCoverage";
 
 export const dynamic = "force-dynamic";
 
-export default async function OperatorPricingPage() {
+const EMPTY_COMMISSIONS = { items: [], total: 0, shown: 0, page: 1, pageSize: 200, owed: [] };
+
+export default async function OperatorPricingPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ commissionStatus?: string; commissionPage?: string }>;
+}) {
+  // The ledger's controls ride the URL so a filtered view can be linked.
+  const csp = (await searchParams) ?? {};
+  const commissionStatus = (csp.commissionStatus ?? "").trim();
+  const commissionPage = Number(csp.commissionPage) > 0 ? Number(csp.commissionPage) : 1;
+  const cq = new URLSearchParams();
+  if (commissionStatus) cq.set("status", commissionStatus);
+  if (commissionPage > 1) cq.set("page", String(commissionPage));
+  const commissionQs = cq.toString() ? `?${cq}` : "";
   const session = await auth();
   const user = session!.user;
   // Not merely a hidden nav item: a manager_admin who types the URL lands back on
@@ -57,7 +71,12 @@ export default async function OperatorPricingPage() {
     // pricing editors beside them, so each falls back to empty independently.
     apiGet<never[]>("/operator/promos").then((r) => r ?? []),
     apiGet<never[]>("/operator/agents").then((r) => r ?? []),
-    apiGet<never[]>("/operator/commissions").then((r) => r ?? []),
+    // The commission ledger is a PAGE with the money still owed counted in SQL.
+    // `never[]` asserted a wire shape nothing checked; the page now carries the
+    // total and the outstanding figure, which is what the operator came for.
+    apiGet<Serialized<AgentCommissionPageDto>>(
+      `/operator/commissions${commissionQs}`,
+    ).then((r) => r ?? EMPTY_COMMISSIONS),
   ]);
 
   return (
@@ -122,7 +141,7 @@ export default async function OperatorPricingPage() {
           />
         )}
 
-        <GrowthManager promos={promos} agents={agents} commissions={commissions} />
+        <GrowthManager promos={promos} agents={agents} commissions={{ ...commissions, status: commissionStatus }} />
       </div>
     </AppShell>
   );

@@ -39,6 +39,17 @@ interface AgentRow {
    *  somebody is actually paid. */
   byCurrency: Array<{ currency: string; accruedMinor: number; paidOutMinor: number }>;
 }
+type CommissionPage = {
+  items: CommissionRow[];
+  total: number;
+  shown: number;
+  page: number;
+  pageSize: number;
+  owed: Array<{ currency: string; amountMinor: number; count: number }>;
+  /** The filter the caller asked for, so the dropdown keeps it. */
+  status?: string;
+};
+
 interface CommissionRow {
   id: string;
   schoolName: string;
@@ -64,10 +75,15 @@ export function GrowthManager({
 }: {
   promos: Promo[];
   agents: AgentRow[];
-  commissions: CommissionRow[];
+  /** A PAGE with what is still OWED counted in SQL. The ledger was the newest
+   *  200 of the whole fleet with no count and no status filter, and the id to
+   *  mark one paid is obtainable nowhere else — so 547 unpaid commissions could
+   *  not be reached, counted or settled through the product. */
+  commissions: CommissionPage;
 }) {
   // Dates follow the SCHOOL's timezone, not the platform's.
   const { shortDate } = useFormat();
+  const rows = commissions.items;
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [promoForm, setPromoForm] = React.useState({ code: "", percentOff: "10", maxUses: "" });
@@ -214,11 +230,44 @@ export function GrowthManager({
         {/* Commissions */}
         <div className="border-t border-border pt-4">
           <p className="mb-2 text-sm font-medium">Commissions</p>
-          {commissions.length === 0 ? (
+          {/* WHAT IS STILL OWED, over the whole ledger and per currency. The
+              operator's question is "who do we still owe", and until now there
+              was no way to ask it. */}
+          {commissions.owed.length > 0 && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              Outstanding:{" "}
+              {commissions.owed.map((o, i) => (
+                <span key={o.currency}>
+                  {i > 0 ? " · " : ""}
+                  <strong className="text-foreground">{cash(o.amountMinor, o.currency)}</strong> ({o.count})
+                </span>
+              ))}
+            </p>
+          )}
+          <form method="GET" className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            <label htmlFor="commission-status" className="text-muted-foreground">Show</label>
+            <select
+              id="commission-status"
+              name="commissionStatus"
+              defaultValue={commissions.status ?? ""}
+              className="h-7 rounded-md border border-border bg-background px-2"
+            >
+              <option value="">Everything</option>
+              <option value="ACCRUED">Still owed</option>
+              <option value="PAID_OUT">Paid out</option>
+            </select>
+            <button type="submit" className="h-7 rounded-md border border-border px-2 hover:bg-muted">Apply</button>
+            <span className="text-muted-foreground">
+              {commissions.total > commissions.shown
+                ? `showing ${commissions.shown} of ${commissions.total}`
+                : `${commissions.total} commission${commissions.total === 1 ? "" : "s"}`}
+            </span>
+          </form>
+          {rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">None accrued yet.</p>
           ) : (
             <ul className="space-y-1.5">
-              {commissions.map((c) => (
+              {rows.map((c) => (
                 <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
                   <span>
                     <span className="font-medium">{c.agent.name}</span>{" "}

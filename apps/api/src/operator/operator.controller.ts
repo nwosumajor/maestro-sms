@@ -1,7 +1,7 @@
 import {
   Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile, BadRequestException} from "@nestjs/common";
 import type { Response } from "express";
-import type { AttentionQueueDto, MessageCreditBalancePageDto, MessageCreditLedgerEntryDto, ModuleAddonPriceDto, OnboardingRequestDto, OperatorAdminAppointmentDto, OperatorBillingAlertDto, OperatorPaymentPageDto, OperatorStudentDto, OperatorUserDto, PlanPriceDto, PlatformAnalyticsDto, PlatformAuditPageDto, PlatformDelegationDto, PlatformStaffInviteDto, SubscriptionDto, TenantNameDto, TenantPageDto } from "@sms/types";
+import type { AttentionQueueDto, MessageCreditBalancePageDto, MessageCreditLedgerEntryDto, ModuleAddonPriceDto, OnboardingRequestDto, OperatorAdminAppointmentDto, OperatorBillingAlertDto, OperatorPaymentPageDto, OperatorStudentDto, OperatorUserDto, PlanPriceDto, PlatformAnalyticsDto, PlatformAuditPageDto, PlatformDelegationDto, PlatformStaffInviteDto, SubscriptionDto, TenantNameDto, TenantPageDto, AgentCommissionPageDto } from "@sms/types";
 import {
   CURRENCIES,
   type Currency,
@@ -9,6 +9,7 @@ import {
   MODULE_ADDON_PRICING,
   PAYSTACK_CURRENCIES,
   planCurrencies,
+  AGENT_COMMISSION_STATUSES,
 } from "@sms/types";
 import { z } from "zod";
 import {
@@ -916,8 +917,9 @@ export class OperatorController {
   settlementHolding(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
+    @Query("page") page?: string,
   ): Promise<SettlementHoldingDto> {
-    return this.settlementRelease.holding(p, schoolId);
+    return this.settlementRelease.holding(p, schoolId, { page: pageNumber(page) });
   }
 
   /**
@@ -1008,8 +1010,18 @@ export class OperatorController {
 
   @Get("commissions")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
-  listCommissions() {
-    return this.growth.listCommissions();
+  listCommissions(
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+  ): Promise<AgentCommissionPageDto> {
+    // "Who do we still owe" had no way to be asked: the route took no
+    // parameters at all. `narrowStatus` refuses an unrecognised one rather than
+    // silently listing everything, which on a money ledger would read as "we
+    // owe nobody".
+    return this.growth.listCommissions({
+      status: narrowStatus(status, AGENT_COMMISSION_STATUSES),
+      page: pageNumber(page),
+    });
   }
 
   /** Mark a commission settled to the agent (money moved outside the system). */

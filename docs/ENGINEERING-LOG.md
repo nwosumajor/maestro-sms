@@ -15503,3 +15503,104 @@ different decisions. The panel reads "waiting since 9 Oct 2021" per row and
 // Live, after: the front page covers 2021-10-09..2022-04-26 — the longest-
 // waiting payments, previously unreachable at any URL — page 5 returns the
 // tail, and `?page=abc` is refused with 400.
+
+### 60 settlement releases, 50 returned, and a card that said "50 on record"
+
+`holding` answers "what the platform still owes this school, and what it has
+ALREADY PAID". The release history read `releasedAt DESC, take: 50` with no
+count, and the operator card printed
+
+    {data.releases.length} release(s) on record
+
+straight off that array. Measured on a school five years into monthly
+settlement:
+
+    releases on record   60, 2021-11-07 .. 2026-09-12, 95,700,000 minor paid
+    returned             50
+    covered              2022-09-03 onward
+    money accounted for  80,150,000 of 95,700,000
+    card claimed         "50 release(s) on record"
+
+Ten months and 15,550,000 minor units of PLATFORM PAYMENTS missing from the
+platform's own record of them, with the figure on screen looking like a fact.
+Same shape as the scholarship oversight panel, pointed at money the platform has
+actually transferred: a release row carries the BANK REFERENCE, which is what an
+auditor reconciling the platform's payouts comes here to find.
+
+FIX. `releaseTotal` is counted in SQL and `releasedTotals` is a `groupBy` over
+every release — so the card describes the money from the ledger, never from the
+page — and `?page=` reaches the rest. Ordering gained `id` as a tiebreaker
+because a multi-currency release writes one row per currency in the same
+transaction, at the same instant.
+
+**Per currency, never across it.** `releasedTotals` mirrors `held`, which this
+log already records being fixed for exactly this: a payment inherits its
+INVOICE's currency, the platform bills USD beside a school's local rail, and a
+mixed history is ordinary rather than a corner case. The card now reads
+"Paid to date: ₦957,000.00 across 60 releases", with a second figure beside it
+when a second currency exists.
+
+Live, after: page 1 shows 50 with `releaseTotal` 60 and NGN 95,700,000 paid to
+date; page 2 returns 2021-11-07..2022-08-04, the ten that were unreachable; the
+totals do not move with the page; `?page=abc` is refused with 400. Verified
+through the BFF with a real owner session, because `SettlementHolding` fetches
+on mount and SSR carries none of it.
+
+// This is the SECOND money surface this session where the defect was not a
+// short list but a WRONG FIGURE derived from one — the scholarship panel's
+// "Awarded 29" of 60 was the first. Both were `.length` over a capped array
+// rendered as a fact. The scan is cheap: grep the web for a displayed value
+// computed from a fetched array, and the API for a `take` with no `count()`
+// beside it.
+
+### 547 agent commissions the platform could not pay
+
+`listCommissions` is the ledger of money the PLATFORM OWES PEOPLE. It returned
+the newest 200 across the whole fleet, with no count, no page and no status
+filter — and `markCommissionPaid` takes an id obtainable from nowhere else.
+
+The ledger grows with the FLEET rather than with one school: `UNIQUE(schoolId)`
+means one commission per attributed school, so 1,000 agent-attributed schools is
+1,000 rows, and 200 of a 5,000-school fleet arriving through agents is enough to
+cross the cap. Measured on 1,000 attributed schools over five years:
+
+    unpaid            687 commissions, 22,081,500 minor owed
+    returned          200, of which 140 unpaid
+    owed visible      4,484,500 of 22,081,500
+    filter by status  none — the route took no parameters at all
+
+So 547 unpaid commissions — and the agents behind them — were unreachable,
+uncountable, and **unpayable through the product**, because the only id that
+settles one comes from this list.
+
+FIX. Counted in SQL, paged, and filterable by status, with `owed` grouped over
+the WHOLE ledger per currency — "who do we still owe" must not be answered from
+whatever fits on screen, and a commission carries its own currency.
+`AGENT_COMMISSION_STATUSES` now exists in `@sms/types`: the two states lived only
+as string literals in a schema default and in `markCommissionPaid`, so the new
+filter had nothing to validate against, and a typo'd status on a money ledger
+must be refused rather than silently read as "everything".
+
+Live, after: 200 shown of 1,000 with NGN 22,081,500 owed across 687;
+`?status=ACCRUED` narrows to 687 with the owed figure unmoved; `?page=4` reaches
+deeper; `?status=NONSENSE` is refused with 400. The panel reads
+"Outstanding: ₦220,815.00 (687)" above "showing 200 of 1000".
+
+// HONESTY ABOUT THE FIXTURE: the first measurement modelled OLD commissions as
+// unpaid — defensible, since a commission lingers because nobody settled it —
+// and produced "0 of 687 unpaid visible", the whole outstanding ledger
+// invisible. That number came from the assumption as much as from the defect,
+// so it was re-measured with settlement INDEPENDENT of age, which is the
+// neutral model, and the honest figure is 140 of 687 visible and 80% of the
+// money out of reach. Report the number the weaker assumption supports.
+
+// GOTCHA: the page fetched this with `apiGet<never[]>`. `Serialized<T>` asserts
+// a wire shape and never checks it, and `never[]` asserts nothing at all — so
+// the shape change could not have been caught by the typechecker on the
+// consumer side. `wire-shape-agrees` is what covers this class; a `never[]`
+// annotation is an opt-out from it.
+
+// This is the THIRD money surface this session whose defect was a wrong or
+// absent FIGURE rather than a short list — after scholarship "Awarded 29 of 60"
+// and the settlement card's "50 release(s) on record" of 60. All three were a
+// count or a sum taken from a capped array and rendered as fact.
