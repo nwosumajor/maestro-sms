@@ -15342,3 +15342,59 @@ returns genuinely different rows; and on a mid-morning state (1,200 in, 50 out)
 // password screen, and a probe that reads a rendered page is reading whatever
 // the session lets it see. Restored byte-exact from the snapshot; the bcrypt
 // hash was never touched.
+
+### "Awarded: 29" on a school that had awarded 60
+
+`listForSchool` is school leadership's scholarship oversight list, and its
+docstring says "every application raised in THEIR OWN school". It returned the
+newest 500 with no count and no filter — and the panel then computed its
+HEADLINE FIGURES from that array:
+
+    { label: "Submitted",   value: applications.length }
+    { label: "In progress", value: open.length }
+    { label: "Awarded",     value: awarded.length }
+
+Measured live on a five-year school holding 1,200 applications (20 platform
+rounds x 60 applicants, awards clustered in the early years as they would be):
+
+                   shown    true
+    Submitted        500    1200
+    In progress      405     980
+    Awarded           29      60
+    covered     2024-09-24 .. 2026-09-15   (the first 2.5 years unreachable)
+
+**More than half the school's scholarships were missing from the awarded
+figure.** This is a step past the capped lists elsewhere in this log. A short
+list at least looks like a list; a wrong NUMBER on an oversight screen looks
+like a fact. Leadership reads "Awarded 29" and has no reason to doubt it, and
+the children behind the other 31 awards are simply not in the school's own
+record of them.
+
+FIX. The counts are a `groupBy` over every non-DRAFT application, deliberately
+NOT narrowed by the status filter or the page — otherwise filtering to awards
+reports that nothing is in progress. `?status=` and `?page=` reach the rest, both
+in SQL. Ordering gained `id` as a tiebreaker, because a round's applications are
+raised in bulk and share a `createdAt`.
+
+Live, after: Submitted 1,204 / In progress 980 / Awarded 64 against a true
+1,204 / 980 / 64 (the extra four are pre-existing demo rows, checked rather than
+assumed); `?status=AWARDED` returns 64 with the day's figures still whole;
+`?page=3` returns the tail; `?status=NONSENSE` -> 400. The filter dropdown
+carries each status's own count — "With the class supervisor (820), Awarded
+(64), Not successful (160)".
+
+// GOTCHA, and a small piece of luck: I hand-rolled the status validation as
+// `STATUSES.includes(x) ? x : undefined` and only noticed `narrowStatus` —
+// already imported two lines above in the same controller — when the compiler
+// complained about a DUPLICATE `pageNumber` import I had also added. The shared
+// helper REFUSES an unknown status with a 400 rather than dropping it, so the
+// comment I had written ("dropped rather than 400") described behaviour the
+// code would not have had. Two rules met here: prefer one shared definition to
+// a sixth correct copy, and never let a comment assert what the code does not
+// do. Both would have been violated by the version that typechecked.
+
+// GOTCHA: `wget -qO <path>` inside `docker exec` writes the file INSIDE the
+// container, so the host-side parse reads nothing and the probe reports a
+// missing file rather than a bad response. Capture on stdout and redirect on
+// the host. The one case that DID report cleanly through the mistake was the
+// 400, because it never tried to parse a body.

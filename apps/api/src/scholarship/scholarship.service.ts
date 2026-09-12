@@ -19,7 +19,7 @@ import {
 } from "@sms/types";
 import { classIdsTaughtBy, teacherIdsOfClasses, teachesAnyOf } from "../common/teaches";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto, type CbtSittingViewDto, type ScholarshipExamPaperDto } from "@sms/types";
+import { reportedTermGrade, resolveGradeBands, SCHOLARSHIP_APPLICATION_STATUSES, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto, type ScholarshipApplicationStatus, type ScholarshipSchoolPageDto, type CbtSittingViewDto, type ScholarshipExamPaperDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -36,6 +36,12 @@ import { toMinor } from "../common/money";
 import { SchoolRegionService } from "../foundation/school-region.service";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
+
+/**
+ * One page of leadership's oversight list. A cap is only honest when the totals
+ * are counted separately and the filter reaches past it.
+ */
+const SCHOOL_PAGE_SIZE = 500;
 
 @Injectable()
 export class ScholarshipService {
@@ -350,14 +356,50 @@ export class ScholarshipService {
    *  Scoping is the tenant boundary itself: runAsTenant sets the GUC and RLS
    *  confines the rows to the caller's school, so there is no second scoping
    *  rule here to drift out of step with the first. */
-  async listForSchool(p: Principal): Promise<ScholarshipApplicationDto[]> {
+  async listForSchool(
+    p: Principal,
+    opts: { status?: ScholarshipApplicationStatus; page?: number } = {},
+  ): Promise<ScholarshipSchoolPageDto> {
+    const page = Math.max(1, opts.page ?? 1);
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const rows = await tx.scholarshipApplication.findMany({
-        where: { status: { not: "DRAFT" } },
-        orderBy: { createdAt: "desc" },
-        take: 500,
+      const oversight = { status: { not: "DRAFT" as const } };
+      const where = opts.status ? { status: opts.status } : oversight;
+
+      // COUNTED IN SQL, OVER THE WHOLE SCHOOL. The page used to compute its
+      // headline figures from the fetched array, so a five-year school holding
+      // 1,200 applications was shown "Submitted 500 / In progress 405 /
+      // Awarded 29" against a true 1,200 / 980 / 60 — more than half its
+      // scholarships missing from the awarded figure. A wrong number on an
+      // oversight screen is worse than a short list: nothing about it looks
+      // short. These are deliberately NOT narrowed by the filter or the page.
+      const grouped = await tx.scholarshipApplication.groupBy({
+        by: ["status"],
+        where: oversight,
+        _count: { _all: true },
       });
-      return this.toApplicationDtos(tx, rows);
+      const counts = Object.fromEntries(
+        SCHOLARSHIP_APPLICATION_STATUSES.map((k) => [k, 0]),
+      ) as Record<ScholarshipApplicationStatus, number>;
+      for (const g of grouped as Array<{ status: string; _count: { _all: number } }>) {
+        if ((SCHOLARSHIP_APPLICATION_STATUSES as readonly string[]).includes(g.status)) {
+          counts[g.status as ScholarshipApplicationStatus] = g._count._all;
+        }
+      }
+
+      const [rows, total] = await Promise.all([
+        tx.scholarshipApplication.findMany({
+          where,
+          // `id` breaks ties: a round's applications are raised in bulk and
+          // share a createdAt, and offset paging over a partial order silently
+          // skips and repeats rows.
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: SCHOOL_PAGE_SIZE,
+          skip: (page - 1) * SCHOOL_PAGE_SIZE,
+        }),
+        tx.scholarshipApplication.count({ where }),
+      ]);
+      const items = await this.toApplicationDtos(tx, rows);
+      return { items, total, shown: items.length, page, pageSize: SCHOOL_PAGE_SIZE, counts };
     });
   }
 

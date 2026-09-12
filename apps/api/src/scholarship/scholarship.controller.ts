@@ -24,6 +24,8 @@ import type {
   ScholarshipQuestionBankDto,
   ScholarshipSchoolSpreadDto,
   ScholarshipSubjectOption,
+  ScholarshipSchoolPageDto,
+  ScholarshipApplicationStatus,
 } from "@sms/types";
 import type { Response } from "express";
 import { safeFilename } from "../documents/safe-content-type";
@@ -394,8 +396,20 @@ export class ScholarshipController {
    *  it can only ever return the caller's own school. */
   @Get("school-applications")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.READ)
-  listSchoolApplications(@CurrentPrincipal() p: Principal): Promise<ScholarshipApplicationDto[]> {
-    return this.scholarships.listForSchool(p);
+  listSchoolApplications(
+    @CurrentPrincipal() p: Principal,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+  ): Promise<ScholarshipSchoolPageDto> {
+    // Both parameters go through the SHARED helpers rather than a sixth correct
+    // copy: `narrowStatus` REFUSES an unrecognised status (a cleared dropdown
+    // sends an empty string, which is not a filter and is allowed), and
+    // `pageNumber` refuses a malformed page — reading page one while believing
+    // you are deep in the record is how an award goes unseen.
+    return this.scholarships.listForSchool(p, {
+      status: narrowStatus(status, SCHOLARSHIP_APPLICATION_STATUSES),
+      page: pageNumber(page),
+    });
   }
 
   /**

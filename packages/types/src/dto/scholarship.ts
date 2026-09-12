@@ -584,3 +584,35 @@ export interface ScholarshipExamPaperDto {
   sittingId: string | null;
   sittingStatus: string | null;
 }
+
+/**
+ * Leadership's oversight page, with the figures counted in SQL.
+ *
+ * `listForSchool` promised "every application raised in THEIR OWN school" and
+ * returned the newest 500 with no count — and the panel then computed its
+ * headline statistics from that array. Measured on a five-year school holding
+ * 1,200 applications:
+ *
+ *     Submitted    shown 500   true 1200
+ *     In progress  shown 405   true  980
+ *     Awarded      shown  29   true   60
+ *
+ * More than half the school's scholarships were missing from the AWARDED
+ * figure, and the list reached back only two and a half years. A wrong number
+ * on an oversight screen is worse than a short list, because nothing about it
+ * looks short.
+ *
+ * `counts` is a `groupBy` over every non-DRAFT application and is NOT narrowed
+ * by the status filter or the page — otherwise filtering to awards would report
+ * that nothing is in progress.
+ */
+export interface ScholarshipSchoolPageDto {
+  items: ScholarshipApplicationDto[];
+  /** Total matching the current filter, counted in SQL. */
+  total: number;
+  shown: number;
+  page: number;
+  pageSize: number;
+  /** Every status's count across the whole school, filter-independent. */
+  counts: Record<ScholarshipApplicationStatus, number>;
+}

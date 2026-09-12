@@ -1,4 +1,4 @@
-import type { PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipPortalDto, Serialized } from "@sms/types";
+import type { ScholarshipSchoolPageDto, PublishedScholarshipResultsDto, ScholarshipApplicationDto, ScholarshipPortalDto, Serialized } from "@sms/types";
 import { regionOf } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -14,7 +14,20 @@ export const dynamic = "force-dynamic";
 
 type Portal = Serialized<ScholarshipPortalDto>;
 
-export default async function ScholarshipsPage() {
+export default async function ScholarshipsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ status?: string; page?: string }>;
+}) {
+  // The oversight controls ride the URL, so a filtered view has a link and a
+  // found application can be shared. Both narrow in SQL.
+  const sp = (await searchParams) ?? {};
+  const schoolStatus = (sp.status ?? "").trim() || undefined;
+  const schoolPage = Number(sp.page) > 0 ? Number(sp.page) : 1;
+  const schoolQuery = new URLSearchParams();
+  if (schoolStatus) schoolQuery.set("status", schoolStatus);
+  if (schoolPage > 1) schoolQuery.set("page", String(schoolPage));
+  const schoolQs = schoolQuery.toString() ? `?${schoolQuery}` : "";
   const session = await auth();
   const user = session!.user;
   // Dates follow the SCHOOL's timezone, not the platform's.
@@ -38,7 +51,7 @@ export default async function ScholarshipsPage() {
   const [portal, schoolApplications, published] = await Promise.all([
     needsPortal ? apiGet<Portal>("/scholarships/portal") : Promise.resolve(null),
     canOversee
-      ? apiGet<Serialized<ScholarshipApplicationDto>[]>("/scholarships/school-applications")
+      ? apiGet<Serialized<ScholarshipSchoolPageDto>>(`/scholarships/school-applications${schoolQs}`)
       : Promise.resolve(null),
     // PUBLISHED RESULTS, which every school on the platform may read — that is
     // the point of publishing. Same audience as the portal.
@@ -76,7 +89,7 @@ export default async function ScholarshipsPage() {
               </p>
             </div>
             {schoolApplications ? (
-              <SchoolApplications applications={schoolApplications} region={region} />
+              <SchoolApplications page={{ ...schoolApplications, status: schoolStatus }} region={region} />
             ) : (
               <Alert variant="info">
                 <AlertTitle>Couldn&apos;t load your school&apos;s applications</AlertTitle>
