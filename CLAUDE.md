@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **328 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **329 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **328 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **329 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1070,6 +1070,13 @@ These are the rules; the log is why each one exists.
   differently), return a total, and trust a seed only when `seed.length >=
   total`. `UserPicker`'s own header had recorded this defect for the guardian
   picker; discipline kept the dropdown.
+- **A TOTAL MUST COUNT ONLY WHAT THE CALLER MAY READ.** When a capped list is
+  given a count and a search, both must inherit the list's own scoping. The
+  notice board is audience-filtered (a parent sees ALL, staff also see STAFF), so
+  its `count` and its `q` carry the same filter: the principal is shown 501 and
+  the parent 400. A total the caller cannot open would be worse than no total —
+  it tells a family that notices exist which they are not allowed to read.
+  Widening the REACH must never widen the RULE.
 - **A JUMP-TO BOX IS STILL A CAP.** The omnibox showed six per category with no
   count and no order: "Adebayo" matched 150 pupils and returned six arbitrary
   ones, so *not on the roll* and *one of the 144 I did not show* rendered

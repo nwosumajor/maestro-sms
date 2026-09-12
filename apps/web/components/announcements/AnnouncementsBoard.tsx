@@ -1,6 +1,6 @@
 "use client";
 
-import type { AnnouncementDto, Serialized } from "@sms/types";
+import type { AnnouncementDto, AnnouncementPageDto, Serialized } from "@sms/types";
 import { useFormat } from "@/components/shell/RegionProvider";
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -13,15 +13,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { readApiError } from "@/lib/api-error";
 
 type Announcement = Serialized<AnnouncementDto>;
+type Board = Serialized<AnnouncementPageDto>;
 
 export function AnnouncementsBoard({
-  announcements,
+  board,
+  query,
   canManage,
 }: {
-  announcements: Announcement[];
+  /** A PAGE, not an array: it carries the total behind the cap. A board with
+   *  three years of notices out of reach must not look like a complete one. */
+  board: Board;
+  /** The search the caller ran, so the box keeps it. */
+  query: string;
   canManage: boolean;
 }) {
   // Dates follow the SCHOOL's calendar, not the browser's.
+  const announcements = board.items;
   const { shortDate } = useFormat();
   const router = useRouter();
   const [f, setF] = React.useState({ title: "", body: "", audience: "ALL" });
@@ -91,7 +98,33 @@ export function AnnouncementsBoard({
       )}
 
       <div className="space-y-3">
-        {announcements.length === 0 && <p className="text-sm text-muted-foreground">No announcements yet.</p>}
+        {/* SEARCH AND REACH. A board answers "what did the school say about X",
+            and the cap made three to four years of that unanswerable. Both
+            controls narrow in SQL. */}
+        <form method="GET" className="flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            name="q"
+            defaultValue={query}
+            aria-label="Search every notice"
+            placeholder="Search every notice"
+            className="h-8 min-w-52 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+          />
+          <button type="submit" className="h-8 rounded-md border border-border px-3 text-xs hover:bg-muted">
+            Search
+          </button>
+          <span className="text-xs text-muted-foreground">
+            {board.total > board.shown
+              ? `showing ${board.shown} of ${board.total}`
+              : `${board.total} notice${board.total === 1 ? "" : "s"}`}
+            {query ? ` matching “${query}”` : ""}
+          </span>
+        </form>
+        {announcements.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {query ? `No notice matches “${query}”.` : "No announcements yet."}
+          </p>
+        )}
         {announcements.map((a) => (
           <Card key={a.id}>
             <CardHeader className="flex-row items-start justify-between space-y-0">
@@ -112,6 +145,23 @@ export function AnnouncementsBoard({
           </Card>
         ))}
       </div>
-    </div>
+    
+      {/* A cap is only safe when the rest is reachable. */}
+      {board.total > board.pageSize && (
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          {board.page > 1 && (
+            <a className="underline hover:text-foreground" href={`/announcements?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(board.page - 1) })}`}>
+              ← newer
+            </a>
+          )}
+          <span>page {board.page} of {Math.max(1, Math.ceil(board.total / board.pageSize))}</span>
+          {board.page * board.pageSize < board.total && (
+            <a className="underline hover:text-foreground" href={`/announcements?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(board.page + 1) })}`}>
+              older →
+            </a>
+          )}
+        </div>
+      )}
+</div>
   );
 }

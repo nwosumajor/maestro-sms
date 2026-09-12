@@ -15398,3 +15398,50 @@ carries each status's own count — "With the class supervisor (820), Awarded
 // missing file rather than a bad response. Capture on stdout and redirect on
 // the host. The one case that DID report cleanly through the mistake was the
 // 400, because it never tried to parse a body.
+
+### 501 notices, 100 reachable, and no way to search them
+
+The notice board returned the newest 100 with no count, no page and no search.
+Measured live on a five-year school posting ~2.5 notices a week:
+
+    held                 501
+    principal reached    100, back to 2025-01-26
+    parent reached       100, back to 2024-11-09
+    said there was more  nothing
+
+Three to four years of what the school had told families were unreachable at any
+URL. A board is read to answer "what did the school say about X" — the trip, the
+uniform, the closure — and beyond a few months that question had no answer.
+
+FIX. `{items, total, shown, page, pageSize}`, with `q` searching title and body
+in SQL and `page` reaching the rest, plus `id` as a tiebreaker because a batch
+posted at the start of term shares a `createdAt`.
+
+**The audience rule is not the defect and does not move**, and that is the part
+worth stating: `q` and `count` are both scoped by audience exactly as the list
+is. A total the caller cannot actually read would be worse than no total — it
+would tell a family that notices exist which they are not allowed to open.
+Verified live: the principal is shown 501 and the parent 400, the difference
+being precisely the STAFF-audience notices.
+
+Live, after: search for "Notice 5" returns 12 matches spanning 2021-10-23 to
+2025-11-16 — reaching year one, where nothing reached past 2025 before; `?page=4`
+returns 2022-08-10 .. 2023-06-03. Web renders "showing 100 of 501" for the
+principal, "showing 100 of 400" for the parent, "12 notices matching "Notice 5""
+and a pager.
+
+// GOTCHA, mine: I appended the new DTO to `dto/announcement.ts` when the type
+// lives in `dto/announcementS.ts`, and `cat >>` CREATED the singular file
+// rather than failing. It typechecked — nothing imported it — so only
+// `git status` showed the stray untracked file. A redirect that creates on
+// miss will not tell you that you addressed the wrong file; check the status
+// rather than the exit code.
+
+// This is the SIXTH instance this session of one shape: an ordering or
+// predicate under a cap that discards exactly what the screen is for. The
+// others were meetings (the future), CBT (1,250 papers and their answer keys),
+// the calendar (a blank term), the gate desk (the morning) and scholarship
+// oversight (a wrong AWARDED figure). The cross-cutting scan that found this
+// one — every literal `take` with no `count()` beside it, and every displayed
+// figure derived from a fetched array — is cheap and is the way to find the
+// seventh.
