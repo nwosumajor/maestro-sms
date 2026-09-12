@@ -41,10 +41,12 @@ RUN pnpm --filter @sms/types build \
 
 # ---- runtime: standalone output only, drop root -----------------------------
 FROM base AS runtime
-# LINKS THE PACKAGE TO THIS REPOSITORY on GitHub Container Registry. Without it
-# the package arrives orphaned: it does not appear on the repo page, does not
-# inherit the repo's access, and connecting it afterwards means pushing the
-# whole image again. The OCI `source` label is what ghcr.io reads.
+# Metadata for `docker inspect`. NOTE: these labels do NOT link the package to
+# the repository on GHCR, though this comment claimed they did for as long as it
+# existed. A LABEL is a config label on the child image; buildx pushes an OCI
+# image INDEX and GHCR reads `source` from an ANNOTATION on that index, never
+# descending into the child config. The label was present and correct here while
+# both packages sat orphaned. `scripts/push-images.sh` sets the annotation.
 LABEL org.opencontainers.image.source="https://github.com/nwosumajor/maestro-sms"
 LABEL org.opencontainers.image.description="MAESTRO-SMS — web (Next.js)"
 LABEL org.opencontainers.image.licenses="UNLICENSED"

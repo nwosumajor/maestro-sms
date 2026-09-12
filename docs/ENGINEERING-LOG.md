@@ -14951,3 +14951,89 @@ and the timers are CLEARED rather than merely switched off.
 
 Mutation-validated: removing the clamp entirely, and turning it into a rounding
 rule, each fail the right named tests.
+
+### A label that was present, correct, and linked nothing
+
+Both container images carried, in their runtime stage:
+
+    LABEL org.opencontainers.image.source="https://github.com/nwosumajor/maestro-sms"
+
+with a comment above it stating that this is what GHCR reads to attach a package
+to its repository. It is not, and both packages had been sitting orphaned since
+the day they were first pushed.
+
+A `LABEL` becomes a **config label on the child image**. buildx pushes an OCI
+**image index** — the platform image plus its provenance attestation — and GHCR
+reads `org.opencontainers.image.source` from an **annotation on that index**. It
+never descends into the child config. Measured on the live artifacts:
+
+    docker image inspect …      org.opencontainers.image.source  present, correct
+    index annotations           null
+    gh api user/packages        repo=(not linked)   — both packages
+
+Every command in the chain reported success. `docker build` succeeded, `docker
+push` succeeded, `docker inspect` showed the label exactly as written, and the
+packages linked to nothing. This is the shape recorded elsewhere in this log as
+worse than a missing control: the reader sees a control that looks right and
+stops looking for the real switch. The comment asserting the mechanism made it
+worse, because it answered the only question that would have found the defect.
+
+The fix is `--annotation "index:org.opencontainers.image.source=…"` at push
+time. **The `index:` prefix is the entire fix** — without it the annotation
+lands on the child manifest and the package stays orphaned, with every command
+still exiting zero. One token, invisible in review.
+
+Two decisions worth recording.
+
+**Annotate rather than disable provenance.** The alternative fix is
+`--provenance=false`, which removes the attestation, leaves no index, and lets
+the config label sit at top level where GHCR reads it. It works, and it pays for
+a metadata link by deleting the SLSA build provenance of images for a platform
+holding minors' records. It also links only by side effect: reintroduce an index
+for any reason — a multi-arch build, a buildx default — and it silently stops
+linking again with the Dockerfile still looking correct. Annotating states the
+intent on the artifact that is actually read, and keeps `linux/arm64` available
+for the Graviton runtime.
+
+**The push commands did not exist in version control.** `grep -rn "ghcr.io"`
+across the repo returned two Dockerfile comments and nothing else: the commands
+that build and push deployable artifacts lived in shell history. That is the
+mechanism by which a required flag goes missing. They are now
+`scripts/push-images.sh`, which annotates index and manifest, tags `:latest` and
+the git SHA (marking a dirty tree `-dirty`, since a SHA tag on uncommitted work
+is a false provenance claim), and — because the whole defect was a push that
+succeeded and linked nothing — **re-reads the pushed index and fails if the
+annotation is not there.** A clean exit was never evidence.
+
+The script cannot reach production, and this is structural rather than a
+convention: production runs from ECR (`ecs.tf` → `aws_ecr_repository`, SHA-tagged
+by `deploy.yml`, repositories tag-immutable, `linux/arm64`). Nothing in the stack
+pulls ghcr.io. The registry is a readonly constant and a guard refuses any value
+matching `*ecr*`/`*amazonaws*`.
+
+Verified live: both packages went from `repo=(not linked)` to
+`repo=nwosumajor/maestro-sms`, visibility preserved as private, with no manual
+"Connect repository" step.
+
+Gate: `a-label-that-linked-nothing.test.ts`. It **drives** the script under
+`DRY_RUN` and reads the emitted flags rather than parsing the bash — the first
+draft parsed the source, matched nothing once the scopes moved into a
+`for scope in index manifest` loop, and failed loudly rather than passing empty.
+Mutation-validated three ways: dropping the `index` scope fails only the index
+assertion (a manifest-only script satisfies every other check, which is the
+point); removing the production-registry guard fails the production test;
+restoring the false Dockerfile comment fails the Dockerfile test.
+
+// GOTCHA, made here: restoring a mutated file with `git checkout` on an
+// UNCOMMITTED file discards the FIX, not the mutation. This log already records
+// that trap and I walked into it — the API Dockerfile silently reverted to the
+// false comment while the web one kept the correction, which is sibling
+// asymmetry created by the act of testing for it. Snapshot to a scratch file
+// and restore from there.
+
+// GOTCHA: the first push failed mid-run on `lookup ghcr.io on [::1]:53` while
+// the host resolved ghcr.io correctly via its own nameserver. Transient, and
+// the same host-network flakiness recorded against compose builds; the retry
+// succeeded with layers cached. The API had already pushed, so the run was
+// half-applied — which is why the script's verify step checks BOTH images
+// rather than trusting the exit status of the last one.

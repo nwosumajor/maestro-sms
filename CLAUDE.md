@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **322 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **323 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **322 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **323 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2304,6 +2304,28 @@ clean typecheck and 3,600 green tests). // GOTCHA: after ANY response-shape
 change, grep the web consumers AND run `WEB_URL=http://localhost pnpm --filter
 @sms/web smoke:routes` — the smoke is still the only thing that catches a
 field-level break.
+
+## Container images: GHCR is annotated, production is ECR
+`scripts/push-images.sh` is the ONLY supported way to push the api/web images to
+GHCR. Production does not use GHCR at all — `ecs.tf` pulls
+`aws_ecr_repository.this["api"|"web"]` at `var.image_tag`, `deploy.yml` sets that
+to the git SHA on an ARM runner, and the ECR repos are tag-IMMUTABLE. The script
+hard-codes `ghcr.io` and refuses any registry matching `*ecr*`/`*amazonaws*`.
+// GOTCHA: **a Dockerfile `LABEL` does NOT link a package to its repository.**
+`LABEL org.opencontainers.image.source` is a config label on the CHILD image;
+buildx pushes an OCI image INDEX and GHCR reads `source` from an ANNOTATION on
+that index, never descending into the config. Both packages sat orphaned for as
+long as they existed while `docker inspect` showed the label exactly as written
+and every build, push and inspect exited zero. The fix is
+`--annotation "index:org.opencontainers.image.source=…"`; **the `index:` prefix
+IS the fix** — without it the annotation lands on the child manifest and nothing
+links, still silently. The labels stay (they are what `docker inspect` reads) but
+they are not the mechanism, and the comments that said they were are corrected.
+// The script VERIFIES by re-reading the pushed index, because the entire defect
+// was a push that succeeded and linked nothing. A clean exit is not evidence.
+// Gate: `a-label-that-linked-nothing` — it DRIVES the script under `DRY_RUN`
+// rather than parsing the bash, which is what the first draft did and why it
+// matched nothing once the scopes moved into a loop.
 
 ## Operating the live system — runbooks
 - **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity
