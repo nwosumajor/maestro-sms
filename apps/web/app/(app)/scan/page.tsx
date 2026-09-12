@@ -3,6 +3,7 @@ import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { ScanConsole } from "@/components/scan/ScanConsole";
+import { DeskDay } from "@/components/scan/DeskDay";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ export default async function ScanPage() {
           subtitle="Scan a member's ID card (or type their code) to confirm their identity at the library, gate, exam hall or register."
         />
         <ScanConsole />
+        <DeskDay />
       </div>
     </AppShell>
   );

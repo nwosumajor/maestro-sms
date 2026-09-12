@@ -23,8 +23,9 @@ import type {
   ScanEventDto,
   ScanPurpose,
   ScanRecordResultDto,
+  ScanDayDto,
 } from "@sms/types";
-import { isScanPurpose, schoolToday } from "@sms/types";
+import { SCAN_PURPOSES, isScanPurpose, schoolToday } from "@sms/types";
 
 /** A movement log is read to answer a question, not to be scrolled. Bounded on
  *  the largest table the platform stores. */
@@ -311,24 +312,54 @@ export class MemberScanService {
    * The other question a gate log answers: who is on the premises, and what has
    * the desk been doing. Uses the `(schoolId, createdAt)` index.
    */
-  async today(p: Principal): Promise<ScanEventDto[]> {
+  async today(
+    p: Principal,
+    opts: { purpose?: ScanPurpose; page?: number } = {},
+  ): Promise<ScanDayDto> {
+    const page = Math.max(1, opts.page ?? 1);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const { timezone } = await this.region.forSchool(p.schoolId);
       // The SCHOOL's day, not the server's UTC one — the same rule the register
       // and the term lock use.
       const start = schoolToday(timezone);
-      const rows = (await tx.scanEvent.findMany({
-        where: { createdAt: { gte: start } },
-        orderBy: { createdAt: "desc" },
-        take: SCAN_HISTORY_CAP,
-      })) as Array<{
+      const dayWhere = { createdAt: { gte: start } };
+      const where = { ...dayWhere, ...(opts.purpose ? { purpose: opts.purpose } : {}) };
+
+      // COUNTS OVER THE WHOLE DAY, never narrowed by the page or the filter.
+      // This is what makes the cap survivable: the desk can answer "who is on
+      // the premises" without paging thousands of rows, which is the question
+      // it could not answer at all when 200 newest rows held zero check-ins.
+      const grouped = await tx.scanEvent.groupBy({
+        by: ["purpose"],
+        where: dayWhere,
+        _count: { _all: true },
+      });
+      const counts = Object.fromEntries(SCAN_PURPOSES.map((k) => [k, 0])) as Record<ScanPurpose, number>;
+      for (const g of grouped as Array<{ purpose: string; _count: { _all: number } }>) {
+        // A purpose the catalogue no longer knows is DROPPED rather than
+        // widening the record: `counts` is typed against SCAN_PURPOSES.
+        if (isScanPurpose(g.purpose)) counts[g.purpose] = g._count._all;
+      }
+
+      const [rows, total] = await Promise.all([
+        tx.scanEvent.findMany({
+          where,
+          // Newest-first is right for a live desk log, and the cap is now safe
+          // because the totals say what is behind it and the filter reaches it.
+          // `id` breaks ties: a handheld scanner fires several times a second.
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: SCAN_HISTORY_CAP,
+          skip: (page - 1) * SCAN_HISTORY_CAP,
+        }),
+        tx.scanEvent.count({ where }),
+      ]) as [Array<{
         id: string;
         memberId: string;
         scannedById: string;
         purpose: string;
         note: string | null;
         createdAt: Date;
-      }>;
+      }>, number];
       await this.audit.record(
         {
           actorId: p.userId,
@@ -336,11 +367,24 @@ export class MemberScanService {
           entity: "scan_event",
           entityId: p.schoolId,
           schoolId: p.schoolId,
-          metadata: { rows: rows.length },
+          // What was SEEN, and how much there was — a read of a day's movements
+          // of minors is audited for the size of the disclosure, not just that
+          // one happened.
+          metadata: { rows: rows.length, total, purpose: opts.purpose ?? null, page },
         },
         tx,
       );
-      return this.decorate(tx, rows);
+      return {
+        items: await this.decorate(tx, rows),
+        total,
+        shown: rows.length,
+        page,
+        pageSize: SCAN_HISTORY_CAP,
+        counts,
+        // A FLOOR, not a roll call: a pupil who never scanned out still counts
+        // as on site, and one who scanned out twice cannot push it below zero.
+        onSite: Math.max(0, counts.CHECK_IN - counts.CHECK_OUT),
+      };
     });
   }
 

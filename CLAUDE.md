@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **326 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **327 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **326 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **327 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1186,6 +1186,19 @@ These are the rules; the log is why each one exists.
   OUT. A maker-checker raised on a tier whose decide route was module-gated; a
   recurring charge with no cancel; a model with a create and no update (**64 of
   them**, one of which held an answer key).
+- **A ROUTE NO SCREEN CALLS IS A DOOR MISSING FROM THE OUTSIDE.** `GET
+  /members/scan/today` — the gate desk's movement log, permission-gated, audited,
+  RLS-scoped — was reached from nowhere; `/scan` only did lookup-and-record. The
+  existing gates catch a service method no CONTROLLER reaches; this was one level
+  out, and the route's own 200-row cap (which returned zero check-ins on a
+  2,400-scan day) would have bitten the first day anyone fitted a door. When a
+  read answers a question the product claims to answer, check that something
+  ASKS it.
+- **A SUMMARY MUST NOT NARROW WITH THE FILTER BELOW IT.** The desk's day counts
+  are a `groupBy` over the whole day, deliberately independent of `?purpose=` and
+  the page — otherwise filtering to check-ins reports that nobody has left. It is
+  what makes a 200-row page on a 2,400-scan day honest: the question is answered
+  before a row is read, and the list is evidence rather than the answer.
 - **A field the API accepts that no screen sends** is a feature nobody has
   (`a-field-no-screen-can-fill-in`); **a service method no controller reaches**
   is a fix that shipped with no door (`service-methods-nobody-calls`); **a page
@@ -1327,14 +1340,22 @@ These are the rules; the log is why each one exists.
   will otherwise SKIP the suite. // GOTCHA: on main the DEPLOY workflow fails on
   every push and always has (no AWS credentials), so "a red run" is ambiguous —
   check WHICH workflow with `gh run list --workflow=ci.yml`.
-- **The full API suite needs `--maxWorkers=3` on a developer machine.** Jest
-  defaults to `cpus - 1` workers, each with its own ~2.2 GB V8 heap ceiling — on
-  an 8-core/15 GB box that is 7 workers against a ~15 GB peak, and the run is
-  killed at STARTUP before it writes a line, which reads as a hang rather than
-  an OOM. Running anything else beside it (a web build, a second suite) takes
-  both down. Capped at 3 it is not merely survivable but FASTER — 508 s against
-  865 s at the default — because the workers stop contending. CI sizes its own
-  runner, so this is a local constraint, not a repo one.
+- **The full API suite needs `--maxWorkers` capped on a developer machine, and
+  the right number depends on what else is resident.** Jest defaults to
+  `cpus - 1`, each worker with its own ~2.2 GB V8 heap ceiling — on an
+  8-core/15 GB box that is 7 workers against a ~15 GB peak. At the default it is
+  killed at STARTUP before writing a line, which reads as a hang rather than an
+  OOM; `--maxWorkers=3` survived a quiet machine (508 s, FASTER than the 865 s
+  default run, because the workers stop contending) and was killed at suite 294
+  of 612 when a browser was also open; `--maxWorkers=2` completed. Do not run a
+  web build or a second suite beside it.
+  // GOTCHA: **a worker killed for memory presents as a TEST failure.** The run
+  // reports `FAIL <suite> ● Test suite failed to run — A jest worker process
+  // was terminated by another process: signal=SIGTERM`, naming a suite that
+  // never executed and has nothing wrong with it. Read the message before
+  // chasing the named file: re-running that suite alone is what tells them
+  // apart. CI sizes its own runner, so this is a local constraint, not a repo
+  // one.
 - **Fake timers must be CLEARED, not just switched off.** `jest.useRealTimers()`
   alone left the worker holding a handle, so jest force-exited it — and only
   when ANOTHER file ran after it in the same worker, which is why it was

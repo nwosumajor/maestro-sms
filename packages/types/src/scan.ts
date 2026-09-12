@@ -43,3 +43,30 @@ export interface ScanEventDto {
   note: string | null;
   at: Date;
 }
+
+/**
+ * A page of the gate desk's day, with the counts that answer the question the
+ * log exists for.
+ *
+ * `GET /members/scan/today` promised "the day at the desk — EVERY scan" and
+ * returned a bare newest-first array capped at 200. Measured on a 1,200-pupil
+ * school: 2,400 scans in the day, 200 returned, **zero of them check-ins**, and
+ * eleven minutes of a nine-hour day covered. The morning check-ins — who is
+ * actually in the building — fell off the end of a cap that said nothing.
+ *
+ * `counts` is computed in SQL over the WHOLE day, never narrowed by the page or
+ * the filter, so "who is on the premises" is answerable without paging through
+ * thousands of rows.
+ */
+export interface ScanDayDto {
+  items: ScanEventDto[];
+  /** Total matching the current filter, counted in SQL. */
+  total: number;
+  shown: number;
+  page: number;
+  pageSize: number;
+  /** Every purpose's count for the whole day, filter-independent. */
+  counts: Record<ScanPurpose, number>;
+  /** check-ins minus check-outs: a floor for who is still on site. */
+  onSite: number;
+}

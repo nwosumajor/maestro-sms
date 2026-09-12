@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Param, Post , Query } from "@nestjs/common";
-import type { MemberScanDto, ScanRecordResultDto, ScanEventDto } from "@sms/types";
-import { MODULES, SCAN_PURPOSES, SIS_PERMISSIONS } from "@sms/types";
+import type { MemberScanDto, ScanRecordResultDto, ScanEventDto, ScanDayDto } from "@sms/types";
+import { MODULES, SCAN_PURPOSES, SIS_PERMISSIONS, isScanPurpose } from "@sms/types";
 import { z } from "zod";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireModule } from "../auth/require-module.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -69,8 +70,19 @@ export class MemberScanController {
   /** The desk's own day. */
   @Get("scan/today")
   @RequirePermission(SIS_PERMISSIONS.MEMBER_SCAN)
-  today(@CurrentPrincipal() p: Principal): Promise<ScanEventDto[]> {
-    return this.scan.today(p);
+  today(
+    @CurrentPrincipal() p: Principal,
+    @Query("purpose") purpose?: string,
+    @Query("page") page?: string,
+  ): Promise<ScanDayDto> {
+    // An unknown purpose is DROPPED rather than 400: this is a filter on a live
+    // desk log, and an empty list is the honest answer to "show me SOMETHING".
+    // The page, by contrast, is refused when malformed — reading page one while
+    // believing you are deep in the day is how a movement goes unnoticed.
+    return this.scan.today(p, {
+      purpose: purpose && isScanPurpose(purpose) ? purpose : undefined,
+      page: pageNumber(page),
+    });
   }
 
   @Get("scan/:code")

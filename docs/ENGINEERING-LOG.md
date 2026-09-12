@@ -15282,3 +15282,63 @@ window, `truncated` true and the banner rendered.
 // array first, or redirect the inner command from /dev/null. The diff against
 // the snapshot is what caught it — restoring without verifying would have left
 // two accounts silently altered.
+
+### The gate log that lost the morning, and that nothing could open
+
+`GET /members/scan/today` is the ID-card desk's movement log. Its own docstring
+says it is "the day at the desk — EVERY scan" and that it answers "who is on the
+premises, and what has the desk been doing". It returned a bare array,
+`createdAt DESC`, capped at 200, with no count and no filter.
+
+Measured live on a 1,200-pupil school's ordinary day — check-ins through the
+morning, check-outs through the afternoon:
+
+    scans in the day      2,400   (1,200 of them check-ins)
+    returned                200
+    CHECK_INs returned        0   <- the question it exists to answer
+    time covered          15:48:21 .. 15:59:59   (11 minutes of a 9-hour day)
+    said there was more    nothing
+
+A newest-first cap on a day's movements discards the MORNING, and the morning is
+when everybody arrives. The desk could not say who was in the building — on a
+safeguarding surface, during the hours a school would want to ask.
+
+**AND NO SCREEN CALLED IT.** The route was permission-gated (`member.scan`),
+audited, RLS-scoped — and reached from nowhere. `/scan` only ever did
+lookup-and-record. This is one level out from the shape the log already records
+("a service method no controller reaches is a fix that shipped with no door"):
+here the controller route existed and the door was missing from the OUTSIDE. The
+cap would have bitten the first day anybody fitted one.
+
+FIX. `today` returns `{items, total, shown, page, pageSize, counts, onSite}`.
+The counts are a `groupBy` over the WHOLE day and are deliberately NOT narrowed
+by the purpose filter or the page — so "who is on the premises" is answered
+before a single row is read, which is the only way a 200-row page on a
+2,400-scan day can be honest. `?purpose=` reaches the morning in SQL, `?page=`
+reaches the rest, and `id` breaks `createdAt` ties because a handheld scanner
+fires several times a second. `onSite` is `max(0, in - out)` and is documented on
+screen as a FLOOR, not a roll call: a pupil who left without scanning out is
+still counted, and a negative number on a safeguarding screen would be worse
+than an approximate one.
+
+WEB: `DeskDay` on `/scan` — counts first, then the filter, then the log as
+evidence rather than as the answer, with a pager.
+
+Live, after: unfiltered 200 of 2,400 with whole-day counts; `?purpose=CHECK_IN`
+returns 07:48–07:59, the morning that was unreachable at any URL; `?page=2`
+returns genuinely different rows; and on a mid-morning state (1,200 in, 50 out)
+`onSite` reads 1,150. Through the BFF with a real session: 200, 200, 200, and
+`?page=abc` -> 400.
+
+// GOTCHA: verifying the new panel by grepping the rendered HTML found the card
+// title and the filter options but NOT the counts — correctly, because
+// `DeskDay` is a client component that fetches on mount, so the server HTML
+// cannot contain them. This repo already records that trap ("grepping SSR HTML
+// matches the JS bundle, not a rendered row"). The right check is the BFF route
+// the component actually calls, with a real session cookie.
+
+// GOTCHA: the demo `passwordChangedAt` had to be refreshed again for the render
+// probes and restored afterwards — the 30-day forced reset makes every page a
+// password screen, and a probe that reads a rendered page is reading whatever
+// the session lets it see. Restored byte-exact from the snapshot; the bcrypt
+// hash was never touched.
