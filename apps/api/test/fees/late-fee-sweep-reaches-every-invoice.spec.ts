@@ -74,6 +74,13 @@ function build(rows: Inv[], opts: { failOn?: string; country?: string; timezone?
           .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
         return Promise.resolve(rs.slice(0, args.take ?? rs.length));
       },
+      // Drawn from the SAME rows and the SAME filter as `findMany`: the sweep
+      // reports `backlog` as due-minus-taken, and a count over a different set
+      // would vouch for a number that describes neither.
+      count: (args: { where: Record<string, unknown> }) => {
+        const excludesMarked = JSON.stringify(args.where).includes("none");
+        return Promise.resolve(rows.filter((r) => !excludesMarked || !r.marked).length);
+      },
     },
     parentChild: { findMany: () => Promise.resolve([{ parentId: "parent-1" }]) },
   };

@@ -24,6 +24,9 @@
 // =============================================================================
 
 import { NotificationRecoveryService, RECOVERY_BATCH } from "../../src/notifications/notification-recovery.service";
+import { readFileSync } from "node:fs";
+import { stripComments } from "../support/strip-comments";
+import { sweptMethods, hasLiteralTake } from "../support/sweep-services";
 
 /** A privileged-client double whose `count` and `findMany` share one dataset —
  *  a stub that answered a fixed count would pass against a service that computed
@@ -88,22 +91,29 @@ describe("the recovery sweep", () => {
 // AND THE SIBLINGS. Fixing where it hurts and leaving the rest is how the class
 // survives — four sweeps share this shape, and a fifth will be written.
 // -----------------------------------------------------------------------------
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
-const SRC = join(__dirname, "..", "..", "src");
-
-/** Every scheduled sweep that bounds its own read with a `take`. */
-const CAPPED_SWEEPS: Array<{ file: string; why: string }> = [
-  { file: "notifications/notification-recovery.service.ts", why: "stranded deliveries, RECOVERY_BATCH" },
-  { file: "sis/sis-nudge.service.ts", why: "profiles due a nudge, SIS_NUDGE_BATCH_MAX" },
-  { file: "documents/submission-retention.service.ts", why: "rejected applications past the window, 500" },
-  { file: "privacy/archive.service.ts", why: "ended terms awaiting an archive, 500" },
-];
+/**
+ * THE SET IS COMPUTED, not listed.
+ *
+ * This was a hand-kept array of four filenames, and that is exactly why the
+ * defect it exists for shipped a fifth time: the overdue FEE REMINDER sweep —
+ * the one that chases families for unpaid invoices — read `take: 2000` with no
+ * `orderBy` and no backlog, and was simply not on the list. Measured at five
+ * years of arrears: 5,001 overdue invoices, 2,000 taken, 3,001 families left
+ * unchased, and the jobs console reporting a clean run.
+ *
+ * The gate one file over already computed its set from the BullMQ processors
+ * and said so in a comment. Same directory, same sweeps, one list maintained by
+ * hand. A gate whose set is hand-maintained only ever guards what somebody
+ * remembered.
+ */
+const CAPPED_SWEEPS = sweptMethods()
+  .filter((m) => hasLiteralTake(m.body))
+  .map((m) => ({ file: m.file, why: `${m.method}()`, body: m.body }));
 
 describe("every capped sweep reports its backlog", () => {
-  it.each(CAPPED_SWEEPS)("$file ($why)", ({ file }) => {
-    const src = readFileSync(join(SRC, file), "utf8");
+  it.each(CAPPED_SWEEPS)("$why reports its backlog", ({ body }) => {
+    const src = body;
     // The PROPERTY: it counts what is due and subtracts what it took. Anchored
     // to the shape rather than to any one line's wording, which has gone red on
     // changes that strengthened the thing it guarded.
@@ -117,9 +127,20 @@ describe("every capped sweep reports its backlog", () => {
     expect(src).toMatch(/Math\.max\(0,/);
   });
 
-  it("read a believable number of files — a walk that finds nothing passes covering nothing", () => {
+  it("DISCOVERED a believable number of sweeps — a walk that finds nothing passes covering nothing", () => {
+    // The previous version asserted each hand-listed file was non-empty, which
+    // guards an EMPTY list and not an INCOMPLETE one — the failure that let the
+    // fee reminder through. This asserts the discovery itself found sweeps, and
+    // found more than the four that used to be typed in by hand.
+    // Anchored to the sweeps it must REACH rather than to a count, which would
+    // rot the moment one is added. These three are the capped ones this gate is
+    // about, and `sendFeeReminders` is reachable only through the one-hop
+    // follow — the very path the defect hid behind.
+    const reached = CAPPED_SWEEPS.map((c) => c.why);
+    expect(reached).toEqual(expect.arrayContaining(["sendFeeReminders()", "recoverPending()"]));
+    expect(CAPPED_SWEEPS.length).toBeGreaterThanOrEqual(3);
     for (const { file } of CAPPED_SWEEPS) {
-      expect(readFileSync(join(SRC, file), "utf8").length).toBeGreaterThan(1_000);
+      expect(readFileSync(file, "utf8").length).toBeGreaterThan(1_000);
     }
   });
 });

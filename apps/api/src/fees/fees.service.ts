@@ -245,13 +245,24 @@ export class FeesService {
   async sendFeeReminders(
     p: Principal,
     opts: { overdueOnly?: boolean } = {},
-  ): Promise<{ reminded: number; invoices: number; unreachable: number }> {
+  ): Promise<{ reminded: number; invoices: number; unreachable: number; backlog: number }> {
     const today = new Date();
-    const targets = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { rows: targets, backlog } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = { status: { in: ["ISSUED", "PARTIALLY_PAID"] } };
       if (opts.overdueOnly) where.dueDate = { lt: today };
+      // COUNTED IN THE DATABASE over the same predicate the page is drawn from,
+      // so `backlog` is due work queued behind the cap rather than an estimate.
+      // An unpaid invoice never closes itself, so arrears only accumulate:
+      // measured at five years, 5,001 overdue against a cap of 2,000, and the
+      // sweep reported a clean run having left 3,001 families unchased.
+      const due = await tx.invoice.count({ where });
       const invoices = await tx.invoice.findMany({
         where,
+        // OLDEST DEBT FIRST. There was no `orderBy` at all, so which 2,000 the
+        // sweep took was whatever Postgres returned — plausibly the SAME 2,000
+        // each week, which makes the other 3,001 families never chased rather
+        // than chased late. A queue is worked from the front.
+        orderBy: [{ dueDate: "asc" }, { id: "asc" }],
         // `currency` is selected because the reminder QUOTES the balance. An
         // invoice carries its own currency per row, so an NGN invoice prints in
         // naira whatever the school has since moved to.
@@ -277,12 +288,17 @@ export class FeesService {
       const paidByInvoice = ids.length
         ? await netPaidByInvoice(tx, { invoiceId: { in: ids } })
         : new Map<string, number>();
-      return invoices
-        .map((inv: { id: string; studentId: string; reference: string; totalMinor: number; dueDate: Date; currency: string }) => ({
-          ...inv,
-          outstanding: inv.totalMinor - (paidByInvoice.get(inv.id) ?? 0),
-        }))
-        .filter((inv: { outstanding: number }) => inv.outstanding > 0);
+      return {
+        rows: invoices
+          .map((inv: { id: string; studentId: string; reference: string; totalMinor: number; dueDate: Date; currency: string }) => ({
+            ...inv,
+            outstanding: inv.totalMinor - (paidByInvoice.get(inv.id) ?? 0),
+          }))
+          .filter((inv: { outstanding: number }) => inv.outstanding > 0),
+        // What the CAP left, not what the settled-balance filter dropped: a row
+        // whose balance turned out to be zero was handled, not deferred.
+        backlog: Math.max(0, due - invoices.length),
+      };
     });
 
     // EVERY family in ONE query. This opened a transaction PER INVOICE just to
@@ -337,7 +353,10 @@ export class FeesService {
       }, [], guardians);
       reminded++;
     }
-    return { reminded, invoices: targets.length, unreachable };
+    // A FOURTH FACT beside reminded / unreachable / failed: due work left behind
+    // the cap. Not `failed` (tried and could not), not `unreachable` (nobody to
+    // tell) — invoices due a reminder that did not get one.
+    return { reminded, invoices: targets.length, unreachable, backlog };
   }
 
   /** DRAFT -> ISSUED, then notify the student's guardians of the amount due. */

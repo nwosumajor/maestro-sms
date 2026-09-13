@@ -54,6 +54,7 @@ import {
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import type { InvoiceStatus } from "@sms/db";
 import { FeesService } from "./fees.service";
 import { currencyDecimals, formatMoney, resolveRegion, schoolDateString, schoolToday, toMajor } from "@sms/types";
 import { BrandingService } from "../branding/branding.service";
@@ -419,7 +420,7 @@ export class FeeOpsService {
 
   /** Add the configured flat late fee ONCE to each invoice overdue past grace.
    *  Idempotent: the marker line item is the "already applied" flag. */
-  async lateFeeSweep(): Promise<{ schools: number; feesApplied: number; failed: number; skipped?: boolean }> {
+  async lateFeeSweep(): Promise<{ schools: number; feesApplied: number; failed: number; backlog: number; skipped?: boolean }> {
     const client = this.privileged.client;
     // SAY SO. This returned zeros in silence, and the processor then logged
     // "Late-fee sweep done: schools=0 applied=0" — which reads as a quiet night
@@ -430,7 +431,7 @@ export class FeeOpsService {
     // were the exception.
     if (!client) {
       this.logger.warn("Late-fee sweep requested but no privileged DB — skipping. No late fee was applied to any school.");
-      return { schools: 0, feesApplied: 0, failed: 0, skipped: true };
+      return { schools: 0, feesApplied: 0, failed: 0, backlog: 0, skipped: true };
     }
     // ONLY SCHOOLS THAT ARE STILL SWITCHED ON.
     //
@@ -457,6 +458,8 @@ export class FeeOpsService {
     });
     let feesApplied = 0;
     let failed = 0;
+    // Overdue invoices this run could not reach because a school hit the cap.
+    let backlog = 0;
     for (const school of schools) {
       // GRACE IS COUNTED IN THE SCHOOL'S DAYS, from the school's today. This
       // subtracted the grace from the instant the sweep happened to run, which
@@ -482,6 +485,14 @@ export class FeeOpsService {
         // feesApplied: 0 — which reads exactly like "nothing was overdue".
         // Found live: 900 invoices overdue, 500 marked, 400 unmarked, 0 applied.
         // A school stopped charging late fees for ever and nothing said so.
+        // ONE predicate, shared by the page and by the backlog count below —
+        // a count drawn from a different `where` describes a different set.
+        const overdueWhere = {
+          status: { in: ["ISSUED", "PARTIALLY_PAID"] as InvoiceStatus[] },
+          dueDate: { lt: cutoff },
+          lineItems: { none: { description: { startsWith: LATE_FEE_MARKER } } },
+          currency: schoolCurrency,
+        };
         const overdue = await this.db.runAsTenantReadOnly(
           { schoolId: school.id, userId: SYSTEM_ACTOR_ID },
           (tx) =>
@@ -525,9 +536,17 @@ export class FeeOpsService {
               take: LATE_FEE_SWEEP_LIMIT,
             }),
         );
-        // NO SILENT CAP: a truncated sweep that looks complete is how a backlog
-        // hides — the same rule the mobile-money recovery sweep follows.
+        // NO SILENT CAP — and a WARNING IS NOT A SIGNAL. This logged when it hit
+        // the cap and returned a summary that looked clean, so the jobs console
+        // showed an ordinary line while the school fell further behind every
+        // night. `JobRunsService` reads `backlog` the way it reads `failed`; a
+        // count nobody surfaces is a count nobody acts on.
         if (overdue.length === LATE_FEE_SWEEP_LIMIT) {
+          const due = await this.db.runAsTenantReadOnly(
+            { schoolId: school.id, userId: SYSTEM_ACTOR_ID },
+            (tx) => tx.invoice.count({ where: overdueWhere }),
+          );
+          backlog += Math.max(0, due - overdue.length);
           this.logger.warn(
             `late-fee sweep hit its ${LATE_FEE_SWEEP_LIMIT}-invoice cap for school ${school.id}; more remain and will be picked up on the next run`,
           );
@@ -645,7 +664,7 @@ export class FeeOpsService {
         this.logger.warn(`late-fee sweep failed for school ${school.id}: ${(e as Error).message}`);
       }
     }
-    return { schools: schools.length, feesApplied, failed };
+    return { schools: schools.length, feesApplied, failed, backlog };
   }
 
   /** Weekly overdue-reminder sweep: the staff-triggered reminder, run for every
@@ -655,12 +674,18 @@ export class FeeOpsService {
     reminded: number;
     unreachable: number;
     failed: number;
+    /** Overdue invoices left behind each school's cap — read by the jobs
+     *  console like `failed`, so a school in arrears past the cap shows a
+     *  Behind badge instead of a clean line. */
+    backlog: number;
     skipped?: boolean;
   }> {
     const client = this.privileged.client;
     if (!client) {
       this.logger.warn("Overdue-reminder sweep requested but no privileged DB — skipping. No guardian was reminded.");
-      return { schools: 0, reminded: 0, unreachable: 0, failed: 0, skipped: true };
+      // backlog 0 with skipped:true — it did not look, and reporting a backlog
+      // it never measured would be an invented number.
+      return { schools: 0, reminded: 0, unreachable: 0, failed: 0, backlog: 0, skipped: true };
     }
     // Same rule as the late-fee sweep next door: a switched-off school does not
     // send reminders to its families. This one reaches PEOPLE — an email or an
@@ -678,18 +703,24 @@ export class FeeOpsService {
     // cross-tenant sweep that catches per school never throws, so without it a
     // run that skipped four schools looks exactly like a clean one.
     let failed = 0;
+    // Overdue invoices this run did not reach, because each school's read is
+    // capped. `JobRunsService` reads this like `failed`, so the console shows a
+    // Behind badge instead of a clean line: a school 3,000 invoices past its cap
+    // otherwise reports exactly like one that was fully chased.
+    let backlog = 0;
     for (const school of schools) {
       try {
         const system: Principal = { userId: SYSTEM_ACTOR_ID, schoolId: school.id, roles: [], permissions: [] };
         const r = await this.fees.sendFeeReminders(system, { overdueOnly: true });
         reminded += r.reminded;
         unreachable += r.unreachable;
+        backlog += r.backlog;
       } catch (e) {
         failed += 1;
         this.logger.warn(`reminder sweep failed for school ${school.id}: ${(e as Error).message}`);
       }
     }
-    return { schools: schools.length, reminded, unreachable, failed };
+    return { schools: schools.length, reminded, unreachable, failed, backlog };
   }
 
   // ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **333 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **334 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **333 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **334 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2072,6 +2072,24 @@ rows. // GOTCHA: paging on a MUTABLE key can show a bumped row twice or miss it
 — the accepted cost of a recency-ordered inbox, and far better than a message
 from today at position 400. // GOTCHA: `POST /messages/threads` takes
 `recipientId`, SINGULAR.
+
+## A gate whose SET is hand-kept only guards what somebody remembered
+`a-sweep-that-was-behind-and-said-nothing` checked a HAND-KEPT array of four
+filenames, while the gate beside it computed its set by walking the BullMQ
+processors and said so in a comment. Three capped MONEY sweeps were therefore
+never checked: the overdue fee reminder (5,001 overdue invoices, 2,000 taken,
+**no `orderBy` at all**, so the same 2,000 plausibly every week), the late-fee
+sweep, and mobile-money recovery — where every stranded intent is a payer
+already DEBITED while their invoice stays open. The set is computed now, from
+the processors, following ONE HOP into the services a swept method calls
+(`test/support/sweep-services.ts`, shared with the sibling gate).
+// GOTCHA: **a warning is not a signal.** Two of the three already logged on
+// hitting their cap and still returned a summary `JobRunsService` read as
+// clean, so the console showed an ordinary line while a school fell further
+// behind nightly. A count nobody surfaces is a count nobody acts on.
+// GOTCHA: the gate's own `methodBody` took the first `{` after the method
+// name, which for `): Promise<{ reminded: number … }> {` is the RETURN TYPE —
+// the capped read was invisible because the gate was reading a type.
 
 ## A capped sweep must report its BACKLOG, not just what it took
 Every scheduled sweep bounds its read with a `take`, deliberately. Each reported

@@ -88,6 +88,14 @@ export interface MobileMoneyRecoveryResult {
   failed: number;
   stillPending: number;
   expired: number;
+  /**
+   * PENDING intents this run did not reach because it hit its cap.
+   *
+   * Read by the jobs console like `failed`. Every stranded intent is a payer
+   * who has been DEBITED while their invoice stays open, so a run that leaves
+   * thousands behind must not report like one that cleared the queue.
+   */
+  backlog?: number;
 }
 
 @Injectable()
@@ -477,10 +485,20 @@ export class MobileMoneyService {
       take: MOBILE_MONEY_SWEEP_LIMIT,
     })) as IntentRow[];
     result.scanned = pending.length;
-    // NO SILENT CAP: if the sweep is truncating, say so — a capped sweep that
-    // looks complete is how a backlog hides.
+    // NO SILENT CAP — and A WARNING IS NOT A SIGNAL. This logged when it hit the
+    // cap and returned a summary that looked clean, so the jobs console showed
+    // an ordinary line. `JobRunsService` reads `backlog` the way it reads
+    // `failed`, and this is money: every stranded intent is a payer who has been
+    // DEBITED while their invoice stays open, so "how many did we not get to"
+    // is the number somebody has to act on.
     if (pending.length === MOBILE_MONEY_SWEEP_LIMIT) {
-      this.logger.warn(`mobile-money recovery hit its ${MOBILE_MONEY_SWEEP_LIMIT}-intent cap; more remain`);
+      const due = await client.mobileMoneyIntent.count({
+        where: { status: "PENDING", createdAt: { lt: before } },
+      });
+      result.backlog = Math.max(0, due - pending.length);
+      this.logger.warn(
+        `mobile-money recovery hit its ${MOBILE_MONEY_SWEEP_LIMIT}-intent cap; ${result.backlog} more remain`,
+      );
     }
 
     for (const intent of pending) {

@@ -52,7 +52,14 @@ const overdue = (n: number): Inv[] =>
 function makeService(invoices: Inv[], linkedFor: string[] = []) {
   const enqueued: Array<{ recipients: string[]; type: string }> = [];
   const tx = {
-    invoice: { findMany: jest.fn(async () => invoices) },
+    invoice: {
+      findMany: jest.fn(async () => invoices),
+      // The sweep counts what is DUE before taking its page, so `backlog` is
+      // work left behind the cap rather than an estimate. A double missing
+      // `count` fails as a code fault; one answering a fixed number would vouch
+      // for a backlog drawn from a different predicate than the page.
+      count: jest.fn(async () => invoices.length),
+    },
     payment: { findMany: jest.fn(async () => []) },
     parentChild: {
       findMany: jest.fn(async () => linkedFor.map((studentId) => ({ studentId, parentId: `parent-of-${studentId}` }))),

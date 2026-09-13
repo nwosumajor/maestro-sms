@@ -23,7 +23,12 @@ function makeService(bills: number, guardiansPer = 2) {
   const links = invoices.flatMap((inv) =>
     Array.from({ length: guardiansPer }, (_, g) => ({ studentId: inv.studentId, parentId: `${inv.studentId}-p${g}` })));
   const tx = {
-    invoice: { findMany: jest.fn(() => { calls.push("invoice.findMany"); return Promise.resolve(invoices); }) },
+    invoice: {
+      findMany: jest.fn(() => { calls.push("invoice.findMany"); return Promise.resolve(invoices); }),
+      // Counted, not walked: the count is one query and must not be mistaken
+      // for the per-bill transactions this spec is about.
+      count: jest.fn(() => { calls.push("invoice.count"); return Promise.resolve(invoices.length); }),
+    },
     payment: { findMany: jest.fn(() => { calls.push("payment.findMany"); return Promise.resolve([]); }) },
     parentChild: {
       findMany: jest.fn((a: { where: { studentId: unknown } }) => {

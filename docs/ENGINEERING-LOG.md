@@ -15650,3 +15650,63 @@ Live, after: the same search reports 800 and NGN 420,000,000.
 // arrears through `$queryRaw`. A double without it fails as "$queryRaw is not a
 // function", which says nothing about the filter under test — the fixture trap
 // this log names, where a missing method reads as a code fault.
+
+### The gate that guarded four sweeps by hand, and the three it never saw
+
+The find started as the OVERDUE FEE REMINDER sweep — the one that chases
+families for unpaid invoices. It read `take: 2000` **with no `orderBy` at all**
+and reported `{reminded, invoices, unreachable}`. Measured on five years of
+arrears (an unpaid invoice never closes itself, so they only accumulate):
+
+    true overdue      5,001 outstanding invoices, oldest 2021-10-30
+    the sweep takes   2,000
+    ordering          none
+
+3,001 families left unchased — and because nothing ordered the read, which 2,000
+it took was whatever Postgres returned, plausibly the SAME 2,000 every week. Not
+chased late: never chased, while the jobs console reported a clean run.
+
+**Why it survived is the more useful half.** A gate exists for exactly this —
+`a-sweep-that-was-behind-and-said-nothing` — and its `CAPPED_SWEEPS` was a
+HAND-KEPT ARRAY OF FOUR FILENAMES. The gate one file over
+(`a-sweep-that-skipped-a-school-and-said-nothing`) computes its set by walking
+the BullMQ processors and says so in a comment: "THE SET IS COMPUTED, not
+listed." Same directory, same sweeps, one list maintained by memory. Its own
+"a walk that finds nothing passes covering nothing" test guards an EMPTY list,
+not an INCOMPLETE one — which is the failure that actually happened.
+
+Rewired to discover its set, the gate immediately found TWO MORE real money
+sweeps with no backlog:
+
+  * `lateFeeSweep` — charges families late fees.
+  * `recoverPending` — mobile-money recovery, where every stranded intent is a
+    payer already DEBITED while their invoice stays open.
+
+Both already LOGGED a warning on hitting their cap. Neither put it in the
+summary `JobRunsService` reads, so the console showed an ordinary line while a
+school fell further behind every night. **A warning in a container log is not a
+signal**: a count nobody surfaces is a count nobody acts on. That distinction is
+now in both call sites.
+
+FIX. All three count what is DUE over the same predicate the page is drawn from
+and report `backlog = due - taken`; the fee reminder also gained
+`orderBy [{dueDate: asc}, {id: asc}]` so the longest-overdue family is the one
+chased first and the cap drops the newest arrival.
+
+// GETTING THE GATE RIGHT TOOK FOUR CORRECTIONS, each worth recording because
+// each is a way this kind of gate goes wrong:
+//   1. Service-level discovery was TOO WIDE — it flagged a user's own feedback
+//      list, a capped "99+" notification count and a 20-row low-balance peek.
+//      None is a sweep leaving work behind. An over-wide gate teaches its
+//      reader to add exemptions, so it was narrowed rather than exempted.
+//   2. Narrowing to the method the PROCESSOR names lost `sendFeeReminders`,
+//      which the processor reaches one hop away through `reminderSweep()`. One
+//      hop is followed now — the very path the defect hid behind.
+//   3. The hop then matched `this.logger.log(...)` and named every finding
+//      "log()". Filter the RECEIVER, not the method name.
+//   4. `methodBody` took the first `{` after the method name, which for
+//      `): Promise<{ reminded: number … }> {` is the RETURN TYPE. The capped
+//      read was invisible to the gate because the gate was reading a type. It
+//      now skips the parameter list and any generic before finding the body.
+// Mutation-validated by removing `backlog` from each of the three sweeps in
+// turn; each fails naming its own method.
