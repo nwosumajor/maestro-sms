@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **334 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **335 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **334 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **335 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2090,6 +2090,24 @@ the processors, following ONE HOP into the services a swept method calls
 // GOTCHA: the gate's own `methodBody` took the first `{` after the method
 // name, which for `): Promise<{ reminded: number … }> {` is the RETURN TYPE —
 // the capped read was invisible because the gate was reading a type.
+
+## One gateway charge posts once — and the race must answer like the guard
+`InvoiceSettlementService.applyOnlinePayment` is the ONE posting path for every
+rail and was "idempotent on the gateway reference" via `findFirst` then
+`create` — read-then-write at READ COMMITTED. Sequential replay passed; SIX
+SIMULTANEOUS deliveries of one signed webhook (identical reference) posted six
+payments against a 5,000,000 invoice — **30,000,000 credited and the invoice
+marked PAID from one payment**. Now `@@unique([invoiceId, reference])` +
+migration `20270301000000`, with P2002 converted to the same `"duplicate"` the
+guard returns. NULL references stay distinct, so manual cash entries are
+unaffected.
+// GOTCHA measured, not assumed: with the index but WITHOUT the catch, the
+// losing deliveries answer **409** — and a non-2xx is what makes a rail retry,
+// so the index alone trades a double-post for a retry loop.
+// GOTCHA: **an idempotency probe that does not RACE confirms the design and
+// misses the defect.** Replaying twice is the obvious test and it passes.
+// And a replay that changes nothing proves idempotency only if the FIRST
+// delivery changed something — seed the precondition, or report INCONCLUSIVE.
 
 ## A capped sweep must report its BACKLOG, not just what it took
 Every scheduled sweep bounds its read with a `take`, deliberately. Each reported

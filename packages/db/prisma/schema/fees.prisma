@@ -218,6 +218,20 @@ model Payment {
   // which Prisma cannot express — declared here for visibility and created by
   // migration `20270105000000_platform_fee_revenue_index`, which carries the
   // measurement (60.0ms -> 12.7ms on 404,517 payments over five years).
+  /// ONE GATEWAY CHARGE POSTS ONCE.
+  ///
+  /// Settlement checked `findFirst({ invoiceId, reference })` then inserted —
+  /// read-then-write at READ COMMITTED, which is not a guard. Six simultaneous
+  /// deliveries of one signed webhook (identical reference on all six) posted
+  /// SIX payments against a 5,000,000 invoice: 30,000,000 credited and the
+  /// invoice marked PAID, from one payment. Sequential replay WAS idempotent,
+  /// so the check existed and simply did not survive being raced — and a
+  /// gateway retrying a slow response is exactly that race.
+  ///
+  /// NULL references are unaffected: Postgres treats NULLs as distinct, so a
+  /// manual payment with no gateway reference still inserts freely, and a bank
+  /// slip covering two invoices differs by `invoiceId`.
+  @@unique([invoiceId, reference])
   @@map("payment")
 }
 

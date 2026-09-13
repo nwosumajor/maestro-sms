@@ -231,10 +231,22 @@ export class InvoiceSettlementService {
         select: { id: true },
       });
       if (already) return "duplicate" as const;
-      await tx.payment.create({
-        data: {
-          schoolId,
-          invoiceId,
+      // AND THE RACE ANSWERS THE SAME WAY. The check above is read-then-write at
+      // READ COMMITTED, which is not a guard: six simultaneous deliveries of one
+      // signed webhook — the same reference on all six — each read nothing and
+      // each inserted, posting 30,000,000 against a 5,000,000 invoice and
+      // marking it PAID. The gateway retries a slow response, so overlapping
+      // delivery is ordinary rather than exotic.
+      //
+      // `@@unique([invoiceId, reference])` now makes the second insert fail, and
+      // it is converted to the SAME "duplicate" the guard returns — otherwise
+      // the race would be observable as a different outcome (a 409 to a gateway
+      // that would then retry it again).
+      try {
+        await tx.payment.create({
+          data: {
+            schoolId,
+            invoiceId,
           amountMinor: input.creditMinor,
           method: input.method ?? "CARD",
           kind: "PAYMENT",
@@ -248,10 +260,17 @@ export class InvoiceSettlementService {
           // derived later, because derived from current state it would silently
           // stop being owed the day the school registers a bank.
           settledToPlatform: await settledToPlatform(tx, schoolId),
-          note: input.note,
-          recordedById: inv.createdById,
-        },
-      });
+            note: input.note,
+            recordedById: inv.createdById,
+          },
+        });
+      } catch (e) {
+        // P2002 on (invoiceId, reference) IS the duplicate the guard above is
+        // for — the other delivery won. Same answer, same shape, so the race is
+        // not observable as a different outcome.
+        if ((e as { code?: string }).code === "P2002") return "duplicate" as const;
+        throw e;
+      }
       const posted = await tx.payment.findMany({
         where: { invoiceId, status: "POSTED" },
         select: { amountMinor: true, kind: true },

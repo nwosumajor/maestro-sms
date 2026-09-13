@@ -15710,3 +15710,68 @@ chased first and the cap drops the newest arrival.
 //      now skips the parameter list and any generic before finding the body.
 // Mutation-validated by removing `backlog` from each of the three sweeps in
 // turn; each fails naming its own method.
+
+### One charge, posted six times — the idempotency probe
+
+`InvoiceSettlementService.applyOnlinePayment` is THE posting path: card, mobile
+money, dedicated NUBAN, verify-on-return and the reconciliation sweep all funnel
+through it, and it is documented as "idempotent on the gateway reference". It
+guarded with
+
+    const already = await tx.payment.findFirst({ where: { invoiceId, reference } });
+    if (already) return "duplicate";
+    await tx.payment.create({ ... });
+
+Read-then-write, at the READ COMMITTED this repo runs by default.
+
+SEQUENTIAL replay is idempotent — proven first, on three rails — and that is
+precisely why this survived: the check is real and simply does not survive being
+raced. Six SIMULTANEOUS deliveries of one signed Paystack event, the same
+reference on all six:
+
+    invoice                     5,000,000 minor, status PAID
+    payments created            6
+    posted                      30,000,000 minor
+    distinct gateway references 1
+
+A parent pays once; the ledger records it six times and closes the invoice. A
+gateway retries a slow response, so overlapping delivery is ordinary rather than
+exotic — and the guard's own comment already said the gateway "can double-
+deliver" and that verify-on-return "can race the webhook". The race was named
+directly above the code that could not withstand it.
+
+FIX: `@@unique([invoiceId, reference])` plus a migration, and P2002 converted to
+the SAME `"duplicate"` the guard returns. NULL references stay distinct under a
+Postgres unique index, so manual payments carrying no gateway reference are
+unaffected (7 of 20 on the demo database), and a bank slip covering two invoices
+differs by `invoiceId`.
+
+**The two halves were measured separately, which is what justifies the second
+one.** With the index applied but the old code still running:
+
+    6 concurrent deliveries -> 1 payment / 5,000,000     the double-post is gone
+    losing deliveries       -> HTTP 409 Conflict         the race is OBSERVABLE
+
+A non-2xx is exactly what makes a rail retry, so the index ALONE would have
+traded a double-post for a retry loop against an invoice already settled. That
+is the documented rule — "a guard and the race behind it must answer with the
+SAME status" — earning its place in a measurement rather than in a principle.
+
+// GOTCHA about the probe, and the reason its first run proved nothing: it
+// reported three rails "IDEMPOTENT" while two had NO-OP'd on payloads their
+// handlers did not recognise (bundle id "starter" where the catalogue has
+// S/M/L; a synthetic subscription reference where `applyPaidByReference`
+// matches an EXISTING pending row). A replay that changes nothing demonstrates
+// idempotency only if the first delivery changed something. Every case now
+// seeds its precondition and reports INCONCLUSIVE — never a pass — when the
+// first delivery moved no ledger.
+
+// GOTCHA: the first version also posted to `/fees/payments/webhook` and got
+// 404 six times, which the probe scored as three clean IDEMPOTENT rows. It
+// reads the STATUS now. The route is `/payments/webhook`; `API.md` had it
+// right.
+
+// AND SEQUENTIAL REPLAY WOULD HAVE CLEARED THIS RAIL. Replaying a webhook twice
+// is the obvious test and it passes. Only simultaneous delivery exposes a
+// read-then-write guard, so an idempotency probe that does not race is a probe
+// that confirms the design and misses the defect.
