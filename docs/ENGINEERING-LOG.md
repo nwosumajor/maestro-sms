@@ -15771,6 +15771,19 @@ SAME status" — earning its place in a measurement rather than in a principle.
 // reads the STATUS now. The route is `/payments/webhook`; `API.md` had it
 // right.
 
+// VERIFIED against a real Postgres with genuinely concurrent calls
+// (`one-charge-one-payment.e2e-spec.ts`, `Promise.all` rather than a loop — a
+// sequential loop is the test that PASSES against the defect). Six deliveries
+// at once now post exactly one payment, the invoice reads PAID once, a later
+// replay is still a no-op, and — the assertion that matters — NONE of the five
+// losing deliveries rejects. That is the half the index alone did not give:
+// with the constraint but without the catch, the losers answered 409, and a
+// non-2xx is what makes a rail retry.
+//
+// // GOTCHA: the e2e's first `schoolStatus` double carried `assertActive` where
+// // the service calls `isActive` — a double modelling the SIGNATURE rather than
+// // the CONTRACT, which fails as a code fault and says nothing about the race.
+
 // AND SEQUENTIAL REPLAY WOULD HAVE CLEARED THIS RAIL. Replaying a webhook twice
 // is the obvious test and it passes. Only simultaneous delivery exposes a
 // read-then-write guard, so an idempotency probe that does not race is a probe
