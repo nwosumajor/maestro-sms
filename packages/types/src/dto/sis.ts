@@ -13,6 +13,29 @@ export interface StudentProfileDto {
   state: string | null;
   country: string | null;
   postalCode: string | null;
+  /**
+   * WHERE THIS PUPIL IS NOW, and who is responsible for them.
+   *
+   * DERIVED from the one ACTIVE enrolment, never stored on the profile. A
+   * denormalised `currentClassId` would have to be rewritten by promotion,
+   * demotion, transfer, withdrawal and the bulk importers — six writers for one
+   * fact, which is how a pupil comes to show last year's class for ever. The
+   * promotion batch already closes the old enrolment and opens the new one, so
+   * deriving it means the profile is correct the moment a batch is approved and
+   * cannot drift afterwards.
+   *
+   * NULL is a real state and a different one in each case: `currentClass` null
+   * means the pupil is on the roll but not placed in a class, and `supervisor`
+   * null means the class has no form teacher — measured on the demo school, 30
+   * of its classes have none. Both are worth seeing rather than rendering blank.
+   */
+  currentClass: { id: string; name: string } | null;
+  /** The class's form teacher. Null when none is assigned, or when the person
+   *  assigned has LEFT — a supervisor who has exited is not who to contact. */
+  supervisor: { id: string; name: string } | null;
+  /** Set when a supervisor IS named on the class but is no longer active, so the
+   *  screen can say "no longer at the school" instead of silently showing none. */
+  supervisorLeft: boolean;
 }
 
 export interface MedicalRecordDto {

@@ -90,7 +90,36 @@ export default async function StudentProfilePage({ params }: { params: { id: str
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Profile</CardTitle>
-              <CardDescription>Admission {profile.admissionNumber || "—"}</CardDescription>
+              <CardDescription>
+                {/* WHERE THE PUPIL IS NOW, first — it is the thing anyone opening
+                    a profile actually wants, and it was not on the page at all.
+                    Derived from the ACTIVE enrolment, so it follows a promotion
+                    the moment the batch is approved. */}
+                Admission {profile.admissionNumber || "—"}
+                {" · "}
+                {profile.currentClass ? (
+                  <Link href={`/classes/${profile.currentClass.id}`} className="font-medium text-primary hover:underline">
+                    {profile.currentClass.name}
+                  </Link>
+                ) : (
+                  <span className="text-amber-600 dark:text-amber-400">Not in a class</span>
+                )}
+                {profile.currentClass && (
+                  <>
+                    {" · "}
+                    {profile.supervisor ? (
+                      <>Form teacher: {profile.supervisor.name}</>
+                    ) : profile.supervisorLeft ? (
+                      /* NAMED APART from "none assigned": a class whose form
+                         teacher has left is a handover nobody finished, and it
+                         needs a different action from an empty rota slot. */
+                      <span className="text-amber-600 dark:text-amber-400">Form teacher has left the school</span>
+                    ) : (
+                      <span className="text-amber-600 dark:text-amber-400">No form teacher assigned</span>
+                    )}
+                  </>
+                )}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">

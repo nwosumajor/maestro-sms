@@ -21,7 +21,7 @@ import {
 import { allocateAdmissionNumber, loadUsedAdmissionNumbers, schoolAdmissionYear } from "../foundation/admission-number";
 import { teachesStudent } from "../common/teaches";
 import { Prisma } from "@sms/db";
-import type { MedicalRecordDto, StudentGuardianDto } from "@sms/types";
+import type { MedicalRecordDto, StudentGuardianDto, StudentProfileDto } from "@sms/types";
 import { missingProfileFields, deliverableEmail } from "@sms/types";
 import { PROFILE_REVIEW_PAGE_SIZE, type ProfileReviewPageDto, type SisCompletionDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
@@ -77,6 +77,9 @@ export interface MedicalInput {
   dietaryNotes?: string | null;
   notes?: string | null;
 }
+
+/** The stored columns, before the derived placement is folded in. */
+type StudentProfileRow = Omit<StudentProfileDto, "currentClass" | "supervisor" | "supervisorLeft">;
 
 @Injectable()
 export class SisService {
@@ -413,13 +416,65 @@ export class SisService {
    * the profile. So "who looked at this child's record" could be answered for
    * their allergies and not for their home address.
    */
-  async getProfile(p: Principal, studentId: string) {
+  /**
+   * A pupil's profile — WITH the class they are in now and who is responsible
+   * for them.
+   *
+   * Neither was on it. A member of staff opening a pupil could see their address
+   * and their blood group but not which class they sit in or who their form
+   * teacher is, which is the first thing anybody actually wants.
+   *
+   * DERIVED FROM THE ACTIVE ENROLMENT, not stored. Six writers move a pupil
+   * between classes — promotion, demotion, graduation, transfer, withdrawal and
+   * the two bulk importers — and a denormalised `currentClassId` would have to
+   * be right in all of them. Deriving it means the profile follows a promotion
+   * the moment the batch is approved, and can never show last year's class.
+   *
+   * TWO QUERIES, not one per pupil: the enrolment, then the class with its
+   * supervisor. It is a single-pupil read, so this costs nothing that matters —
+   * but it is written as a join rather than a loop so that lifting it to a LIST
+   * later cannot become a query per row.
+   */
+  async getProfile(p: Principal, studentId: string): Promise<StudentProfileDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccessStudent(tx, p, studentId);
-      const profile = await tx.studentProfile.findFirst({ where: { studentId } });
+      const profile = (await tx.studentProfile.findFirst({ where: { studentId } })) as StudentProfileRow | null;
       if (!profile) throw new NotFoundException("Student profile not found");
+
+      // ONE active enrolment is the invariant every mover maintains: promotion
+      // closes the source before it opens the destination. Verified on the demo
+      // school — 900 pupils, exactly one each, none with two. Ordered anyway, so
+      // that if the invariant were ever broken this returns the most recent
+      // placement rather than an arbitrary one.
+      const enrolment = (await tx.enrollment.findFirst({
+        where: { studentId, status: "ACTIVE" },
+        orderBy: { enrolledAt: "desc" },
+        select: { class: { select: { id: true, name: true, supervisorId: true } } },
+      })) as { class: { id: string; name: string; supervisorId: string | null } | null } | null;
+
+      const cls = enrolment?.class ?? null;
+      let supervisor: { id: string; name: string } | null = null;
+      let supervisorLeft = false;
+      if (cls?.supervisorId) {
+        // STILL HERE. A form teacher who has left is not who to contact about a
+        // child, and showing their name invites somebody to try. The class still
+        // NAMES them, so the two states are reported apart: "none assigned" is a
+        // rota gap, "no longer at the school" is a handover nobody finished.
+        const sup = (await tx.user.findFirst({
+          where: { id: cls.supervisorId },
+          select: { id: true, name: true, status: true },
+        })) as { id: string; name: string; status: string } | null;
+        if (sup && sup.status === "ACTIVE") supervisor = { id: sup.id, name: sup.name };
+        else supervisorLeft = true;
+      }
+
       await this.log(tx, p, "sis.profile.read", "student_profile", studentId);
-      return profile;
+      return {
+        ...profile,
+        currentClass: cls ? { id: cls.id, name: cls.name } : null,
+        supervisor,
+        supervisorLeft,
+      };
     });
   }
 

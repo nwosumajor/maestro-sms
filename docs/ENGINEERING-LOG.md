@@ -16348,3 +16348,48 @@ BEFORE adding it, and here that meant not adding one.
 // clamped at zero so a stale rollup cannot print a negative "missing" figure on
 // an audit screen. It was invisible to every unit test, because a fixture's
 // terms cover its fixture's dates.
+
+### The profile showed a pupil's blood group but not which class they are in
+
+`StudentProfileDto` carried admission number, date of birth, address and contact
+details, and neither the class the pupil sits in nor who is responsible for them.
+The detail page fetched contacts, medical, guardians and scan history; a teacher
+or a principal opening a pupil could not see the first thing anybody wants.
+
+DERIVED FROM THE ACTIVE ENROLMENT, NOT STORED, and that is the whole design.
+SIX writers move a pupil between classes — promotion, demotion, graduation,
+transfer, withdrawal and the two bulk importers — so a denormalised
+`currentClassId` would have to be correct in all six, and the one that forgot
+would leave a pupil showing last year's class for ever with nothing to say it was
+wrong. Deriving it means the promotion batch, which already closes the source
+enrolment before opening the destination, updates the profile by construction.
+
+The invariant that rests on was measured, not assumed: on the demo school, 900
+pupils with exactly ONE active enrolment each and none with two. The read is
+ordered `enrolledAt desc` anyway, so that if it were ever broken this returns the
+most recent placement rather than an arbitrary one.
+
+Driven end to end against a real Postgres (`the-profile-follows-a-promotion`):
+JSS 1A / Mrs Old -> close the source, open the destination -> JSS 2A / Mr New,
+with the SUPERVISOR following because the class changed and nothing about the
+pupil was rewritten; graduating out then reports "not in a class" rather than
+keeping the class they have left. Mutation-validated: reading any enrolment
+rather than the ACTIVE one fails it.
+
+THREE STATES, REPORTED APART, because they need different actions: not placed in
+a class (one such pupil on the demo school); no form teacher assigned (a rota
+gap — 30 of the demo school's classes have none); and a form teacher who has
+LEFT, which is a handover nobody finished. The leaver's NAME is never returned,
+because showing it invites somebody to contact a person who is gone.
+
+// GOTCHA: an existing spec pinned the profile with exact `toEqual`, so an
+// ADDITIVE change read as a scoping failure. Those cases assert WHO MAY READ a
+// profile, not the column set, so they are re-anchored to `toMatchObject` on the
+// identifying field and the new fields have their own tests. Anchor a test to
+// the PROPERTY, not the text.
+
+// GOTCHA, mine again: my verification probe reported the fields missing from the
+// live API. They were not — the probe's BFF path 404'd and it read the body
+// without looking at the status, so it reported a fact about itself. Printing
+// the STATUS first showed it in one run. Third time this session; the rule is in
+// the probe-hygiene list and I keep rediscovering it.
