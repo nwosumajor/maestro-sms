@@ -15949,3 +15949,48 @@ count-and-stamp atomic between jobs.
 // `assertActive`/`isActive`, a missing `count`, and a missing `$executeRaw`,
 // the pattern is unmistakable: a double that models a PLAUSIBLE SIGNATURE
 // rather than the CONTRACT fails in a way that looks like anything but itself.
+
+### Two waivers against one balance, and a bill worth less than nothing
+
+`decideAdjustment` caps a discount at what is outstanding, then posts a negative
+line item and decrements the invoice total.
+
+The DECREMENT was already race-safe, and its own comment says exactly why: two
+different adjustments on one invoice would otherwise both compute
+`total - amount` from the same starting figure and one would be LOST — "the
+database does the arithmetic, so neither can be".
+
+That fixes the lost update. **It does not fix the CAP**, which is a different
+question and still read-then-write. Both approvals read the same outstanding
+balance, each is individually within it, and both post. Measured on a real
+Postgres — a 10,000,000 invoice with two pending waivers of 8,000,000 each,
+approved at the same moment:
+
+    approved            2
+    invoice total       -6,000,000
+    runs                3 failures out of 3
+
+The school had waived 16,000,000 against a 10,000,000 bill, and the bill was
+worth less than nothing. Reachable by two approvers clearing the queue together,
+or one approver double-clicking two rows.
+
+FIX: the same `SELECT ... FOR UPDATE` on the invoice that `recordPayment`,
+`approvePayment` and the settlement path take. Every writer that reads an
+invoice's money and then writes it now takes that lock, so the rule holds
+however the decisions arrive. 3 runs of 3 pass after; removing the lock returns
+-6,000,000 in 3 of 3.
+
+// THE INTERESTING PART IS THAT HALF THE RACE WAS ALREADY SOLVED. Somebody saw
+// the concurrency, reasoned it through correctly, and wrote the atomic
+// decrement — while the CHECK two lines above kept reading a stale balance. A
+// lost update and a violated invariant are different failures of the same race,
+// and fixing the one you thought of is not fixing the race. Read a
+// concurrency comment as a statement about WHAT IT COVERS, not about the
+// method.
+
+// FIFTH FIXTURE TRAP OF THE DAY, and by now entirely predictable: adding the
+// lock broke `adjustment-approved-once.spec` because its double had no
+// `$executeRaw`. After isActive/assertActive, a missing `count`, a missing
+// `$executeRaw` twice over and send/deliver, the rule is worth stating plainly:
+// ADDING A GUARD TO A SERVICE BREAKS EVERY DOUBLE THAT MODELLED YESTERDAY'S
+// COLLABORATORS. Expect it, and treat the failure as a signal the guard landed.

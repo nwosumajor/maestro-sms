@@ -49,6 +49,11 @@ function makeService(adj: { status: string; requestedById: string; amountMinor: 
   const invoice = { totalMinor: 10_000_000, studentId: "s-1", reference: "INV-1", currency: "NGN" };
   const lineItems: number[] = [];
   const tx = {
+    // The cap now reads the balance under SELECT ... FOR UPDATE, so a real
+    // TenantTx answers `$executeRaw`. Fifth double today caught out by a
+    // service gaining a collaborator — the signal is reliable enough to
+    // expect it whenever a guard is added.
+    $executeRaw: jest.fn().mockResolvedValue(0),
     invoiceAdjustment: {
       findFirst: jest.fn(async () => ({ ...state })),
       findFirstOrThrow: jest.fn(async () => ({ ...state })),

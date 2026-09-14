@@ -247,6 +247,25 @@ export class FeeOpsService {
       });
       if (claimed.count === 0) throw new BadRequestException("Already decided");
 
+      // LOCK THE INVOICE BEFORE READING THE BALANCE THE CAP IS CHECKED AGAINST.
+      //
+      // The DECREMENT below is already race-safe and its comment says why: two
+      // different adjustments on one invoice would otherwise both compute
+      // `total - amount` from the same figure and one would be lost. That fixes
+      // the lost update. It does NOT fix the CAP, which is still read-then-write:
+      // both approvals read the same outstanding balance, each is individually
+      // within it, and both post.
+      //
+      // Measured on a real Postgres — a 10,000,000 invoice with two pending
+      // waivers of 8,000,000 each, approved at the same moment: both approved
+      // and the invoice finished at **-6,000,000**, 3 runs out of 3. The school
+      // had waived 16,000,000 against a 10,000,000 bill and the bill was worth
+      // less than nothing.
+      //
+      // Same lock as `recordPayment`, `approvePayment` and the settlement path:
+      // every writer that reads an invoice's money and then writes it takes this
+      // lock, so the rule holds however the decisions arrive.
+      await tx.$executeRaw`SELECT id FROM "invoice" WHERE id = ${row.invoiceId}::uuid FOR UPDATE`;
       const inv = await tx.invoice.findFirst({
         where: { id: row.invoiceId },
         select: { totalMinor: true, studentId: true, reference: true, currency: true },
