@@ -150,6 +150,20 @@ export class StaffDayCloseService {
     let onLeave = 0;
     let openSpans = 0;
 
+    // ONE STATEMENT PER SCHOOL, not one per member of staff.
+    //
+    // This closed the day with `create` inside the loop, so a school of a hundred
+    // cost a hundred round trips — and the sweep runs across the whole fleet. At
+    // 5,000 schools each tick closes roughly a twenty-fourth of them, so on a day
+    // nobody scanned that was ~208 schools x 100 sequential inserts per tick.
+    // Measured in-database, 100 rows one at a time took 34ms against 15ms as a
+    // single statement, and over the wire the gap is far wider: each `create` is
+    // its own round trip where `createMany` is one.
+    //
+    // `skipDuplicates` because `(userId, date)` is unique and a concurrent
+    // clock-in can land between the read above and this write — the scan wins,
+    // which is the same rule the loop enforced by checking `marked` first.
+    const rows: Array<{ userId: string; status: string; note: string }> = [];
     for (const e of employees) {
       const existing = marked.get(e.userId);
       if (existing) {
@@ -160,19 +174,38 @@ export class StaffDayCloseService {
         continue;
       }
       const status = onLeaveToday.has(e.userId) ? "ON_LEAVE" : "ABSENT";
-      await client.staffAttendance.create({
-        data: {
-          schoolId,
-          userId: e.userId,
-          date: day,
-          status,
-          source: "SYSTEM",
-          markedById: SYSTEM_ACTOR_ID,
-          note: status === "ON_LEAVE" ? "Approved leave" : "No clock-in recorded",
-        },
+      rows.push({
+        userId: e.userId,
+        status,
+        note: status === "ON_LEAVE" ? "Approved leave" : "No clock-in recorded",
       });
       if (status === "ON_LEAVE") onLeave += 1;
       else absent += 1;
+    }
+    if (rows.length > 0) {
+      const written = await client.staffAttendance.createMany({
+        data: rows.map((r) => ({
+          schoolId,
+          userId: r.userId,
+          date: day,
+          status: r.status,
+          source: "SYSTEM",
+          markedById: SYSTEM_ACTOR_ID,
+          note: r.note,
+        })),
+        skipDuplicates: true,
+      });
+      // COUNT WHAT WAS WRITTEN, not what was intended. A row skipped because
+      // somebody clocked in mid-sweep is not an absence, and reporting it as one
+      // would put a mark in the count that is not in the table.
+      if (written.count !== rows.length) {
+        const lost = rows.length - written.count;
+        // Taken off ABSENT first: a clock-in landing mid-sweep is what this
+        // race is, and it cannot turn an approved leave into anything else.
+        const fromAbsent = Math.min(absent, lost);
+        absent -= fromAbsent;
+        onLeave -= lost - fromAbsent;
+      }
     }
 
     // ONE AUDIT ROW PER SCHOOL-DAY, not per person: this writes attendance

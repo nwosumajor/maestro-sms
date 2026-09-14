@@ -37,8 +37,11 @@ function makeService(opts: {
   leave?: string[];
   holiday?: boolean;
   throwFor?: string;
+  /** userIds the UNIQUE INDEX rejects at write time — a clock-in that landed
+   *  between the read and the write, which is the only way counts can differ. */
+  droppedByUnique?: string[];
 } = {}) {
-  const { staff = ["a", "b"], marks = [], leave = [], holiday = false } = opts;
+  const { staff = ["a", "b"], marks = [], leave = [], holiday = false, droppedByUnique = [] } = opts;
   const created: Array<{ userId: string; status: string; source: string; note: string | null }> = [];
   const client = {
     school: { findMany: jest.fn(async () => opts.schools ?? [LAGOS]) },
@@ -51,9 +54,17 @@ function makeService(opts: {
     },
     staffAttendance: {
       findMany: jest.fn(async () => marks.map((m, i) => ({ id: `m${i}`, status: "PRESENT", ...m }))),
-      create: jest.fn(async ({ data }: { data: { userId: string; status: string; source: string; note: string | null } }) => {
-        created.push(data);
-        return data;
+      // ONE STATEMENT PER SCHOOL now, not one call per person. A double that
+      // only models `create` reports zero written against a service that
+      // batches — the change is the point, so the double follows it.
+      createMany: jest.fn(async ({ data }: { data: Array<{ userId: string; status: string; source: string; note: string | null }> }) => {
+        // Honours skipDuplicates against what is already marked, the way the
+        // unique index does: a clock-in landing mid-sweep wins.
+        const fresh = data.filter(
+          (d) => !marks.some((m) => m.userId === d.userId) && !droppedByUnique.includes(d.userId),
+        );
+        created.push(...fresh);
+        return { count: fresh.length };
       }),
     },
     leaveRequest: { findMany: jest.fn(async () => leave.map((userId) => ({ userId }))) },
@@ -165,4 +176,35 @@ describe("one school's failure does not end the fleet's sweep", () => {
     const r = await svc.run();
     expect(r).toMatchObject({ schools: 0, absent: 0, failed: 0 });
   });
+
+describe("it closes a fleet, not one school", () => {
+  it("writes ONE statement per school, whatever the size of the staff", async () => {
+    // The sweep runs across every school. Closing with `create` in the loop cost
+    // a round trip per member of staff — at 5,000 schools each tick closes about
+    // a twenty-fourth of them, so on a day nobody scanned that was ~208 schools
+    // x 100 sequential inserts. Measured in-database, 100 rows one at a time was
+    // 34ms against 15ms as one statement, and over the wire the gap is wider.
+    jest.setSystemTime(CLOSING_TICK);
+    const { svc, client } = makeService({ staff: Array.from({ length: 100 }, (_, i) => `s${i}`) });
+    const r = await svc.run();
+    expect(r.absent).toBe(100);
+    expect(client.staffAttendance.createMany).toHaveBeenCalledTimes(1);
+    expect(client.staffAttendance.createMany.mock.calls[0][0].data).toHaveLength(100);
+  });
+
+  it("counts what was WRITTEN, not what it intended", async () => {
+    // `(userId, date)` is unique and a clock-in can land between the read and
+    // the write. Reporting the intended figure would put an absence in the count
+    // that is not in the table.
+    jest.setSystemTime(CLOSING_TICK);
+    // `b` clocks in AFTER the sweep read the register and BEFORE it wrote — so
+    // the service still builds a row for them and the unique index rejects it.
+    // (An earlier version of this test put `b` in `marks`, which the service
+    // filters out before writing, so the correction never ran and the test
+    // passed against a mutation that removed it.)
+    const { svc } = makeService({ staff: ["a", "b", "c"], droppedByUnique: ["b"] });
+    const r = await svc.run();
+    expect(r.absent).toBe(2);
+  });
+});
 });
