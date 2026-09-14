@@ -20,6 +20,7 @@ import {
 import { Prisma } from "@sms/db";
 import type { PromotionBatchDto, PromotionDecisionDto, PromotionOutcome } from "@sms/types";
 import { PROMOTION_OUTCOMES } from "@sms/types";
+import { assertClassCapacity } from "../common/class-capacity";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -371,20 +372,10 @@ export class PromotionService {
     const reactivateSet = new Set(reactivate);
     const incoming = studentIds.filter((s) => !activeHere.has(s) && !reactivateSet.has(s));
 
-    const cls = await tx.class.findFirst({ where: { id: classId }, select: { capacity: true, name: true } });
-    if (cls?.capacity != null) {
-      // Lock the class for the rest of the transaction so the count and the
-      // insert below are atomic — the same guard hostel allocation uses for a
-      // room. Two promotion batches landing on one class would otherwise both
-      // read the old occupancy and both fit.
-      await tx.$executeRaw`SELECT id FROM "class" WHERE id = ${classId}::uuid FOR UPDATE`;
-      const activeNow = await tx.enrollment.count({ where: { classId, status: "ACTIVE" } });
-      // A REACTIVATION TAKES A PLACE too — counting only the inserts would let a
-      // demotion overfill exactly the class this guard exists to protect.
-      if (activeNow + incoming.length + reactivate.length > cls.capacity) {
-        throw new ConflictException(`${cls.name} is at capacity (${cls.capacity})`);
-      }
-    }
+    // A REACTIVATION TAKES A PLACE too — counting only the inserts would let a
+    // demotion overfill exactly the class this guard exists to protect. The
+    // rule and its lock are shared with every other enrolment door.
+    await assertClassCapacity(tx, classId, incoming.length + reactivate.length);
     if (incoming.length > 0) {
       await tx.enrollment.createMany({
         data: incoming.map((studentId) => ({ schoolId, classId, studentId, status: "ACTIVE" })),

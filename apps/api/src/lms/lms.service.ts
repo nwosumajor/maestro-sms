@@ -29,6 +29,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { assertStillHere, STILL_HERE } from "../common/still-here";
+import { assertClassCapacity } from "../common/class-capacity";
 
 // Staff whose duties span the whole school: they may view ANY class roster, the
 // full class list, AND the school-wide student directory (req: principal, school
@@ -1046,35 +1047,20 @@ export class LmsService {
     });
   }
 
-  /** Throw 409 if adding `adding` active enrollments would exceed the class capacity. */
   /**
    * Refuse an enrolment that would overfill the class.
    *
-   * The count and the insert that follows it are made atomic by locking the
-   * CLASS row first — the same thing hostel allocation does for a room, and for
-   * the same reason: two racers both read `active + adding <= capacity` for the
-   * last places and both insert, and the class ends up over its limit with
-   * nothing in the log to say how.
+   * The rule, the lock and the wording now live in ONE place
+   * (`common/class-capacity.ts`) because five other doors enrol a pupil and two
+   * of them enforced nothing at all. This is the thin call; the reasoning is
+   * beside the definition.
    *
    * It is not hypothetical here. The bulk enrolment form sends a whole staged
    * list in one request, so a double-click is two batches of twenty-four
    * arriving together, each seeing an empty class of thirty.
-   *
-   * A class with no capacity set is unlimited and takes no lock — there is
-   * nothing to serialise, and locking every enrolment into every uncapped class
-   * would be a contention point for no gain.
    */
   private async assertCapacity(tx: TenantTx, classId: string, adding: number) {
-    const cls = await tx.class.findFirst({ where: { id: classId }, select: { capacity: true } });
-    if (!cls || cls.capacity == null) return; // unlimited
-    // Serialises concurrent enrolments into THIS class for the rest of the
-    // transaction. RLS still applies; the class is this tenant's by the caller's
-    // own scope check.
-    await tx.$executeRaw`SELECT id FROM "class" WHERE id = ${classId}::uuid FOR UPDATE`;
-    const active = await tx.enrollment.count({ where: { classId, status: "ACTIVE" } });
-    if (active + adding > cls.capacity) {
-      throw new ConflictException(`Class is at capacity (${cls.capacity})`);
-    }
+    await assertClassCapacity(tx, classId, adding);
   }
 
   /**

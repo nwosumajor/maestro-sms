@@ -61,7 +61,14 @@ export default async function AdminAdmissionsPage({
     // For the class picker when enrolling an accepted applicant. Only fetched
     // for somebody who may actually enrol — an unauthorised read would render
     // an empty picker rather than an error.
-    canEnrol ? apiGet<{ id: string; name: string }[]>("/classes/mine") : Promise.resolve(null),
+    // OVERVIEW, not /classes/mine: it carries `students` and `capacity` from the
+    // same grouped query, so the picker can say which classes still have room.
+    // Enrolling into a full class is refused now, and a registrar choosing blind
+    // and being told afterwards is a worse flow than one that never offers it.
+    // Both endpoints resolve through `visibleClasses`, so the scope is identical.
+    canEnrol
+      ? apiGet<{ id: string; name: string; students: number; capacity: number | null }[]>("/classes/overview")
+      : Promise.resolve(null),
   ]);
 
   const apps = appPage === null ? null : appPage.items;

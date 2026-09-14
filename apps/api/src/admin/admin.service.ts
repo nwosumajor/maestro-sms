@@ -7,6 +7,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { classHeadroom } from "../common/class-capacity";
 import { csvCell } from "../common/csv";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
@@ -423,6 +424,10 @@ export class AdminService {
       const errors: string[] = [];
       const slug = await schoolSlugOf(tx, p.schoolId);
       const issued = new Set<string>();
+      // Remaining places per class, asked once per class and then decremented —
+      // a count per row would be right and needlessly quadratic. `null` means
+      // the class has no capacity set, i.e. unlimited.
+      const headroom = new Map<string, number | null>();
       for (const row of rows) {
         try {
           const generated = !row.email?.trim();
@@ -453,7 +458,24 @@ export class AdminService {
           });
           await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
           if (row.classId) {
-            await tx.enrollment.create({ data: { schoolId: p.schoolId, classId: row.classId, studentId: u.id } });
+            // THE CLASS MUST HAVE ROOM. This enrolled whatever it was given:
+            // measured live, three pupils into a class of one, answered
+            // `{"created":3,"skipped":0,"errors":[]}`. A full class SKIPS the
+            // row rather than failing the upload — the same answer the SIS
+            // importer gives, and the account is still created so the pupil can
+            // be placed by hand.
+            //
+            // Headroom is read INSIDE this transaction and takes the class lock,
+            // so two imports landing on the same class cannot both fill it.
+            const left = headroom.has(row.classId)
+              ? headroom.get(row.classId)!
+              : ((h) => { headroom.set(row.classId!, h); return h; })(await classHeadroom(tx, row.classId));
+            if (left != null && left <= 0) {
+              errors.push(`${row.name}: that class is full — the account was created but not enrolled`);
+            } else {
+              await tx.enrollment.create({ data: { schoolId: p.schoolId, classId: row.classId, studentId: u.id } });
+              if (left != null) headroom.set(row.classId, left - 1);
+            }
           }
           created++;
         } catch (err) {

@@ -24,7 +24,13 @@ import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 
-type ClassOption = { id: string; name: string };
+type ClassOption = { id: string; name: string; students?: number; capacity?: number | null };
+
+/** Places left, or null when the school has set no capacity for the class. */
+function placesLeft(c: ClassOption): number | null {
+  if (c.capacity == null || c.students == null) return null;
+  return Math.max(0, c.capacity - c.students);
+}
 type Credentials = { name: string; email: string; tempPassword: string };
 
 export function EnrolAccepted({
@@ -113,11 +119,19 @@ export function EnrolAccepted({
                 settled, and forcing a choice here would push somebody into
                 picking the wrong one. */}
             <option value="">No class yet</option>
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+            {classes.map((c) => {
+              const left = placesLeft(c);
+              return (
+                // A FULL CLASS IS SHOWN AND DISABLED, not hidden: the registrar
+                // needs to know the class exists and is full, which is the
+                // question they came to answer. Hiding it reads as "no such
+                // class".
+                <option key={c.id} value={c.id} disabled={left === 0}>
+                  {c.name}
+                  {left === null ? "" : left === 0 ? " — full" : ` — ${left} place${left === 1 ? "" : "s"} left`}
+                </option>
+              );
+            })}
           </select>
           <Button size="sm" disabled={busy} onClick={enrol}>
             {busy ? "Enrolling…" : "Confirm"}

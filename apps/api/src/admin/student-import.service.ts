@@ -29,6 +29,7 @@ import type {
   StudentImportRow,
   StudentImportSummary,
 } from "@sms/types";
+import { assertClassCapacity } from "../common/class-capacity";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -418,6 +419,35 @@ export class StudentImportService {
         data: { reviewedById: p.userId },
       });
       if (claimed.count === 0) throw new ConflictException("Batch already decided");
+      // THE HEADROOM ABOVE WAS READ IN AN EARLIER TRANSACTION, so it is a
+      // snapshot, not a reservation: two approvers deciding two batches into the
+      // same class both saw the same free places and both filled them. Re-assert
+      // here, inside the write, where the class row can actually be LOCKED —
+      // then a second approver waits and is refused rather than overfilling.
+      //
+      // The whole batch is refused rather than trimmed: the sign-in slips ride
+      // on this response and are shown once, so silently dropping pupils would
+      // hand the approver credentials for children who were never enrolled.
+      const wanted = new Map<string, number>();
+      for (const e of newEnrolments) wanted.set(e.classId, (wanted.get(e.classId) ?? 0) + 1);
+      for (const [classId, n] of wanted) {
+        try {
+          await assertClassCapacity(tx, classId, n);
+        } catch (err) {
+          // SAY WHAT HAPPENED TO THE BATCH. The guard names the class, which is
+          // the fact the approver needs; on its own it leaves them wondering
+          // whether some of the roll went in. Nothing did — the claim above
+          // rolls back with this throw — and the sibling P2002 refusal three
+          // lines down has always said so.
+          if (err instanceof ConflictException) {
+            throw new ConflictException(
+              `${err.message} Nothing was imported and the batch is still waiting for review — ` +
+                `free up places or move those pupils to another class, then approve it again.`,
+            );
+          }
+          throw err;
+        }
+      }
       try {
         for (const chunk of chunked(newUsers, 500)) await tx.user.createMany({ data: chunk });
         for (const chunk of chunked(newRoles, 500)) await tx.userRole.createMany({ data: chunk });

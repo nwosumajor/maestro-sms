@@ -15994,3 +15994,132 @@ however the decisions arrive. 3 runs of 3 pass after; removing the lock returns
 // `$executeRaw` twice over and send/deliver, the rule is worth stating plainly:
 // ADDING A GUARD TO A SERVICE BREAKS EVERY DOUBLE THAT MODELLED YESTERDAY'S
 // COLLABORATORS. Expect it, and treat the failure as a signal the guard landed.
+
+### Three pupils in a room with one place, reported as a clean import
+
+A class carries a `capacity` and the product refuses an enrolment that would
+overfill it. Asking the question this repo keeps having to ask — *how many doors
+are there?* — there are SEVEN writes that can leave an enrolment ACTIVE, and the
+rule was implemented at four of them, in two hand-written copies:
+
+| door | capacity | lock |
+|---|---|---|
+| `LmsService.enrollStudent` / `enrollStudentsBulk` / `setEnrollmentStatus` | yes | yes |
+| `PromotionService.enrollInto` | yes (its own copy) | yes |
+| `StudentImportService.approve` | headroom read in an EARLIER read-only tx | no |
+| `AdminService.importStudents` | **none** | no |
+| `AdmissionsService.convertToPupil` | **none** | no |
+
+Measured live against the running stack, on ONE class, a minute apart:
+
+    POST /classes/:id/enrollments     409   "Class is at capacity (1)"
+    POST /admin/import/students       201   {"created":3,"skipped":0,"errors":[]}
+
+and the class then held three ACTIVE enrolments against a capacity of 1, with
+nothing on the response, in the audit log, or on the screen to say so. Nobody
+finds out until the children are standing in the room.
+
+`convertToPupil` matters more than the legacy importer: it is the ORDINARY route
+a school admits a pupil by — the "Approve & provision" button on
+`/admin/admissions` — and it enrolled into whatever `input.classId` it was
+handed.
+
+The third shape was the subtlest. `StudentImportService` DOES check, against a
+headroom map built in PHASE 2, a read-only transaction; the enrolments are
+written in PHASE 3c, a different transaction. **A snapshot is not a
+reservation.** Two approvers clearing the review queue at the same moment each
+read the same free places, each batch fits alone, and both write. Measured on a
+real Postgres, two batches of 3 into a class of 4:
+
+    approved            2
+    active              6      (capacity 4)
+
+FIX: one shared `assertClassCapacity(tx, classId, adding)` in
+`common/class-capacity.ts`, on the `lockPerson` pattern — lock the class row,
+count ACTIVE, refuse naming the class — plus `classHeadroom` for the two
+importers that SKIP a full class row-by-row rather than failing the upload. Both
+existing copies now delegate to it; the three unguarded doors call it. The SIS
+importer keeps its batched pre-check (it is what produces the per-row `skipped`
+reporting) and re-asserts inside the WRITE, where the row can actually be
+locked. After: `approved=1 active=3`, the refusal reading
+`JSS 1A is at capacity (4)`.
+
+// THE PROBE PASSED WITHOUT THE GUARD, TWICE, FOR TWO DIFFERENT WRONG REASONS —
+// which is the only reason it is worth writing down. First both batches were
+// uploaded by the same person the fixture then used as approver, so
+// maker-checker refused one and nothing raced. Fixed, and it passed again: both
+// batches ALLOCATE admission numbers from a set read in their own read-only
+// transaction, so the second died on the `student_profile.admissionNumber`
+// unique — a race the service already handles deliberately, and a refusal that
+// is not about capacity. Only with admission numbers SUPPLIED did the capacity
+// race become the last one standing, and the probe went red. A green race probe
+// means nothing until you have seen it go red; a green race probe that you have
+// not made go red is measuring some other guard.
+
+// AND THE SAME TWO GATES DISAGREED ABOUT THE SAME CHANGE, usefully. The
+// efficiency gate `an-import-that-does-not-outgrow-its-transaction` asserted
+// zero `class.findFirst` and zero `enrollment.count` — true while headroom came
+// entirely from two batched reads, and false once the re-check exists. Its
+// PROPERTY is "bounded by classes, not rows", so it now asserts against the
+// fixture's own distinct-class count rather than a literal 0, and keeps an
+// assertion that fails if it ever goes per-row again. Its double had answered
+// `class.findFirst` with `null` and `enrollment.count` with a flat `0`, which
+// meant the new guard was invisible to every assertion in the file: it would
+// have passed with the guard broken. A double must model the CONTRACT.
+
+GATE: `every-door-into-a-class-checks-it-has-room.spec.ts` COMPUTES its set —
+it walks the API source for every write that can leave an enrolment ACTIVE
+(status defaults to ACTIVE in the schema, so a `create` naming no status IS one;
+a write setting some other status is a closure and not a door) and fails on one
+whose method cannot reach the shared guard, following one hop through a
+same-file private helper. A hand-kept list of enrolment writers is a list of the
+ones somebody remembered, which is the defect. It also fails if a door grows its
+own copy of the lock again — exactly one file in the API may take `FOR UPDATE`
+on a class row. Mutation-validated three ways: removing the admissions guard,
+removing the importer's headroom read, and re-inlining a copy in `LmsService`
+each fail it, naming the door.
+
+// A NOTE ON THE GATE ITSELF, since it was wrong twice before it was right. Its
+// first version reported five correctly-guarded doors as unguarded, because the
+// shared `methodBody` helper finds the first `name(` in a file and
+// `this.enrollInto(` is a match — so it returned the body of whatever encloses
+// the CALL. And its copy-detection flagged `lms.service.ts` for holding
+// `enrollment.count` near the word "capacity", which is a legitimate
+// co-occurrence in a class-overview read. An over-wide gate is the same failure
+// as a blind one: it teaches its next reader to add an exemption. Narrowed to
+// the thing that cannot be re-derived casually — who takes the lock.
+
+WHAT WAS ALREADY SOUND, checked the same way rather than assumed:
+
+  * **hostel allocation** — `allocate` and `transfer` both `SELECT … FOR UPDATE`
+    the destination room before counting occupants. Two correct copies in one
+    file rather than one definition, which is the sibling-asymmetry risk, but
+    they demonstrably agree.
+  * **exam seat assignment** — no lock anywhere across 42 capacity references,
+    and it does not need one: `seat()` REPLACES the whole plan, so its own check
+    bounds the final count, and `exam_seat` carries `@@unique([sittingId,
+    studentId])` and `@@unique([sittingId, seatNo])`, so a concurrent
+    double-seating is a P2002 and therefore a 409. The unique index is the
+    guard.
+  * **workflow stage advance** — the optimistic `updateMany` on
+    `(id, state, currentStage)` is a genuine version, because EVERY entry in
+    `WORKFLOW_TRANSITIONS` changes `state` and a non-final APPROVE changes
+    `currentStage`. So it covers the violated invariant (two approvers on one
+    stage) as well as the lost update — which is the question worth asking after
+    the adjustment cap, where the lost update was solved and the invariant was
+    not.
+  * **meeting booking** — locks the slot before the capacity count, and its
+    header comment records that it once described an optimistic claim that was
+    not in the code.
+
+// AND IT BROKE A GATE ABOUT THE VERY THING IT CHANGED, which is the part worth
+// keeping. `security/capacity-claims-are-atomic.spec.ts` already asserted
+// lock-before-count — by scanning EACH SERVICE IN PLACE, with a fixed source
+// window per service. Collapsing the two hand-written class copies into a shared
+// helper moved the rule out from under both windows and the gate went red on a
+// change that strengthened what it guards (the log records that shape nine times
+// already). It should have been read BEFORE the refactor, not discovered by the
+// full suite afterwards: a gate named for the rule you are about to move is the
+// first thing to grep for. Repointed at the one definition, which makes those
+// two assertions cover FIVE doors instead of two, and the membership question is
+// delegated by name to the gate that computes it.

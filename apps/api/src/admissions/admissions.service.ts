@@ -51,6 +51,7 @@ import { BadRequestException, Logger, ServiceUnavailableException } from "@nestj
 import { computePlatformFeeMinor, UPLOAD_TOKEN_TTL_DAYS } from "@sms/types";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
+import { assertClassCapacity } from "../common/class-capacity";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import bcrypt from "bcryptjs";
@@ -766,6 +767,14 @@ export class AdmissionsService {
         if (now?.convertedStudentId) return { studentId: now.convertedStudentId, alreadyConverted: true };
         throw new BadRequestException("Only an accepted application can be enrolled");
       }
+
+      // THE CLASS MUST HAVE ROOM. This is the ordinary route a school admits a
+      // pupil by, and it enrolled into `input.classId` with nothing asking. Five
+      // sibling doors refuse an over-full class; measured live, this one and the
+      // legacy import put three pupils in a room with one place and reported a
+      // clean success. Asserted BEFORE the account is created, so a refusal
+      // costs nothing and the class row is locked for the whole transaction.
+      if (input.classId) await assertClassCapacity(tx, input.classId, 1);
 
       const studentRole = await tx.role.findFirst({ where: { name: "student" }, select: { id: true } });
       const parentRole = await tx.role.findFirst({ where: { name: "parent" }, select: { id: true } });

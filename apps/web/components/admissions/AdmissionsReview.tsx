@@ -29,7 +29,7 @@ export function AdmissionsReview({
 }: {
   apps: Application[];
   /** For the class picker on an accepted application. */
-  classes?: { id: string; name: string }[];
+  classes?: { id: string; name: string; students?: number; capacity?: number | null }[];
   /** class.write — the authority to put a child on the roll, which is narrower
    *  than the authority to decide their application. */
   canEnrol?: boolean;
@@ -89,7 +89,7 @@ function AdmissionRow({
   busy: boolean;
   onReview: (id: string, action: "APPROVE" | "REJECT") => void;
   onSchedule: (id: string, examDate: string, examNote: string) => void;
-  classes: { id: string; name: string }[];
+  classes: { id: string; name: string; students?: number; capacity?: number | null }[];
   canEnrol: boolean;
 }) {
   // Dates follow the SCHOOL's timezone, not the platform's.

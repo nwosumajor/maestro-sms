@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **339 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **340 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **339 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **340 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -946,6 +946,11 @@ These are the rules; the log is why each one exists.
    A rule enforced in the module it was written in is not enforced. Drive EVERY
    door by direct id rather than reading the call graph — that is what found two
    open marking routes after a fix claimed to cover "all three".
+   **COUNT THE DOORS.** Class capacity had SEVEN writers, enforced at four —
+   `/classes/:id/enrollments` refused a full class while `/admin/import/students`
+   and admissions filled it in silence. One `assertClassCapacity`, and a gate
+   COMPUTING the writer set from source. // GOTCHA: **a pre-check in an EARLIER
+   transaction is a snapshot, not a reservation** — re-assert inside the WRITE.
 
 ### Truth-telling
 - **A count or claim typed into prose ROTS.** Role counts, RLS-file counts,
