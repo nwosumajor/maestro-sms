@@ -32,10 +32,20 @@ function makeService(f: Fakes, provider?: { deliver: jest.Mock }, credits?: { ba
       count: jest.fn().mockResolvedValue(0),
       updateMany: jest.fn().mockResolvedValue({ count: f.updateManyCount ?? 0 }),
     },
+    // The metered budget now takes an advisory lock and counts in-flight
+    // reservations, so a real TenantTx answers `$executeRaw` and
+    // `notificationDelivery.count`. A double carrying only the methods the
+    // service happened to call yesterday fails as a CODE fault.
+    $executeRaw: jest.fn().mockResolvedValue(0),
     notificationDelivery: {
       create: jest.fn().mockResolvedValue({ id: "del-1" }),
       findMany: jest.fn().mockResolvedValue(f.pendingDeliveries ?? []),
       update: jest.fn().mockResolvedValue({}),
+      // In-flight reservations: rows already handed to a gateway. Zero here, so
+      // these specs see the whole balance and keep testing what they are about
+      // (one debit per confirmed send) rather than the reservation arithmetic,
+      // which the concurrency e2e covers against a real Postgres.
+      count: jest.fn().mockResolvedValue(0),
     },
     // Recipient preferences: null => the producer delivers all requested channels.
     notificationPreference: { findFirst: jest.fn().mockResolvedValue(null) },

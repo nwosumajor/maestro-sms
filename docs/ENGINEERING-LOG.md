@@ -15895,3 +15895,57 @@ know it was supposed to take a lock. 4 runs out of 4 pass after.
 // GOTCHA: adding the lock broke three payment specs whose doubles had no
 // `$executeRaw` — a double modelling the methods a service happened to call
 // yesterday. Same trap as `isActive`/`assertActive` earlier in this session.
+
+### One purchased credit, two jobs, two messages sent
+
+A metered send (SMS / WhatsApp) takes an ALLOWANCE once per job: read the
+balance, decrement a LOCAL variable per delivery, send, and debit the ledger
+afterwards. The comment above it is right that this stops two metered CHANNELS
+in one notification from both spending the school's last credit. It says nothing
+about two NOTIFICATIONS — and the worker runs jobs concurrently, which is
+exactly what a broadcast to many families produces.
+
+Measured on a real Postgres: one purchased credit, two concurrent jobs.
+
+    before    balance -1, sent 2
+    after     balance  0, sent 1
+
+Credits are BOUGHT, so overspending bills a school for messages it did not buy
+and drives the ledger below zero — which the low-balance warning and the
+"no message credits" soft-fail both read.
+
+**A lock alone could not fix this.** The debit deliberately lands AFTER the send
+so that a failed delivery never spends a paid credit — a property worth keeping
+— which means two jobs would still each read a balance neither had debited.
+What was needed is a RESERVATION, and the row already carried one without
+calling it that: `attempts` is stamped in the planning transaction, before the
+gateway is told anything, precisely so a PENDING row with an attempt means
+"handed over, outcome unknown". Every such row is a credit about to be spent, so
+the budget is the balance MINUS those. The advisory lock then makes the
+count-and-stamp atomic between jobs.
+
+// BOTH HALVES WERE MEASURED, because a fix with a decorative half is worse than
+// a smaller fix. Removing the reservation fails EVERY run (2 sent). Removing
+// the lock fails 1 run in 8 — small on a two-job test and far worse on a
+// broadcast producing dozens of concurrent jobs, so it stays. A mutation that
+// passes is not proof the code is unnecessary; it can equally mean the test does
+// not reach the window, which is why the no-lock case was repeated eight times
+// rather than once.
+
+// THE ONE PLACE THIS DELIBERATELY DOES NOT FAIL CLOSED: in-flight rows are
+// counted only within a 15-minute window. A STRANDED row — a worker that died
+// mid-send — stays PENDING with an attempt until the recovery sweep re-queues
+// it, and reserving against it for ever would withhold credits the school has
+// PAID FOR. Golden Rule #7 asks for the more restrictive option, and which
+// option is more restrictive depends on who the rule is pointed at: withholding
+// a purchased credit is not the safe direction.
+
+// GOTCHA, and the fourth fixture trap of the day: this probe first reported
+// GREEN having sent NOTHING. Two faults stacked. The assertion was
+// `sent <= 1`, which also passes at zero; tightening it to `toBe(1)` exposed
+// `sent=0`. The cause was a channel double carrying `send` where the provider
+// interface declares `deliver(req)` — so the call threw and left both rows in
+// the code's own "handed to a gateway, outcome lost" state. After
+// `assertActive`/`isActive`, a missing `count`, and a missing `$executeRaw`,
+// the pattern is unmistakable: a double that models a PLAUSIBLE SIGNATURE
+// rather than the CONTRACT fails in a way that looks like anything but itself.

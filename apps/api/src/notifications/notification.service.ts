@@ -82,6 +82,16 @@ export interface NotificationInput {
   params?: Record<string, string | number>;
 }
 
+/**
+ * How long a handed-over metered delivery reserves its credit.
+ *
+ * A PENDING row with an attempt was given to a gateway and its outcome lost; it
+ * will be re-attempted by the recovery sweep. Past this window it is stranded
+ * rather than in flight, and holding a credit against it would withhold one the
+ * school has paid for.
+ */
+const IN_FLIGHT_RESERVATION_MS = 15 * 60_000;
+
 @Injectable()
 export class NotificationService {
   /** A send that happened but could not be written down has to be visible. */
@@ -561,12 +571,54 @@ export class NotificationService {
       // what keeps two metered channels from both spending the school's last
       // credit.
       //
+      // ...AND IT SAYS NOTHING ABOUT TWO NOTIFICATIONS. The worker runs jobs
+      // concurrently — a school broadcasting to many families produces many at
+      // once — and each job read this same balance. Measured on a real Postgres
+      // with ONE purchased credit and two concurrent jobs: both sent, and the
+      // ledger finished at **-1**. Credits are bought, so that bills the school
+      // for a message it did not buy and drives the balance below zero, which
+      // is what the low-balance warning and the soft-fail both read.
+      //
+      // The debit deliberately lands AFTER the send, so a failed delivery never
+      // spends a paid credit — which means a lock alone cannot fix this: two
+      // jobs would still each read a balance neither has debited yet. What is
+      // needed is a RESERVATION, and the row already carries one. `attempts` is
+      // stamped in THIS transaction, before the gateway is told anything,
+      // precisely so a PENDING row with an attempt means "handed over, outcome
+      // unknown". Every such row is a credit that is going to be spent, so the
+      // budget is the balance MINUS those.
+      //
+      // The advisory lock makes the read-and-stamp atomic between jobs: without
+      // it both read the same in-flight count before either stamps. Held only
+      // for this planning transaction — the gateway call happens outside it —
+      // so a broadcast serialises on a few short reads, not on the wire.
+      //
       // Read LAZILY: an email-only notification is the common case and has no
-      // business asking the ledger anything.
+      // business asking the ledger anything, or taking a lock.
       let allowance: number | null = null;
       const remaining = async (): Promise<number> => {
         if (allowance === null) {
-          allowance = this.credits ? await this.credits.balanceInTx(tx, job.schoolId) : 0;
+          if (!this.credits) {
+            allowance = 0;
+          } else {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credits:${job.schoolId}`}))`;
+            const balance = await this.credits.balanceInTx(tx, job.schoolId);
+            // In flight: handed to a gateway, outcome not yet recorded. Bounded
+            // to a recent window because a STRANDED row (a worker that died
+            // mid-send) stays PENDING with an attempt until the recovery sweep
+            // re-queues it, and reserving against it for ever would withhold
+            // credits the school has paid for.
+            const inFlight = await tx.notificationDelivery.count({
+              where: {
+                schoolId: job.schoolId,
+                status: "PENDING",
+                channel: { in: ["SMS", "WHATSAPP"] },
+                attempts: { gt: 0 },
+                lastAttemptAt: { gte: new Date(Date.now() - IN_FLIGHT_RESERVATION_MS) },
+              },
+            });
+            allowance = Math.max(0, balance - inFlight);
+          }
         }
         return allowance;
       };

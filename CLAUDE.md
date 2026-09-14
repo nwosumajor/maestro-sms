@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **337 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **338 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **337 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **338 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2090,6 +2090,23 @@ the processors, following ONE HOP into the services a swept method calls
 // GOTCHA: the gate's own `methodBody` took the first `{` after the method
 // name, which for `): Promise<{ reminded: number … }> {` is the RETURN TYPE —
 // the capped read was invisible because the gate was reading a type.
+
+## A deferred debit needs a RESERVATION, not just a lock
+Metered sends read a credit balance once per job, decrement a LOCAL variable,
+and debit the ledger only AFTER the gateway confirms — deliberately, so a failed
+delivery never spends a paid credit. Two concurrent jobs therefore each read a
+balance neither had debited: one purchased credit produced **2 messages sent and
+a balance of -1**. A lock alone cannot fix a deferred write; the budget is now
+the balance MINUS in-flight reservations, and the row already carried one —
+`attempts` is stamped before the gateway is told anything, so a PENDING row with
+an attempt is a credit about to be spent. The advisory lock makes the
+count-and-stamp atomic.
+// Measured both halves: dropping the reservation fails EVERY run, dropping the
+// lock fails 1 in 8 — repeated eight times, because a mutation that passes may
+// mean the test misses the window rather than the code being needless.
+// GOTCHA: in-flight counts only within 15 minutes. A stranded row would
+// otherwise reserve a PAID credit for ever; here the restrictive option is the
+// wrong one, because it withholds something the school bought.
 
 ## Every writer that recomputes an invoice's status must take its lock
 `recordPayment` and `approvePayment` take `SELECT ... FOR UPDATE` on the invoice
