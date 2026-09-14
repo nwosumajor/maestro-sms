@@ -110,6 +110,8 @@ type ContentRow = {
   authorId: string;
   approvalRequestId: string | null;
   moduleId: string | null;
+  /** The syllabus week this item teaches, in its OWN class's plan. */
+  syllabusItemId: string | null;
   subjectId: string | null;
   termId: string | null;
   fileKey: string | null;
@@ -1612,7 +1614,10 @@ export class LmsContentService {
   async copyContentToArms(
     p: Principal,
     contentId: string,
-  ): Promise<{ copied: Array<{ classId: string; className: string }>; skipped: Array<{ className: string; reason: string }> }> {
+  ): Promise<{
+    copied: Array<{ classId: string; className: string; /** attached to that arm's matching week */ week: boolean }>;
+    skipped: Array<{ className: string; reason: string }>;
+  }> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const src = await this.requireContent(tx, contentId);
       await this.assertTeacherOfClass(tx, p, src.classId);
@@ -1632,7 +1637,55 @@ export class LmsContentService {
       })) as Array<{ id: string; name: string }>;
       if (siblings.length === 0) throw new BadRequestException(`${source.name} has no other arms to copy to.`);
 
-      const copied: Array<{ classId: string; className: string }> = [];
+      // WHICH WEEK, IN EACH ARM'S OWN PLAN — resolved for every arm in TWO
+      // queries, before the loop, so this costs the same at ten arms as at two.
+      //
+      // Re-pointing is safe here and is not safe in general. `copyToArms` on the
+      // syllabus creates an arm's weeks FROM THE SAME SOURCE, so after that the
+      // plans correspond by construction — same week numbers, same topics. The
+      // TOPIC is checked as well as the number, and that check is the whole
+      // safeguard: it is what distinguishes "this arm's plan came from the same
+      // place" from "this arm happens to have a week 3 about something else".
+      // Where it cannot prove correspondence it leaves the note untagged, which
+      // is recoverable; attaching notes to the wrong week is not.
+      const weekByClass = new Map<string, string>();
+      if (src.syllabusItemId) {
+        const srcItem = (await tx.subjectSyllabusItem.findFirst({
+          where: { id: src.syllabusItemId },
+          select: { week: true, topic: true, syllabus: { select: { subjectId: true, termId: true } } },
+        })) as { week: number; topic: string; syllabus: { subjectId: string; termId: string } | null } | null;
+        // Read from the ITEM'S OWN plan rather than the content's `subjectId`
+        // and `termId`: those are the gradebook tag and may be null while the
+        // item is set, and the plan is what actually says which offering this
+        // week belongs to.
+        if (srcItem?.syllabus) {
+          const armPlans = (await tx.subjectSyllabus.findMany({
+            where: {
+              classId: { in: siblings.map((a) => a.id) },
+              subjectId: srcItem.syllabus.subjectId,
+              termId: srcItem.syllabus.termId,
+            },
+            select: { id: true, classId: true },
+          })) as Array<{ id: string; classId: string }>;
+          if (armPlans.length > 0) {
+            const classOfPlan = new Map(armPlans.map((pl) => [pl.id, pl.classId]));
+            const matches = (await tx.subjectSyllabusItem.findMany({
+              where: {
+                syllabusId: { in: armPlans.map((pl) => pl.id) },
+                week: srcItem.week,
+                topic: srcItem.topic,
+              },
+              select: { id: true, syllabusId: true },
+            })) as Array<{ id: string; syllabusId: string }>;
+            for (const m of matches) {
+              const cls = classOfPlan.get(m.syllabusId);
+              if (cls) weekByClass.set(cls, m.id);
+            }
+          }
+        }
+      }
+
+      const copied: Array<{ classId: string; className: string; week: boolean }> = [];
       const skipped: Array<{ className: string; reason: string }> = [];
       for (const arm of siblings) {
         // MAY THE COPIER AUTHOR IN THAT ARM? Checked per arm rather than assumed
@@ -1667,18 +1720,22 @@ export class LmsContentService {
             fileName: src.fileName,
             fileUploaded: src.fileUploaded,
             moduleId: null,
-            syllabusItemId: null,
+            // The arm's OWN week when the plans demonstrably correspond, null
+            // otherwise — never the source's item, which belongs to another
+            // arm's plan.
+            syllabusItemId: weekByClass.get(arm.id) ?? null,
             subjectId: src.subjectId,
             termId: src.termId,
           },
         })) as ContentRow;
         await this.snapshot(tx, p, row, `Copied from ${source.name}`);
-        copied.push({ classId: arm.id, className: arm.name });
+        copied.push({ classId: arm.id, className: arm.name, week: weekByClass.has(arm.id) });
       }
       await this.log(tx, p, "lms.content.copy-to-arms", contentId, {
         sourceClassId: src.classId,
         copied: copied.length,
         skipped: skipped.length,
+        weekAttached: copied.filter((c) => c.week).length,
       });
       return { copied, skipped };
     });

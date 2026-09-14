@@ -81,11 +81,17 @@ export function ContentItemTools({
     const r = await req("POST", `/content/${contentId}/copy-to-arms`, {});
     setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
-    const d = r.data as { copied: Array<{ className: string }>; skipped: Array<{ className: string; reason: string }> };
+    const d = r.data as {
+      copied: Array<{ className: string; week: boolean }>;
+      skipped: Array<{ className: string; reason: string }>;
+    };
     // REPORTS WHAT IT DID NOT DO, per arm and why — "copied to 2 arms" with a
     // third silently skipped is the failure this codebase keeps recording.
     setNote(
-      `Copied to ${d.copied.length === 0 ? "no arms" : d.copied.map((c) => c.className).join(", ")}.` +
+      // SAYS WHERE IT LANDED IN THE PLAN. A copy attached to the arm's matching
+      // week appears in its weekly view; one that could not be matched is a
+      // DRAFT a teacher must attach by hand, and that difference is worth a word.
+      `Copied to ${d.copied.length === 0 ? "no arms" : d.copied.map((c) => `${c.className}${c.week ? "" : " (not attached to a week)"}`).join(", ")}.` +
         (d.skipped.length ? ` Skipped: ${d.skipped.map((x) => `${x.className} (${x.reason})`).join("; ")}` : ""),
     );
     onChanged();

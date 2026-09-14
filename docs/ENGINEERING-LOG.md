@@ -16528,3 +16528,30 @@ PLANNED: `status`/`taughtAt` record what an arm actually taught, and carrying
 // classIdsTaughtBy). Returning the arms to both made the caller look like the
 // supervisor of every arm, so the authoring check passed and the test failed for
 // entirely the wrong reason. A double must answer by the WHERE it is given.
+
+// FOLLOW-UP: the week re-pointing I had argued AGAINST is now built, because
+// the reason against it stopped being true. I had said nothing guarantees two
+// arms' plans correspond week for week — right in general, and wrong
+// immediately after `syllabus/copy-to-arms`, which creates an arm's weeks FROM
+// THE SAME SOURCE. After that they correspond by construction.
+//
+// So a copied note attaches to the ARM'S OWN week when the match can be PROVEN:
+// same week number AND same topic, in that arm's plan for the same (subject,
+// term). The topic check is the whole safeguard — it distinguishes "this plan
+// came from the same place" from "this arm happens to have a week 3 about
+// something else". Where it cannot prove it, the note lands untagged, which a
+// teacher can fix; the wrong week is not recoverable, because nothing would say
+// it was wrong.
+//
+// RESOLVED FROM THE ITEM'S OWN PLAN, not from the content's `subjectId`/`termId`
+// — those are the gradebook tag and may be null while the week is set.
+//
+// TWO QUERIES FOR EVERY ARM, taken before the loop: the arms' plans by
+// `classId: { in: [...] }`, then the matching weeks by `syllabusId: { in: [...] }`.
+// A lookup per arm is the shape that degrades quietly — correct at two arms and
+// ten queries at ten — so the count is asserted, along with the fact that a note
+// carrying no week costs nothing extra.
+//
+// The response says which arms got a week and which did not, because a copy
+// attached to the plan shows up in that arm's weekly view and one that is not is
+// a draft somebody has to place by hand.

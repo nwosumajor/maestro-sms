@@ -45,8 +45,15 @@ const ARMS = [
   { id: "c-c", name: "SS1 Science C" },
 ];
 
-function makeService(opts: { titleTakenIn?: string[]; cannotAuthorIn?: string[] } = {}) {
-  const { titleTakenIn = [], cannotAuthorIn = [] } = opts;
+function makeService(opts: {
+  titleTakenIn?: string[];
+  cannotAuthorIn?: string[];
+  /** arms with no plan for this (subject, term) at all */
+  armsWithoutPlan?: string[];
+  /** arm classId -> the topic ITS week 3 actually covers */
+  armWeekTopics?: Record<string, string>;
+} = {}) {
+  const { titleTakenIn = [], cannotAuthorIn = [], armsWithoutPlan = [], armWeekTopics = {} } = opts;
   const created: Array<Record<string, unknown>> = [];
   const tx = {
     lmsContent: {
@@ -84,6 +91,28 @@ function makeService(opts: { titleTakenIn?: string[]; cannotAuthorIn?: string[] 
     lmsContentRevision: { create: jest.fn(async () => ({})), count: jest.fn(async () => 0) },
     auditLog: { create: jest.fn(async () => ({})) },
     user: { findFirst: jest.fn(async () => ({ name: "A Teacher" })) },
+    // The source week, and each arm's plan, for the re-pointing lookup.
+    subjectSyllabusItem: {
+      findFirst: jest.fn(async () => ({
+        week: 3,
+        topic: "Motion",
+        syllabus: { subjectId: "sub-physics", termId: "term-1" },
+      })),
+      // Only arms whose plan has a week 3 ABOUT MOTION match. `armWeekTopics`
+      // decides that, so a plan with a different week 3 is expressible.
+      findMany: jest.fn(async (a: { where: { syllabusId: { in: string[] }; week: number; topic: string } }) =>
+        a.where.syllabusId.in
+          .filter((sid) => (armWeekTopics[sid.replace("plan-", "")] ?? "Motion") === a.where.topic)
+          .map((sid) => ({ id: `item-${sid}`, syllabusId: sid })),
+      ),
+    },
+    subjectSyllabus: {
+      findMany: jest.fn(async (a: { where: { classId: { in: string[] } } }) =>
+        a.where.classId.in
+          .filter((c) => !armsWithoutPlan.includes(c))
+          .map((c) => ({ id: `plan-${c}`, classId: c })),
+      ),
+    },
   } as unknown as TenantTx;
 
   const svc = new LmsContentService(
@@ -97,7 +126,7 @@ function makeService(opts: { titleTakenIn?: string[]; cannotAuthorIn?: string[] 
     { presignUpload: jest.fn(), presignDownload: jest.fn() } as never,
     { onFinalized: jest.fn() } as never,
   );
-  return { svc, created };
+  return { svc, created, tx };
 }
 
 describe("copying a note to the other arms", () => {
@@ -117,14 +146,46 @@ describe("copying a note to the other arms", () => {
     expect(SRC.status).toBe("APPROVED");
   });
 
-  it("DROPS the class-scoped ids, which mean nothing in the target", async () => {
-    // A module belongs to the source class's module list; a syllabus item to its
-    // own plan's week. Re-pointing the week is deliberately not attempted —
-    // nothing guarantees the plans correspond, and attaching notes to the wrong
-    // week is worse than leaving them untagged.
+  it("DROPS the module id, which means nothing in the target", async () => {
+    // `LmsModule` is class-scoped: the source class's module list does not exist
+    // in another arm.
     const { svc, created } = makeService();
     await svc.copyContentToArms(admin, SRC.id);
-    expect(created.every((c) => c.moduleId === null && c.syllabusItemId === null)).toBe(true);
+    expect(created.every((c) => c.moduleId === null)).toBe(true);
+  });
+
+  it("NEVER carries the source's own syllabus item across", async () => {
+    // The invariant that holds however the week lookup behaves: an item belongs
+    // to ONE arm's plan, so pointing another arm's note at it would attach a note
+    // to a week in a different class.
+    const { svc, created } = makeService();
+    await svc.copyContentToArms(admin, SRC.id);
+    expect(created.every((c) => c.syllabusItemId !== SRC.syllabusItemId)).toBe(true);
+  });
+
+  it("attaches to the ARM'S OWN week when the plans demonstrably correspond", async () => {
+    // Safe because the syllabus copy creates an arm's weeks from the same
+    // source, so after that they match by construction — same number, same topic.
+    const { svc, created } = makeService();
+    const r = await svc.copyContentToArms(admin, SRC.id);
+    expect(created.map((c) => c.syllabusItemId)).toEqual(["item-plan-c-b", "item-plan-c-c"]);
+    expect(r.copied.every((c) => c.week)).toBe(true);
+  });
+
+  it("leaves it UNTAGGED when the arm's week 3 is about something else", async () => {
+    // The topic check is the whole safeguard: it distinguishes "this plan came
+    // from the same place" from "this arm happens to have a week 3". Untagged is
+    // recoverable; the wrong week is not.
+    const { svc, created } = makeService({ armWeekTopics: { "c-c": "Electricity" } });
+    const r = await svc.copyContentToArms(admin, SRC.id);
+    expect(created.map((c) => c.syllabusItemId)).toEqual(["item-plan-c-b", null]);
+    expect(r.copied.map((c) => c.week)).toEqual([true, false]);
+  });
+
+  it("leaves it UNTAGGED when the arm has no plan for that term at all", async () => {
+    const { svc, created } = makeService({ armsWithoutPlan: ["c-b", "c-c"] });
+    await svc.copyContentToArms(admin, SRC.id);
+    expect(created.every((c) => c.syllabusItemId === null)).toBe(true);
   });
 
   it("keeps the title, so a second press can recognise its own work", async () => {
@@ -157,4 +218,29 @@ describe("what it refuses to trample", () => {
     expect(created).toEqual([]);
     expect(r.skipped.map((s) => s.reason)).toEqual(["you do not teach this arm", "you do not teach this arm"]);
   });
+
+describe("it costs the same at ten arms as at two", () => {
+  it("resolves every arm's week in TWO queries, not one per arm", async () => {
+    // A lookup per arm is the shape that degrades quietly: correct at two arms,
+    // and ten queries at ten. The plans are fetched once and the matching weeks
+    // once, both by `id: { in: [...] }`.
+    const { svc, tx } = makeService();
+    await svc.copyContentToArms(admin, SRC.id);
+    const plans = (tx as unknown as { subjectSyllabus: { findMany: jest.Mock } }).subjectSyllabus.findMany;
+    const items = (tx as unknown as { subjectSyllabusItem: { findMany: jest.Mock } }).subjectSyllabusItem.findMany;
+    expect(plans).toHaveBeenCalledTimes(1);
+    expect(items).toHaveBeenCalledTimes(1);
+    // ...and both asked for ALL the arms at once, which is what makes it one query.
+    expect(plans.mock.calls[0][0].where.classId.in).toHaveLength(ARMS.length);
+  });
+
+  it("does not look for a week at all when the note has none", async () => {
+    // A material with no syllabus item costs nothing extra.
+    const { svc, tx } = makeService();
+    (SRC as { syllabusItemId: string | null }).syllabusItemId = null;
+    await svc.copyContentToArms(admin, SRC.id);
+    (SRC as { syllabusItemId: string | null }).syllabusItemId = "item-a";
+    expect((tx as unknown as { subjectSyllabus: { findMany: jest.Mock } }).subjectSyllabus.findMany).not.toHaveBeenCalled();
+  });
+});
 });
