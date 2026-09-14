@@ -348,13 +348,33 @@ export interface StaffAttendanceDto {
   userId: string;
   userName: string | null;
   date: Date;
-  status: "PRESENT" | "LATE" | "ABSENT";
-  source: "ADMIN" | "SELF_KIOSK" | "BIOMETRIC";
+  status: StaffAttendanceStatus;
+  source: "ADMIN" | "SELF_KIOSK" | "BIOMETRIC" | "SYSTEM";
+  /** First arrival scan of the school day. */
   clockInAt: Date | null;
+  /**
+   * Last departure scan, when there is one. NULL means nobody recorded a
+   * departure — a real and common state, distinct from a zero-length day, so no
+   * screen should render it as "0 hours".
+   */
+  clockOutAt: Date | null;
+  /**
+   * Minutes between the two, or null when the day is still open. Computed on the
+   * server so that a school, a payslip and a report cannot each do the
+   * subtraction slightly differently.
+   */
+  minutesOnSite: number | null;
   /** Anomaly SIGNAL (off-site IP etc.) for human review — never auto-punitive. */
   flagged: boolean;
   note: string | null;
 }
+
+/**
+ * ON_LEAVE is not a kind of absence, which is why it is its own status: an
+ * authorised absence and a no-show were the same "unmarked" state, and marking
+ * somebody ABSENT counted their approved leave against them.
+ */
+export type StaffAttendanceStatus = "PRESENT" | "LATE" | "ABSENT" | "ON_LEAVE";
 
 /** The day's register: every active employee with their mark (or none yet). */
 export interface AttendanceRegisterDto {

@@ -99,7 +99,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "timetable.read", "timetable.write", "meeting.host", "meeting.request.read", "exam.manage", "exam.release",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "privacy.compliance.manage", "privacy.archive.manage", "message.read", "message.send", "event.read", "announcement.read", "event.write",
-    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.payroll.run", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
+    "hr.read", "hr.self", "hr.write", "hr.attendance.read", "hr.attendance.amend", "hr.attendance.amend.review", "hr.kiosk.display", "hr.salary.approve", "hr.payroll.run", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate", "game.quiz.host", "game.hangman.host", "game.typing.host",
     "game.ultimate.enroll",
@@ -132,7 +132,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "timetable.read", "timetable.write", "meeting.host", "meeting.request.read", "exam.manage", "exam.release",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "privacy.compliance.manage", "privacy.archive.manage", "message.read", "message.send", "event.read", "announcement.read", "event.write",
-    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
+    "hr.read", "hr.self", "hr.write", "hr.attendance.read", "hr.attendance.amend", "hr.attendance.amend.review", "hr.kiosk.display", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
     // School admin approves end-of-session promotions (maker-checker checker).
     // The PRINCIPAL holds it too — see the note beside their `class.promote`.
     "class.promote.approve",
@@ -217,12 +217,12 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   // The accountant owns Fees/Billing.
   accountant: ["directory.people.read", "hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "announcement.read", "billing.read",
   ],
-  hr_clerk: ["directory.people.read", "hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read", "announcement.read", "student.import", "parent.import", "class.read", "enrollment.read", "document.read",],
+  hr_clerk: ["directory.people.read", "hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "hr.attendance.read", "hr.attendance.amend", "hr.kiosk.display", "message.read", "message.send", "event.read", "announcement.read", "student.import", "parent.import", "class.read", "enrollment.read", "document.read",],
   // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
   // staff-request chain. Salary maker-checker still needs TWO distinct managers.
   hr_manager: ["directory.people.read", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.hr",
-    "hr.read", "hr.write", "hr.salary.request", "hr.salary.approve", "hr.leave.manage", "hr.payroll.run",
+    "hr.read", "hr.write", "hr.attendance.read", "hr.attendance.amend", "hr.attendance.amend.review", "hr.kiosk.display", "hr.salary.request", "hr.salary.approve", "hr.leave.manage", "hr.payroll.run",
     "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage",
     // Coarse gate for the admissions review surface; the HR stage of the
     // maker-checker still requires the granular workflow.review.hr above.

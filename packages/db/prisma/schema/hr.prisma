@@ -544,12 +544,22 @@ model StaffAttendance {
   userId     String    @db.Uuid
   /// The attendance day (date only, UTC midnight).
   date       DateTime  @db.Date
-  /// PRESENT | LATE | ABSENT
+  /// PRESENT | LATE | ABSENT | ON_LEAVE
+  ///
+  /// ON_LEAVE exists because "authorised" and "did not turn up" were the same
+  /// state: nothing wrote attendance from an approved leave request, so somebody
+  /// on approved leave was indistinguishable from a no-show, and marking them
+  /// ABSENT counted their own approved leave against them.
   status     String
-  /// ADMIN | SELF_KIOSK | BIOMETRIC
+  /// ADMIN | SELF_KIOSK | BIOMETRIC | SYSTEM
   source     String
   markedById String    @db.Uuid
+  /// DERIVED from the event log: the FIRST IN of the school day.
   clockInAt  DateTime?
+  /// DERIVED from the event log: the LAST OUT of the school day, after the first
+  /// IN. Null means nobody recorded a departure — a real state, and not the same
+  /// as a zero-length day, so nothing infers one.
+  clockOutAt DateTime?
   /// Evidence: requester IP as seen by the API (signal, not proof).
   ip         String?
   flagged    Boolean   @default(false)
@@ -563,6 +573,44 @@ model StaffAttendance {
   @@index([schoolId])
   @@index([schoolId, date])
   @@map("staff_attendance")
+}
+
+/// Every arrival and departure scan, as reported — append-only.
+///
+/// `staff_attendance` holds ONE row per person per day and was write-once: the
+/// first scan created it and every later scan was counted `alreadyMarked` and
+/// DISCARDED. A gate terminal reports every scan, so the departures were already
+/// arriving and being thrown away, and no hours could be computed from what was
+/// kept.
+///
+/// This is the record; the day row is a projection of it (first IN, last OUT).
+/// Keeping both means a correction to the summary never destroys the evidence it
+/// was drawn from — the same reason the ledger keeps payments, not a balance.
+model StaffAttendanceEvent {
+  id       String   @id @default(uuid()) @db.Uuid
+  schoolId String   @db.Uuid
+  userId   String   @db.Uuid
+  /// The SCHOOL's calendar day this event belongs to, decided where it is
+  /// written. A UTC day files a Singapore morning against the day before.
+  date     DateTime @db.Date
+  /// IN | OUT
+  kind     String
+  at       DateTime
+  /// SELF_KIOSK | BIOMETRIC | ADMIN
+  source   String
+  /// The terminal that reported it, when a device did — so a drifting clock or a
+  /// leaked secret traces to one device rather than to the whole school.
+  deviceId String?  @db.Uuid
+  ip       String?
+
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, date])
+  @@index([schoolId, userId, date])
+  @@map("staff_attendance_event")
 }
 
 /// Per-school clock-in kiosk config (one row per school). The TOTP secret that

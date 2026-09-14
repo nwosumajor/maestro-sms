@@ -39,6 +39,7 @@ const ARRIVAL = "2026-08-17T23:30:00.000Z";
 function makeService(timezone: string, opts: { existingDates?: string[] } = {}) {
   const { existingDates = [] } = opts;
   const created: Array<{ date: Date; status: string; clockInAt: Date }> = [];
+  const loggedEvents: Date[] = [];
   const tx = {
     school: { findFirst: jest.fn(async () => ({ id: "school-A" })) },
     attendanceDevice: {
@@ -47,21 +48,37 @@ function makeService(timezone: string, opts: { existingDates?: string[] } = {}) 
     },
     attendanceKiosk: { findFirst: jest.fn(async () => ({ lateAfter: "08:00" })) },
     biometricEnrollment: { findMany: jest.fn(async () => [{ deviceUserId: "E7", userId: "staff-1" }]) },
+    // The ingest now appends every scan and projects the day from the log, so a
+    // double without this fails as a code fault rather than as the wiring change
+    // it is. It models the CONTRACT: append, then re-read in time order.
+    staffAttendanceEvent: {
+      create: jest.fn(async (a: { data: { at: Date } }) => {
+        loggedEvents.push(a.data.at);
+        return a.data;
+      }),
+      findMany: jest.fn(async () => [...loggedEvents].sort((x, y) => x.getTime() - y.getTime()).map((at) => ({ at }))),
+    },
     staffAttendance: {
       findFirst: jest.fn(async (a: { where: { date: Date } }) =>
-        existingDates.includes(a.where.date.toISOString().slice(0, 10)) ? { id: "existing" } : null,
+        existingDates.includes(a.where.date.toISOString().slice(0, 10)) ? { id: "existing", clockInAt: null } : null,
       ),
       create: jest.fn(async (a: { data: { date: Date; status: string; clockInAt: Date } }) => {
         created.push(a.data);
         return a.data;
       }),
+      update: jest.fn(async (a: { data: Record<string, unknown> }) => a.data),
     },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const service = new StaffAttendanceService(
     db as never,
     { record: jest.fn() } as never,
-    { inTx: async () => ({ timezone }), todayInTx: async () => new Date() } as never,
+    { inTx: async () => ({ timezone }), todayInTx: async () => new Date(), forSchool: async () => ({ timezone }) } as never,
+    // A correction older than the window now raises a maker-checker amendment,
+    // and the constructor registers the reactor that applies it. A double
+    // missing either fails as a code fault rather than as the wiring change it is.
+    { createRequest: jest.fn(), submit: jest.fn() } as never,
+    { onFinalized: jest.fn() } as never,
   );
   const ingest = () =>
     service.ingestDeviceEvents("demo", "D1", "sig", Buffer.from("{}"), {
@@ -121,12 +138,23 @@ describe("the silent drop this caused", () => {
     expect(created).toHaveLength(1);
   });
 
-  it("still refuses a genuine duplicate on the school's own day", async () => {
-    // The idempotency itself must survive the fix.
+  it("still writes exactly ONE attendance row for the school's own day", async () => {
+    // WHAT THIS TEST NOW ASSERTS, and why it changed.
+    //
+    // It used to require `{ accepted: 0, alreadyMarked: 1 }` — a second event on
+    // a day already marked was a DUPLICATE and was refused. That was the old
+    // rule, and it was the defect: a gate terminal reports every scan, so after
+    // the morning most of what it sends is somebody LEAVING, and every one of
+    // those was being discarded.
+    //
+    // The property this test was really protecting is the one that still holds
+    // and still matters: the day-boundary fix must never produce a SECOND
+    // attendance row for the same person and day. It does not — the existing row
+    // is updated from the event log instead.
     const { ingest, created } = makeService("Asia/Singapore", { existingDates: ["2026-08-18"] });
     const res = await ingest();
-    expect(res).toMatchObject({ accepted: 0, alreadyMarked: 1 });
-    expect(created).toHaveLength(0);
+    expect(created).toHaveLength(0); // no second row
+    expect(res).toMatchObject({ accepted: 1, alreadyMarked: 0 });
   });
 });
 

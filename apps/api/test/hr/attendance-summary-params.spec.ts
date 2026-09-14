@@ -42,7 +42,12 @@ function makeService(timezone = "Africa/Lagos") {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const region = { forSchool: jest.fn(async () => ({ timezone })) };
-  const svc = new StaffAttendanceService(db as never, { record: jest.fn() } as never, region as never);
+  const svc = new StaffAttendanceService(db as never, { record: jest.fn() } as never, region as never,
+    // The service now raises a maker-checker amendment for a correction older
+    // than the window, and registers a reactor in its constructor. A double
+    // missing either fails as a code fault rather than a wiring one.
+    { createRequest: jest.fn(), submit: jest.fn() } as never,
+    { onFinalized: jest.fn() } as never);
   return { svc, queried };
 }
 

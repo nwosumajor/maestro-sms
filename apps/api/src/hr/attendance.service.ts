@@ -9,9 +9,19 @@
 //                at the display. The kiosk secret is field-ENCRYPTED and never
 //                leaves the server. Off-window rejected; off-allowlist IP is
 //                FLAGGED (a signal for human review, never a block/penalty).
-//   BIOMETRIC  — future terminal ingestion lands in the same table.
-// Corrections are UPDATEs (no hard delete); every mutation audited; staff see
-// their OWN history, hr.read sees all. Tenant-isolated (RLS).
+//   BIOMETRIC  — HMAC-signed terminal batches land in the same table.
+//   SYSTEM     — the day-close sweep, which is what records an absence nobody
+//                marked and an authorised absence nobody would have.
+//
+// A DAY IS A SPAN, NOT A STAMP. Every scan is appended to `staff_attendance_event`
+// and the day row is a PROJECTION of it — first IN, last OUT. It used to be
+// write-once on the first scan, so a gate terminal's departure events were counted
+// "already marked" and discarded: the data was arriving and being thrown away, and
+// no hours could be derived from what was kept.
+//
+// Corrections are UPDATEs (no hard delete) and never touch the event log — an
+// amendment must not rewrite the scan it contradicts. Every mutation audited;
+// staff see their OWN history, hr.read sees all. Tenant-isolated (RLS).
 // =============================================================================
 
 import { isIsoDay } from "../common/calendar-day";
@@ -19,7 +29,7 @@ import { isHhmm, normaliseHhmm } from "../common/time-of-day";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { Prisma } from "@sms/db";
-import { schoolToday } from "@sms/types";
+import { schoolToday, STAFF_ATTENDANCE_AMENDMENT_CHAIN, STAFF_ATTENDANCE_AMEND_WINDOW_DAYS } from "@sms/types";
 import type {
   AttendanceRegisterDto,
   AttendanceSummaryDto,
@@ -41,6 +51,8 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { WorkflowService } from "../workflow/workflow.service";
+import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
 const KIOSK_STEP_SEC = 30;
 const ZERO = "00000000-0000-0000-0000-000000000000"; // system actor for device events
@@ -52,6 +64,7 @@ type MarkRow = {
   status: string;
   source: string;
   clockInAt: Date | null;
+  clockOutAt: Date | null;
   flagged: boolean;
   note: string | null;
 };
@@ -69,17 +82,166 @@ export class StaffAttendanceService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly region: SchoolRegionService,
-  ) {}
+    private readonly workflow: WorkflowService,
+    hooks: WorkflowHooksService,
+  ) {
+    // Maker-checker reactor: a SENIOR holder of `hr.attendance.amend.review` (a
+    // different person from whoever raised it, engine-enforced) approves a
+    // correction older than the window, and the mark is applied in the SAME
+    // tenant transaction as the transition — so an approval can never be
+    // recorded without the change it approves.
+    hooks.onFinalized(async (tx, req) => {
+      if (req.type !== "STAFF_ATTENDANCE_AMENDMENT" || req.state !== "APPROVED") return;
+      const pl = req.payload as { userId?: string; date?: string; status?: string; note?: string | null } | null;
+      if (!pl?.userId || !pl.date || !pl.status) return;
+      const date = dayUtc(pl.date);
+      // The employment record is re-asked HERE because approval happens LATER:
+      // somebody can leave between raising a correction and it being approved,
+      // and writing attendance for a person who is no longer staff files a
+      // record nobody owns.
+      const emp = await tx.employee.findFirst({ where: { userId: pl.userId, status: "ACTIVE" }, select: { id: true } });
+      if (!emp) return;
+      await tx.staffAttendance.upsert({
+        where: { userId_date: { userId: pl.userId, date } },
+        create: {
+          schoolId: req.schoolId,
+          userId: pl.userId,
+          date,
+          status: pl.status,
+          source: "ADMIN",
+          markedById: req.initiatorId,
+          note: (pl.note ?? "").trim() || null,
+        },
+        update: { status: pl.status, source: "ADMIN", markedById: req.initiatorId, note: (pl.note ?? "").trim() || null },
+      });
+      await this.audit.record(
+        {
+          actorId: req.initiatorId,
+          action: "hr.attendance.mark.approved",
+          entity: "staff_attendance",
+          entityId: pl.userId,
+          schoolId: req.schoolId,
+          metadata: { date: pl.date, status: pl.status, requestId: req.id },
+        },
+        tx,
+      );
+    });
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  /**
+   * Record ONE scan and re-project the day from the log — the single path every
+   * capture mode writes through.
+   *
+   * The projection rule, stated once so the kiosk and the terminals cannot
+   * disagree about it: the day's `clockInAt` is the EARLIEST event and
+   * `clockOutAt` the LATEST, and a departure only counts when it is strictly
+   * after the arrival. A single scan is an arrival with no recorded departure —
+   * a real state, so nothing here invents a zero-length day.
+   *
+   * Derived from the LOG rather than from the row it is updating, because
+   * terminals batch and retry: events do not always arrive in time order, and
+   * re-reading means the answer never depends on delivery order.
+   */
+  private async recordEvent(
+    tx: TenantTx,
+    input: {
+      schoolId: string;
+      userId: string;
+      date: Date;
+      at: Date;
+      kind?: "IN" | "OUT";
+      source: string;
+      deviceId?: string | null;
+      ip?: string | null;
+    },
+  ): Promise<{ clockInAt: Date; clockOutAt: Date | null }> {
+    await tx.staffAttendanceEvent.create({
+      data: {
+        schoolId: input.schoolId,
+        userId: input.userId,
+        date: input.date,
+        kind: input.kind ?? "IN",
+        at: input.at,
+        source: input.source,
+        deviceId: input.deviceId ?? null,
+        ip: input.ip ?? null,
+      },
+    });
+    const events = (await tx.staffAttendanceEvent.findMany({
+      where: { userId: input.userId, date: input.date },
+      select: { at: true },
+      orderBy: { at: "asc" },
+    })) as Array<{ at: Date }>;
+    const first = events[0]!.at;
+    const last = events[events.length - 1]!.at;
+    return { clockInAt: first, clockOutAt: last.getTime() > first.getTime() ? last : null };
   }
 
   // --- Mode A: the admin-marked register --------------------------------------
   /** Mark (or correct) one staff member's attendance for a day. */
   async mark(
     p: Principal,
-    input: { userId: string; date: string; status: "PRESENT" | "LATE" | "ABSENT"; note?: string },
+    input: { userId: string; date: string; status: "PRESENT" | "LATE" | "ABSENT" | "ON_LEAVE"; note?: string },
+  ): Promise<StaffAttendanceDto | { pendingApproval: true; requestId: string; date: string }> {
+    const date = dayUtc(input.date);
+    // NOBODY MARKS THEMSELVES. This was a plain upsert on any `userId`, so every
+    // holder of the permission could write or rewrite their OWN attendance for
+    // any date — the one record later read back as evidence about them. Refused
+    // outright rather than flagged: there is no legitimate case for it, and a
+    // signal nobody reviews is not a control.
+    if (input.userId === p.userId) {
+      throw new ForbiddenException(
+        "You cannot mark your own attendance — ask another attendance approver to record it.",
+      );
+    }
+    // PAST THE WINDOW IT NEEDS A SECOND SIGNATURE. A correction made while the
+    // week is live is ordinary administration; one made long afterwards is a
+    // claim about the past, and this record decides lateness conversations and
+    // is cited in disciplinary files. The same seven days, and the same
+    // maker-checker shape, as amending a PUPIL register.
+    const { timezone } = await this.region.forSchool(p.schoolId);
+    // The SCHOOL's day: deciding the age of a correction in UTC puts a school
+    // west of UTC a day out on every boundary.
+    const ageDays = Math.floor((schoolToday(timezone).getTime() - date.getTime()) / 86_400_000);
+    if (ageDays > STAFF_ATTENDANCE_AMEND_WINDOW_DAYS) {
+      // Checked BEFORE raising, so an amendment naming somebody who is not staff
+      // here is refused now rather than after a reviewer's time.
+      await this.db.runAsTenant(this.ctx(p), async (tx) => {
+        const emp = await tx.employee.findFirst({ where: { userId: input.userId, status: "ACTIVE" }, select: { id: true } });
+        if (!emp) throw new NotFoundException("Active employee record not found");
+      });
+      // WHO, AND TO WHAT. The inbox renders the payload's `summary` and nothing
+      // else, and "Staff attendance amendment — 2026-06-01" names neither the
+      // person nor the change: an approver cannot countersign a claim about
+      // somebody's attendance record from a date alone, and this record is cited
+      // in disciplinary files.
+      const subject = await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.user.findFirst({ where: { id: input.userId }, select: { name: true } }),
+      );
+      const who = (subject as { name?: string } | null)?.name ?? "a member of staff";
+      const summary =
+        `Change ${who}'s attendance on ${input.date} to ${input.status.toLowerCase().replace("_", " ")}` +
+        `${input.note?.trim() ? ` — ${input.note.trim()}` : ""}.`;
+      const req = (await this.workflow.createRequest(p, {
+        type: "STAFF_ATTENDANCE_AMENDMENT",
+        title: `Staff attendance amendment — ${who}, ${input.date}`,
+        payload: { summary, userId: input.userId, date: input.date, status: input.status, note: input.note ?? null },
+        stages: [...STAFF_ATTENDANCE_AMENDMENT_CHAIN],
+      })) as { id: string };
+      await this.workflow.submit(p, req.id);
+      return { pendingApproval: true as const, requestId: req.id, date: input.date };
+    }
+    return this.applyMark(p, input);
+  }
+
+  /** The write itself, shared by the direct path and the approved amendment. */
+  private async applyMark(
+    p: Principal,
+    input: { userId: string; date: string; status: string; note?: string | null },
   ): Promise<StaffAttendanceDto> {
     const date = dayUtc(input.date);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -305,6 +467,15 @@ export class StaffAttendanceService {
       const existing = await tx.staffAttendance.findFirst({ where: { userId: p.userId, date } });
       if (existing) return this.toDto(existing, null); // already clocked in today
       const flagged = !ipMatchesAllowlist(ip, k.allowedIps);
+      const span = await this.recordEvent(tx, {
+        schoolId: p.schoolId,
+        userId: p.userId,
+        date,
+        at: now,
+        kind: "IN",
+        source: "SELF_KIOSK",
+        ip,
+      });
       const row = await tx.staffAttendance.create({
         data: {
           schoolId: p.schoolId,
@@ -313,13 +484,71 @@ export class StaffAttendanceService {
           status: deriveClockInStatus(k.lateAfter, now, timezone),
           source: "SELF_KIOSK",
           markedById: p.userId,
-          clockInAt: now,
+          clockInAt: span.clockInAt,
+          clockOutAt: span.clockOutAt,
           ip,
           flagged,
         },
       });
       await this.audit.record(
         { actorId: p.userId, action: "hr.attendance.clockin", entity: "staff_attendance", entityId: row.id, schoolId: p.schoolId, metadata: { status: row.status, flagged, ip } },
+        tx,
+      );
+      return this.toDto(row, null);
+    });
+  }
+
+  /**
+   * Clock OUT — the other half of the day, which did not exist.
+   *
+   * DELIBERATELY NOT WINDOWED. Clock-IN is refused outside the kiosk window
+   * because an arrival outside it is what the window exists to catch; applying
+   * the same window to a departure would refuse everybody who stays past it,
+   * which is most of the staff on most days. The code must still be current, so
+   * it is still proof of presence at the display.
+   *
+   * REFUSES when there is no arrival to close rather than inventing one: that
+   * would file a full day for somebody who never clocked in. The refusal says
+   * which, because "cannot clock out" on its own sends somebody to the office.
+   *
+   * Clocking out twice is not an error — it moves the departure later, which is
+   * what actually happened.
+   */
+  async clockOut(p: Principal, code: string, ip: string | null): Promise<StaffAttendanceDto> {
+    const now = new Date();
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const k = await tx.attendanceKiosk.findFirst({});
+      if (!k || !k.enabled) throw new NotFoundException("Clock-in kiosk is not enabled");
+      const secret = decryptField(k.secretEnc, p.schoolId);
+      if (!verifyTotp(secret, (code ?? "").trim(), 1, Date.now(), KIOSK_STEP_SEC)) {
+        await this.audit.record(
+          { actorId: p.userId, action: "hr.attendance.clockout.badcode", entity: "attendance_kiosk", entityId: p.schoolId, schoolId: p.schoolId, metadata: { ip } },
+          tx,
+        );
+        throw new ConflictException("That code isn't current — read it off the display and try again");
+      }
+      const date = await this.region.todayInTx(tx, p.schoolId);
+      const existing = (await tx.staffAttendance.findFirst({ where: { userId: p.userId, date } })) as MarkRow | null;
+      if (!existing || !existing.clockInAt) {
+        throw new ConflictException("You have not clocked in today, so there is nothing to clock out of");
+      }
+      const span = await this.recordEvent(tx, {
+        schoolId: p.schoolId,
+        userId: p.userId,
+        date,
+        at: now,
+        kind: "OUT",
+        source: "SELF_KIOSK",
+        ip,
+      });
+      const row = (await tx.staffAttendance.update({
+        where: { id: existing.id },
+        // The STATUS is not recomputed: lateness is a fact about the arrival and
+        // nothing about leaving should change it.
+        data: { clockOutAt: span.clockOutAt },
+      })) as MarkRow;
+      await this.audit.record(
+        { actorId: p.userId, action: "hr.attendance.clockout", entity: "staff_attendance", entityId: row.id, schoolId: p.schoolId, metadata: { ip } },
         tx,
       );
       return this.toDto(row, null);
@@ -467,9 +696,33 @@ export class StaffAttendanceService {
         // row, count the event "already marked", and drop it. The day itself
         // then had no record at all.
         const date = schoolToday(timezone, at);
-        const existing = await tx.staffAttendance.findFirst({ where: { userId, date }, select: { id: true } });
+        const existing = (await tx.staffAttendance.findFirst({
+          where: { userId, date },
+          select: { id: true, clockInAt: true },
+        })) as { id: string; clockInAt: Date | null } | null;
+        // EVERY SCAN IS KEPT. This counted an existing row as `alreadyMarked`
+        // and DROPPED the event — so a terminal's departure scans, which is most
+        // of what it sends after the morning, went in the bin, and the one
+        // feature that needed them could not be built from data the device was
+        // already sending on a signed, audited endpoint.
+        const span = await this.recordEvent(tx, {
+          schoolId: school.id,
+          userId,
+          date,
+          at,
+          source: "BIOMETRIC",
+          deviceId: device.id,
+        });
         if (existing) {
-          alreadyMarked++;
+          // A later scan closes the day; an earlier one corrects the arrival.
+          await tx.staffAttendance.update({
+            where: { id: existing.id },
+            data: { clockInAt: span.clockInAt, clockOutAt: span.clockOutAt },
+          });
+          // Counted as ACCEPTED because it was: the event is on the log and the
+          // day now reflects it. Reporting it as "already marked" is what made a
+          // device look listened to while its data was discarded.
+          accepted++;
           continue;
         }
         try {
@@ -481,7 +734,8 @@ export class StaffAttendanceService {
               status: deriveClockInStatus(lateAfter, at, timezone),
               source: "BIOMETRIC",
               markedById: ZERO,
-              clockInAt: at,
+              clockInAt: span.clockInAt,
+              clockOutAt: span.clockOutAt,
             },
           });
           accepted++;
@@ -559,6 +813,15 @@ export class StaffAttendanceService {
       status: r.status as StaffAttendanceDto["status"],
       source: r.source as StaffAttendanceDto["source"],
       clockInAt: r.clockInAt,
+      clockOutAt: r.clockOutAt,
+      // COMPUTED ONCE, on the server: three screens and a payslip each
+      // subtracting two timestamps is three chances to round differently. A day
+      // with no recorded departure is NULL, not 0 — "we do not know when they
+      // left" and "they were here for no time" are different facts.
+      minutesOnSite:
+        r.clockInAt && r.clockOutAt
+          ? Math.max(0, Math.round((r.clockOutAt.getTime() - r.clockInAt.getTime()) / 60_000))
+          : null,
       flagged: r.flagged,
       note: r.note,
     };

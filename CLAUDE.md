@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **340 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **341 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **340 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **341 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2005,16 +2005,35 @@ resolved window now, and a row with none says "all years". // GOTCHA:
 common across the web (`sessionId` is on dozens of screens); it asks only
 whether the web MENTIONS it.
 
-## A COUNT-then-INSERT cap is not a cap
-`attemptQuiz` counted a pupil's attempts, compared to `maxAttempts`, then
-inserted — nothing between, and no isolation level is set. Interleaving those
-exact statements in two sessions: both counted 0, both inserted, **two attempts
-on a one-attempt quiz, both numbered 1**. Now
-`@@unique([contentId, studentId, attemptNo])` (migration `20260910000000`), with
-P2002 converted to the guard's own 409 so the race is not observable as a
-different outcome. // GOTCHA: eight concurrent HTTP attempts did NOT reproduce
-it — a concurrency test over HTTP would have called this clean. Interleave the
-statements instead.
+## Races: fit the remedy to the RULE, and distrust a green probe
+Six money paths were read-then-write at READ COMMITTED and each needed a
+DIFFERENT remedy — that is the durable part; the measurements are in the log.
+- **Uniqueness** -> a UNIQUE INDEX. `attemptQuiz` counted then inserted (two
+  attempts on a one-attempt quiz, both numbered 1); one signed webhook replayed
+  concurrently posted SIX payments. Convert P2002 to the guard's own 409, or the
+  index only trades a double-post for a retry loop — a non-2xx makes a rail retry.
+- **A balance invariant** -> an ADVISORY LOCK, because an append-only ledger has
+  no row to lock. One pupil's credit applied to two invoices at once finished at
+  -5,000,000. The CURRENCY belongs in the key: a pupil can hold two balances.
+- **Read-modify-write on a row** -> `SELECT ... FOR UPDATE`, taken by EVERY
+  writer that reads an invoice's money and then writes it. Settlement did not,
+  so its safety was borrowed from whichever other writer held the lock — and two
+  gateway payments have no such neighbour.
+- **A DEFERRED write** -> a RESERVATION, not just a lock. Metered sends debit
+  only after the gateway confirms, so two jobs each read a balance neither had
+  spent; the budget is the balance MINUS in-flight (`attempts` stamped pre-send).
+// GOTCHA: **fixing the lost update is not fixing the race.** `decideAdjustment`
+// had a race-safe DECREMENT with a comment explaining it, while the CAP two
+// lines above still read a stale balance. Read a concurrency comment as a claim
+// about WHAT IT COVERS.
+// GOTCHA: **money AWAITING APPROVAL is already committed against the invoice** —
+// the overpayment guard counted POSTED only, so two payments each for the full
+// balance both passed. Sequential, through the front door: not a race at all.
+// GOTCHA: **distrust a green race probe until you have made it go RED.** Eight
+// concurrent HTTP requests did not reproduce the quiz race (interleave the
+// statements instead), and a settlement probe passed 6/6 until the neighbouring
+// lock was removed. Adding a guard then breaks every double that modelled
+// yesterday's collaborators — that failure is the signal the guard landed.
 
 ## An error message is the SERVER's reason; a hint is only a fallback
 A status usually has several causes and the component knows one. Eleven did
@@ -2095,85 +2114,6 @@ the processors, following ONE HOP into the services a swept method calls
 // GOTCHA: the gate's own `methodBody` took the first `{` after the method
 // name, which for `): Promise<{ reminded: number … }> {` is the RETURN TYPE —
 // the capped read was invisible because the gate was reading a type.
-
-## Fixing the lost update is not fixing the race
-`decideAdjustment` caps a waiver at the outstanding balance, and its decrement
-was ALREADY race-safe — the comment explains that two adjustments would
-otherwise both compute `total - amount` from one figure and one would be lost.
-The CAP two lines above still read a stale balance: a 10,000,000 invoice with
-two pending 8,000,000 waivers, approved together, both posted and left the
-invoice at **-6,000,000**, 3 runs of 3. A lost update and a violated invariant
-are different failures of the SAME race; read a concurrency comment as a claim
-about what it COVERS. Fixed with the same invoice `FOR UPDATE` the other three
-writers take — every writer that reads an invoice's money then writes it.
-// GOTCHA: adding a guard breaks every double that modelled yesterday's
-// collaborators (five times in one session: isActive, count, $executeRaw twice,
-// send/deliver). Expect it; the failure is the signal the guard landed.
-
-## A deferred debit needs a RESERVATION, not just a lock
-Metered sends read a credit balance once per job, decrement a LOCAL variable,
-and debit the ledger only AFTER the gateway confirms — deliberately, so a failed
-delivery never spends a paid credit. Two concurrent jobs therefore each read a
-balance neither had debited: one purchased credit produced **2 messages sent and
-a balance of -1**. A lock alone cannot fix a deferred write; the budget is now
-the balance MINUS in-flight reservations, and the row already carried one —
-`attempts` is stamped before the gateway is told anything, so a PENDING row with
-an attempt is a credit about to be spent. The advisory lock makes the
-count-and-stamp atomic.
-// Measured both halves: dropping the reservation fails EVERY run, dropping the
-// lock fails 1 in 8 — repeated eight times, because a mutation that passes may
-// mean the test misses the window rather than the code being needless.
-// GOTCHA: in-flight counts only within 15 minutes. A stranded row would
-// otherwise reserve a PAID credit for ever; here the restrictive option is the
-// wrong one, because it withholds something the school bought.
-
-## Every writer that recomputes an invoice's status must take its lock
-`recordPayment` and `approvePayment` take `SELECT ... FOR UPDATE` on the invoice
-before recomputing status from the posted total. `settlement.service` — the ONE
-path every gateway rail funnels through — did not, so its safety came from
-whichever OTHER writer happened to hold the lock. Two GATEWAY payments have no
-such neighbour: two online payments of 5,000,000 on one 10,000,000 invoice, both
-posting, left it **PARTIALLY_PAID in 4 runs out of 4** — a fully paid invoice
-that does not say so, then chased by the reminder sweep, charged late fees and
-counted in receivables. Settlement takes the lock itself now.
-// GOTCHA: **distrust a green race.** The staff-approval-vs-settlement case
-// passed 6/6; only removing `approvePayment`'s lock (probe then failed 1 in 3)
-// showed the probe really raced AND that the safety was borrowed.
-// THREE RACES, THREE REMEDIES: uniqueness -> `@@unique`; a balance invariant ->
-// advisory lock; read-modify-write on a row -> `FOR UPDATE`. Fit the remedy to
-// the RULE.
-
-## A balance read and then spent is a double-spend waiting for two clicks
-`applyCreditToInvoice` aggregated a pupil's credit, took `Math.min`, then wrote
-the spend. Two invoices applied at the same moment each read the WHOLE balance:
-measured on a real Postgres, 5,000,000 of credit became **-5,000,000 with
-10,000,000 applied**. A credit is money the family already handed over, so
-spending it twice credits the school for money it never received.
-No index expresses a balance invariant, so this takes an ADVISORY lock —
-`pg_advisory_xact_lock(hashtext('credit:<school>:<student>:<currency>'))` —
-chosen over `SELECT ... FOR UPDATE` for the reason `TermResultService
-.lockResultRow` already records: an append-only ledger has no row to lock. The
-CURRENCY is in the key because a pupil can hold two independent balances.
-// GOTCHA: only two sites write a negative `deltaMinor`; the scholarship award
-// reversal is safe because it reverses a specific entry BY ID, not a balance.
-
-## One gateway charge posts once — and the race must answer like the guard
-`InvoiceSettlementService.applyOnlinePayment` is the ONE posting path for every
-rail and was "idempotent on the gateway reference" via `findFirst` then
-`create` — read-then-write at READ COMMITTED. Sequential replay passed; SIX
-SIMULTANEOUS deliveries of one signed webhook (identical reference) posted six
-payments against a 5,000,000 invoice — **30,000,000 credited and the invoice
-marked PAID from one payment**. Now `@@unique([invoiceId, reference])` +
-migration `20270301000000`, with P2002 converted to the same `"duplicate"` the
-guard returns. NULL references stay distinct, so manual cash entries are
-unaffected.
-// GOTCHA measured, not assumed: with the index but WITHOUT the catch, the
-// losing deliveries answer **409** — and a non-2xx is what makes a rail retry,
-// so the index alone trades a double-post for a retry loop.
-// GOTCHA: **an idempotency probe that does not RACE confirms the design and
-// misses the defect.** Replaying twice is the obvious test and it passes.
-// And a replay that changes nothing proves idempotency only if the FIRST
-// delivery changed something — seed the precondition, or report INCONCLUSIVE.
 
 ## A capped sweep must report its BACKLOG, not just what it took
 Every scheduled sweep bounds its read with a `take`, deliberately. Each reported
@@ -2412,6 +2352,21 @@ register records who physically looked at the room. The board is gated on
 on /attendance shows BOTH lists — still-to-take with the person to ask, and a
 collapsed "Taken (n)" — where it used to show only a count of the gaps. The
 manual trigger is SCHOOL-scoped (`attendance.write`), never the fleet.
+
+## Staff attendance: a SPAN, closed by a sweep, corrected by two people
+It recorded ARRIVALS only, and the biometric ingest dropped a terminal's
+departure scans as duplicates. Scans now append to `staff_attendance_event`
+(rls/113, append-only) and the day row is a PROJECTION — first IN, last OUT.
+// GOTCHA: clock-OUT is NOT windowed (a window catches a late ARRIVAL), and
+`minutesOnSite` is NULL not 0 — "we do not know" is not "no time".
+// **ABSENCE WAS NEVER RECORDED** — `summary()` counts rows that EXIST, so anyone
+who never clocked in was neither present nor absent. `StaffDayCloseService` acts
+on each school's own 19:00 (late, or every evening activity is an ABSENT):
+unmarked -> ABSENT, approved leave -> ON_LEAVE (authorised and no-show had been
+one state); `openSpans` counted apart. // **AND EVERY READER COULD REWRITE THEIR
+OWN RECORD**: `hr.attendance.read`/`.amend` split, self-marking REFUSED, past 7
+days needs a senior `.amend.review` holder (never the initiator). `/kiosk` shows
+the code alone — it needed `hr.read`, so the corridor screen showed the register.
 
 ## Attendance register — write windows (BUILT)
 Three tiers gate a register write (`AttendanceService.markAttendance`):

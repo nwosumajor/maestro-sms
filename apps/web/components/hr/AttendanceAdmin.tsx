@@ -44,6 +44,13 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = 
   ABSENT: "destructive",
 };
 
+/** "6h 45m" — minutes are what the server sends, hours are what a person reads. */
+function hoursAndMinutes(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 export function AttendanceAdmin({
   initialRegister,
   initialKiosk,
@@ -109,13 +116,26 @@ export function AttendanceAdmin({
                       <Badge variant={STATUS_VARIANT[r.mark.status] ?? "secondary"}>{r.mark.status.toLowerCase()}</Badge>
                       <span className="text-xs text-muted-foreground">
                         {r.mark.source === "SELF_KIOSK" ? "kiosk" : r.mark.source.toLowerCase()}
-                        {r.mark.clockInAt &&
-                          ` · ${timeOfDay(r.mark.clockInAt)}`}
+                        {r.mark.clockInAt && ` · in ${timeOfDay(r.mark.clockInAt)}`}
+                        {/* NULL IS NOT ZERO. No recorded departure is a real and
+                            common state — rendering it as "0h" would assert a
+                            day nobody worked. */}
+                        {r.mark.clockOutAt
+                          ? ` · out ${timeOfDay(r.mark.clockOutAt)}`
+                          : r.mark.clockInAt
+                            ? " · still in"
+                            : ""}
+                        {r.mark.minutesOnSite != null && ` · ${hoursAndMinutes(r.mark.minutesOnSite)}`}
                       </span>
                       {r.mark.flagged && <Badge variant="destructive">⚑ review</Badge>}
                     </>
                   ) : (
-                    <span className="text-xs text-muted-foreground">unmarked</span>
+                    /* THE STATE THAT NEEDS ACTION, rendered as the state that
+                       needs action. Muted grey made the one row a head of school
+                       has to do something about the quietest thing on it. */
+                    <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400">
+                      not yet marked
+                    </Badge>
                   )}
                   {canWrite && (
                     <span className="ml-auto inline-flex gap-1">

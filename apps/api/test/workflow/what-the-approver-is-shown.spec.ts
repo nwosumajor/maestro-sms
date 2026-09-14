@@ -21,11 +21,20 @@ import { walkSources } from "../support/api-routes";
 
 const SRC = join(__dirname, "../../src");
 
-/** Producers whose approval bills a family, pays somebody, or grants leave. */
+/**
+ * Producers whose approval bills a family, pays somebody, grants leave — or
+ * changes a record held ABOUT a named person.
+ *
+ * Staff attendance is the fourth for that last reason: the approver is asked to
+ * countersign a claim about when a colleague was at work, which is read back in
+ * a lateness conversation and cited in a disciplinary file. A date in a title
+ * cannot support that decision.
+ */
 const MUST_SUMMARISE = [
   "src/hr/leave.service.ts",
   "src/hostel/hostel.service.ts",
   "src/transport/transport.service.ts",
+  "src/hr/attendance.service.ts",
 ];
 
 /**

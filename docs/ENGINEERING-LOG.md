@@ -16123,3 +16123,106 @@ WHAT WAS ALREADY SOUND, checked the same way rather than assumed:
 // first thing to grep for. Repointed at the one definition, which makes those
 // two assertions cover FIVE doors instead of two, and the membership question is
 // delegated by name to the gate that computes it.
+
+### The staff register recorded arrivals, and called that attendance
+
+Asked how staff attendance works for HR, a school admin and a principal — and
+whether time-in and time-out are accurate, controllable and consistent — the
+answer to the second half was that there was no time-out at all.
+
+`staff_attendance` carried `clockInAt` and no departure column: no route, no
+service method, no screen, and no `hoursWorked` anywhere in the repo. One row
+per person per day, `@@unique([userId, date])`, written once by whichever scan
+arrived first.
+
+The sharp edge was in the biometric path. A gate terminal reports EVERY scan,
+and after the morning most of what it sends is somebody leaving — and the ingest
+did this:
+
+    const existing = await tx.staffAttendance.findFirst({ where: { userId, date } });
+    if (existing) { alreadyMarked++; continue; }
+
+So the departures were arriving on a signed, authenticated, audited endpoint and
+going in the bin, while the response reported the batch accepted. The data
+needed to build the missing feature was already being delivered and discarded.
+
+FIX: a day is a SPAN, not a stamp. Every scan appends to an append-only
+`staff_attendance_event` (rls/113, INSERT+SELECT only) and the day row is a
+PROJECTION of it — first IN, last OUT. `clockOutAt` on the row, `minutesOnSite`
+computed once on the server, and a `POST /hr/attendance/clock-out` on the same
+proof-of-presence code. // GOTCHA: clock-OUT is deliberately NOT windowed. The
+window exists to catch a late ARRIVAL; applying it to a departure would refuse
+everybody who stays past it, which is most of the staff most days. // GOTCHA:
+`minutesOnSite` is NULL, never 0, with no departure — "we do not know when they
+left" and "they were here for no time" are different facts, and only one is ever
+true of somebody who scanned in. // The event log is append-only precisely so a
+later correction cannot rewrite the scan it contradicts.
+
+**AND ABSENCE WAS NEVER RECORDED AT ALL.** `summary()` counts the rows that
+exist, so a member of staff who never clocked in had no row and was neither
+present nor absent — the register said "unmarked" and the month counted nothing.
+Absence was recorded only where a human marked each absentee by hand, which on a
+kiosk or biometric school nobody does. There was no scheduled job of any kind:
+the PUPIL register got a reminder sweep and a nightly rollup for exactly this,
+and its sibling got neither.
+
+`StaffDayCloseService` closes the day hourly on each school's OWN evening tick
+(19:00 local — deliberately late, because closing at 17:00 would file an ABSENT
+against everyone running an evening activity). Anyone unmarked becomes ABSENT;
+anyone with APPROVED leave becomes ON_LEAVE, which is the second half of the
+same defect — nothing wrote attendance from leave, so an authorised absence and
+a no-show were one state, and marking somebody ABSENT counted their own approved
+leave against them. `openSpans` is counted separately: clocked in, never out, is
+the one thing a human should look at and folding it into either number hides it.
+
+**AND EVERY READER COULD REWRITE THEIR OWN RECORD.** `hr.read` and `hr.write`
+were held by exactly the same four roles and `mark()` was a plain upsert on any
+`userId` and any `date` — so anyone who could see the register could rewrite any
+mark for anyone, including themselves, including last year, with no step-up and
+no second signature. Salary changes are maker-checker here; payroll finalise is
+maker-checker; amending a PUPIL register past seven days needs a second
+approver. This record — read back in a lateness conversation and cited in a
+disciplinary file — had none. Now: `hr.attendance.read` / `.amend` split,
+self-marking refused outright (not flagged: a signal nobody reviews is not a
+control), and past 7 days a `STAFF_ATTENDANCE_AMENDMENT` that a SENIOR holder of
+`hr.attendance.amend.review` — never an hr_clerk, never the initiator — must
+approve, applied in the approval's own transaction.
+
+// GOTCHA: the type spine refused the shortcut, twice, and was right both times.
+// `WorkflowStage.permission` only accepts a declared `WorkflowPermission`, which
+// stopped me reusing `hr.attendance.amend` as its own reviewer gate — the
+// senior-tier permission it forced is the better control, because a clerk's late
+// correction should reach a manager and not another clerk. And a mutation
+// folding ON_LEAVE into ABSENT would not COMPILE, because the literal types have
+// no overlap.
+
+WEB: `/kiosk` renders the rotating code full-screen and nothing else behind the
+narrowest permission in the module (`hr.kiosk.display`). It had lived on the HR
+attendance page, so the screen standing in a corridor all day had to be signed in
+as somebody with `hr.read` and rendered every member of staff's attendance and
+the month's roll-up beside the six digits it was there to show. Also: the page
+passed `year`/`month` from the SERVER's clock while deriving the register day
+from the SCHOOL's two lines above — defeating a correct default whose docstring
+says "it is the school's month" — so around a month boundary it showed 1
+February's register beside January's roll-up; and "unmarked" was muted grey, the
+quietest thing on the one row needing action, now an amber badge.
+
+// FOUR EXISTING GATES WENT RED, every one of them earning its place: the manual
+// trigger was not wrapped in `record(…, "MANUAL")` so a hand-run day-close would
+// have been invisible to the operator console; the cron/catalogue map had no
+// entry; a double lacked the new collaborator; and `what-the-approver-is-shown`
+// refused a request whose title carried a date but not WHOSE attendance or what
+// to — an approver cannot countersign a claim about a colleague from a date, so
+// the payload now carries a real summary and the file joined MUST_SUMMARISE.
+
+// AND ONE TEST HAD TO CHANGE ITS MIND HONESTLY: `still refuses a genuine
+// duplicate` encoded the OLD rule, that a second scan on a marked day is a
+// duplicate. That rule WAS the defect. It now asserts the property it was really
+// protecting — that no SECOND attendance row is ever created for one person-day.
+
+// SELF-INFLICTED, and worth recording because the repo already warns about it:
+// I ran `git checkout` on `attendance.service.ts` to undo a probe mutation and
+// discarded every uncommitted change in the file. "git checkout on an
+// uncommitted file discards the FIX, not the mutation" is in the probe-hygiene
+// list; I rebuilt the ten changes and verified each by reading the file back
+// rather than trusting the patch. Mutations after that were reversed by hand.

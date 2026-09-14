@@ -238,6 +238,23 @@ export const SCHEDULED_JOBS = [
     },
   },
   {
+    key: "hr.staffDayClose",
+    label: "Staff attendance day close",
+    // HOURLY for a once-a-day close, same reason as the register reminder: a
+    // fleet spans timezones, so each school is closed on the tick where ITS OWN
+    // clock reads the evening hour. Twenty-three ticks in twenty-four correctly
+    // do nothing, so `skipped` is large and healthy here.
+    everyMinutes: 60,
+    manual: {
+      path: "hr/attendance/day-close/run",
+      permission: "hr.attendance.amend",
+      // SCHOOL, and enforced in the handler, which passes the caller's own
+      // schoolId — an HR clerk pressing this cannot reach the fleet.
+      scope: "SCHOOL",
+      where: "/hr/attendance",
+    },
+  },
+  {
     key: "attendance.registerReminder",
     label: "Daily register reminder",
     // HOURLY for a once-a-day reminder: a fleet spans timezones, so the sweep

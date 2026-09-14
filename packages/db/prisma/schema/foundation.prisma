@@ -364,6 +364,7 @@ model School {
   schoolBranding           SchoolBranding?
   schoolGroupMembers       SchoolGroupMember[]
   staffAttendances         StaffAttendance[]
+  staffAttendanceEvents    StaffAttendanceEvent[]
   staffChecklists          StaffChecklist[]
   staffChecklistItems      StaffChecklistItem[]
   staffDocuments           StaffDocument[]

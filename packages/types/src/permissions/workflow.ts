@@ -31,6 +31,17 @@ export const WORKFLOW_PERMISSIONS = {
   STUDENT_EXIT_APPROVE: "student.exit.approve",
   /** Approve a stale (>7-day) attendance amendment. head_teacher/school_admin/principal. */
   ATTENDANCE_AMEND_REVIEW: "attendance.amend.review",
+  /**
+   * Approve a STAFF attendance correction older than the window.
+   *
+   * Held by the SENIOR tier only (principal / school_admin / hr_manager) and NOT
+   * by hr_clerk, so a clerk's late correction to somebody's attendance record
+   * genuinely reaches a second pair of eyes rather than another clerk's. All
+   * three senior roles hold it, so the chain can always be satisfied — a stage
+   * with no holder deadlocks an item for ever, which this repo has recorded more
+   * than once.
+   */
+  STAFF_ATTENDANCE_AMEND_REVIEW: "hr.attendance.amend.review",
 } as const;
 
 export type WorkflowPermission =
@@ -138,6 +149,29 @@ export const ATTENDANCE_AMENDMENT_CHAIN: WorkflowStage[] = [
   { key: "SENIOR", label: "Head teacher / school admin", permission: WORKFLOW_PERMISSIONS.ATTENDANCE_AMEND_REVIEW },
 ];
 
+/**
+ * STAFF attendance amendment: a correction to a staff register older than
+ * `STAFF_ATTENDANCE_AMEND_WINDOW_DAYS` needs a SECOND holder of
+ * `hr.attendance.amend` — a different person from whoever raised it, which the
+ * engine enforces via `mustNotBeInitiator`.
+ *
+ * The reviewer permission is the SENIOR tier's, not the same `hr.attendance.amend`
+ * that raised it: an hr_clerk's late correction should reach a manager, not
+ * another clerk. Three roles hold it, so the chain always has a holder.
+ */
+export const STAFF_ATTENDANCE_AMENDMENT_CHAIN: WorkflowStage[] = [
+  { key: "HR_SECOND", label: "Principal / school admin / HR manager", permission: WORKFLOW_PERMISSIONS.STAFF_ATTENDANCE_AMEND_REVIEW },
+];
+
+/**
+ * How long a staff attendance record stays directly correctable.
+ *
+ * Same seven days as the pupil register, and for the same reason: a correction
+ * made while the week is still live is ordinary administration, and one made
+ * long afterwards is a claim about the past that somebody should countersign.
+ */
+export const STAFF_ATTENDANCE_AMEND_WINDOW_DAYS = 7;
+
 export const WORKFLOW_STATES = [
   "DRAFT",
   "PENDING_REVIEW",
@@ -218,6 +252,7 @@ export const WORKFLOW_TYPES = [
   "EXAM_SCHEDULE_APPROVAL",
   "ADMIN_APPOINTMENT",
   "ATTENDANCE_AMENDMENT",
+  "STAFF_ATTENDANCE_AMENDMENT",
   "STUDENT_EXIT",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
@@ -297,6 +332,7 @@ export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   // the change applies ONLY after a head teacher / school admin / principal
   // (a different person) approves. Leadership edits such registers directly.
   ATTENDANCE_AMENDMENT: { label: "Attendance amendment", selfService: false, systemOnly: true },
+  STAFF_ATTENDANCE_AMENDMENT: { label: "Staff attendance amendment", selfService: false, systemOnly: true },
 };
 
 /** Pure: may a user with these permissions initiate this type via the API? */

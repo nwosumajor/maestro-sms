@@ -145,6 +145,7 @@ const meetingCohostA = randomUUID();
   const xapiStatementA = randomUUID();
   const payComponentA = randomUUID();
   const staffAttendanceA = randomUUID();
+  const staffAttendanceEventA = randomUUID();
   const attendanceKioskA = randomUUID();
   const dutyAssignmentA = randomUUID();
   const employmentChangeA = randomUUID();
@@ -1103,6 +1104,10 @@ const documentSubmissionA = randomUUID();
       [staffAttendanceA, A, userA],
     );
     await a.query(
+      `INSERT INTO staff_attendance_event (id,"schoolId","userId",date,kind,at,source) VALUES ($1,$2,$3,'2026-07-01','IN',now(),'BIOMETRIC')`,
+      [staffAttendanceEventA, A, userA],
+    );
+    await a.query(
       `INSERT INTO attendance_kiosk (id,"schoolId","secretEnc","updatedById","updatedAt") VALUES ($1,$2,'x',$3,now())`,
       [attendanceKioskA, A, userA],
     );
@@ -1236,6 +1241,7 @@ const documentSubmissionA = randomUUID();
       "loan_repayment",
       "staff_loan",
       "pay_component",
+      "staff_attendance_event",
       "staff_attendance",
       "attendance_kiosk",
       "attendance_device",
@@ -1554,6 +1560,7 @@ const documentSubmissionA = randomUUID();
     ["staff_loan", staffLoanA],
     ["loan_repayment", loanRepaymentA],
     ["staff_attendance", staffAttendanceA],
+    ["staff_attendance_event", staffAttendanceEventA],
     ["attendance_kiosk", attendanceKioskA],
     ["duty_assignment", dutyAssignmentA],
     ["employment_change_request", employmentChangeA],
@@ -1923,6 +1930,9 @@ const documentSubmissionA = randomUUID();
       "submission_telemetry",
       "disciplinary_entry", // the history of a staff case is tamper-evident
       "scan_event",
+      // A correction to the staff register must not rewrite the scan it
+      // contradicts, or the record stops being evidence.
+      "staff_attendance_event",
       "student_credit_entry", // ledgers are summed, never amended
       "message_credit_entry",
       "school_referral_conversion",
