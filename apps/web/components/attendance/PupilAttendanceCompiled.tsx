@@ -122,6 +122,19 @@ export function PupilAttendanceCompiled({ studentId, initial }: { studentId: str
           </table>
         </div>
 
+        {/* WHAT THIS GRAIN CANNOT SHOW, said plainly. A reader who adds the
+            terms up and gets less than the lifetime total will either mistrust
+            the tool or cite the smaller number; both are worse than a sentence.
+            It is usually a gap in the CALENDAR rather than in the child's
+            attendance, and the wording says so. */}
+        {data.outsideAnyBucket > 0 && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+            {data.outsideAnyBucket} register{data.outsideAnyBucket === 1 ? "" : "s"} fall outside every {grain} the school has
+            set up, so {data.outsideAnyBucket === 1 ? "it is" : "they are"} not counted in the rows above. Usually this means
+            registers were taken on dates outside the configured {grain} dates — check the academic calendar.
+          </p>
+        )}
+
         {(data.page > 1 || more) && (
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" disabled={busy || data.page <= 1} onClick={() => void load(grain, data.page - 1)}>Newer</Button>

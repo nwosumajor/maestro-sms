@@ -228,6 +228,47 @@ describe("what the page does not hide", () => {
   });
 });
 
+describe("what the grain cannot show", () => {
+  it("NAMES the registers that fall outside every term", async () => {
+    // Found on real data: one pupil's terms summed to 162 against a lifetime of
+    // 193 — 16% of the record absent from the view, because registers get taken
+    // in the gaps between configured term dates. A reader adding the terms up
+    // would either mistrust the tool or cite the smaller number.
+    const { svc } = makeService({
+      rollups: [
+        { termId: "t2", present: 50, absent: 2, late: 1, excused: 0 }, // 53
+        { termId: "t3", present: 55, absent: 1, late: 2, excused: 1 }, // 59
+      ],
+      live: { t1: { present: 0, absent: 0, late: 0, excused: 0 }, t4: { present: 0, absent: 0, late: 0, excused: 0 } },
+    });
+    const r = await svc.compiledHistory(head, PUPIL, { grain: "term" });
+    // lifetime is 335 in the fixture; the terms account for 112.
+    expect(r.lifetime.total).toBe(335);
+    expect(r.outsideAnyBucket).toBe(335 - 112);
+  });
+
+  it("is ZERO for months, because every date is in some month", async () => {
+    const { svc } = makeService({
+      months: [
+        { key: "2026-03", present: 300, absent: 20, late: 10, excused: 5 },
+      ],
+    });
+    const r = await svc.compiledHistory(head, PUPIL, { grain: "month" });
+    expect(r.outsideAnyBucket).toBe(0);
+  });
+
+  it("never goes negative when the buckets exceed the lifetime read", async () => {
+    // A rollup counts registers as they were at the time; a later purge could
+    // leave the buckets ahead of the live count. A negative "missing" figure
+    // would be nonsense on an audit screen.
+    const { svc } = makeService({
+      rollups: [{ termId: "t1", present: 5000, absent: 0, late: 0, excused: 0 }],
+    });
+    const r = await svc.compiledHistory(head, PUPIL, { grain: "term" });
+    expect(r.outsideAnyBucket).toBe(0);
+  });
+});
+
 describe("months", () => {
   it("compiles per calendar month and labels them readably", async () => {
     const { svc } = makeService({

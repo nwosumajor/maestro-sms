@@ -120,4 +120,19 @@ export interface AttendanceCompiledDto {
   /** Totals across the pupil's WHOLE history, independent of the page — an audit
    *  that reports only what fitted on a page is worse than one that says nothing. */
   lifetime: { present: number; absent: number; late: number; excused: number; total: number; percent: number | null };
+  /**
+   * Registers that fall in NO bucket at this grain — days the school took a
+   * register outside every term it has configured.
+   *
+   * Always 0 for months, because every date is in some month. For terms and
+   * sessions it is real and was invisible: measured on one demo pupil, the terms
+   * summed to 162 against a lifetime of 193, so 16% of their record was missing
+   * from the view and a reader adding the terms up would either think the tool
+   * was broken or quietly cite the wrong total.
+   *
+   * Named rather than folded in, because the two readings differ: a register
+   * outside every term is usually a gap in the CALENDAR, not in the child's
+   * attendance, and an investigation needs to know which it is looking at.
+   */
+  outsideAnyBucket: number;
 }

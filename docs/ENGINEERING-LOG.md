@@ -16335,3 +16335,16 @@ BEFORE adding it, and here that meant not adding one.
 // mutation then failed with `Expected 58, Received 28`. Same shape as the
 // `findMany` stubs that ignore `where` recorded above, and worth noting that it
 // caught me while I was writing a test specifically about that column.
+
+// AND DRIVING IT FOUND A DEFECT IN THE THING I HAD JUST BUILT. On real data the
+// four terms summed to 162 registers against a lifetime of 193: the missing 31
+// were taken on dates in the GAPS BETWEEN configured term dates (20 Dec–4 Jan,
+// 3–19 Apr). So the term and session grains silently omitted 16% of the pupil's
+// record — on the screen whose whole purpose is being cited at somebody. A
+// reader adding the terms up would either mistrust the tool or quietly quote the
+// smaller number. `outsideAnyBucket` now names it, in words that say it is
+// usually a gap in the CALENDAR rather than in the child's attendance, because
+// the two readings call for different action. Zero for months by construction,
+// clamped at zero so a stale rollup cannot print a negative "missing" figure on
+// an audit screen. It was invisible to every unit test, because a fixture's
+// terms cover its fixture's dates.
