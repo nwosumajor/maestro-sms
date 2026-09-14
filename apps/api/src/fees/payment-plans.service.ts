@@ -420,6 +420,24 @@ export class PaymentPlansService {
       }
       const paid = await this.paidMinor(tx, invoiceId);
       const invoiceBalance = inv.totalMinor - paid;
+      // SERIALISE SPENDS OF THIS PUPIL'S CREDIT.
+      //
+      // The balance is read and then spent, and the ledger is APPEND-ONLY —
+      // there is no balance row to lock, so `SELECT ... FOR UPDATE` has nothing
+      // to take (the same reason `TermResultService.lockResultRow` uses an
+      // advisory lock). Measured against a real Postgres: one pupil holding
+      // 5,000,000 of credit, two open invoices, both applied at the same
+      // moment — each read the whole balance, both spent it, and the ledger
+      // finished at **-5,000,000 with 10,000,000 applied**. A credit is money
+      // the family has already handed over; spending it twice credits the
+      // school for money it never received and leaves the pupil's account
+      // negative.
+      //
+      // Keyed on the pupil AND the currency, because a pupil can legitimately
+      // hold credit in two currencies and those balances are independent.
+      // Transaction-scoped, so it releases on commit or rollback; a hash
+      // collision merely makes two unrelated spends take turns.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit:${p.schoolId}:${inv.studentId}:${inv.currency}`}))`;
       // ONLY credit in THIS INVOICE'S currency. Minor units of one currency are
       // not minor units of another and there is no FX rate in this platform —
       // inventing one to spend a balance would be worse than refusing, the same

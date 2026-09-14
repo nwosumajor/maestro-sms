@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **335 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **336 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **335 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **336 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2090,6 +2090,20 @@ the processors, following ONE HOP into the services a swept method calls
 // GOTCHA: the gate's own `methodBody` took the first `{` after the method
 // name, which for `): Promise<{ reminded: number … }> {` is the RETURN TYPE —
 // the capped read was invisible because the gate was reading a type.
+
+## A balance read and then spent is a double-spend waiting for two clicks
+`applyCreditToInvoice` aggregated a pupil's credit, took `Math.min`, then wrote
+the spend. Two invoices applied at the same moment each read the WHOLE balance:
+measured on a real Postgres, 5,000,000 of credit became **-5,000,000 with
+10,000,000 applied**. A credit is money the family already handed over, so
+spending it twice credits the school for money it never received.
+No index expresses a balance invariant, so this takes an ADVISORY lock —
+`pg_advisory_xact_lock(hashtext('credit:<school>:<student>:<currency>'))` —
+chosen over `SELECT ... FOR UPDATE` for the reason `TermResultService
+.lockResultRow` already records: an append-only ledger has no row to lock. The
+CURRENCY is in the key because a pupil can hold two independent balances.
+// GOTCHA: only two sites write a negative `deltaMinor`; the scholarship award
+// reversal is safe because it reverses a specific entry BY ID, not a balance.
 
 ## One gateway charge posts once — and the race must answer like the guard
 `InvoiceSettlementService.applyOnlinePayment` is the ONE posting path for every

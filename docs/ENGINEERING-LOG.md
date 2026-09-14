@@ -15788,3 +15788,54 @@ SAME status" — earning its place in a measurement rather than in a principle.
 // is the obvious test and it passes. Only simultaneous delivery exposes a
 // read-then-write guard, so an idempotency probe that does not race is a probe
 // that confirms the design and misses the defect.
+
+### A family's credit, spent twice at once
+
+Racing the settlement path found one read-then-write guard. The same shape on a
+BALANCE is the natural next place to look, and it was there.
+`applyCreditToInvoice`:
+
+    const agg   = await tx.studentCreditEntry.aggregate({ _sum: { deltaMinor } })
+    const apply = Math.min(invoiceBalance, agg._sum.deltaMinor ?? 0)
+    await tx.studentCreditEntry.create({ deltaMinor: -apply })
+
+Measured against a real Postgres — one pupil holding 5,000,000 of credit, two
+open invoices each large enough to absorb it, both applied at the same moment:
+
+    ledger balance after   -5,000,000
+    credit applied          10,000,000 across the two invoices
+
+Each call read the whole balance and each spent it. A credit is money the family
+has ALREADY HANDED OVER — an overpayment, a prepayment — so spending it twice
+credits the school for money it never received and leaves the pupil's account
+negative, with two invoices each showing as settled by a balance that existed
+once.
+
+**The remedy is not the previous one, and the difference is the point.** The
+webhook case was a UNIQUENESS rule and `@@unique([invoiceId, reference])`
+expresses it exactly. This is a BALANCE INVARIANT: no index can say "the sum of
+these rows may not go below zero". So it takes a lock — and specifically an
+ADVISORY lock, because the ledger is append-only and there is no balance row for
+`SELECT ... FOR UPDATE` to take. `TermResultService.lockResultRow` had already
+written that reasoning down for a row that does not exist yet; it transfers
+unchanged.
+
+Keyed on `credit:<school>:<student>:<currency>`. The currency belongs in the key
+because a pupil can legitimately hold credit in two currencies and those
+balances are independent — locking the pupil alone would serialise unrelated
+spends for no reason. Transaction-scoped, so it releases on commit or rollback;
+a hash collision merely makes two unrelated spends take turns.
+
+Mutation-validated: removing the lock returns -5,000,000 and 10,000,000.
+
+// Checked, and NOT exposed: only two sites write a negative `deltaMinor`. The
+// other is the scholarship award reversal, which reverses a specific held entry
+// BY ID rather than reading a balance, so it cannot over-spend one.
+
+// THE METHOD, not the module. The money surfaces had already come back clean on
+// every shape scanned by reading — caps, cross-currency sums, rounding. Both
+// races were found by DOING something to the running system that a reader
+// cannot do: delivering the same webhook simultaneously, and spending the same
+// balance simultaneously. `Promise.all`, never a loop — sequentially the second
+// call correctly sees a spent balance and refuses, which is exactly why this
+// survived normal use and every existing test.
