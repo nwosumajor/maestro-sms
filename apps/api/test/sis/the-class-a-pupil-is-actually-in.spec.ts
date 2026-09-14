@@ -29,7 +29,7 @@ const staff: Principal = {
 };
 
 function makeService(opts: {
-  enrolment?: { class: { id: string; name: string; supervisorId: string | null } | null } | null;
+  enrolment?: { class: { id: string; name: string; supervisorId: string | null; homeRoomId?: string | null } | null } | null;
   supervisor?: { id: string; name: string; status: string } | null;
 } = {}) {
   const { enrolment = null, supervisor = null } = opts;
@@ -41,6 +41,9 @@ function makeService(opts: {
     parentChild: { findFirst: jest.fn(async () => null) },
     classSubjectTeacher: { findMany: jest.fn(async () => []) },
     class: { findMany: jest.fn(async () => []) },
+    // The profile resolves the class's BASE room too — a double missing it
+    // fails as a code fault rather than as the wiring change it is.
+    room: { findFirst: jest.fn(async () => ({ name: "Hall A" })) },
   } as unknown as TenantTx;
   const svc = new SisService(
     {
@@ -60,8 +63,19 @@ describe("a pupil's profile says where they are", () => {
       supervisor: { id: "t-1", name: "Mrs Okafor", status: "ACTIVE" },
     });
     const r = await svc.getProfile(staff, "stu-1");
-    expect(r.currentClass).toEqual({ id: "c-jss2", name: "JSS 2A" });
+    expect(r.currentClass).toEqual({ id: "c-jss2", name: "JSS 2A", room: null });
     expect(r.supervisor).toEqual({ id: "t-1", name: "Mrs Okafor" });
+  });
+
+  it("says WHICH ROOM the class is in, not only which class", async () => {
+    // The base room was settable by three paths and read only by its own
+    // uniqueness guard — written and visible nowhere. "Which room is my child
+    // in?" is the question a parent and a visitor both ask first.
+    const { svc } = makeService({
+      enrolment: { class: { id: "c", name: "JSS 2A", supervisorId: null, homeRoomId: "room-1" } },
+    });
+    const r = await svc.getProfile(staff, "stu-1");
+    expect(r.currentClass).toMatchObject({ name: "JSS 2A", room: "Hall A" });
   });
 
   it("asks for the ACTIVE enrolment, not just any", async () => {

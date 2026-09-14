@@ -16465,3 +16465,66 @@ already the base room for SS1 Science H".
 // work. Only an HttpException — a guard's refusal — may skip an arm now; a fault
 // propagates. Making that change immediately surfaced two real faults my test
 // double had been hiding.
+
+### A scheme of work written three times, and notes copied one at a time
+
+`SubjectSyllabus` is keyed `(classId, subjectId, termId)` and `LmsContent.classId`
+is required, so SS1 Science A, B and C each need their own plan and their own copy
+of every note. Subjects already had `copy-to-arms` — "one action instead of one
+configuration per arm" — and the plan that says WHAT TO TEACH IN WHICH WEEK did
+not. The only copy path for content was `clone`: one item to one class, so three
+arms of twelve notes is twenty-four operations.
+
+CBT, checked at the same time, is keyed correctly and needed nothing:
+`CbtQuestionBank` hangs off `subjectId`, `CbtQuestion` carries a `level`
+(null = any), and only `CbtExam` names a class — so every arm draws from one bank
+and an unlevelled class draws from the whole of it rather than nothing.
+
+BOTH DECISIONS WERE ALREADY TAKEN BY THIS CODEBASE; neither was invented here.
+
+SKIP, NEVER OVERWRITE — `copySubjectsToArms` uses `skipDuplicates` and says why:
+it must be safe to press twice, and it must protect an arm that has adjusted its
+own copy. The person who loses that work is not the person pressing the button.
+So an arm with a plan for that (subject, term) is skipped and NAMED, as is an arm
+that does not offer the subject at all — a Physics plan on an arm teaching no
+Physics is reachable from nowhere and confusing when found.
+
+LAND AS DRAFT — `cloneContent` already sets `status: "DRAFT"` unconditionally.
+Carrying approval would let one approval in SS1A publish into three arms nobody
+reviewed, which is a control with a way round it.
+
+ONE DELIBERATE DEPARTURE FROM `clone`, and it is why this is a separate action:
+clone drops `subjectId`/`termId` whenever the target is a different class. That
+is right for an arbitrary cross-class target, which may teach neither — and wrong
+for a sibling arm, where both are the same by construction. They are the GRADEBOOK
+TAG (the schema: a quiz tagged `(subjectId, termId)` "can be pulled into the
+SubjectResult assignment CA component"; both null means not counted), so dropping
+them turns one copy into twelve retagging jobs whose omission is invisible until a
+report card is short a component. `moduleId` and `syllabusItemId` ARE dropped —
+`LmsModule` is class-scoped and a syllabus item belongs to that arm's own plan.
+Re-pointing the week is deliberately not attempted: nothing guarantees the plans
+correspond, and attaching notes to the wrong week is worse than leaving them
+untagged.
+
+The plan's OWNER is the arm's own subject teacher, not whoever pressed the button
+— they are the person who will teach it and adjust week 6, and a principal
+copying to three arms would otherwise own plans they do not teach. Weeks copy as
+PLANNED: `status`/`taughtAt` record what an arm actually taught, and carrying
+"taught" asserts a lesson that never happened in that room.
+
+// GOTCHA, caught before it shipped: I registered both routes in the surface
+// registry as "reached from" screens that did not exist yet. Two endpoints
+// nobody could call — the exact "a route no screen calls is a door missing from
+// the outside" rule I had been citing three messages earlier. The controls exist
+// now, so the registry entries are true rather than aspirational.
+
+// GOTCHA: I wrote a `canAuthorIn` wrapper before noticing `canAuthor` already
+// answers exactly that question as a boolean. A second definition of "may author
+// here" is one more thing to drift; deleted.
+
+// FIXTURE TRAP of a shape worth naming: one `class.findMany` stub answered TWO
+// different questions — "which are the sibling arms" (by stage/level/stream) and
+// "which classes does this user SUPERVISE" (by supervisorId, via
+// classIdsTaughtBy). Returning the arms to both made the caller look like the
+// supervisor of every arm, so the authoring check passed and the test failed for
+// entirely the wrong reason. A double must answer by the WHERE it is given.

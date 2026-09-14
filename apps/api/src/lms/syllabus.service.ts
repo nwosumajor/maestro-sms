@@ -317,6 +317,136 @@ export class SyllabusService {
   }
 
   /** Mark one week taught, or put it back to planned. */
+  /**
+   * COPY THIS TERM PLAN ONTO THE OTHER ARMS OF THE SAME STREAM.
+   *
+   * A syllabus is keyed `(classId, subjectId, termId)`, so SS1 Science A, B and
+   * C each need their own — and a scheme of work is normally the SAME across
+   * arms. Without this, writing one plan meant writing it three times, and the
+   * third could quietly differ from the first. Subjects already had
+   * `copy-to-arms`; the plan that says what to teach in which week did not.
+   *
+   * SKIPS AN ARM THAT ALREADY HAS A PLAN, never overwrites it, for the two
+   * reasons `copySubjectsToArms` gives for `skipDuplicates`:
+   *
+   *   - it must be SAFE TO PRESS TWICE. A destructive copy is a button nobody
+   *     can press with confidence, because getting it wrong destroys work.
+   *   - an arm's plan may have been ADJUSTED — week 6 moved, a topic rewritten —
+   *     and the person who loses that work is not the person pressing the
+   *     button. Replacing one plan should be a deliberate act on that arm.
+   *
+   * Each skip is NAMED with its reason, so "copied to 1 of 3" never has to be
+   * guessed at.
+   *
+   * WEEKS ARE COPIED AS PLANNED. `status` and `taughtAt` record what an arm has
+   * actually taught; carrying "taught" across would assert a lesson that never
+   * happened in that room.
+   */
+  async copyToArms(
+    p: Principal,
+    args: { classId: string; subjectId: string; termId: string },
+  ): Promise<{ copied: Array<{ classId: string; className: string; weeks: number }>; skipped: Array<{ className: string; reason: string }> }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertCanWrite(tx, p, args.classId, args.subjectId);
+      const source = (await tx.subjectSyllabus.findFirst({
+        where: { classId: args.classId, subjectId: args.subjectId, termId: args.termId },
+        select: { id: true, overview: true },
+      })) as { id: string; overview: string | null } | null;
+      if (!source) throw new NotFoundException("There is no plan for this subject and term to copy.");
+      const items = (await tx.subjectSyllabusItem.findMany({
+        where: { syllabusId: source.id },
+        select: { week: true, topic: true, objectives: true, resources: true },
+        orderBy: { week: "asc" },
+      })) as Array<{ week: number; topic: string; objectives: string | null; resources: string | null }>;
+      if (items.length === 0) throw new BadRequestException("This plan has no weeks to copy.");
+
+      const { siblings } = await this.arms(tx, args.classId);
+      const copied: Array<{ classId: string; className: string; weeks: number }> = [];
+      const skipped: Array<{ className: string; reason: string }> = [];
+
+      for (const arm of siblings) {
+        // THE ARM MUST ACTUALLY OFFER THE SUBJECT. Copying a Physics plan onto an
+        // arm that does not teach Physics would create a plan for an offering
+        // that does not exist — findable from nowhere and confusing when it is.
+        const offers = (await tx.classSubjectTeacher.findFirst({
+          where: { classId: arm.id, subjectId: args.subjectId },
+          select: { id: true, teacherId: true },
+        })) as { id: string; teacherId: string } | null;
+        if (!offers) {
+          skipped.push({ className: arm.name, reason: "does not offer this subject" });
+          continue;
+        }
+        const existing = await tx.subjectSyllabus.findFirst({
+          where: { classId: arm.id, subjectId: args.subjectId, termId: args.termId },
+          select: { id: true },
+        });
+        if (existing) {
+          skipped.push({ className: arm.name, reason: "already has a plan for this term" });
+          continue;
+        }
+        const created = (await tx.subjectSyllabus.create({
+          data: {
+            schoolId: p.schoolId,
+            classId: arm.id,
+            subjectId: args.subjectId,
+            termId: args.termId,
+            // The term's aims travel with the weeks — they are the top of the
+            // same plan, and a copy without them is half a plan.
+            overview: source.overview,
+            // OWNED BY THE ARM'S OWN SUBJECT TEACHER, not by whoever pressed the
+            // button. They are the person who will teach it and adjust week 6;
+            // a principal copying to three arms would otherwise own nine plans
+            // they do not teach. Falls back to the copier only if the arm somehow
+            // has no teacher on the offering, so the column is never invented.
+            ownerId: offers.teacherId ?? p.userId,
+          },
+        })) as { id: string };
+        await tx.subjectSyllabusItem.createMany({
+          data: items.map((i) => ({
+            schoolId: p.schoolId,
+            syllabusId: created.id,
+            week: i.week,
+            topic: i.topic,
+            objectives: i.objectives,
+            resources: i.resources,
+            // PLANNED, deliberately — see the note above.
+          })),
+        });
+        copied.push({ classId: arm.id, className: arm.name, weeks: items.length });
+      }
+
+      await this.log(tx, p, "lms.syllabus.copy-to-arms", source.id, {
+        subjectId: args.subjectId,
+        termId: args.termId,
+        copied: copied.length,
+        skipped: skipped.length,
+        weeks: items.length,
+      });
+      return { copied, skipped };
+    });
+  }
+
+  /** The other arms of this class's stream. Same definition LmsService uses —
+   *  same stage, year and stream — resolved here so this service does not take a
+   *  dependency on that one just to ask which classes are siblings. */
+  private async arms(tx: TenantTx, classId: string): Promise<{ siblings: Array<{ id: string; name: string }> }> {
+    const source = (await tx.class.findFirst({
+      where: { id: classId },
+      select: { stage: true, level: true, stream: true, name: true },
+    })) as { stage: string | null; level: number | null; stream: string | null; name: string } | null;
+    if (!source) throw new NotFoundException("Class not found");
+    if (!source.stage || source.level == null) {
+      throw new BadRequestException("Set this class's stage and year before copying its plan to other arms.");
+    }
+    const siblings = (await tx.class.findMany({
+      where: { id: { not: classId }, stage: source.stage, level: source.level, stream: source.stream },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    })) as Array<{ id: string; name: string }>;
+    if (siblings.length === 0) throw new BadRequestException(`${source.name} has no other arms to copy to.`);
+    return { siblings };
+  }
+
   async setItemStatus(p: Principal, itemId: string, status: string) {
     if (!(ITEM_STATUSES as readonly string[]).includes(status)) {
       throw new BadRequestException(`Status must be one of ${ITEM_STATUSES.join(", ")}`);

@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { postSms } from "@/components/game/play-ui";
 
 type Item = {
   id: string;
@@ -138,6 +139,29 @@ export function SyllabusPanel({
 
   const pct = syl?.progress.percent;
 
+  /**
+   * Copy this term's plan onto the other arms of the same stream.
+   *
+   * SKIPS an arm that already has a plan rather than replacing it — the copy
+   * must be safe to press twice, and an arm may have adjusted its own weeks.
+   * Each skip is named, so "copied to 1 of 3" never has to be guessed at.
+   */
+  async function copyToArms() {
+    setBusy(true);
+    setMsg(null);
+    const res = await postSms<{
+      copied: Array<{ className: string; weeks: number }>;
+      skipped: Array<{ className: string; reason: string }>;
+    }>("/syllabus/copy-to-arms", { classId, subjectId, termId });
+    setBusy(false);
+    if (!res.ok) { setMsg(res.error ?? "Could not copy the plan."); return; }
+    const d = res.data ?? { copied: [], skipped: [] };
+    setMsg(
+      `Copied to ${d.copied.length === 0 ? "no arms" : d.copied.map((c) => c.className).join(", ")}.` +
+        (d.skipped.length ? ` Skipped: ${d.skipped.map((x) => `${x.className} (${x.reason})`).join("; ")}` : ""),
+    );
+  }
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -148,11 +172,22 @@ export function SyllabusPanel({
               What this subject covers this term, week by week. Tick a week once it has been taught.
             </CardDescription>
           </div>
-          {canWrite && loaded && !editing && (
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              {syl ? "Edit plan" : "Create plan"}
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {/* A scheme of work is normally the SAME across the arms of a stream,
+                and the plan was keyed per class — so writing it once meant
+                writing it three times. Offered only when a plan exists, because
+                there is nothing to copy otherwise. */}
+            {canWrite && loaded && !editing && syl && (
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void copyToArms()}>
+                Copy to other arms
+              </Button>
+            )}
+            {canWrite && loaded && !editing && (
+              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                {syl ? "Edit plan" : "Create plan"}
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
 

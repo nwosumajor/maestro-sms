@@ -914,29 +914,45 @@ export class LmsService {
    * Cost is two statements regardless of how many arms: one indexed read for
    * the siblings (schoolId, stage, level, stream) and one createMany.
    */
+  /**
+   * THE OTHER ARMS OF THIS CLASS'S STREAM — one definition, three callers.
+   *
+   * "Sibling arm" means the same stage, year and stream: SS1 Science A, B and C
+   * are arms of one thing, and SS1 Art A is not. Written once because subjects,
+   * the syllabus and class notes all copy across the same set, and three copies
+   * of a definition of "sibling" would eventually disagree about which classes
+   * are siblings — with nothing to say which answer was right.
+   *
+   * The `what` names the action in both refusals, so a person who cannot copy is
+   * told what they cannot copy rather than being handed a generic 400.
+   */
+  private async siblingArms(
+    tx: TenantTx,
+    classId: string,
+    what: string,
+  ): Promise<{ source: { id: string; name: string }; siblings: Array<{ id: string; name: string }> }> {
+    const source = (await tx.class.findFirst({
+      where: { id: classId },
+      select: { id: true, stage: true, level: true, stream: true, name: true },
+    })) as { id: string; stage: string | null; level: number | null; stream: string | null; name: string } | null;
+    if (!source) throw new NotFoundException("Class not found");
+    if (!source.stage || source.level == null) {
+      throw new BadRequestException(`Set this class's stage and year before copying its ${what} to other arms.`);
+    }
+    const siblings = (await tx.class.findMany({
+      where: { id: { not: classId }, stage: source.stage, level: source.level, stream: source.stream },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    })) as Array<{ id: string; name: string }>;
+    if (siblings.length === 0) {
+      throw new BadRequestException(`${source.name} has no other arms to copy to.`);
+    }
+    return { source: { id: source.id, name: source.name }, siblings };
+  }
+
   async copySubjectsToArms(p: Principal, classId: string): Promise<{ arms: number; created: number }> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const source = (await tx.class.findFirst({
-        where: { id: classId },
-        select: { id: true, stage: true, level: true, stream: true, name: true },
-      })) as { id: string; stage: string | null; level: number | null; stream: string | null; name: string } | null;
-      if (!source) throw new NotFoundException("Class not found");
-      if (!source.stage || source.level == null) {
-        throw new BadRequestException("Set this class's stage and year before copying its subjects to other arms.");
-      }
-
-      const siblings = (await tx.class.findMany({
-        where: {
-          id: { not: classId },
-          stage: source.stage,
-          level: source.level,
-          stream: source.stream,
-        },
-        select: { id: true },
-      })) as Array<{ id: string }>;
-      if (siblings.length === 0) {
-        throw new BadRequestException(`${source.name} has no other arms to copy to.`);
-      }
+      const { source, siblings } = await this.siblingArms(tx, classId, "subjects");
 
       const offerings = (await tx.classSubjectTeacher.findMany({
         where: { classId },
@@ -1413,9 +1429,21 @@ export class LmsService {
         stage: string | null;
         stream: string | null;
         arm: string | null;
+        homeRoomId: string | null;
       }>;
       if (classes.length === 0) return [];
       const ids = classes.map((c) => c.id);
+      // ONE query for every base room on the page, not one per class — the same
+      // rule the four grouped reads below already follow.
+      const roomIds = [...new Set(classes.map((c) => c.homeRoomId).filter((r): r is string => !!r))];
+      const roomNames = new Map(
+        roomIds.length === 0
+          ? []
+          : ((await tx.room.findMany({ where: { id: { in: roomIds } }, select: { id: true, name: true } })) as Array<{
+              id: string;
+              name: string;
+            }>).map((r) => [r.id, r.name] as const),
+      );
 
       const [rolls, offerings] = await Promise.all([
         // ACTIVE only: a promoted or withdrawn pupil is not in the room, and a roll
@@ -1488,6 +1516,8 @@ export class LmsService {
         nextClassId: c.nextClassId,
         supervisorId: c.supervisorId,
         supervisorName: c.supervisorId ? supBy.get(c.supervisorId) ?? null : null,
+        homeRoomId: c.homeRoomId,
+        homeRoomName: c.homeRoomId ? roomNames.get(c.homeRoomId) ?? null : null,
         students: rollBy.get(c.id) ?? 0,
         capacity: c.capacity,
         // One class teacher per class, so this is 0 or 1 and is read off the

@@ -1574,6 +1574,116 @@ export class LmsContentService {
     });
   }
 
+  /**
+   * COPY THIS CLASS'S CONTENT ONTO THE OTHER ARMS OF THE SAME STREAM.
+   *
+   * `LmsContent.classId` is required, so notes, materials and quizzes belong to
+   * ONE class — SS1 Science A, B and C each need their own. The only copy path
+   * was `clone`, which moves one item to one class: three arms of twelve notes
+   * is twenty-four operations.
+   *
+   * WHAT IT CARRIES, AND WHAT IT DELIBERATELY DOES NOT:
+   *
+   *   status     -> DRAFT, always. Carrying approval would let one approval in
+   *                 SS1A publish into three arms nobody reviewed — a control
+   *                 with a way round it is not a control.
+   *   subject,
+   *   term       -> KEPT, and this is the change from `clone`. Both are
+   *                 school-wide ids and, across arms of one stream and year, the
+   *                 same by construction. They are the GRADEBOOK TAG: a quiz
+   *                 tagged (subjectId, termId) is what a subject teacher pulls
+   *                 into the report card's assignment component. `clone` drops
+   *                 them because an arbitrary cross-class target may teach
+   *                 neither — right there, wrong here, and dropping them would
+   *                 turn one copy into twelve retagging jobs whose omission is
+   *                 invisible until a report card is short a component.
+   *   module,
+   *   syllabusItem -> DROPPED. `LmsModule` is class-scoped and a syllabus item
+   *                 belongs to that arm's own plan, so those ids mean nothing in
+   *                 the target. Re-pointing the syllabus item to the equivalent
+   *                 week is deliberately NOT attempted: it needs the plans to
+   *                 correspond week for week, which nothing guarantees, and
+   *                 silently attaching notes to the wrong week is worse than
+   *                 leaving them untagged.
+   *
+   * SKIPS an arm that already has content with the same title, so it is safe to
+   * press twice and cannot quietly duplicate a note somebody has since edited.
+   */
+  async copyContentToArms(
+    p: Principal,
+    contentId: string,
+  ): Promise<{ copied: Array<{ classId: string; className: string }>; skipped: Array<{ className: string; reason: string }> }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const src = await this.requireContent(tx, contentId);
+      await this.assertTeacherOfClass(tx, p, src.classId);
+
+      const source = (await tx.class.findFirst({
+        where: { id: src.classId },
+        select: { stage: true, level: true, stream: true, name: true },
+      })) as { stage: string | null; level: number | null; stream: string | null; name: string } | null;
+      if (!source) throw new NotFoundException("Class not found");
+      if (!source.stage || source.level == null) {
+        throw new BadRequestException("Set this class's stage and year before copying its content to other arms.");
+      }
+      const siblings = (await tx.class.findMany({
+        where: { id: { not: src.classId }, stage: source.stage, level: source.level, stream: source.stream },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })) as Array<{ id: string; name: string }>;
+      if (siblings.length === 0) throw new BadRequestException(`${source.name} has no other arms to copy to.`);
+
+      const copied: Array<{ classId: string; className: string }> = [];
+      const skipped: Array<{ className: string; reason: string }> = [];
+      for (const arm of siblings) {
+        // MAY THE COPIER AUTHOR IN THAT ARM? Checked per arm rather than assumed
+        // from the source: a subject teacher of SS1A does not necessarily teach
+        // SS1B, and a bulk action must not become a way to write into a class
+        // the caller could not write into one at a time. `canAuthor` is the
+        // existing boolean form of that question — a second copy of it here
+        // would be one more definition of "may author" to drift.
+        const mayWrite = await this.canAuthor(tx, p, arm.id);
+        if (!mayWrite) {
+          skipped.push({ className: arm.name, reason: "you do not teach this arm" });
+          continue;
+        }
+        const dup = await tx.lmsContent.findFirst({
+          where: { classId: arm.id, title: src.title },
+          select: { id: true },
+        });
+        if (dup) {
+          skipped.push({ className: arm.name, reason: "already has content with this title" });
+          continue;
+        }
+        const row = (await tx.lmsContent.create({
+          data: {
+            schoolId: p.schoolId,
+            classId: arm.id,
+            type: src.type,
+            title: src.title,
+            body: src.body as Prisma.InputJsonValue,
+            status: "DRAFT",
+            authorId: p.userId,
+            fileKey: src.fileKey,
+            fileName: src.fileName,
+            fileUploaded: src.fileUploaded,
+            moduleId: null,
+            syllabusItemId: null,
+            subjectId: src.subjectId,
+            termId: src.termId,
+          },
+        })) as ContentRow;
+        await this.snapshot(tx, p, row, `Copied from ${source.name}`);
+        copied.push({ classId: arm.id, className: arm.name });
+      }
+      await this.log(tx, p, "lms.content.copy-to-arms", contentId, {
+        sourceClassId: src.classId,
+        copied: copied.length,
+        skipped: skipped.length,
+      });
+      return { copied, skipped };
+    });
+  }
+
   private toRevisionDto(
     r: { id: string; contentId: string; version: number; title: string; note: string | null; createdAt: Date },
     authorName: string,

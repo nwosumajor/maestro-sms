@@ -29,7 +29,7 @@ export interface StudentProfileDto {
    * null means the class has no form teacher — measured on the demo school, 30
    * of its classes have none. Both are worth seeing rather than rendering blank.
    */
-  currentClass: { id: string; name: string } | null;
+  currentClass: { id: string; name: string; room: string | null } | null;
   /** The class's form teacher. Null when none is assigned, or when the person
    *  assigned has LEFT — a supervisor who has exited is not who to contact. */
   supervisor: { id: string; name: string } | null;

@@ -2077,6 +2077,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /content/:p/copy-to-arms": {
+      "kind": "ui",
+      "note": "reviewed: reached from the content editor's copy control"
+    },
     "POST /content/:p/forum": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -3164,6 +3168,10 @@
     "POST /submissions/:p/grade": {
       "kind": "internal",
       "note": "The gradebook's assessment-grade write, and the ONLY way to set grade.status (DRAFT | PUBLISHED). No UI calls it: the registry claimed GradingConsole did and that file never has \u2014 the console posts term-results instead. Kept because it is now REACHABLE at all: an identically-pathed LMS route on another prefixless controller shadowed it until 2026-08, so a teacher posting its documented body got somebody else's 400."
+    },
+    "POST /syllabus/copy-to-arms": {
+      "kind": "ui",
+      "note": "reviewed: reached from the syllabus planner on /classes"
     },
     "POST /tasks": {
       "kind": "ui",

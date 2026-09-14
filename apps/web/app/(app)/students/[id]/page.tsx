@@ -98,9 +98,13 @@ export default async function StudentProfilePage({ params }: { params: { id: str
                 Admission {profile.admissionNumber || "—"}
                 {" · "}
                 {profile.currentClass ? (
-                  <Link href={`/classes/${profile.currentClass.id}`} className="font-medium text-primary hover:underline">
-                    {profile.currentClass.name}
-                  </Link>
+                  <>
+                    <Link href={`/classes/${profile.currentClass.id}`} className="font-medium text-primary hover:underline">
+                      {profile.currentClass.name}
+                    </Link>
+                    {/* WHERE, not only WHICH — the question a visitor asks. */}
+                    {profile.currentClass.room && <> · {profile.currentClass.room}</>}
+                  </>
                 ) : (
                   <span className="text-amber-600 dark:text-amber-400">Not in a class</span>
                 )}

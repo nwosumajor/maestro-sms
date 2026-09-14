@@ -449,10 +449,17 @@ export class SisService {
       const enrolment = (await tx.enrollment.findFirst({
         where: { studentId, status: "ACTIVE" },
         orderBy: { enrolledAt: "desc" },
-        select: { class: { select: { id: true, name: true, supervisorId: true } } },
-      })) as { class: { id: string; name: string; supervisorId: string | null } | null } | null;
+        select: { class: { select: { id: true, name: true, supervisorId: true, homeRoomId: true } } },
+      })) as { class: { id: string; name: string; supervisorId: string | null; homeRoomId: string | null } | null } | null;
 
       const cls = enrolment?.class ?? null;
+      let roomName: string | null = null;
+      if (cls?.homeRoomId) {
+        const room = (await tx.room.findFirst({ where: { id: cls.homeRoomId }, select: { name: true } })) as
+          | { name: string }
+          | null;
+        roomName = room?.name ?? null;
+      }
       let supervisor: { id: string; name: string } | null = null;
       let supervisorLeft = false;
       if (cls?.supervisorId) {
@@ -471,7 +478,10 @@ export class SisService {
       await this.log(tx, p, "sis.profile.read", "student_profile", studentId);
       return {
         ...profile,
-        currentClass: cls ? { id: cls.id, name: cls.name } : null,
+        // WHERE THE CLASS IS, not only which class it is. "Which room is my
+        // child in?" is the question a parent and a visitor both ask, and the
+        // room was settable and visible nowhere.
+        currentClass: cls ? { id: cls.id, name: cls.name, room: roomName } : null,
         supervisor,
         supervisorLeft,
       };

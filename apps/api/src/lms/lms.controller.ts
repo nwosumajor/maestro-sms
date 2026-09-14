@@ -125,6 +125,12 @@ const syllabusSchema = z.object({
     .max(60),
 });
 const syllabusStatusSchema = z.object({ status: z.enum(["PLANNED", "TAUGHT"]) });
+/** Which plan to copy: the offering it belongs to, named exactly as `GET /syllabus` names it. */
+const syllabusCopySchema = z.object({
+  classId: z.string().uuid(),
+  subjectId: z.string().uuid(),
+  termId: z.string().uuid(),
+});
 const gradingPolicySchema = z.object({
   scale: z.string().max(24).optional(),
   // Floors only — there is nowhere to type a ceiling, which is what makes a gap
@@ -272,6 +278,22 @@ export class LmsController {
     @Query("termId") termId: string,
   ) {
     return this.syllabus.get(p, { classId, subjectId, termId });
+  }
+
+  /**
+   * Copy this term plan onto the other arms of the same stream.
+   *
+   * Same gate as writing one plan — the service re-checks that the caller may
+   * write the SOURCE offering, and skips any arm that already has a plan rather
+   * than replacing it.
+   */
+  @Post("syllabus/copy-to-arms")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  copySyllabusToArms(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(syllabusCopySchema)) b: z.infer<typeof syllabusCopySchema>,
+  ) {
+    return this.syllabus.copyToArms(p, b);
   }
 
   /** Every plan the caller may see for a term — the review view. */

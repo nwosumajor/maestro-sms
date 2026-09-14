@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **911 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **913 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -821,6 +821,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **911 routes across 90
 | POST | `/content/:id/clone` | 🔑 `lms.content.write` · 📦 `lms` | Clone |
 | POST | `/content/:id/complete` | 🔑 `lms.content.read` · 📦 `lms` | Mark Complete |
 | DELETE | `/content/:id/complete` | 🔑 `lms.content.read` · 📦 `lms` | Unmark Complete |
+| POST | `/content/:id/copy-to-arms` | 🔑 `lms.content.write` · 📦 `lms` | Copy this item onto every other arm of the same stream. |
 | GET | `/content/:id/download` | 🔑 `lms.content.read` · 📦 `lms` | Download attachment |
 | GET | `/content/:id/forum` | 🔑 `lms.content.read` · 📦 `lms` | Course forum |
 | POST | `/content/:id/forum` | 🔑 `lms.forum.post` · 📦 `lms` | Course forum |
@@ -868,6 +869,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **911 routes across 90
 | GET | `/syllabus` | 🔑 `class.read` · 📦 `lms` | The plan for one offering in one term. |
 | PUT | `/syllabus` | 🔑 `class.read` · 📦 `lms` | Create or replace a term plan. |
 | DELETE | `/syllabus/:id` | 🔑 `class.read` · 📦 `lms` | Remove a plan and its weeks. |
+| POST | `/syllabus/copy-to-arms` | 🔑 `class.read` · 📦 `lms` | Copy this term plan onto the other arms of the same stream. |
 | PUT | `/syllabus/items/:id/status` | 🔑 `class.read` · 📦 `lms` | Mark a week taught, or put it back to planned. |
 | GET | `/syllabus/term/:termId` | 🔑 `class.read` · 📦 `lms` | Every plan the caller may see for a term — the review view. |
 | GET | `/users` | 🔑 `class.write` · 📦 `lms` | Staff-scoped user picker |
