@@ -81,7 +81,14 @@ function make(over: { application?: Row | null; claimable?: boolean; guardianExi
       create: jest.fn(async ({ data }: { data: Row }) => { created.studentProfile.push(data); return data; }),
       findMany: jest.fn(async () => []),
     },
-    enrollment: { create: jest.fn(async ({ data }: { data: Row }) => { created.enrollment.push(data); return data; }) },
+    enrollment: {
+      create: jest.fn(async ({ data }: { data: Row }) => { created.enrollment.push(data); return data; }),
+      // The conversion now refuses a class with no room, which counts who is in
+      // it and takes a row lock. A double missing either fails as a code fault.
+      count: jest.fn(async () => created.enrollment.length),
+    },
+    class: { findFirst: jest.fn(async () => ({ capacity: 30, name: "JSS 1A" })) },
+    $executeRaw: jest.fn(async () => 1),
     parentChild: { create: jest.fn(async ({ data }: { data: Row }) => { created.parentChild.push(data); return data; }) },
     school: { findFirst: jest.fn(async () => ({ slug: "st-andrews", country: "NG", timezone: "Africa/Lagos" })) },
   } as unknown as TenantTx;
@@ -205,5 +212,35 @@ describe("what it refuses", () => {
     (service as unknown as { db: { runAsTenant: unknown } }).db;
     await expect(service.convertToPupil(p, "app-1", {})).rejects.toBeInstanceOf(BadRequestException);
     expect(created.user).toHaveLength(0);
+  });
+
+  it("REFUSES a class that has no room, naming it", async () => {
+    // The ordinary route a school admits a pupil by, and it enrolled into
+    // whatever class id it was handed. Five sibling doors refuse an over-full
+    // class; this one and the legacy import did not, and put three pupils in a
+    // room with one place while reporting a clean success.
+    const { service, tx } = make();
+    (tx as unknown as { class: { findFirst: jest.Mock } }).class.findFirst.mockResolvedValue({ capacity: 2, name: "JSS 1A" });
+    (tx as unknown as { enrollment: { count: jest.Mock } }).enrollment.count.mockResolvedValue(2);
+    await expect(
+      service.convertToPupil(p, "app-1", { classId: "11111111-1111-1111-1111-111111111111" }),
+    ).rejects.toThrow(/JSS 1A is at capacity \(2\)/);
+  });
+
+  it("and takes the class LOCK before it counts — a count alone is not a guard", async () => {
+    // Read-then-write at READ COMMITTED lets two admissions officers both see
+    // the last place. The lock is the guard; the count is only how it decides.
+    const { service, tx } = make();
+    // Recorded explicitly. `mock.invocationCallOrder` is a counter shared by
+    // every mock in the PROCESS, so comparing two mocks' first entries is a
+    // claim about the whole file's history, not about this call — it passed
+    // alone and failed in the full run.
+    const order: string[] = [];
+    const t = tx as unknown as { $executeRaw: jest.Mock; enrollment: { count: jest.Mock } };
+    t.$executeRaw.mockImplementation(async () => { order.push("lock"); return 1; });
+    t.enrollment.count.mockImplementation(async () => { order.push("count"); return 0; });
+    await service.convertToPupil(p, "app-1", { classId: "11111111-1111-1111-1111-111111111111" });
+    expect(order).toContain("lock");
+    expect(order.indexOf("lock")).toBeLessThan(order.indexOf("count"));
   });
 });

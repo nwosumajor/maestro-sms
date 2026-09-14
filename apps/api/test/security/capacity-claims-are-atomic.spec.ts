@@ -31,8 +31,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const SRC = (rel: string) => readFileSync(join(__dirname, "../../src", rel), "utf8");
-const LMS = SRC("lms/lms.service.ts");
-const PROMOTION = SRC("lms/promotion.service.ts");
+// The class rule now lives in ONE place. It used to be written twice — in
+// LmsService and again, hand-copied, in PromotionService — and this gate checked
+// both copies, which is why it broke when they were collapsed into a shared
+// helper. It broke honestly: a gate that scans each service in place cannot
+// follow a rule that moved. What it checks now is stronger, because three
+// further doors (admissions, the legacy import, the SIS importer) reach the same
+// helper and enforced nothing at all before.
+const CLASS_CAPACITY = SRC("common/class-capacity.ts");
 const TRANSPORT = SRC("transport/transport.service.ts");
 const MEETING = SRC("meeting/meeting.service.ts");
 const HOSTEL = SRC("hostel/hostel.service.ts");
@@ -48,12 +54,21 @@ function locksBeforeCounting(src: string, anchor: string, table: string, counted
 }
 
 describe("every capacity check locks the contended row first", () => {
-  it("class enrolment locks the class", () => {
-    expect(locksBeforeCounting(LMS, "private async assertCapacity(", "class", "enrollment.count")).toBe(true);
+  it("class enrolment locks the class — the ONE definition every door reaches", () => {
+    // `assertClassCapacity` refuses; `classHeadroom` answers with a number for
+    // the two importers that skip a full class row by row. BOTH decide from a
+    // count, so both must take the lock first.
+    expect(locksBeforeCounting(CLASS_CAPACITY, "export async function assertClassCapacity", "class", "enrollment.count")).toBe(true);
+    expect(locksBeforeCounting(CLASS_CAPACITY, "export async function classHeadroom", "class", "enrollment.count")).toBe(true);
   });
 
-  it("class promotion locks the class", () => {
-    expect(locksBeforeCounting(PROMOTION, "capacity: true, name: true", "class", "enrollment.count")).toBe(true);
+  it("and WHICH doors reach it is checked by its own gate", () => {
+    // `every-door-into-a-class-checks-it-has-room` computes that set from the
+    // source. Named here so the next reader of this file knows the membership
+    // question is answered, and where.
+    expect(readFileSync(join(__dirname, "../lms/every-door-into-a-class-checks-it-has-room.spec.ts"), "utf8")).toMatch(
+      /assertClassCapacity/,
+    );
   });
 
   it("a transport route locks the route", () => {
@@ -75,8 +90,9 @@ describe("what deliberately stays unlocked", () => {
   it("a class with NO capacity takes no lock", () => {
     // Unlimited means there is nothing to serialise, and locking every enrolment
     // into every uncapped class would be contention bought for nothing.
-    const fn = LMS.slice(LMS.indexOf("private async assertCapacity("), LMS.indexOf("private async assertCapacity(") + 1600);
-    expect(fn.indexOf("return; // unlimited")).toBeLessThan(fn.indexOf("FOR UPDATE"));
+    const at = CLASS_CAPACITY.indexOf("export async function assertClassCapacity");
+    const fn = CLASS_CAPACITY.slice(at, at + 1600);
+    expect(fn.indexOf("return; // unknown here, or unlimited")).toBeLessThan(fn.indexOf("FOR UPDATE"));
   });
 
   it("a BRIEFING slot still claims nothing", () => {

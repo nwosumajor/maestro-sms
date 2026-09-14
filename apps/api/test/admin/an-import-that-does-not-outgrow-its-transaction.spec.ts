@@ -23,13 +23,16 @@ import type { Principal, TenantContext, TenantTx } from "../../src/integrity/int
 
 type Row = Record<string, unknown>;
 
-function makeService(rows: Row[], opts: { existingEmails?: string[]; classes?: { id: string; capacity: number | null }[]; active?: Record<string, number> } = {}) {
+function makeService(rows: Row[], opts: { existingEmails?: string[]; classes?: { id: string; capacity: number | null; name?: string }[]; active?: Record<string, number> } = {}) {
   const existing = new Set((opts.existingEmails ?? []).map((e) => e.toLowerCase()));
   const calls: string[] = [];
   const state: { batch: Row | null } = { batch: { id: "b1", status: "PENDING", uploadedById: "uploader", rows } };
   const rec = (name: string, impl: (a?: never) => unknown) =>
     jest.fn((a?: never) => { calls.push(name); return Promise.resolve(impl(a)); });
   const tx = {
+    // Every real client has it, and the capacity guard takes a row lock through
+    // it. A double missing a method the service calls fails as a code fault.
+    $executeRaw: rec("$executeRaw", () => 1),
     user: {
       findMany: rec("user.findMany", (a?: never) => {
         const want = (a as unknown as { where?: { email?: { in?: string[] } } } | undefined)?.where?.email?.in;
@@ -49,13 +52,30 @@ function makeService(rows: Row[], opts: { existingEmails?: string[]; classes?: {
     enrollment: {
       create: rec("enrollment.create", () => ({})),
       createMany: rec("enrollment.createMany", () => ({ count: 0 })),
-      count: rec("enrollment.count", () => 0),
+      // ANSWERS FROM THE SAME FIXTURE the groupBy draws from. Returning a flat 0
+      // made the in-transaction capacity re-check see an empty class, so it
+      // passed whatever the guard did — a double must model the CONTRACT, not
+      // just the signature.
+      count: rec("enrollment.count", (a?: never) => {
+        const classId = (a as unknown as { where?: { classId?: string } } | undefined)?.where?.classId;
+        return classId ? ((opts.active ?? {})[classId] ?? 0) : 0;
+      }),
       groupBy: rec("enrollment.groupBy", () =>
         Object.entries(opts.active ?? {}).map(([classId, n]) => ({ classId, _count: { _all: n } }))),
     },
     class: {
       findMany: rec("class.findMany", () => opts.classes ?? []),
-      findFirst: rec("class.findFirst", () => null),
+      // Likewise: `null` here meant "no such class", and the shared capacity
+      // guard correctly returns early for a class it cannot see — so the guard
+      // was invisible to every assertion in this file.
+      findFirst: rec("class.findFirst", (a?: never) => {
+        const id = (a as unknown as { where?: { id?: string } } | undefined)?.where?.id;
+        const c = (opts.classes ?? []).find((x) => x.id === id);
+        // The refusal QUOTES the class name, so a double that omits it produces
+        // "undefined is at capacity" and vouches for a message no school would
+        // understand.
+        return c ? { capacity: c.capacity, name: c.name ?? c.id } : null;
+      }),
     },
     role: { findFirst: rec("role.findFirst", () => ({ id: "student-role" })) },
     school: { findFirst: rec("school.findFirst", () => ({ slug: "demo" })) },
@@ -110,8 +130,26 @@ describe("an import does not outgrow its transaction", () => {
     await service.approve(p("approver"), "b1");
     expect(calls.filter((c) => c === "class.findMany")).toHaveLength(1);
     expect(calls.filter((c) => c === "enrollment.groupBy")).toHaveLength(1);
-    expect(calls.filter((c) => c === "enrollment.count")).toHaveLength(0);
-    expect(calls.filter((c) => c === "class.findFirst")).toHaveLength(0);
+
+    // THE RE-CHECK IN THE WRITE TRANSACTION IS BOUNDED BY CLASSES, NOT ROWS.
+    //
+    // This asserted zero of both, because the headroom used to come entirely
+    // from the two batched reads above. It is now re-asserted inside the write,
+    // where the class row can be LOCKED — a snapshot read in an earlier
+    // read-only transaction is not a reservation, and two approvers deciding
+    // two batches into one class both took the same free places (measured: 6
+    // pupils into a class of 4). That costs one read and one count per DISTINCT
+    // CLASS, which is the shape the batching exists to protect.
+    //
+    // So the property is the bound, not the number: it must not scale with the
+    // roll. Sixty rows over two classes is two, and asserting against the
+    // fixture rather than a literal keeps that true if the fixture changes.
+    const distinctClasses = new Set(rows.map((r) => r.classId)).size;
+    const cappedClasses = 1; // c2 only — an uncapped class returns before counting
+    expect(calls.filter((c) => c === "class.findFirst")).toHaveLength(distinctClasses);
+    expect(calls.filter((c) => c === "enrollment.count")).toHaveLength(cappedClasses);
+    // The assertion that actually fails if it ever goes per-row again.
+    expect(calls.filter((c) => c === "class.findFirst").length).toBeLessThan(rows.length / 10);
   }, 60000);
 
   // The rules the batching must not have quietly dropped.
@@ -121,6 +159,28 @@ describe("an import does not outgrow its transaction", () => {
     const res = await service.approve(p("approver"), "b1");
     // three seats left, so three in and seven turned away
     expect(res.summary).toMatchObject({ created: 3, skipped: 7 });
+  });
+
+  it("refuses the batch if the class FILLED UP between the two phases, and says nothing was imported", async () => {
+    // The headroom that decides the per-row skip above is read in PHASE 2, a
+    // READ-ONLY transaction; the enrolments are written in PHASE 3c, another
+    // one. A snapshot is not a reservation — two approvers deciding two batches
+    // into one class both saw the same free places and both wrote them
+    // (measured on a real Postgres: 6 pupils into a class of 4).
+    //
+    // Modelled by letting the phase-2 groupBy report room and the in-write
+    // count report the class full, which is exactly what a concurrent approver
+    // committing in between looks like.
+    const rows = Array.from({ length: 3 }, (_, i) => ({ name: `Pupil G${i}`, classId: "c1" }));
+    const { service, tx } = makeService(rows, { classes: [{ id: "c1", capacity: 10, name: "JSS 1A" }], active: { c1: 0 } });
+    (tx as unknown as { enrollment: { count: jest.Mock } }).enrollment.count.mockResolvedValue(10);
+
+    await expect(service.approve(p("approver"), "b1")).rejects.toThrow(/JSS 1A is at capacity \(10\)/);
+    // AND what happened to the batch. The claim above this guard rolls back with
+    // it, so the batch is untouched and re-approvable — an approver told only
+    // "at capacity" cannot tell whether half the roll went in.
+    await expect(service.approve(p("approver"), "b1")).rejects.toThrow(/Nothing was imported/);
+    await expect(service.approve(p("approver"), "b1")).rejects.toThrow(/still waiting for review/);
   });
 
   it("still suffixes around identifiers the school ALREADY holds", async () => {
