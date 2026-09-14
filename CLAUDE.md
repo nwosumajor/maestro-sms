@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **336 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **337 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **336 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **337 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2090,6 +2090,22 @@ the processors, following ONE HOP into the services a swept method calls
 // GOTCHA: the gate's own `methodBody` took the first `{` after the method
 // name, which for `): Promise<{ reminded: number … }> {` is the RETURN TYPE —
 // the capped read was invisible because the gate was reading a type.
+
+## Every writer that recomputes an invoice's status must take its lock
+`recordPayment` and `approvePayment` take `SELECT ... FOR UPDATE` on the invoice
+before recomputing status from the posted total. `settlement.service` — the ONE
+path every gateway rail funnels through — did not, so its safety came from
+whichever OTHER writer happened to hold the lock. Two GATEWAY payments have no
+such neighbour: two online payments of 5,000,000 on one 10,000,000 invoice, both
+posting, left it **PARTIALLY_PAID in 4 runs out of 4** — a fully paid invoice
+that does not say so, then chased by the reminder sweep, charged late fees and
+counted in receivables. Settlement takes the lock itself now.
+// GOTCHA: **distrust a green race.** The staff-approval-vs-settlement case
+// passed 6/6; only removing `approvePayment`'s lock (probe then failed 1 in 3)
+// showed the probe really raced AND that the safety was borrowed.
+// THREE RACES, THREE REMEDIES: uniqueness -> `@@unique`; a balance invariant ->
+// advisory lock; read-modify-write on a row -> `FOR UPDATE`. Fit the remedy to
+// the RULE.
 
 ## A balance read and then spent is a double-spend waiting for two clicks
 `applyCreditToInvoice` aggregated a pupil's credit, took `Math.min`, then wrote

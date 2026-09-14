@@ -15839,3 +15839,59 @@ Mutation-validated: removing the lock returns -5,000,000 and 10,000,000.
 // balance simultaneously. `Promise.all`, never a loop — sequentially the second
 // call correctly sees a spent balance and refuses, which is exactly why this
 // survived normal use and every existing test.
+
+### An invoice paid in full that did not say so
+
+Racing the maker-checker approval path produced something better than a defect
+at first: a PASS, and then a reason not to trust it.
+
+Two paths post a payment and then recompute the invoice's status from the posted
+total. `fees.service` takes `SELECT ... FOR UPDATE` on the invoice before doing
+so — in `recordPayment` AND in `approvePayment`. `settlement.service`, which
+every gateway rail funnels through, took none.
+
+Scenario one — a staff approval racing an online settlement — passed 6 runs out
+of 6. **The negative control is what made that meaningful**: with
+`approvePayment`'s lock removed, the same probe failed 1 run in 3. So the probe
+genuinely races, and the safety was coming ENTIRELY from the other writer's
+lock. Settlement was being protected by its neighbour.
+
+Which immediately raises the case with no neighbour: TWO GATEWAY payments, where
+neither side takes a lock. Measured on a real Postgres — two online payments of
+5,000,000 settling on one 10,000,000 invoice at the same moment:
+
+    both payments post          10,000,000 posted
+    invoice status              PARTIALLY_PAID
+    runs                        4 failures out of 4
+
+Each read the posted total before the other's insert, each computed a status
+from its own stale view, and the last write won. Not a lost payment: **a fully
+paid invoice that does not say so.** It is then chased by the overdue reminder
+sweep, accrues late fees, counts in receivables, and can withhold a leaver's
+documents — from a family that has paid in full. Reachable whenever two rails
+land together: a card charge beside a mobile-money transfer, a dedicated-NUBAN
+credit, or the reconciliation sweep posting a missed charge while a webhook
+delivers another.
+
+FIX: settlement locks the invoice before reading it, exactly as its two siblings
+do. It is self-protecting now rather than dependent on whoever else happens to
+be writing — which matters because the next path that posts a payment will not
+know it was supposed to take a lock. 4 runs out of 4 pass after.
+
+// THREE RACES, THREE DIFFERENT REMEDIES, and the distinction is the whole
+// lesson of this sequence:
+//   * one charge posted six times      — a UNIQUENESS rule    -> @@unique
+//   * a credit spent twice             — a BALANCE invariant  -> advisory lock
+//   * an invoice not marked paid       — READ-MODIFY-WRITE    -> FOR UPDATE
+// An index cannot express "this sum may not go below zero"; a lock on a row
+// that does not exist yet takes nothing. Reaching for the remedy that fits the
+// RULE is the work.
+
+// GOTCHA, and the reason to distrust a green race: scenario one passed 6/6 and
+// I nearly stopped. A race probe that has never been shown to FAIL proves
+// nothing about the code — it may simply not be racing. Remove the guard the
+// safety rests on and confirm the probe goes red before believing it green.
+
+// GOTCHA: adding the lock broke three payment specs whose doubles had no
+// `$executeRaw` — a double modelling the methods a service happened to call
+// yesterday. Same trap as `isActive`/`assertActive` earlier in this session.

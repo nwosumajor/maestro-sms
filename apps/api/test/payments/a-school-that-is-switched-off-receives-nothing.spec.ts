@@ -46,6 +46,11 @@ const INVOICE = "1e7f0a4c-0000-4000-8000-000000000002";
 function make(active: boolean) {
   const created: Array<Record<string, unknown>> = [];
   const tx = {
+    // Settlement now locks the invoice row before reading it (SELECT ... FOR
+    // UPDATE), so a real TenantTx answers `$executeRaw`. A double missing a
+    // method every real client has fails as a CODE fault and says nothing about
+    // what the spec is actually testing.
+    $executeRaw: jest.fn().mockResolvedValue(0),
     invoice: {
       findFirst: jest.fn().mockResolvedValue({
         id: INVOICE, currency: "NGN", totalMinor: 1_000_000, status: "ISSUED", createdById: "staff-1", studentId: "pupil-1",

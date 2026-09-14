@@ -187,6 +187,26 @@ export class InvoiceSettlementService {
     }
     // System-context write (no user): the audit actor is the invoice's creator.
     const receipt = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+      // LOCK THE INVOICE BEFORE READING IT, the same way `recordPayment` and
+      // `approvePayment` do. This path did not, and its safety therefore rested
+      // entirely on the OTHER writer taking the lock — which held for a staff
+      // decision and not at all for two GATEWAY payments, because neither takes
+      // one.
+      //
+      // Measured against a real Postgres, two online payments of 5,000,000
+      // settling on one 10,000,000 invoice at the same moment: both rows post,
+      // and the invoice is left **PARTIALLY_PAID** — 4 runs out of 4. Each read
+      // the posted total before the other's insert, each computed a status from
+      // its own stale view, and the last write won.
+      //
+      // Not a lost payment: a fully-paid invoice that does not say so. It is
+      // then chased by the overdue reminder sweep, accrues late fees, counts in
+      // receivables, and can withhold a leaver's documents — from a family that
+      // has paid in full. Reachable whenever two rails land together: a card
+      // charge beside a mobile-money transfer, a dedicated-NUBAN credit, or the
+      // reconciliation sweep posting a missed charge while a webhook delivers
+      // another.
+      await tx.$executeRaw`SELECT id FROM "invoice" WHERE id = ${invoiceId}::uuid FOR UPDATE`;
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
       if (!inv) return "invoice_missing" as const;
 
