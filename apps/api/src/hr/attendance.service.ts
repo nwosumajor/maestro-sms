@@ -36,6 +36,7 @@ import type {
   KioskCodeDto,
   KioskConfigDto,
   StaffAttendanceDto,
+  StaffAttendanceHistoryDto,
 } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import { generateSecret, totp, verifyTotp } from "../auth/totp";
@@ -55,6 +56,12 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
 const KIOSK_STEP_SEC = 30;
+/**
+ * A year of months on a page. Enough that the ordinary question ("how has this
+ * year been?") is answered without paging, and small enough that the wire does
+ * not grow with somebody's length of service.
+ */
+const STAFF_HISTORY_MONTHS_PER_PAGE = 12;
 const ZERO = "00000000-0000-0000-0000-000000000000"; // system actor for device events
 
 type MarkRow = {
@@ -344,6 +351,128 @@ export class StaffAttendanceService {
         rows: [...byUser.entries()]
           .map(([userId, r]) => ({ userId, userName: nameById.get(userId) ?? "Staff", ...r }))
           .sort((a, b) => a.userName.localeCompare(b.userName)),
+      };
+    });
+  }
+
+  /**
+   * ONE MEMBER OF STAFF'S RECORD, compiled per month.
+   *
+   * There was no such page at all: the register showed today, the roll-up showed
+   * this month across everybody, and the only per-person read was `myHistory` —
+   * self-only, 60 rows, no count and no paging. So the question a head of school
+   * actually asks ("how has this person's attendance been?") had no answer in
+   * the product.
+   *
+   * THE MONTHS ARE COMPILED IN SQL, not by reading days. A per-day read is
+   * O(how long the person has worked here) — about 250 rows a year, so a
+   * long-serving member of staff in year eight costs eight times what a new one
+   * does, for a screen that shows the same thing. That is the shape this repo
+   * keeps recording: it degrades invisibly, and only in production. One grouped
+   * aggregate costs the same either way, and the page is PAGED over months so
+   * the wire never grows either.
+   *
+   * `days` is the chosen month ALONE — bounded by the calendar at 31 rows — so
+   * the detail behind a month is never a growing list.
+   *
+   * The month totals and the day rows are drawn from the SAME table, so they
+   * cannot disagree; the counts come from the database rather than from
+   * `rows.filter(...).length`, which is the only way they stay true once a month
+   * is bigger than a page.
+   */
+  async staffHistory(
+    p: Principal,
+    userId: string,
+    opts: { month?: string; page?: number } = {},
+  ): Promise<StaffAttendanceHistoryDto> {
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = STAFF_HISTORY_MONTHS_PER_PAGE;
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // 404-not-403: somebody else's school's staff is not a person this caller
+      // may learn the existence of, and RLS already confines the read.
+      const subject = (await tx.user.findFirst({
+        where: { id: userId },
+        select: { id: true, name: true },
+      })) as { id: string; name: string } | null;
+      if (!subject) throw new NotFoundException("Staff member not found");
+
+      // ONE grouped aggregate over the whole history. `FILTER` counts each
+      // status in a single pass; the minutes are summed only where BOTH ends
+      // exist, so a day with no clock-out contributes nothing rather than
+      // silently counting as zero.
+      const rows = (await tx.$queryRaw(Prisma.sql`
+        SELECT to_char(date_trunc('month', "date"), 'YYYY-MM')                       AS month,
+               count(*) FILTER (WHERE status = 'PRESENT')::int                        AS present,
+               count(*) FILTER (WHERE status = 'LATE')::int                           AS late,
+               count(*) FILTER (WHERE status = 'ABSENT')::int                         AS absent,
+               count(*) FILTER (WHERE status = 'ON_LEAVE')::int                       AS on_leave,
+               count(*) FILTER (WHERE flagged)::int                                   AS flagged,
+               count(*) FILTER (WHERE "clockInAt" IS NOT NULL AND "clockOutAt" IS NULL)::int AS open_spans,
+               COALESCE(SUM(EXTRACT(EPOCH FROM ("clockOutAt" - "clockInAt")) / 60)
+                        FILTER (WHERE "clockInAt" IS NOT NULL AND "clockOutAt" IS NOT NULL), 0)::int AS minutes,
+               count(*) FILTER (WHERE "clockInAt" IS NOT NULL AND "clockOutAt" IS NOT NULL)::int AS closed
+        FROM staff_attendance
+        WHERE "schoolId" = ${p.schoolId}::uuid AND "userId" = ${userId}::uuid
+        GROUP BY 1
+        ORDER BY 1 DESC
+        LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+      `)) as Array<{
+        month: string;
+        present: number;
+        late: number;
+        absent: number;
+        on_leave: number;
+        flagged: number;
+        open_spans: number;
+        minutes: number;
+        closed: number;
+      }>;
+
+      // COUNTED IN THE DATABASE over the same predicate, so a reader is told how
+      // much history exists rather than being shown a page as if it were all of
+      // it — the commonest defect in this repo.
+      const totals = (await tx.$queryRaw(Prisma.sql`
+        SELECT count(DISTINCT date_trunc('month', "date"))::int AS n
+        FROM staff_attendance
+        WHERE "schoolId" = ${p.schoolId}::uuid AND "userId" = ${userId}::uuid
+      `)) as Array<{ n: number }>;
+
+      const months = rows.map((r) => ({
+        month: r.month,
+        present: r.present,
+        late: r.late,
+        absent: r.absent,
+        onLeave: r.on_leave,
+        flagged: r.flagged,
+        openSpans: r.open_spans,
+        // NULL when no day in the month has both ends: a month of arrivals with
+        // no departures has no hours to report, and reporting 0 would assert a
+        // month nobody worked.
+        minutesOnSite: r.closed > 0 ? r.minutes : null,
+      }));
+
+      // The day detail for ONE month — the newest on the page unless asked.
+      const chosen = opts.month && /^\d{4}-\d{2}$/.test(opts.month) ? opts.month : (months[0]?.month ?? null);
+      let days: StaffAttendanceDto[] = [];
+      if (chosen) {
+        const from = new Date(`${chosen}-01T00:00:00.000Z`);
+        const to = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 1));
+        const rawDays = (await tx.staffAttendance.findMany({
+          where: { userId, date: { gte: from, lt: to } },
+          orderBy: { date: "asc" },
+        })) as MarkRow[];
+        days = rawDays.map((d) => this.toDto(d, subject.name));
+      }
+
+      return {
+        userId: subject.id,
+        userName: subject.name,
+        months,
+        totalMonths: totals[0]?.n ?? 0,
+        page,
+        pageSize,
+        month: chosen,
+        days,
       };
     });
   }

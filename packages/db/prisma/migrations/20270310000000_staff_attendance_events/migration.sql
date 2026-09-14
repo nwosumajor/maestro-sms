@@ -38,7 +38,34 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- BACKFILL: every existing day row already carries the arrival it was created
 -- from. Without this the log would begin empty and the projection would read as
 -- though nobody had ever clocked in before today.
+-- IDEMPOTENT, because every other statement in this file is: without the guard a
+-- re-run (or a hand-applied migration later recorded as applied) would give every
+-- existing day a SECOND arrival event. Harmless to the first/last projection,
+-- junk in the record it is meant to be.
 INSERT INTO "staff_attendance_event" ("id","schoolId","userId","date","kind","at","source","ip","createdAt")
-SELECT gen_random_uuid(), "schoolId", "userId", "date", 'IN', "clockInAt", "source", "ip", "createdAt"
-FROM "staff_attendance"
-WHERE "clockInAt" IS NOT NULL;
+SELECT gen_random_uuid(), a."schoolId", a."userId", a."date", 'IN', a."clockInAt", a."source", a."ip", a."createdAt"
+FROM "staff_attendance" a
+WHERE a."clockInAt" IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM "staff_attendance_event" e
+    WHERE e."userId" = a."userId" AND e."date" = a."date"
+  );
+
+-- The per-staff monthly history reads ONE person's whole record to compile it,
+-- which is O(how long they have worked here): ~250 rows a year, so a colleague
+-- in year eight costs eight times what a new one does for the same screen.
+--
+-- MEASURED as the app role, under RLS, with a bound parameter, on 250,440 rows
+-- (120 staff x 8 years) in the test database:
+--
+--   existing (userId,date) only          Bitmap Heap Scan   41.8 ms
+--   plain (schoolId,userId,date)         Index Scan         34.8 ms
+--   this one, with INCLUDE               Index Only Scan    12.5 ms
+--
+-- The INCLUDE is what removes the heap fetch, and it is the whole difference —
+-- the plain composite barely pays for itself. Carried here rather than in the
+-- Prisma schema because `INCLUDE` has no Prisma syntax, the same reason the
+-- documented FK-only-in-migrations objects live here.
+CREATE INDEX IF NOT EXISTS "staff_attendance_schoolId_userId_date_idx"
+  ON "staff_attendance" ("schoolId", "userId", "date")
+  INCLUDE (status, flagged, "clockInAt", "clockOutAt");

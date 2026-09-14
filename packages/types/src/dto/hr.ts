@@ -376,6 +376,50 @@ export interface StaffAttendanceDto {
  */
 export type StaffAttendanceStatus = "PRESENT" | "LATE" | "ABSENT" | "ON_LEAVE";
 
+/** One month of a person's attendance, compiled in SQL. */
+export interface StaffAttendanceMonthDto {
+  /** "2026-08" — the school's month, sortable and safe to use as a key. */
+  month: string;
+  present: number;
+  late: number;
+  absent: number;
+  onLeave: number;
+  /** Off-site or otherwise anomalous clock-ins — a SIGNAL for review, never a penalty. */
+  flagged: number;
+  /**
+   * Days that were clocked into and never closed. NOT an absence and NOT a
+   * failure: it is the number somebody should ask about, and folding it into
+   * either of the others would hide it.
+   */
+  openSpans: number;
+  /** Summed across the days that HAVE both ends; null when none do. */
+  minutesOnSite: number | null;
+}
+
+/**
+ * One member of staff's attendance record.
+ *
+ * The months are COMPILED IN SQL over the whole history and paged, so this costs
+ * the same for somebody in their eighth year as in their first: a per-day read
+ * is O(how long they have worked here), which is the shape that degrades
+ * invisibly and only in production.
+ *
+ * `days` is the chosen month only — bounded by the calendar at 31 rows — so the
+ * detail a reader actually opens is never a growing list.
+ */
+export interface StaffAttendanceHistoryDto {
+  userId: string;
+  userName: string | null;
+  months: StaffAttendanceMonthDto[];
+  /** Months the person has ANY record for — so a page can say what it is not showing. */
+  totalMonths: number;
+  page: number;
+  pageSize: number;
+  /** The month `days` covers ("2026-08"), and its day rows. */
+  month: string | null;
+  days: StaffAttendanceDto[];
+}
+
 /** The day's register: every active employee with their mark (or none yet). */
 export interface AttendanceRegisterDto {
   date: string;

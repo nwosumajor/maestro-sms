@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **909 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -664,6 +664,8 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | POST | `/hr/appraisals/:id/submit` | 🔑 `hr.appraisal.manage` · 📦 `hr` | Submit Appraisal |
 | GET | `/hr/appraisals/me` | 🔑 `hr.self` · 📦 `hr` | My Appraisals |
 | POST | `/hr/attendance/clock-in` | 🔑 `hr.self` · 📦 `hr` | Staff clock-in with the current display code (hr.self). |
+| POST | `/hr/attendance/clock-out` | 🔑 `hr.self` · 📦 `hr` | Staff clock-OUT with the current display code (hr.self). |
+| POST | `/hr/attendance/day-close/run` | 🔑 `hr.attendance.amend` · 📦 `hr` | Close today's register by hand — SCHOOL-SCOPED. |
 | GET | `/hr/attendance/devices` | 🔑 `hr.read` · 📦 `hr` | List Devices |
 | POST | `/hr/attendance/devices` | 🔑 `hr.write` · 📦 `hr` | Register a terminal — the HMAC secret is returned ONCE. |
 | DELETE | `/hr/attendance/devices/:id` | 🔑 `hr.write` · 📦 `hr` | Remove Device |
@@ -672,11 +674,12 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | DELETE | `/hr/attendance/enrollments/:id` | 🔑 `hr.write` · 📦 `hr` | Unenroll |
 | GET | `/hr/attendance/kiosk` | 🔑 `hr.read` · 📦 `hr` | Kiosk Config |
 | PUT | `/hr/attendance/kiosk` | 🔑 `hr.write` · 📦 `hr` | Update Kiosk |
-| GET | `/hr/attendance/kiosk/code` | 🔑 `hr.read` · 📦 `hr` | The rotating gate-display code (staff-operated screen; hr.read). |
-| POST | `/hr/attendance/mark` | 🔑 `hr.write` · 📦 `hr` | Mark |
+| GET | `/hr/attendance/kiosk/code` | 🔑 `hr.kiosk.display` · 📦 `hr` | The rotating gate-display code — on its OWN narrow permission. |
+| POST | `/hr/attendance/mark` | 🔑 `hr.attendance.amend` · 📦 `hr` | Mark |
 | GET | `/hr/attendance/me` | 🔑 `hr.self` · 📦 `hr` | My History |
-| GET | `/hr/attendance/register/:date` | 🔑 `hr.read` · 📦 `hr` | Register |
-| GET | `/hr/attendance/summary` | 🔑 `hr.read` · 📦 `hr` | Both optional — omitted means the school's current month. |
+| GET | `/hr/attendance/register/:date` | 🔑 `hr.attendance.read` · 📦 `hr` | Register |
+| GET | `/hr/attendance/staff/:userId` | 🔑 `hr.attendance.read` · 📦 `hr` | ONE member of staff's record, compiled per month. `hr.attendance.read` — the same gate as the register, because this is the same data about the same people, narrowed to one of them. |
+| GET | `/hr/attendance/summary` | 🔑 `hr.attendance.read` · 📦 `hr` | Both optional — omitted means the school's current month. |
 | DELETE | `/hr/components/:id` | 🔑 `hr.write` · 📦 `hr` | Remove Component |
 | GET | `/hr/disciplinary` | 🔑 `hr.disciplinary.manage` · 📦 `hr` | Disciplinary cases |
 | POST | `/hr/disciplinary/:id/entries` | 🔑 `hr.disciplinary.manage` · 📦 `hr` | Add Entry |

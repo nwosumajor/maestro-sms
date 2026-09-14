@@ -7,6 +7,7 @@ import { hhmm } from "../common/time-of-day";
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, RawBodyRequest, Req } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
+import { pageNumber } from "../common/status-filter";
 import { HR_PERMISSIONS, MODULES } from "@sms/types";
 import type {
   AttendanceRegisterDto,
@@ -14,6 +15,7 @@ import type {
   KioskCodeDto,
   KioskConfigDto,
   StaffAttendanceDto,
+  StaffAttendanceHistoryDto,
 } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { Public } from "../auth/public.decorator";
@@ -121,6 +123,29 @@ export class StaffAttendanceController {
   ): Promise<KioskConfigDto> {
     return this.attendance.updateKiosk(p, b);
   }
+
+  /**
+   * ONE member of staff's record, compiled per month.
+   *
+   * `hr.attendance.read` — the same gate as the register, because this is the
+   * same data about the same people, narrowed to one of them. There was no such
+   * read at all: the register showed today, the roll-up showed this month across
+   * everybody, and the only per-person view was a person's own.
+   */
+  @Get("staff/:userId")
+  @RequirePermission(HR_PERMISSIONS.HR_ATTENDANCE_READ)
+  staffHistory(
+    @CurrentPrincipal() p: Principal,
+    @Param("userId") userId: string,
+    @Query("month") month?: string,
+    @Query("page") page?: string,
+  ): Promise<StaffAttendanceHistoryDto> {
+    // PARSED THROUGH THE SHARED HELPER, not `Number(page)`: a bare Number()
+    // turns "abc" into NaN and "-3" into a negative offset, and every other
+    // paged read in this API goes through one definition of what a page is.
+    return this.attendance.staffHistory(p, userId, { month, page: pageNumber(page) });
+  }
+
 
   /**
    * The rotating gate-display code — on its OWN narrow permission.

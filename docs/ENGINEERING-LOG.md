@@ -16226,3 +16226,60 @@ quietest thing on the one row needing action, now an amber badge.
 // uncommitted file discards the FIX, not the mutation" is in the probe-hygiene
 // list; I rebuilt the ten changes and verified each by reading the file back
 // rather than trusting the patch. Mutations after that were reversed by hand.
+
+### "How has this person's attendance been?" had no answer in the product
+
+The register showed TODAY. The monthly roll-up showed THIS MONTH across
+everybody. The only per-person read was `myHistory` — self-only, 60 rows, no
+count, no paging, no compilation — and the staff detail page had no attendance
+section at all. So the question a head of school actually asks about one
+colleague could not be asked.
+
+`GET /hr/attendance/staff/:userId` answers it: months COMPILED IN SQL and paged,
+with the day-by-day detail for one chosen month. Web: an Attendance card on
+`/hr/staff/[userId]`.
+
+THE SHAPE THAT MATTERS is that a per-day read is O(how long the person has
+worked here) — roughly 250 rows a year, so a colleague in year eight costs eight
+times what a new starter does for a screen showing the same thing. Measured as
+the app role, under RLS, with a bound parameter, on 250,440 rows (120 staff x 8
+years) — the four conditions this log keeps recording, because each has produced
+a wrong answer on its own:
+
+    existing (userId,date) unique only     Bitmap Heap Scan   41.8 ms
+    plain (schoolId,userId,date)           Index Scan         34.8 ms
+    + INCLUDE (status, flagged, clocks)    Index Only Scan    12.5 ms
+
+The INCLUDE is the whole difference — it removes the heap fetch — and the plain
+composite barely pays for its write cost, so only the covering index ships. The
+fixture was deleted afterwards: 250k rows left in the test database would slow
+every other DB-gated suite and nothing would say why.
+
+// GOTCHA: I "dropped" the covering index and re-measured, and the plan still
+// named it — `DROP INDEX; CREATE INDEX CONCURRENTLY` in one `psql -c` is a
+// single transaction and CONCURRENTLY cannot run in one, so the pair failed and
+// rolled back. The measurement that followed was of the index I thought I had
+// removed. Check what the database is actually RUNNING before believing a
+// result, exactly as the probe-hygiene list says about containers.
+
+Accuracy rules the DTO now carries: the month totals and the day rows come from
+the SAME table so they cannot disagree; the counts come from the database rather
+than `rows.filter(...).length`, which stops being true the moment a month is
+bigger than a page; `minutesOnSite` is NULL for a month with nothing closed
+rather than 0; and days left OPEN are their own number rather than folded into
+absences.
+
+// FOUR MORE GATES, all correct. `a-filter-nobody-validated` caught `?page=`
+// parsed with a bare `Number()` — NaN for "abc", a negative offset for "-3" —
+// where every other paged read goes through one `pageNumber()`.
+// `every-student-table-is-accounted-for` required the new table to be
+// classified (STAFF_ONLY: a pupil holds no employment record).
+// `api-doc-is-current` and `api-surface` required API.md regenerated and each
+// new route to declare how a human reaches it — the door-from-the-outside rule.
+
+// AND THE MIGRATION'S BACKFILL WAS NOT IDEMPOTENT, which only showed up because
+// I applied it by hand to the dev database and then re-ran it: every existing
+// day would have gained a SECOND arrival event. Harmless to a first/last
+// projection and junk in the record it is meant to BE. Guarded with NOT EXISTS;
+// a re-run now reports `INSERT 0 0`. Every other statement in the file was
+// already `IF NOT EXISTS` — the one that wasn't is the one that writes data.

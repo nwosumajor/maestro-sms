@@ -155,6 +155,9 @@ const PERSON_KEYED: Record<string, string> = {
   PrivilegeGrant: STAFF_ONLY,
   SchoolGroupDirector: STAFF_ONLY,
   StaffAttendance: STAFF_ONLY,
+  // The scan log behind StaffAttendance. Staff-only for the same reason: a pupil
+  // holds no employment record, so nothing here can key on one.
+  StaffAttendanceEvent: STAFF_ONLY,
   StaffChecklist: STAFF_ONLY,
   StaffDocument: STAFF_ONLY,
   StaffExit: STAFF_ONLY,

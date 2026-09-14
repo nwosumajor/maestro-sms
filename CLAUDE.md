@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **341 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **342 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **341 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **342 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2367,6 +2367,19 @@ one state); `openSpans` counted apart. // **AND EVERY READER COULD REWRITE THEIR
 OWN RECORD**: `hr.attendance.read`/`.amend` split, self-marking REFUSED, past 7
 days needs a senior `.amend.review` holder (never the initiator). `/kiosk` shows
 the code alone — it needed `hr.read`, so the corridor screen showed the register.
+
+## A staff record is read PER PERSON, and must not grow with their service
+`GET /hr/attendance/staff/:userId` + the Attendance card on `/hr/staff/[userId]`:
+months COMPILED IN SQL and paged, day detail for ONE month (bounded by the
+calendar). There was no per-person view at all — register showed today, roll-up
+showed this month across everyone. // GOTCHA: a per-day read is O(length of
+SERVICE), ~250 rows a year. Measured as the app role under RLS with a bound
+parameter on 250,440 rows: 41.8ms (existing index) -> 34.8ms (plain composite)
+-> **12.5ms Index Only Scan** with `INCLUDE (status, flagged, clocks)`. The
+INCLUDE is the whole difference; the plain composite does not pay for its write
+cost. // GOTCHA: `DROP INDEX; CREATE INDEX CONCURRENTLY` in one `psql -c` is one
+transaction and CONCURRENTLY cannot run in one — the pair rolls back and the
+next measurement is of the index you think you dropped.
 
 ## Attendance register — write windows (BUILT)
 Three tiers gate a register write (`AttendanceService.markAttendance`):
