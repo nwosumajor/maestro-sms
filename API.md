@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **910 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **911 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -812,6 +812,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **910 routes across 90
 | POST | `/classes/:classId/subjects/copy-to-arms` | 🔑 `class.write` · 📦 `lms` | Copy this class's subject set onto every other arm of the same stream — one action instead of one configuration per arm. |
 | POST | `/classes/:classId/teachers` | 🔑 `enrollment.write` · 📦 `lms` | Assign a teacher to a class |
 | DELETE | `/classes/:classId/teachers/:teacherId` | 🔑 `enrollment.write` · 📦 `lms` | Take a class teacher off a class — the counterpart the assign route never had, so class-wide access could be granted and never revoked. |
+| POST | `/classes/arms` | 🔑 `class.write` · 📦 `lms` | SS1A, SS1B, SS1C in one action. |
 | GET | `/classes/mine` | 🔑 `class.read` · 📦 `lms` | The caller's relationship-scoped classes |
 | GET | `/classes/overview` | 🔑 `class.read` · 📦 `lms` | The caller's classes with roll / capacity / supervisor / teaching counts — what the classes page is actually managed by. |
 | GET | `/content/:id` | 🔑 `lms.content.read` · 📦 `lms` | Content detail (reviewer) |

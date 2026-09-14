@@ -16393,3 +16393,75 @@ because showing it invites somebody to contact a person who is gone.
 // without looking at the status, so it reported a fact about itself. Printing
 // the STATUS first showed it in one run. Third time this session; the rule is in
 // the probe-hygiene list and I keep rediscovering it.
+
+### The only place a class can be created had not rendered for anyone
+
+`/classes` gated its create-a-class card on four things:
+
+    {canWrite && classes && students && staff && <ClassAdmin ... />}
+
+and three lines above, `students` was hard-coded:
+
+    // Roster no longer prefetched: the enrol/link controls search on demand.
+    Promise.resolve(null),
+
+The optimisation removed the data; the render condition kept depending on it. So
+the card could never be true — not "hard to find" but ABSENT, for every role,
+since that change. A card that does not render looks exactly like a card that was
+never meant to be there, which is why nobody noticed: the page still had plenty
+on it, and the missing thing was the only route to creating a class at all.
+
+// AND I ASSERTED IT WAS REACHABLE, TWICE, ON A STRING MATCH FROM ANOTHER
+// COMPONENT. My probe grepped the rendered page for "New class", found it, and
+// I concluded the form was there. It came from `ClassSubjectsAdmin`'s
+// `aria-label="New class name"` — a RENAME field in a different card. The create
+// card's own title, "Manage classes", was never in the page and I never looked
+// for it. The repo's own rule covers this ("grepping SSR HTML matches the JS
+// bundle, not a rendered row; assert the prop"), and the general form is worse:
+// a probe that searches for a string it did not take FROM THE THING IT IS
+// TESTING is asking a question about the whole page, not about the component.
+
+GATE: `a-card-that-can-never-render` walks every server page, pairs the names
+destructured from `await Promise.all([...])` with the array's elements
+positionally, and fails when a name fetched as a bare `Promise.resolve(null)` is
+then used to gate a component. The conditional form
+(`cond ? apiGet(...) : Promise.resolve(null)`) is the ordinary permission gate
+and is not flagged. Mutation-validated: restoring the condition fails it, naming
+the page and the variable. // GOTCHA: its own "a walk that finds nothing passes
+green" assertion caught the first version scanning ZERO files — `walkTs` matches
+`.ts` and pages are `.tsx`.
+
+A CLASS TEACHER IS NOW EXPECTED, NOT REQUIRED — a deliberate reversal. The
+requirement was added to stop the gap growing, and the reasoning was right, but
+the mechanism asserted an invariant the data does not have (30 of 31 classes have
+no supervisor) while doing nothing about those, and it blocked the ordinary way a
+school works: lay out next year's classes, staff them later. A required field
+people satisfy by naming whoever is in the dropdown is worse than an empty one,
+because a wrong name is acted on and an empty one is chased. The rule is now
+NAMED OR NOBODY, never wrong, never quietly removed — a pupil or a leaver is
+still refused on every path, a class that HAS one still cannot have it cleared,
+and the classes list already flags and filters classes with none.
+
+// The gate `every-class-has-a-class-teacher` still passed after the reversal,
+// because every property it actually tested survived. Its HEADER did not: it
+// claimed to close "a class created with no class teacher at all". Prose that
+// outlives the rule it describes is the defect this log records as "a comment
+// asserting agreement is not agreement", so the header records the new decision
+// and a case was added for it.
+
+ALSO BUILT, both asked for and neither present: `POST /classes/arms` creates a
+whole stream's arms in one action (idempotent on the composed name, partial
+success reported per arm with the reason), and `Class.homeRoomId` gives a class
+a BASE room — distinct from `ClassSubjectOffering.preferredRoomId`, which pins
+one SUBJECT to a specialist room. One class per room via a partial unique index
+(`WHERE homeRoomId IS NOT NULL`, so any number may have none), and the refusal
+NAMES the class that already has it rather than reporting a constraint. Verified
+live: three arms submitted, two created, the third skipped with "Hall A is
+already the base room for SS1 Science H".
+
+// GOTCHA in my own bulk endpoint: the first version caught every error and
+// reported it as a skipped arm, which dressed a genuine fault up as a business
+// rule and would have left an operator re-pressing a button that could never
+// work. Only an HttpException — a guard's refusal — may skip an arm now; a fault
+// propagates. Making that change immediately surfaced two real faults my test
+// double had been hiding.

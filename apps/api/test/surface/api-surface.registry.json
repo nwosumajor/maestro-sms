@@ -2049,6 +2049,10 @@
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
     },
+    "POST /classes/arms": {
+      "kind": "ui",
+      "note": "reviewed: reached from the ArmsBuilder on components/lms/ClassAdmin.tsx"
+    },
     "POST /competitions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

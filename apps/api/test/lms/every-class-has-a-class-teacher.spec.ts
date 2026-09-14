@@ -10,10 +10,21 @@
  * row and 30 had NEITHER. A class could be created with nobody responsible for
  * its register, and `updateClass` would happily clear the one it had.
  *
- * Two gaps this closes:
- *   - a class created with no class teacher at all
- *   - a class teacher who is a PUPIL or has LEFT — `updateClass` asked only
- *     that the id resolved to a user, which a pupil does
+ * WHAT THIS GUARDS, and what it deliberately no longer does.
+ *
+ * It ONCE refused to create a class without a class teacher. That requirement
+ * is gone, on purpose: it asserted an invariant the data does not have — 30 of
+ * 31 classes have no supervisor — while doing nothing about those, and it
+ * blocked the ordinary way a school works, which is to lay out next year's
+ * classes before the staffing is settled. A required field people satisfy by
+ * naming whoever is in the dropdown is worse than an empty one, because a wrong
+ * name is acted on and an empty one is chased.
+ *
+ * So the rule now is NAMED OR NOBODY, never wrong, and never quietly removed:
+ *   - a class teacher who is a PUPIL or has LEFT is refused, on every path —
+ *     `updateClass` asked only that the id resolved to a user, which a pupil does
+ *   - a class that HAS one cannot have it cleared
+ *   - a class may be created with none, and the classes list flags it
  */
 import { LmsService } from "../../src/lms/lms.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
@@ -100,6 +111,18 @@ describe("every class has a class teacher", () => {
     const { svc, created } = harness();
     await svc.createClass(admin, NEW_CLASS);
     expect(created[0].supervisorId).toBe("t1");
+  });
+
+  it("ALLOWS a class created with none, so the year can be laid out first", async () => {
+    // The deliberate reversal. It is safe only because the gap is loud: the
+    // classes list flags every class with no class teacher and can filter to
+    // exactly those, and the register reminder already reports such a class as
+    // unreachable rather than silently skipping it.
+    const { svc, created } = harness({});
+    await expect(
+      svc.createClass(admin, { name: "JSS 4A", supervisorId: null }),
+    ).resolves.toBeTruthy();
+    expect(created[0]?.supervisorId ?? null).toBeNull();
   });
 
   it("refuses a PUPIL as the class teacher", async () => {

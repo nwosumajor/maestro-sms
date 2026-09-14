@@ -11,14 +11,14 @@
 // audit-logged. Not-visible -> 404 (never 403), no cross-tenant/owner leak.
 // =============================================================================
 
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, HttpException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { classIdsTaughtBy, studentIdsTaughtBy, teachesClass } from "../common/teaches";
 import { SchoolRegionService } from "../foundation/school-region.service";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
 import { DEFAULT_CURRICULUM, MAX_GUARDIANS_PER_STUDENT, MEETING_PERMISSIONS, NON_STAFF_ROLE_NAMES, ROSTER_CAP, SEARCH_CAP, isStaffRoles, normaliseEntityCode, subjectCatalogueFor, type ClassOverviewDto, type SubjectStage, type UserKind, uniqueEntityCode } from "@sms/types";
-import { LMS_PERMISSIONS } from "@sms/types";
+import { LMS_PERMISSIONS, composeClassName } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -206,18 +206,129 @@ export class LmsService {
     }
   }
 
+  /**
+   * Is this room free to be a class's BASE room?
+   *
+   * A base room is where a cohort IS, so two classes claiming one is a data
+   * error in almost every school. The database enforces it — a partial unique
+   * index over `(schoolId, homeRoomId) WHERE homeRoomId IS NOT NULL`, so any
+   * number of classes may have NO base room — and this check exists to make the
+   * refusal SAY WHICH CLASS already has it. "Unique constraint failed" sends
+   * somebody hunting; "Hall A is already the base room for SS1B" does not.
+   *
+   * The index is still the guarantee: this read-then-write cannot be atomic, and
+   * P2002 is converted at the boundary, so the race answers the same way.
+   */
+  private async assertRoomFree(tx: TenantTx, roomId: string, exceptClassId: string | null) {
+    const room = (await tx.room.findFirst({ where: { id: roomId }, select: { id: true, name: true } })) as
+      | { id: string; name: string }
+      | null;
+    // 404-not-403 via the caller's own scope: RLS already confines the read, so
+    // a room from another school simply is not found here.
+    if (!room) throw new NotFoundException("Room not found");
+    const taken = (await tx.class.findFirst({
+      where: { homeRoomId: roomId, ...(exceptClassId ? { id: { not: exceptClassId } } : {}) },
+      select: { name: true },
+    })) as { name: string } | null;
+    if (taken) {
+      throw new ConflictException(`${room.name} is already the base room for ${taken.name}`);
+    }
+  }
+
+  /**
+   * CREATE A WHOLE STREAM'S ARMS IN ONE ACTION — SS1A, SS1B, SS1C.
+   *
+   * Creating them one at a time meant re-picking Section, Year and Stream for
+   * every arm: nine form passes for three year groups of three arms, with the
+   * shape retyped eight times and nothing stopping the ninth from being subtly
+   * different. The structured fields already made the NAME consistent; this
+   * makes the WORK proportionate.
+   *
+   * EVERY CLASS STILL GETS A CLASS TEACHER. The rule that a class has one from
+   * the moment it exists is deliberate — a class without one has a roll and a
+   * timetable and nobody responsible for its register — so each arm names its
+   * own, and this endpoint cannot be used to get round it.
+   *
+   * PARTIAL SUCCESS IS REPORTED, never silent: an arm whose name already exists
+   * is SKIPPED with a reason rather than failing the batch, so re-running after
+   * fixing one row does not mean deleting the rest. That makes it idempotent on
+   * the composed name, which is what somebody pressing the button twice needs.
+   */
+  async createArms(
+    p: Principal,
+    input: {
+      stage?: string | null;
+      level?: number | null;
+      stream?: string | null;
+      arms: Array<{ arm: string; supervisorId?: string | null; homeRoomId?: string | null }>;
+    },
+  ): Promise<{
+    created: Array<{ id: string; name: string }>;
+    skipped: Array<{ arm: string; name: string; reason: string }>;
+  }> {
+    const created: Array<{ id: string; name: string }> = [];
+    const skipped: Array<{ arm: string; name: string; reason: string }> = [];
+    // One transaction per arm, deliberately: a batch that rolls back wholesale
+    // because the third arm's room was taken would throw away two correct
+    // classes and give the operator nothing to keep.
+    for (const a of input.arms) {
+      const name = composeClassName({
+        stage: (input.stage ?? null) as never,
+        level: input.level ?? null,
+        stream: (input.stream ?? null) as never,
+        arm: a.arm || null,
+      });
+      if (!name) {
+        skipped.push({ arm: a.arm, name: "", reason: "That combination does not make a class name" });
+        continue;
+      }
+      try {
+        const cls = (await this.createClass(p, {
+          name,
+          supervisorId: a.supervisorId,
+          stage: input.stage ?? null,
+          level: input.level ?? null,
+          stream: input.stream ?? null,
+          arm: a.arm || null,
+          homeRoomId: a.homeRoomId ?? null,
+        })) as { id: string; name: string };
+        created.push({ id: cls.id, name: cls.name });
+      } catch (err) {
+        // ONLY A GUARD'S REFUSAL SKIPS AN ARM. A ConflictException ("that name
+        // exists", "that room is taken") is a decision this batch should step
+        // over and report; anything else is a FAULT, and swallowing it as "could
+        // not be created" would dress a bug up as a business rule and leave the
+        // operator re-pressing a button that can never work.
+        if (!(err instanceof HttpException)) throw err;
+        // NAMED, not counted. "3 of 5 created" with no list is the silent-partial
+        // failure this repo keeps recording.
+        const body = err.getResponse() as { message?: string | string[] } | string;
+        const reason =
+          typeof body === "string"
+            ? body
+            : Array.isArray(body?.message)
+              ? body.message.join(", ")
+              : body?.message ?? err.message;
+        skipped.push({ arm: a.arm, name, reason });
+      }
+    }
+    return { created, skipped };
+  }
+
   async createClass(
     p: Principal,
     input: {
       name: string;
-      /** The class teacher — see assertMayTeach. Required. */
-      supervisorId: string;
+      /** The class teacher. Optional: a class may be created before its
+       *  staffing is settled, and the gap is reported rather than prevented. */
+      supervisorId?: string | null;
       level?: number | null;
       nextClassId?: string | null;
       code?: string | null;
       stage?: string | null;
       stream?: string | null;
       arm?: string | null;
+      homeRoomId?: string | null;
     },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -228,12 +339,26 @@ export class LmsService {
         select: { id: true },
       });
       if (dup) throw new ConflictException("A class with that name already exists");
-      // EVERY CLASS HAS A CLASS TEACHER, from the moment it exists. Created
-      // without one, a class has a roll and a timetable and nobody responsible
-      // for its register — which is the state 30 of this school's 31 classes
-      // were in. Requiring it here is what stops the gap being re-created while
-      // the existing ones are being filled in.
-      await this.assertMayTeach(tx, [input.supervisorId], "be a class teacher");
+      // A CLASS TEACHER IS EXPECTED, NOT REQUIRED — and that is a deliberate
+      // change from requiring one at creation.
+      //
+      // The requirement was added to stop the gap growing: a class without a
+      // class teacher has a roll and a timetable and nobody responsible for its
+      // register. The reasoning is right; the mechanism was not. It asserted an
+      // invariant the data does not have — 30 of this school's 31 classes have
+      // no supervisor — while doing nothing about those, and it blocked the
+      // ordinary way a school works, which is to lay out next year's classes
+      // before the staffing is settled. A hard requirement people satisfy by
+      // naming whoever is in the dropdown is worse than an empty field: a wrong
+      // name is acted on, an empty one is chased.
+      //
+      // So it is optional here and LOUD everywhere else: `classesWithoutTeacher`
+      // below, the count on the classes page, and the register reminder that
+      // already reports a class with no supervisor as unreachable.
+      if (input.supervisorId) {
+        await this.assertMayTeach(tx, [input.supervisorId], "be a class teacher");
+      }
+      if (input.homeRoomId) await this.assertRoomFree(tx, input.homeRoomId, null);
       const code = await this.nextCode(tx, "class", input.name, input.code);
       const cls = await tx.class.create({
         data: {
@@ -242,10 +367,11 @@ export class LmsService {
           code,
           level: input.level ?? null,
           nextClassId: input.nextClassId ?? null,
-          supervisorId: input.supervisorId,
+          supervisorId: input.supervisorId ?? null,
           stage: input.stage ?? null,
           stream: input.stream ?? null,
           arm: input.arm ?? null,
+          homeRoomId: input.homeRoomId ?? null,
         },
       });
       await this.log(tx, p, "lms.class.create", "class", cls.id, {
@@ -270,6 +396,7 @@ export class LmsService {
       stage?: string | null;
       stream?: string | null;
       arm?: string | null;
+      homeRoomId?: string | null;
     },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -293,6 +420,12 @@ export class LmsService {
         }
       }
       if (input.supervisorId) await this.assertMayTeach(tx, [input.supervisorId], "be a class teacher");
+      // THE SAME GUARD ON THIS DOOR. `classShape` is shared with the create
+      // schema, so the update accepts `homeRoomId` too — and a rule enforced only
+      // where it was first written is not enforced. Without this the second door
+      // answers a raw unique-constraint 409 instead of naming the class that
+      // already has the room.
+      if (input.homeRoomId) await this.assertRoomFree(tx, input.homeRoomId, classId);
       const cls = await tx.class.update({
         where: { id: classId },
         data: {
@@ -304,6 +437,7 @@ export class LmsService {
           stage: input.stage === undefined ? undefined : input.stage,
           stream: input.stream === undefined ? undefined : input.stream,
           arm: input.arm === undefined ? undefined : input.arm,
+          homeRoomId: input.homeRoomId === undefined ? undefined : input.homeRoomId,
         },
       });
       await this.log(tx, p, "lms.class.update", "class", classId, {
