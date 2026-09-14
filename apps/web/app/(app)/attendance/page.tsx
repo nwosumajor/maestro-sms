@@ -1,4 +1,4 @@
-import type { AttendanceRecordDto, IdNameDto, Serialized } from "@sms/types";
+import type { AttendanceCompiledDto, AttendanceRecordDto, IdNameDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { hasPermission } from "@/lib/permissions";
@@ -14,6 +14,7 @@ import { TakeRegister } from "@/components/attendance/TakeRegister";
 import { RegisterBoard } from "@/components/attendance/RegisterBoard";
 import { SweepButton } from "@/components/maintenance/SweepButton";
 import { ClassAttendanceBoard } from "@/components/attendance/ClassAttendanceBoard";
+import { PupilAttendanceCompiled } from "@/components/attendance/PupilAttendanceCompiled";
 import { StudentPicker } from "@/components/attendance/StudentPicker";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -77,6 +78,10 @@ export default async function AttendancePage({
     Promise.all([
       apiGet<History>(`/students/${id}/attendance?page=${page}&pageSize=${PAGE_SIZE}`),
       apiGet<Summary>(`/students/${id}/attendance/summary`),
+      // COMPILED for audit — months by default; the card switches grain itself.
+      // Same route gate and the same `assertCanAccessStudent`, so a teacher sees
+      // this only for pupils they teach, exactly as the day list behaves.
+      apiGet<Serialized<AttendanceCompiledDto>>(`/students/${id}/attendance/compiled?grain=month`),
     ]);
 
   const [students, count, classes, termLock, preloaded] = await Promise.all([
@@ -91,7 +96,7 @@ export default async function AttendancePage({
 
   const list = students ?? [];
   const selectedId = known ?? list[0]?.id;
-  const [history, summary] = preloaded ?? (selectedId ? await historyFor(selectedId) : [null, null]);
+  const [history, summary, compiled] = preloaded ?? (selectedId ? await historyFor(selectedId) : [null, null, null]);
   const records = history?.records ?? (history === null && selectedId ? null : []);
   const total = history?.total ?? 0;
   const pages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
@@ -137,6 +142,12 @@ export default async function AttendancePage({
 
         <div className="space-y-3">
           <StudentPicker students={list} selectedId={selectedId} total={count?.students} />
+
+          {/* THE COMPILED RECORD, above the day log: an investigation asks how
+              many days were missed in each month, term and year — not which
+              Tuesday. Counting that off the log by hand is how a wrong number
+              reaches a meeting. */}
+          {selectedId && <PupilAttendanceCompiled studentId={selectedId} initial={compiled} />}
 
           {/* Totals before the log. Nobody reads 200 rows to work out whether a
               child is attending, and this figure is term-scoped the same way the

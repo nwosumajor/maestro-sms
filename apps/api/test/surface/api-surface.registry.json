@@ -1465,6 +1465,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /students/:p/attendance/compiled": {
+      "kind": "ui",
+      "note": "reviewed: reached from components/attendance/PupilAttendanceCompiled.tsx on /attendance"
+    },
     "GET /students/:p/attendance/summary": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

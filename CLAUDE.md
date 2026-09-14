@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **342 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **343 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **342 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **343 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2367,6 +2367,22 @@ one state); `openSpans` counted apart. // **AND EVERY READER COULD REWRITE THEIR
 OWN RECORD**: `hr.attendance.read`/`.amend` split, self-marking REFUSED, past 7
 days needs a senior `.amend.review` holder (never the initiator). `/kiosk` shows
 the code alone — it needed `hr.read`, so the corridor screen showed the register.
+
+## A pupil's attendance compiles at THREE grains, and says which are settled
+`GET /students/:id/attendance/compiled?grain=month|term|session` (card on
+/attendance). Scoping is INHERITED from `assertCanAccessStudent`, not restated —
+school-wide roles see every pupil, a teacher only pupils they teach, a parent
+their children, else 404. // GOTCHA: `attendance_term_rollup` covers ENDED terms
+ONLY, so reading it alone shows the CURRENT term as zero — "never attended"
+rather than "not settled". Unrolled terms compute LIVE and every bucket carries
+`source: ROLLUP|LIVE`; a session is only as settled as its least settled term.
+// GOTCHA: the rollup is keyed `(termId, classId, studentId)` — a pupil who moved
+class mid-term has SEVERAL rows and they must be SUMMED, or you report a
+fraction of the term and it looks entirely normal. // A session is summed from
+the TERM buckets, never a second query: two paths to one figure is how a year
+total disagrees with the terms under it. // 834k records, 8 years: 17.5ms and NO
+new index — `attendance_record` is already partitioned by month. Measure the
+variant before adding one; here that meant not adding one.
 
 ## A staff record is read PER PERSON, and must not grow with their service
 `GET /hr/attendance/staff/:userId` + the Attendance card on `/hr/staff/[userId]`:

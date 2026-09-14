@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **909 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **910 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -265,7 +265,8 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **909 routes across 90
 | GET | `/classes/:classId/attendance` | 🔑 `attendance.read` · 📦 `attendance` | Class register history |
 | POST | `/classes/:classId/attendance` | 🔑 `attendance.write` · 📦 `attendance` | Take the daily register (auto-notifies guardians on absence) |
 | GET | `/students/:studentId/attendance` | 🔑 `attendance.read` · 📦 `attendance` | A student's attendance |
-| GET | `/students/:studentId/attendance/summary` | 🔑 `attendance.read` · 📦 `attendance` | A student's current-term totals (% present, absences, lates). |
+| GET | `/students/:studentId/attendance/compiled` | 🔑 `attendance.read` · 📦 `attendance` | A pupil's attendance COMPILED — per month, per term or per session. `attendance.read` and the SAME `assertCanAccessStudent` the day list uses, so the rule is inherited rather than restated: school-wide roles see every… |
+| GET | `/students/:studentId/attendance/summary` | 🔑 `attendance.read` · 📦 `attendance` | Student Summary |
 
 ---
 

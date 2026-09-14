@@ -58,3 +58,66 @@ export interface RegisterStatusDto {
   /** Why it would not. Null when it would. */
   remindersOffReason: RegisterReminderOffReason | null;
 }
+
+/**
+ * Which grain a compiled attendance history is cut at.
+ *
+ * Three, because three different questions get asked of the same record: a
+ * MONTH is how a pattern is spotted ("every Monday in March"), a TERM is how the
+ * school reports and what the report card states, and a SESSION is how a year is
+ * compared with the one before it.
+ */
+export type AttendanceGrain = "month" | "term" | "session";
+
+/** One compiled bucket of a pupil's attendance. */
+export interface AttendanceBucketDto {
+  /** Stable key — "2026-09" for a month, the term or session id otherwise. */
+  key: string;
+  /** "September 2026", "First Term", "2025/2026". */
+  label: string;
+  /** The window this bucket covers, inclusive. Null only where a term or session
+   *  has no dates configured, which is itself worth seeing in an audit. */
+  from: string | null;
+  to: string | null;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  /** Registers this pupil appears in — the denominator, not the school's days. */
+  total: number;
+  /** `attendanceRatePct`: LATE attends, EXCUSED does not. Null when total is 0,
+   *  because a rate over no registers is not 0% — it is unknown. */
+  percent: number | null;
+  /**
+   * PROVENANCE, which is the point of the thing in an audit.
+   *
+   * ROLLUP — read from `attendance_term_rollup`, computed once when the term
+   * ended and never recomputed, so it is what the school reported at the time.
+   * LIVE — aggregated from the register records now. The current term is always
+   * LIVE, because the rollup deliberately only covers ENDED terms; a reader who
+   * cannot tell the two apart cannot tell a settled figure from a moving one.
+   */
+  source: "ROLLUP" | "LIVE";
+}
+
+/**
+ * A pupil's attendance compiled for audit, at one grain.
+ *
+ * Paged over BUCKETS rather than records: a pupil's day rows are O(how long they
+ * have been at the school), and an investigation opens years. Terms and sessions
+ * are inherently few (three and one a year); months are ten. So the page is
+ * generous and the count is exact.
+ */
+export interface AttendanceCompiledDto {
+  studentId: string;
+  studentName: string | null;
+  grain: AttendanceGrain;
+  buckets: AttendanceBucketDto[];
+  /** Buckets that exist in total, so a page is never mistaken for the record. */
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Totals across the pupil's WHOLE history, independent of the page — an audit
+   *  that reports only what fitted on a page is worse than one that says nothing. */
+  lifetime: { present: number; absent: number; late: number; excused: number; total: number; percent: number | null };
+}

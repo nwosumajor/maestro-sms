@@ -16283,3 +16283,55 @@ absences.
 // projection and junk in the record it is meant to BE. Guarded with NOT EXISTS;
 // a re-run now reports `INSERT 0 0`. Every other statement in the file was
 // already `IF NOT EXISTS` — the one that wasn't is the one that writes data.
+
+### A pupil's attendance compiled for audit — month, term and session
+
+The record answered "which days" (paged, windowed) and "this term so far".
+Neither answers what an investigation asks: how many days was this child absent
+in each month of Year 9, and how does that compare with Year 8? Reading that off
+a day list means paging a thousand rows and counting by hand, which is how a
+wrong number reaches a meeting.
+
+`GET /students/:studentId/attendance/compiled?grain=month|term|session`, rendered
+above the day log on /attendance. The SCOPING IS INHERITED, not restated — the
+same `assertCanAccessStudent` the day list uses, so school_admin / principal /
+head_teacher / junior_admin see every pupil, a teacher only pupils in classes
+they teach (all three teaching links, ACTIVE enrolment), a parent their own
+children, a pupil themselves, anyone else a 404. Verified live per role.
+
+TWO THINGS DECIDE WHETHER AN AUDIT CAN RELY ON IT, and both fail plausibly:
+
+1. `attendance_term_rollup` is computed once when a term ENDS and never
+   recomputed — exactly what an audit wants, the figure the school reported at
+   the time rather than a recount that might disagree with the card already
+   filed. But it covers ENDED terms ONLY. Reading the table alone shows the
+   CURRENT term as zero, which reads as "never attended" rather than "not
+   settled yet". Unrolled terms are computed LIVE, and every bucket carries
+   `source: ROLLUP | LIVE` so a reader can tell a settled figure from a moving
+   one. A session is only as settled as its least settled term.
+2. The rollup is keyed `(termId, classId, studentId)`, so a pupil who moved class
+   mid-term has SEVERAL rows for one term. They are SUMMED.
+
+A SESSION IS BUILT FROM THE TERM BUCKETS, not from a second query over the
+register: two paths to one figure is how a year total comes to disagree with the
+terms printed beneath it. And the rate is `attendanceRatePct` — LATE attends,
+EXCUSED does not — shared with the term summary and the report card, with NULL
+rather than 0 over no registers, because a rate over nothing is unknown and 0%
+reads as truancy.
+
+MEASURED, and the answer was "add no index". 834,800 records (400 pupils x 8
+years), as the app role under RLS with a bound parameter: one pupil's whole
+history compiles in **17.5 ms**, because `attendance_record` is already
+PARTITIONED BY MONTH with a per-partition `(schoolId, studentId)` index. A
+covering index would have shaved a few milliseconds off an already-fast read on
+a table written to on every register — the discipline is to measure the variant
+BEFORE adding it, and here that meant not adding one.
+
+// GOTCHA, and my own test was the one that failed it: a mutation grouping the
+// rollup by `(termId, classId)` — the exact "reports a fraction of the term"
+// defect — PASSED against my first double, because the double summed per term
+// whatever `by` it was handed. A stub that ignores the query's own arguments
+// vouches for a service that stopped asking them. Fixed to honour `by`; the
+// mutation then failed with `Expected 58, Received 28`. Same shape as the
+// `findMany` stubs that ignore `where` recorded above, and worth noting that it
+// caught me while I was writing a test specifically about that column.
