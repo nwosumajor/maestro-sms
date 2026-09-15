@@ -24,9 +24,9 @@ export class IntegrityRetentionProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job): Promise<{ schools: number; purged: number }> {
+  async process(job: Job): Promise<{ schools: number; purged: number; failed: number }> {
     return this.runs.record("integrity.retention", "SCHEDULE", async () => {
-      if (job.name !== PURGE_EXPIRED_JOB) return { schools: 0, purged: 0 };
+      if (job.name !== PURGE_EXPIRED_JOB) return { schools: 0, purged: 0, failed: 0 };
       // Report the total the SERVICE computed. This used to re-derive it and sum
       // three of the five tenant streams, omitting xapiDeleted and scansDeleted
       // (scan_event is one of the largest tables projected) and every
@@ -36,10 +36,16 @@ export class IntegrityRetentionProcessor extends WorkerHost {
       this.logger.log(
         result.skipped
           ? "Purge sweep SKIPPED — no privileged DB configured. This is not a sweep that found nothing."
-          : `Purge sweep done: schools=${result.schools.length} rows=${result.purged}`,
+          : `Purge sweep done: schools=${result.schools.length} failed=${result.failed} rows=${result.purged}`,
       );
-      return { schools: result.schools.length, purged: result.purged };
-  
+      // `failed` MUST cross into the job summary. The service counts a school
+      // whose purge threw and carries on — which is right — but a catch that
+      // does not rethrow leaves `lastOk` true, so the operator console's only
+      // sight of it is this field. It was dropped here: the sweep counted, and
+      // nothing that anybody reads was ever told. Minors' telemetry sitting past
+      // its window is the one outcome this job exists to prevent, and it would
+      // have failed the same way every night looking perfectly healthy.
+      return { schools: result.schools.length, purged: result.purged, failed: result.failed };
     });
   }
 }

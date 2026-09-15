@@ -48,6 +48,18 @@ const PURGED = [
   "scanEvent",
 ];
 
+/**
+ * The SQL of a `$executeRaw` call.
+ *
+ * `client.$executeRaw` is a TAGGED TEMPLATE, so the first argument is the
+ * TemplateStringsArray itself — not an object with a `strings` property. A
+ * double that reads `q.strings` gets `undefined` for every call, matches
+ * nothing, and answers every statement with the same value: it then vouches for
+ * any raw query standing in for any other. (Written that way first, which is how
+ * this comment comes to be here.)
+ */
+const sqlOf = (q: unknown): string => (Array.isArray(q) ? q.join(" ") : String(q ?? ""));
+
 function makeService(counts: Record<string, number>) {
   const del = (k: string) => jest.fn().mockResolvedValue({ count: counts[k] ?? 0 });
   const tx = {
@@ -59,14 +71,30 @@ function makeService(counts: Record<string, number>) {
     integrityRetentionRun: { create: jest.fn().mockResolvedValue({}) },
   };
   const client = {
-    school: { findMany: jest.fn().mockResolvedValue([{ id: "s-1", integrityRetentionDays: 30 }]) },
+    school: {
+      findMany: jest.fn().mockResolvedValue([
+        // BOTH windows, because the sweep now reads both. A fixture that omitted
+        // the staff one would leave that whole stream disabled and every
+        // assertion below would be made against a sweep doing less than the real
+        // one does — the fixture trap this repo keeps recording.
+        { id: "s-1", integrityRetentionDays: 30, staffAttendanceEventRetentionDays: 730 },
+      ]),
+    },
     $transaction: jest.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
     // The two PLATFORM-WIDE streams, swept once per run rather than per school.
     gatewayEvent: { deleteMany: jest.fn().mockResolvedValue({ count: counts.gatewayEvent ?? 0 }) },
     // The platform-wide purge also clears READ notifications (see the
     // unbounded-growers suite); unread are never touched at any age.
     notification: { deleteMany: jest.fn().mockResolvedValue({ count: counts.notification ?? 0 }) },
-    $executeRaw: jest.fn().mockResolvedValue(counts.lmsContentRevision ?? 0),
+    // ANSWERS BY WHAT WAS ASKED. Several different raw statements go through
+    // here now — the per-school staff-scan purge and the platform-wide ones —
+    // and one blanket return value would let any of them stand in for another.
+    $executeRaw: jest.fn((q: TemplateStringsArray) => {
+      const sql = sqlOf(q);
+      if (/staff_attendance_event/.test(sql)) return Promise.resolve(counts.staffAttendanceEvent ?? 0);
+      if (/lms_content_revision/.test(sql)) return Promise.resolve(counts.lmsContentRevision ?? 0);
+      return Promise.resolve(0);
+    }),
   };
   const db = { client };
   const svc = new IntegrityRetentionService(db as never);
@@ -172,7 +200,11 @@ describe("the platform-wide streams — not about pupils, still unbounded", () =
     // the real growth risk — would lose nothing.
     const { svc, client } = makeService({});
     await svc.purgeAllSchools("SCHEDULED");
-    const sql = (client.$executeRaw as jest.Mock).mock.calls[0][0].join("?");
+    // By what it IS, not by its position: the staff-scan purge now runs before
+    // the platform-wide statements, so `calls[0]` is a different query.
+    const sql = (client.$executeRaw as jest.Mock).mock.calls
+      .map((c) => sqlOf(c[0]))
+      .find((q) => /lms_content_revision/.test(q)) ?? "";
     expect(sql).toContain("lms_content_revision");
     expect(sql).toContain("PARTITION BY");
     expect(sql).toContain("contentId");
@@ -182,24 +214,33 @@ describe("the platform-wide streams — not about pupils, still unbounded", () =
   it("runs them ONCE per sweep, not once per school", async () => {
     // Per-school would delete the same platform-wide rows N times over and report
     // a wildly inflated count.
+    // Counted over the PLATFORM-WIDE statements only. The staff-scan purge is
+    // deliberately per school — it is tenant data — so counting every raw
+    // statement would now conflate the two and this test would be asserting the
+    // opposite of its own name.
+    const platformWideRawCalls = (c: { $executeRaw: jest.Mock }) =>
+      c.$executeRaw.mock.calls.filter((call) => !/staff_attendance_event/.test(sqlOf(call[0]))).length;
+
     const { svc, client } = makeService({});
     (client.school.findMany as jest.Mock).mockResolvedValue([
-      { id: "s-1", integrityRetentionDays: 30 },
-      { id: "s-2", integrityRetentionDays: 30 },
-      { id: "s-3", integrityRetentionDays: 30 },
+      { id: "s-1", integrityRetentionDays: 30, staffAttendanceEventRetentionDays: 730 },
+      { id: "s-2", integrityRetentionDays: 30, staffAttendanceEventRetentionDays: 730 },
+      { id: "s-3", integrityRetentionDays: 30, staffAttendanceEventRetentionDays: 730 },
     ]);
     await svc.purgeAllSchools("SCHEDULED");
     // THREE schools, but each platform-wide statement runs ONCE. Asserting a
     // fixed count of raw statements would break every time one is added and say
     // nothing about the property; what matters is that the count does not scale
     // with the number of schools.
-    const rawCallsFor3 = (client.$executeRaw as jest.Mock).mock.calls.length;
+    const rawCallsFor3 = platformWideRawCalls(client as never);
     expect(client.gatewayEvent.deleteMany).toHaveBeenCalledTimes(1);
 
     const second = makeService({});
-    (second.client.school.findMany as jest.Mock).mockResolvedValue([{ id: "only-1", integrityRetentionDays: 30 }]);
+    (second.client.school.findMany as jest.Mock).mockResolvedValue([
+      { id: "only-1", integrityRetentionDays: 30, staffAttendanceEventRetentionDays: 730 },
+    ]);
     await second.svc.purgeAllSchools("SCHEDULED");
-    expect((second.client.$executeRaw as jest.Mock).mock.calls.length).toBe(rawCallsFor3);
+    expect(platformWideRawCalls(second.client as never)).toBe(rawCallsFor3);
   });
 
   it("keeps them OUT of the per-school run record", async () => {
@@ -229,6 +270,18 @@ describe("the source itself", () => {
     const deleted = [...SERVICE_SRC.matchAll(/tx\.(\w+)\.deleteMany/g)].map((m) => m[1]);
     expect(deleted.sort()).toEqual([...PURGED].sort());
   });
+
+  it("sweeps the per-school streams written as RAW SQL too", () => {
+    // The gate above scans for `tx.X.deleteMany`, so a stream purged with raw
+    // SQL is INVISIBLE to it. `staff_attendance_event` is exactly that — it is
+    // batched, so it cannot ride inside the telemetry transaction — and it is
+    // the largest table the platform projects. A coverage gate that cannot see
+    // the biggest stream it is meant to cover is worse than no gate, because it
+    // reports the set as complete.
+    expect(SERVICE_SRC).toMatch(/DELETE FROM staff_attendance_event/);
+    // Tenant-bounded, on the privileged RLS-bypassing client.
+    expect(SERVICE_SRC).toMatch(/staff_attendance_event[\s\S]{0,400}?"schoolId" = \$\{schoolId\}/);
+  });
 });
 
 // ===========================================================================
@@ -257,7 +310,7 @@ describe("IntegrityRetentionProcessor job result", () => {
     // just as readily as a right one.
     const expected = (await makeService(counts).svc.purgeAllSchools("SCHEDULED")).purged;
     const out = await new IntegrityRetentionProcessor(makeService(counts).svc, norecord).process(job);
-    expect(out).toEqual({ schools: 1, purged: expected });
+    expect(out).toEqual({ schools: 1, purged: expected, failed: 0 });
   });
 
   // The sharp case: a night whose ENTIRE yield is the two streams the old
@@ -268,13 +321,38 @@ describe("IntegrityRetentionProcessor job result", () => {
     expect(out.purged).toBe(90);
   });
 
+  it("carries `failed` through, so a school it could not purge reaches the console", async () => {
+    // The service counts a school whose purge threw and carries on, which is
+    // right — one school's failure must not end the fleet's sweep. But a catch
+    // that does not rethrow leaves `lastOk` true, so the job summary's `failed`
+    // field is the operator console's ONLY sight of it. The processor dropped it
+    // between the service and `record()`: the sweep counted four skipped schools
+    // and nothing anybody reads was ever told, every night, looking healthy.
+    //
+    // Minors' telemetry sitting past its retention window is the one outcome
+    // this job exists to prevent.
+    const { svc, client } = makeService({});
+    (client.school.findMany as jest.Mock).mockResolvedValue([
+      { id: "ok-1", integrityRetentionDays: 30, staffAttendanceEventRetentionDays: 730 },
+      { id: "bad", integrityRetentionDays: 30, staffAttendanceEventRetentionDays: 730 },
+    ]);
+    (client.$transaction as jest.Mock).mockImplementationOnce(async () => {
+      throw new Error("deadlock detected");
+    });
+
+    const out = await new IntegrityRetentionProcessor(svc, norecord).process(job);
+    expect(out.failed).toBe(1);
+    // And it is the SERVICE's count, not a second one derived here.
+    expect(out.schools).toBe(1);
+  });
+
   it("a sweep with NO privileged DB is not a sweep that found nothing", async () => {
     const svc = new IntegrityRetentionService({ client: null } as never);
     const processor = new IntegrityRetentionProcessor(svc, norecord);
     const logged: string[] = [];
     jest.spyOn(Logger.prototype, "log").mockImplementation((m: unknown) => { logged.push(String(m)); });
     try {
-      await expect(processor.process(job)).resolves.toEqual({ schools: 0, purged: 0 });
+      await expect(processor.process(job)).resolves.toEqual({ schools: 0, purged: 0, failed: 0 });
       expect(logged.join(" ")).toMatch(/SKIPPED/i);
     } finally {
       jest.restoreAllMocks();

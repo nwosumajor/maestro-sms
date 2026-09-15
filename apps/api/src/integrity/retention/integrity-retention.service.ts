@@ -98,8 +98,14 @@ export interface SchoolRetentionResult {
   telemetryDeleted: number;
   xapiDeleted: number;
   scansDeleted: number;
-  /** Set when nothing was purged for a non-error reason. */
+  /** Raw staff clock scans, purged on their OWN window (see below). */
+  staffEventsDeleted: number;
+  staffEventRetentionDays: number;
+  /** Set when the TELEMETRY streams were not purged for a non-error reason. The
+   *  staff stream has its own window and is reported separately, because one
+   *  being disabled says nothing about the other. */
   skipped?: "DISABLED" | "NO_DB";
+  staffEventsSkipped?: "DISABLED" | "NO_DB";
 }
 
 /**
@@ -144,7 +150,7 @@ export class IntegrityRetentionService {
       return { schools: [], failed: 0, purged: 0, platformWide: EMPTY_PLATFORM_COUNTS, skipped: true };
     }
     const schools = await client.school.findMany({
-      select: { id: true, integrityRetentionDays: true },
+      select: { id: true, integrityRetentionDays: true, staffAttendanceEventRetentionDays: true },
     });
     const results: SchoolRetentionResult[] = [];
     // ONE SCHOOL'S FAILURE MUST NOT END THE FLEET'S SWEEP.
@@ -162,7 +168,9 @@ export class IntegrityRetentionService {
     let failed = 0;
     for (const s of schools) {
       try {
-        results.push(await this.purgeSchool(s.id, s.integrityRetentionDays, trigger));
+        results.push(
+          await this.purgeSchool(s.id, s.integrityRetentionDays, trigger, s.staffAttendanceEventRetentionDays),
+        );
       } catch (err) {
         failed += 1;
         this.logger.error(
@@ -180,13 +188,16 @@ export class IntegrityRetentionService {
 
     const purged = results.reduce(
       // EVERY stream, or the reported total quietly under-counts what was purged.
-      (n, r) => n + r.signalsDeleted + r.draftsDeleted + r.telemetryDeleted + r.xapiDeleted + r.scansDeleted,
+      // staffEventsDeleted is the largest of them by a wide margin, and omitting
+      // it is exactly how this total under-reported millions once before.
+      (n, r) =>
+        n + r.signalsDeleted + r.draftsDeleted + r.telemetryDeleted + r.xapiDeleted + r.scansDeleted + r.staffEventsDeleted,
       0,
     );
     const platformTotal =
       globalCounts.gatewayEvents + globalCounts.contentRevisions + globalCounts.gameGuesses + globalCounts.readNotifications + globalCounts.jobRuns;
     this.logger.log(
-      `Retention sweep (${trigger}) complete: ${schools.length} schools, ${purged + platformTotal} rows purged ` +
+      `Retention sweep (${trigger}) complete: ${schools.length} schools, ${failed} failed, ${purged + platformTotal} rows purged ` +
         `(${purged} tenant-scoped + ${platformTotal} platform-wide). ` +
         `Platform-wide: gatewayEvents=${globalCounts.gatewayEvents} contentRevisions=${globalCounts.contentRevisions} ` +
           `gameGuesses=${globalCounts.gameGuesses} readNotifications=${globalCounts.readNotifications} jobRuns=${globalCounts.jobRuns}.`,
@@ -194,54 +205,98 @@ export class IntegrityRetentionService {
     return { schools: results, failed, purged: purged + platformTotal, platformWide: globalCounts, skipped: false };
   }
 
-  /** Purge one school using its window. schoolId/retentionDays come from the
-   *  registry, never from request input. */
+  /**
+   * Purge one school. schoolId and both windows come from the registry, never
+   * from request input.
+   *
+   * TWO INDEPENDENT WINDOWS, and keeping them independent is the point.
+   * `retentionDays` governs behavioural telemetry about MINORS;
+   * `staffEventRetentionDays` governs the raw clock-in/out scans of ADULT staff.
+   * They answer different questions and a school may reasonably set one to
+   * ninety days and the other to two years — so neither may gate the other. An
+   * earlier draft of this ran the staff purge inside the telemetry window's
+   * early return, which meant a school disabling pupil-telemetry purging (a
+   * privacy-conservative choice) silently stopped purging its staff scans too,
+   * and the largest table on the platform grew for ever with nothing said.
+   */
   async purgeSchool(
     schoolId: string,
     retentionDays: number,
     trigger: RetentionTrigger = "MANUAL",
+    staffEventRetentionDays = 0,
   ): Promise<SchoolRetentionResult> {
     const client = this.db.client;
-    if (!client) {
-      return {
-        schoolId,
-        retentionDays,
-        cutoff: new Date().toISOString(),
-        signalsDeleted: 0,
-        xapiDeleted: 0,
-        scansDeleted: 0,
-        draftsDeleted: 0,
-        telemetryDeleted: 0,
-        skipped: "NO_DB",
-      };
-    }
-    // 0 / negative window => purging disabled for this school (keep everything).
-    if (!retentionDays || retentionDays <= 0) {
-      return {
-        schoolId,
-        retentionDays,
-        cutoff: new Date().toISOString(),
-        signalsDeleted: 0,
-        xapiDeleted: 0,
-        scansDeleted: 0,
-        draftsDeleted: 0,
-        telemetryDeleted: 0,
-        skipped: "DISABLED",
-      };
-    }
+    const none = (
+      skipped: "DISABLED" | "NO_DB" | undefined,
+      staffSkipped: "DISABLED" | "NO_DB" | undefined,
+    ): SchoolRetentionResult => ({
+      schoolId,
+      retentionDays,
+      staffEventRetentionDays,
+      cutoff: new Date().toISOString(),
+      signalsDeleted: 0,
+      xapiDeleted: 0,
+      scansDeleted: 0,
+      draftsDeleted: 0,
+      telemetryDeleted: 0,
+      staffEventsDeleted: 0,
+      ...(skipped ? { skipped } : {}),
+      ...(staffSkipped ? { staffEventsSkipped: staffSkipped } : {}),
+    });
+
+    if (!client) return none("NO_DB", "NO_DB");
+
+    // 0 / negative window => purging disabled for that stream (keep everything).
+    const telemetryOn = retentionDays > 0;
+    const staffOn = staffEventRetentionDays > 0;
+    if (!telemetryOn && !staffOn) return none("DISABLED", "DISABLED");
 
     const startedAt = new Date();
     const cutoff = new Date(Date.now() - retentionDays * 86_400_000);
+    // The staff scan's own cutoff, as a CALENDAR DAY — `staff_attendance_event
+    // .date` is a @db.Date holding the SCHOOL's day, not an instant, so the
+    // predicate has to be a day too. At a two-year boundary a timezone's worth
+    // of skew is immaterial and resolving each school's zone here would cost a
+    // registry read per school for no decision it could change.
+    const staffCutoff = new Date(Date.now() - staffEventRetentionDays * 86_400_000);
+    staffCutoff.setUTCHours(0, 0, 0, 0);
+
+    // THE STAFF SCANS GO FIRST, AND OUTSIDE THE TRANSACTION BELOW.
+    //
+    // This is the largest table the platform projects (~1.3B rows at 5,000
+    // schools over five years) and these windows are new, so the FIRST sweep on
+    // a mature database has years of rows to remove at once. Inside the
+    // telemetry transaction that would be one enormous long-held delete; batched
+    // and auto-committed it is bounded work that resumes next sweep — the same
+    // reasoning, and the same helper, as the platform-wide streams.
+    //
+    // SECURITY: privileged (RLS-bypassing) client, so the predicate carries
+    // schoolId explicitly — no cross-tenant bleed even without RLS.
+    let staffEventsDeleted = 0;
+    if (staffOn) {
+      staffEventsDeleted = await this.deleteInBatches(
+        `staff scans (school ${schoolId})`,
+        (limit) => client.$executeRaw`
+          DELETE FROM staff_attendance_event
+          WHERE id IN (
+            SELECT id FROM staff_attendance_event
+            WHERE "schoolId" = ${schoolId}::uuid AND "date" < ${staffCutoff}
+            LIMIT ${limit}
+          )
+        `,
+      );
+    }
 
     // One transaction: delete the three append-only tables for THIS school, then
     // write the immutable run record. // SECURITY: privileged (RLS-bypassing)
     // handle, so every delete is explicitly bounded by schoolId — no cross-tenant
     // bleed even without RLS.
     const counts = await client.$transaction(async (tx) => {
+      const none = { count: 0 };
       const where = { schoolId, createdAt: { lt: cutoff } };
-      const signals = await tx.integritySignal.deleteMany({ where });
-      const drafts = await tx.submissionDraft.deleteMany({ where });
-      const telemetry = await tx.submissionTelemetry.deleteMany({ where });
+      const signals = telemetryOn ? await tx.integritySignal.deleteMany({ where }) : none;
+      const drafts = telemetryOn ? await tx.submissionDraft.deleteMany({ where }) : none;
+      const telemetry = telemetryOn ? await tx.submissionTelemetry.deleteMany({ where }) : none;
       // The other two streams of behavioural telemetry about children, governed
       // by the SAME window rather than one of their own: a school that has
       // decided how long it keeps observations of its pupils has decided it for
@@ -250,10 +305,10 @@ export class IntegrityRetentionService {
       // that can ever make them smaller.
       // NOTE the different column: an xAPI statement records when it was STORED,
       // not created — the two are not the same for a record that can arrive late.
-      const xapi = await tx.xapiStatement.deleteMany({
-        where: { schoolId, storedAt: { lt: cutoff } },
-      });
-      const scans = await tx.scanEvent.deleteMany({ where });
+      const xapi = telemetryOn
+        ? await tx.xapiStatement.deleteMany({ where: { schoolId, storedAt: { lt: cutoff } } })
+        : none;
+      const scans = telemetryOn ? await tx.scanEvent.deleteMany({ where }) : none;
       await tx.integrityRetentionRun.create({
         data: {
           schoolId,
@@ -264,6 +319,10 @@ export class IntegrityRetentionService {
           telemetryDeleted: telemetry.count,
           xapiDeleted: xapi.count,
           scansDeleted: scans.count,
+          staffEventsDeleted,
+          // NULL when the staff stream was not swept, which is a different fact
+          // from a window of zero — the history has to be able to say which.
+          staffEventRetentionDays: staffOn ? staffEventRetentionDays : null,
           trigger,
           startedAt,
         },
@@ -275,17 +334,24 @@ export class IntegrityRetentionService {
     this.logger.log(
       `school=${schoolId} cutoff=${cutoff.toISOString()} purged ` +
         `signals=${counts.signals} drafts=${counts.drafts} telemetry=${counts.telemetry} ` +
-        `xapi=${counts.xapi} scans=${counts.scans}`,
+        `xapi=${counts.xapi} scans=${counts.scans} staffEvents=${staffEventsDeleted}`,
     );
     return {
       schoolId,
       retentionDays,
+      staffEventRetentionDays,
       cutoff: cutoff.toISOString(),
       signalsDeleted: counts.signals,
       draftsDeleted: counts.drafts,
       telemetryDeleted: counts.telemetry,
       xapiDeleted: counts.xapi,
       scansDeleted: counts.scans,
+      staffEventsDeleted,
+      // Each stream reports its OWN reason for having done nothing. One being
+      // disabled says nothing about the other, and a single flag would read as
+      // "this school was skipped" when half of it was swept.
+      ...(telemetryOn ? {} : { skipped: "DISABLED" as const }),
+      ...(staffOn ? {} : { staffEventsSkipped: "DISABLED" as const }),
     };
   }
 

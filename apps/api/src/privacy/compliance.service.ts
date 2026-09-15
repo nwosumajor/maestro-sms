@@ -269,8 +269,18 @@ export class ComplianceService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const school = (await tx.school.findFirst({
         where: { id: p.schoolId },
-        select: { dpoName: true, dpoEmail: true, integrityRetentionDays: true },
-      })) as { dpoName: string | null; dpoEmail: string | null; integrityRetentionDays: number } | null;
+        select: {
+          dpoName: true,
+          dpoEmail: true,
+          integrityRetentionDays: true,
+          staffAttendanceEventRetentionDays: true,
+        },
+      })) as {
+        dpoName: string | null;
+        dpoEmail: string | null;
+        integrityRetentionDays: number;
+        staffAttendanceEventRetentionDays: number;
+      } | null;
 
       const rows = (await tx.dataBreachIncident.findMany({ take: 500 })) as Row[];
       const now = new Date();
@@ -318,6 +328,7 @@ export class ComplianceService {
         },
         erasurePending,
         integrityRetentionDays: school?.integrityRetentionDays ?? 0,
+        staffEventRetentionDays: school?.staffAttendanceEventRetentionDays ?? 0,
         consent: {
           recorded: consentRecorded,
           // The lawful-basis question a DPO asks: how many children are we holding
