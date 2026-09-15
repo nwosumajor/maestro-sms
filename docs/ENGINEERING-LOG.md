@@ -16555,3 +16555,95 @@ PLANNED: `status`/`taughtAt` record what an arm actually taught, and carrying
 // The response says which arms got a week and which did not, because a copy
 // attached to the plan shows up in that arm's weekly view and one that is not is
 // a draft somebody has to place by hand.
+
+### Whole-application simulation: 5,000 schools, five years
+
+Seeded a 5,000-school fleet, one school with five years of staff attendance
+(130,500 rows / 261,000 scan events) and one with five years of pupil registers
+(1,291,951 records across 52 monthly partitions), and measured as the app role
+under RLS with bound parameters.
+
+WHAT HELD. Index coverage is complete: of 203 tenant-scoped tables, exactly TWO
+lack a `schoolId`-leading index — `ultimate_participant` (the documented
+RLS-exempt arena) and `school_group_member` (operator-managed, deny-all). Reads
+measured fine at volume: the scan projection 0.17 ms, a person's whole five-year
+compiled history 3.47 ms on an Index Only Scan, the fleet scan across 5,000
+schools 5.53 ms. Retention is broader than it looks — `integrity_signal`,
+`submission_draft`, `submission_telemetry`, `xapi_statement`, `scan_event`,
+`gateway_event` and READ notifications are all purged, and `attendance_record`
+and `audit_log` are partitioned.
+
+**THE FINDING: PLANNING TIME, NOT EXECUTION.** An aggregate over a partitioned
+table with NO date predicate must plan every partition:
+
+    unbounded (all months), 52 partitions   planning 88.6 ms   execution 9.4 ms
+    bounded to one school year              planning  0.58 ms  execution 1.3 ms
+
+Planning was NINETY PER CENT of the cost, and it scales with PARTITION COUNT —
+8.9 ms at 5, 88.6 ms at 52 — which tracks the PLATFORM's age, not the pupil's
+record. So the pupil compiled history I had just built would get slower every
+month for every school, including schools that joined yesterday, and nothing in
+their own data would explain it. This is the O(lifetime) class arriving by a
+route the log had not recorded: not more rows, more PARTITIONS.
+
+FIX: the page IS a date window for months, so page 5 costs what page 1 does, and
+the in-memory slice is gone. The one pass that must stay unbounded is the
+lifetime total — an audit figure that stopped at a page would be the very thing
+it must not be — so it now also returns the SPAN, which gives the month total
+without a second scan over every partition. Two unbounded passes became one:
+~196 ms -> ~93 ms, of which 76 ms is the remaining unavoidable plan. Bounding
+that by the pupil's first enrolment is the next step if the screen proves slow;
+it was not measured, so it is not claimed.
+
+// GOTCHA found while seeding, and it is a REAL operational trap rather than a
+// fixture artifact: Postgres REFUSES to create a partition for a month that
+// already has rows in the DEFAULT partition ("updated partition constraint for
+// default partition would be violated"). So once the extender falls behind — or
+// a school onboards with history — that month can never be partitioned until
+// the rows are migrated out. `AuditPartitionService` already DETECTS this,
+// counts `defaultRows` into `failed` so the console flags it, and its comment
+// says "they must be moved before a partition can be added for their month, and
+// that gets harder the longer nobody looks". The detection is right; there is no
+// remedy in the product, and at 5,000 schools "manual attention" has no tool.
+
+// The day-close write path found in the same run is written up above.
+
+### A window anchored on today lands after a leaver's final register
+
+// Found reviewing my own fix from #347 before committing it, which is the only
+// reason it is here rather than in a school's incident report.
+//
+// Turning the compiled-attendance month page from a SLICE into a date WINDOW
+// fixed the partition-planning cost, and introduced a correctness defect in the
+// same edit. The window was counted back from TODAY:
+//
+//     monthsBack = page * pageSize
+//     from = firstOfMonth(today - monthsBack + 1)
+//
+// which is right for a pupil still on roll and wrong for everyone else. A pupil
+// who left in July 2023 has no register after that date, so with a 36-month page
+// every month of their record fell outside page 1 from August 2026 onwards: an
+// EMPTY page under a `total` correctly reporting thirty months of history, with
+// paging controls that work and a screen that shows nothing.
+//
+// The reader this hurts is the only reader the screen was built for. Nobody
+// compiles three years of a current pupil's attendance per month; the request
+// that produced this surface was "viewable for many years for audit and
+// investigation", and an investigation is overwhelmingly opened on somebody who
+// has gone. So the defect was aimed precisely at the use case.
+//
+// This is the silent-partial-success class again (the totals agree, the list is
+// empty, nothing says why), arriving through the door of a performance fix —
+// which is the recurring shape: the careful half is reasoned out and the edit
+// changes what the numbers MEAN as a side effect.
+//
+// FIX: anchor on `last_day`, which the lifetime pass already returns for the
+// span, falling back to the school's today when there is no record at all. Costs
+// nothing — the value is in hand.
+//
+// TESTS (mutation-validated, each failing naming its own property):
+//   - anchor on today instead of last_day -> the LEAVER test fails
+//   - drop the `AND "date" >= … AND "date" <` predicate -> the SQL-window test
+//     fails (and the month double now HONOURS the window, so it cannot vouch for
+//     an unwindowed query — the fixture trap this repo keeps recording)
+//   - total from `all.length` -> Expected 30, Received 1

@@ -43,8 +43,16 @@ function makeService(opts: {
   rollups?: Array<{ termId: string; classId?: string; present: number; absent: number; late: number; excused: number }>;
   live?: Record<string, { present: number; absent: number; late: number; excused: number }>;
   months?: Array<{ key: string; present: number; absent: number; late: number; excused: number }>;
+  /** The pupil's first and last recorded day — what the lifetime pass returns. */
+  span?: { first: Date; last: Date };
 } = {}) {
-  const { rollups = [], live = {}, months = [] } = opts;
+  const {
+    rollups = [],
+    live = {},
+    months = [],
+    // 30 months of span, matching the fixture's month list.
+    span = { first: new Date("2024-03-01"), last: new Date("2026-08-31") },
+  } = opts;
   const tx = {
     user: { findFirst: jest.fn(async () => ({ name: "Ada Pupil" })) },
     term: { findMany: jest.fn(async () => TERMS) },
@@ -95,14 +103,36 @@ function makeService(opts: {
         ];
       }),
     },
-    $queryRaw: jest.fn(async () =>
-      months.map((m) => ({
-        key: m.key,
-        from_date: new Date(`${m.key}-01`),
-        to_date: new Date(`${m.key}-28`),
-        present: m.present, absent: m.absent, late: m.late, excused: m.excused,
-      })),
-    ),
+    // TWO different raw queries now: the lifetime pass (which also returns the
+    // SPAN, so the month total needs no second scan over every partition) and
+    // the month aggregate. A stub answering both with the same shape would let
+    // either one break unnoticed, so it answers by what was ASKED.
+    $queryRaw: jest.fn(async (q: { strings?: string[]; values?: unknown[] }) => {
+      const sql = String(q?.strings?.join(" ") ?? "");
+      if (/min\("date"\)/.test(sql) && !/date_trunc/.test(sql)) {
+        return [{
+          present: 300, absent: 20, late: 10, excused: 5,
+          first_day: span.first, last_day: span.last,
+        }];
+      }
+      // HONOURS THE DATE WINDOW, which is the whole point of this half of the
+      // double. Returning every month regardless would let the service drop the
+      // `AND "date" >= … AND "date" < …` predicate — the one that stops a page
+      // planning every partition — with every assertion here still green.
+      const [, from, to] = (q?.values ?? []) as [unknown, Date, Date];
+      return months
+        .filter((m) => {
+          if (!(from instanceof Date) || !(to instanceof Date)) return true;
+          const start = new Date(`${m.key}-01T00:00:00Z`);
+          return start >= from && start < to;
+        })
+        .map((m) => ({
+          key: m.key,
+          from_date: new Date(`${m.key}-01`),
+          to_date: new Date(`${m.key}-28`),
+          present: m.present, absent: m.absent, late: m.late, excused: m.excused,
+        }));
+    }),
   } as unknown as TenantTx;
 
   const svc = new AttendanceService(
@@ -286,5 +316,62 @@ describe("months", () => {
     const { svc } = makeService({ months: [{ key: "2026-03", present: 1, absent: 0, late: 0, excused: 0 }] });
     const r = await svc.compiledHistory(head, PUPIL, { grain: "month" });
     expect(r.buckets.every((b) => b.source === "LIVE")).toBe(true);
+  });
+});
+
+describe("the month page is a DATE WINDOW, and it is anchored on the record", () => {
+  // Months are paged by narrowing the SQL rather than by slicing a full fetch,
+  // because `attendance_record` is partitioned by month and an aggregate with no
+  // date predicate has to PLAN every partition — measured at 88.6 ms planning
+  // against 9.4 ms execution on 52 partitions, a cost that grows with the
+  // PLATFORM's age rather than with the pupil's record.
+  //
+  // That makes WHERE the window sits a correctness question, not a tuning one.
+
+  it("puts a LEAVER's last months on page 1, not an empty window after them", async () => {
+    // The defect this exists for: a window counted back from TODAY lands after
+    // the final register of anyone who has left, so page 1 comes back empty
+    // under a total saying thirty months of history exist. An investigation
+    // opening a leaver's record is the likeliest reader of this screen.
+    const { svc } = makeService({
+      span: { first: new Date("2021-09-01"), last: new Date("2023-07-31") },
+      months: [
+        { key: "2023-07", present: 14, absent: 1, late: 0, excused: 0 },
+        { key: "2023-06", present: 19, absent: 0, late: 1, excused: 0 },
+      ],
+    });
+    const r = await svc.compiledHistory(head, PUPIL, { grain: "month", page: 1 });
+    expect(r.buckets.map((b) => b.key)).toEqual(["2023-07", "2023-06"]);
+  });
+
+  it("narrows in SQL, so a later page asks for a DIFFERENT window", async () => {
+    const { svc, tx } = makeService({
+      span: { first: new Date("2024-03-01"), last: new Date("2026-08-31") },
+      months: [{ key: "2026-08", present: 1, absent: 0, late: 0, excused: 0 }],
+    });
+    const windowOf = async (page: number) => {
+      (tx.$queryRaw as jest.Mock).mockClear();
+      await svc.compiledHistory(head, PUPIL, { grain: "month", page });
+      const call = (tx.$queryRaw as jest.Mock).mock.calls
+        .map((c) => c[0] as { strings?: string[]; values?: unknown[] })
+        .find((q) => /date_trunc/.test(String(q?.strings?.join(" ") ?? "")));
+      const [, from, to] = (call?.values ?? []) as [unknown, Date, Date];
+      return [from?.toISOString().slice(0, 10), to?.toISOString().slice(0, 10)];
+    };
+    // Page 1 ends just after the pupil's last recorded month; page 2 is the
+    // 36 months before it. Neither is the whole record.
+    expect(await windowOf(1)).toEqual(["2023-09-01", "2026-09-01"]);
+    expect(await windowOf(2)).toEqual(["2020-09-01", "2023-09-01"]);
+  });
+
+  it("reports the TOTAL months from the span, never the size of the page", async () => {
+    // The page is the window, so `all.length` would report the page as the whole
+    // record — a pupil with thirty months of history shown as having twelve.
+    const { svc } = makeService({
+      span: { first: new Date("2024-03-01"), last: new Date("2026-08-31") },
+      months: [{ key: "2026-08", present: 1, absent: 0, late: 0, excused: 0 }],
+    });
+    const r = await svc.compiledHistory(head, PUPIL, { grain: "month", page: 1 });
+    expect(r.total).toBe(30);
   });
 });

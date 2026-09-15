@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **346 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **348 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **346 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **348 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1029,21 +1029,19 @@ These are the rules; the log is why each one exists.
 - **A DIARY IS THE MIRROR OF A REGISTER, AND AN ASCENDING CAP EATS THE FUTURE.**
   A register is read oldest-first and a newest-first cap drops the row it exists
   to surface; a diary is read for what is NEXT and an ascending cap drops that.
-  Meetings had both `mySlots` and `myBookings` on `startsAt ASC` under a cap with
-  NO date filter: at a 61-teacher secondary three years in (10,980 slots, 1,220
-  still to come) a school-wide reader got 200 rows spanning **a single day three
-  years earlier** and zero upcoming — a screen that could never advance, because
-  every new slot sorts after the 200 oldest. Order so the cap keeps what the
-  screen is FOR, count the rest in SQL, and keep the other end reachable
-  (`?when=past`). // GOTCHA: the correct sibling was one method away —
+  Meetings had `mySlots` and `myBookings` on `startsAt ASC` under a cap with NO
+  date filter: at a 61-teacher secondary three years in (10,980 slots, 1,220 to
+  come) a school-wide reader got 200 rows spanning **a single day three years
+  earlier** and zero upcoming — a screen that could never advance. Order so the
+  cap keeps what the screen is FOR, count the rest in SQL, and keep the other end
+  reachable (`?when=past`). // GOTCHA: the correct sibling was one method away —
   `listOpenSlots` filtered `startsAt >= now` and paged, with a comment reasoning
   about this exact failure, and was never swept to the other two lists.
 - **A capped list is worse when it is the only route to something else.** The
   billing history was the 50 most recent with no page, and a payment's id appears
-  NOWHERE else — so its receipt went with it. At three years a school holds 48
-  rows: every school crosses the cap in year four, and a receipt its auditor asks
-  for is then unreachable while the route that serves it works perfectly. Ask
-  what a dropped row was the key to.
+  NOWHERE else — so its receipt went with it. Every school crosses the cap in
+  year four, and a receipt its auditor asks for is then unreachable while the
+  route that serves it works perfectly. Ask what a dropped row was the key to.
 - **"Live work is bounded" is an assumption, not a fact.** The approvals queue
   read the newest 500 PENDING_REVIEW rows and narrowed in memory, reasoning that
   live work is bounded by what a school is working on. It is bounded by what the
@@ -1085,19 +1083,15 @@ These are the rules; the log is why each one exists.
 - **A JUMP-TO BOX IS STILL A CAP.** The omnibox showed six per category with no
   count and no order: "Adebayo" matched 150 pupils and returned six arbitrary
   ones, so *not on the roll* and *one of the 144 I did not show* rendered
-  identically. Six is the right page size; saying nothing is not. Return
-  `shown`/`total` and order by a TOTAL order so the six are explicable — and
-  offer "see all" ONLY where a query page exists (`/students`, `/hr` do;
-  `/classes`, `/fees` do not). Count only when the `PER_CATEGORY + 1`-th row
-  proves there is more, so the common search pays nothing.
+  identically. Return `shown`/`total`, order by a TOTAL order so the six are
+  explicable, and offer "see all" ONLY where a query page exists. Count only when
+  the `PER_CATEGORY + 1`-th row proves there is more.
 - **AND THE FILTER A TOTAL IS COMPUTED OVER CAN ITSELF BE TRUNCATED.** The
   operator revenue screen aggregates in SQL over the whole filter and says so in
   a docstring — while the filter was built from the first 500 name-matching
   schools fed to a `schoolId IN`. At 800 similarly-named schools it reported
-  NGN 262,500,000 of 420,000,000. When a predicate is MATERIALISED (an id list,
-  because the column has no Prisma relation), the cap belongs to the fleet, not
-  to a page — and crossing it must be reported. Careful reasoning aimed one level
-  too low is still a guard on one door.
+  NGN 262,500,000 of 420,000,000. When a predicate is MATERIALISED (an id list),
+  the cap belongs to the fleet, not to a page — and crossing it must be reported.
 - **A FIGURE COMPUTED FROM A CAPPED PAGE IS WORSE THAN A SHORT LIST.** The
   scholarship oversight panel derived its headline statistics from the fetched
   array — `applications.length`, `awarded.length` — over a `take: 500`. At five
@@ -2354,65 +2348,71 @@ collapsed "Taken (n)" — where it used to show only a count of the gaps. The
 manual trigger is SCHOOL-scoped (`attendance.write`), never the fleet.
 
 ## Staff attendance: a SPAN, closed by a sweep, corrected by two people
-It recorded ARRIVALS only, and the biometric ingest dropped a terminal's
-departure scans as duplicates. Scans now append to `staff_attendance_event`
-(rls/113, append-only) and the day row is a PROJECTION — first IN, last OUT.
-// GOTCHA: clock-OUT is NOT windowed (a window catches a late ARRIVAL), and
-`minutesOnSite` is NULL not 0 — "we do not know" is not "no time".
+It recorded ARRIVALS only and the biometric ingest dropped departure scans as
+duplicates. Scans append to `staff_attendance_event` (rls/113, append-only); the
+day row is a PROJECTION — first IN, last OUT. // GOTCHA: clock-OUT is NOT
+windowed (a window catches a late ARRIVAL), and `minutesOnSite` is NULL not 0.
 // **ABSENCE WAS NEVER RECORDED** — `summary()` counts rows that EXIST, so anyone
-who never clocked in was neither present nor absent. `StaffDayCloseService` acts
-on each school's own 19:00 (late, or every evening activity is an ABSENT):
-unmarked -> ABSENT, approved leave -> ON_LEAVE (authorised and no-show had been
-one state); `openSpans` counted apart. // **AND EVERY READER COULD REWRITE THEIR
-OWN RECORD**: `hr.attendance.read`/`.amend` split, self-marking REFUSED, past 7
-days needs a senior `.amend.review` holder (never the initiator). `/kiosk` shows
-the code alone — it needed `hr.read`, so the corridor screen showed the register.
+who never clocked in was neither. `StaffDayCloseService` acts on each school's own
+19:00 (late, or evening activities become absences): unmarked -> ABSENT, approved
+leave -> ON_LEAVE; `openSpans` apart; ONE `createMany` per school, counting what
+was WRITTEN. // **EVERY READER COULD REWRITE THEIR OWN RECORD**:
+`hr.attendance.read`/`.amend` split, self-marking REFUSED, past 7 days needs a
+senior `.amend.review` holder. `/kiosk` shows the code alone — it needed
+`hr.read`, so the corridor screen showed the register.
 
 ## A CARD THAT DOES NOT RENDER LOOKS EXACTLY LIKE ONE THAT SHOULD NOT
 `/classes` gated its create-a-class card on `students`, which the page had been
-changed to fetch as a bare `Promise.resolve(null)`. The optimisation removed the
-data, the condition kept depending on it, and the ONLY route to creating a class
-was absent for every role, silently. Gate: `a-card-that-can-never-render`.
-// GOTCHA: I called it reachable from a page grep matching a string in a
-DIFFERENT card. A probe searching for a string it did not take FROM THE THING IT
-TESTS asks about the page, not the component.
-// A class teacher is now EXPECTED, NOT REQUIRED — the rule asserted an invariant
-the data lacks (30 of 31 have none) and blocked laying out next year before
-staffing. NAMED OR NOBODY: a pupil or leaver refused, an existing one cannot be
-cleared, and the list flags every class with none.
+changed to fetch as a bare `Promise.resolve(null)` — so the ONLY route to
+creating a class was absent for every role, silently. Gate:
+`a-card-that-can-never-render`. // GOTCHA: a probe searching for a string it did
+not take FROM THE THING IT TESTS asks about the page, not the component.
+// A class teacher is EXPECTED, NOT REQUIRED — the rule asserted an invariant the
+data lacks (30 of 31 have none) and blocked laying out next year before staffing.
+NAMED OR NOBODY: a pupil or leaver refused, an existing one cannot be cleared.
 // `POST /classes/arms` creates a stream's arms at once; `Class.homeRoomId` is a
-BASE room (one class per room, refusal names the holder) — distinct from the
-per-SUBJECT `preferredRoomId`.
+BASE room (one per class, refusal names the holder), distinct from the
+per-SUBJECT `preferredRoomId`. Syllabus and notes copy to arms too: SKIP never
+overwrite, notes land DRAFT keeping the (subject, term) gradebook tag.
+
+## O(lifetime) ALSO ARRIVES AS PARTITION COUNT — costing PLANNING, not execution
+An aggregate over `attendance_record` with no date predicate PLANS every
+partition. On 1.29M rows: unbounded 88.6ms planning / 9.4ms execution; bounded to
+a year 0.58 / 1.3. Planning was 90%, and scales with partition count (8.9ms at 5,
+88.6ms at 52) — which tracks the PLATFORM's age, so a school that joined
+yesterday slows every month with nothing in its data to explain it. **Bound every
+aggregate over a partitioned table by date; make the PAGE a window, not a slice.**
+Keep at most ONE unbounded pass (the lifetime audit total) and have it return the
+SPAN, so the total needs no second scan. // GOTCHA: **a window is anchored on the
+RECORD, not on today** — counted back from today it lands after a LEAVER's final
+register, so page 1 is empty under a total saying thirty months exist, and an
+investigation opening a leaver is this screen's likeliest reader. Anchor on the
+`last_day` the lifetime pass already returned. // GOTCHA: Postgres REFUSES a partition
+for a month with rows already in DEFAULT — once the extender falls behind, that
+month cannot be partitioned until they are migrated. `AuditPartitionService`
+detects it and counts `failed`; no remedy tool exists.
 
 ## A pupil's attendance compiles at THREE grains, and says which are settled
-`GET /students/:id/attendance/compiled?grain=month|term|session` (card on
-/attendance). Scoping is INHERITED from `assertCanAccessStudent`, not restated —
-school-wide roles see every pupil, a teacher only pupils they teach, a parent
-their children, else 404. // GOTCHA: `attendance_term_rollup` covers ENDED terms
-ONLY, so reading it alone shows the CURRENT term as zero — "never attended"
-rather than "not settled". Unrolled terms compute LIVE and every bucket carries
-`source: ROLLUP|LIVE`; a session is only as settled as its least settled term.
-// GOTCHA: the rollup is keyed `(termId, classId, studentId)` — a pupil who moved
-class mid-term has SEVERAL rows and they must be SUMMED, or you report a
-fraction of the term and it looks entirely normal. // A session is summed from
-the TERM buckets, never a second query: two paths to one figure is how a year
-total disagrees with the terms under it. // 834k records, 8 years: 17.5ms and NO
-new index — `attendance_record` is already partitioned by month. Measure the
-variant before adding one; here that meant not adding one.
+`GET /students/:id/attendance/compiled?grain=month|term|session`. Scoping is
+INHERITED from `assertCanAccessStudent`, not restated. // GOTCHA:
+`attendance_term_rollup` covers ENDED terms ONLY, so reading it alone shows the
+CURRENT term as zero — "never attended" rather than "not settled". Unrolled terms
+compute LIVE, every bucket carries `source: ROLLUP|LIVE`, and a session is only as
+settled as its least settled term. // GOTCHA: the rollup is keyed
+`(termId, classId, studentId)` — a pupil who moved class mid-term has SEVERAL
+rows and they must be SUMMED, or you report a fraction of the term and it looks
+entirely normal. // A session is summed from the TERM buckets, never a second
+query.
 
 ## A staff record is read PER PERSON, and must not grow with their service
-`GET /hr/attendance/staff/:userId` + the Attendance card on `/hr/staff/[userId]`:
-months COMPILED IN SQL and paged, day detail for ONE month (bounded by the
-calendar). There was no per-person view at all — register showed today, roll-up
-showed this month across everyone. // GOTCHA: a per-day read is O(length of
-SERVICE), ~250 rows a year. Measured as the app role under RLS with a bound
-parameter on 250,440 rows: 41.8ms (existing index) -> 34.8ms (plain composite)
--> **12.5ms Index Only Scan** with `INCLUDE (status, flagged, clocks)`. The
-INCLUDE is the whole difference; the plain composite does not pay for its write
-cost. // GOTCHA: `DROP INDEX; CREATE INDEX CONCURRENTLY` in one `psql -c` is one
-transaction and CONCURRENTLY cannot run in one — the pair rolls back and the
-next measurement is of the index you think you dropped.
-
+`GET /hr/attendance/staff/:userId` + the card on `/hr/staff/[userId]`: months
+COMPILED IN SQL and paged. A per-day read is O(length of SERVICE); on 250,440
+rows the covering `INCLUDE (status, flagged, clocks)` took it 41.8ms -> 12.5ms
+(Index Only Scan) while a plain composite did not pay for its write cost — for
+PUPILS the same measurement said add NO index. // GOTCHA: `DROP INDEX; CREATE
+INDEX CONCURRENTLY` in one `psql -c` is one transaction and CONCURRENTLY cannot
+run in one — the pair rolls back and you then measure the index you think you
+dropped.
 ## Attendance register — write windows (BUILT)
 Three tiers gate a register write (`AttendanceService.markAttendance`):
 - **≤7 days old**: applied directly.
