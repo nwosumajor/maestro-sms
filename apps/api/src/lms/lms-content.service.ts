@@ -66,6 +66,7 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { NotificationService } from "../notifications/notification.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
+import { sniffUploadType } from "../documents/sniff-upload";
 import {
   canonicalEmbedUrl,
   computeEngagementPercent,
@@ -345,16 +346,58 @@ export class LmsContentService {
     return this.storage.presignUpload({ key: presign.key, contentType: presign.contentType });
   }
 
+  /**
+   * The upload says it finished. Check — three things, none settleable earlier.
+   *
+   * The bytes go browser→bucket through a presigned PUT, so the API never sees
+   * them on the way in and this is its only chance to look. It did not look at
+   * all: it set `fileUploaded: true` on the word of the caller.
+   *
+   * 1. THE BYTES ARRIVED. A PUT that failed, or a browser closed mid-upload,
+   *    left the material marked as having a file and the teacher told
+   *    "Attached." Pupils then got a refusal from storage on the one button the
+   *    feature exists for. The Vault's own provider carries the note for exactly
+   *    this — "confirming an upload without asking this means telling a family
+   *    their child's report card is ready when the bytes may never have
+   *    arrived" — and this module was written without it.
+   *
+   * 2. IT IS WITHIN THE CAP. The size checked at presign is a NUMBER THE CALLER
+   *    SENT, not the size of anything.
+   *
+   * 3. IT IS ACTUALLY A PDF. `contentType` is likewise a claim; the browser
+   *    check beside it is friction, not a control. This is what makes serving
+   *    the file inline safe — see `downloadUrl`.
+   *
+   * A failure leaves `fileUploaded` FALSE, so the same material can simply be
+   * uploaded again rather than needing to be recreated.
+   */
   async confirmUpload(p: Principal, contentId: string): Promise<LmsContentDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const key = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const row = await this.requireContent(tx, contentId);
       await this.assertTeacherOfClass(tx, p, row.classId);
       if (!row.fileKey) throw new BadRequestException("No upload was started");
+      return row.fileKey;
+    });
+
+    const bytes = await this.storage.download(key);
+    if (!bytes) throw new BadRequestException("No file has arrived yet. Please choose the PDF again.");
+    if (bytes.length > MAX_MATERIAL_BYTES) {
+      throw new BadRequestException(
+        `That file is ${(bytes.length / 1024 / 1024).toFixed(1)} MB. The limit is ${MAX_MATERIAL_BYTES / 1024 / 1024} MB.`,
+      );
+    }
+    if (sniffUploadType(bytes) !== "application/pdf") {
+      throw new BadRequestException("That file is not a PDF. Pupils can only open a PDF in the browser.");
+    }
+
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await this.requireContent(tx, contentId);
+      await this.assertTeacherOfClass(tx, p, row.classId);
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },
         data: { fileUploaded: true },
       })) as ContentRow;
-      await this.log(tx, p, "lms.content.upload.confirm", contentId);
+      await this.log(tx, p, "lms.content.upload.confirm", contentId, { sizeBytes: bytes.length });
       return this.toDto(updated, true, await this.nameOf(tx, updated.authorId));
     });
   }
@@ -369,7 +412,23 @@ export class LmsContentService {
       await this.log(tx, p, "lms.content.download", contentId);
       return { key: row.fileKey, fileName: row.fileName ?? "material.pdf" };
     });
-    return this.storage.presignDownload({ key: file.key, filename: file.fileName });
+    // INLINE, because that is what the product says. Attaching one promises
+    // "pupils can open it in the browser" in three places — the picker's
+    // refusal, the helper text and the presign's own error — and the download
+    // forced `attachment` + `application/octet-stream`, so every pupil got a
+    // file saved to disk instead. A promise the product makes on the screen and
+    // breaks on the click.
+    //
+    // Safe because `confirmUpload` established the bytes ARE a PDF, and the
+    // served type is pinned to that rather than echoed from the upload's claim.
+    // Naming the type here rather than passing a flag is what makes that
+    // dependency impossible to lose: there is no way to ask for inline without
+    // saying what the server vouches for.
+    return this.storage.presignDownload({
+      key: file.key,
+      filename: file.fileName,
+      inline: "application/pdf",
+    });
   }
 
   // --- approval workflow ----------------------------------------------------

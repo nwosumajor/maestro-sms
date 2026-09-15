@@ -20,6 +20,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { PresignResult, StorageProvider } from "./storage.provider";
 import { safeFilename } from "./safe-content-type";
+import type { InlineType } from "./local-storage-signing";
 
 @Injectable()
 export class S3StorageProvider implements StorageProvider {
@@ -100,7 +101,7 @@ export class S3StorageProvider implements StorageProvider {
   }: {
     key: string;
     filename?: string;
-    inline?: boolean;
+    inline?: InlineType;
   }): Promise<PresignResult> {
     // The FOURTH hand-rolled copy of this rule, and the one that runs in cloud
     // production — it also strips no non-Latin-1 character, which AWS then signs
@@ -112,7 +113,15 @@ export class S3StorageProvider implements StorageProvider {
         Bucket: this.bucket,
         Key: key,
         ...(inline
-          ? { ResponseContentDisposition: "inline" }
+          ? {
+              ResponseContentDisposition: "inline",
+              // PIN THE TYPE. Without this S3 returns the object's stored
+              // ContentType, which came off a presigned PUT and is therefore the
+              // uploader's claim — an inline response carrying an attacker-chosen
+              // type is the stored-XSS this module already has a write-up for.
+              // `inline` is the type the SERVER established, so state it.
+              ResponseContentType: inline,
+            }
           : {
               ResponseContentDisposition: `attachment; filename="${safeName}"`,
               ResponseContentType: "application/octet-stream",

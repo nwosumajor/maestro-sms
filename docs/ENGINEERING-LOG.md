@@ -16647,3 +16647,155 @@ it was not measured, so it is not claimed.
 //     fails (and the month double now HONOURS the window, so it cannot vouch for
 //     an unwindowed query — the fixture trap this repo keeps recording)
 //   - total from `all.length` -> Expected 30, Received 1
+
+### The largest table on the platform had no purge path
+
+`staff_attendance_event` is append-only by design — INSERT and SELECT only for
+the app role, so an amendment can never reach back and rewrite the scan it
+contradicts. That also means the privileged retention sweep is the ONLY thing
+that can ever make it smaller, and it was not in the sweep.
+
+Projected at 5,000 schools over five years: ~1.3B rows / ~305 GB, carried
+through every backup and every restore drill. Both of its siblings were already
+handled — `scan_event` is purged on the school's privacy window,
+`attendance_record` is partitioned by month — which is what made this one easy
+to miss: the class had been thought about, twice, and this table was written
+after both.
+
+WHAT IS KEPT AND WHAT GOES. The DAY ROW (`staff_attendance`) is the employment
+record and is never purged at any age. It is a PROJECTION of these scans — first
+IN, last OUT — so the summary outlives the evidence it was drawn from, which is
+the same shape as keeping payments rather than a balance. What ages out is the
+raw scan stream, whose value is bounded: the amendment window is seven days, a
+disciplinary case citing lateness looks back months, and device/clock-drift
+forensics are a matter of days.
+
+THE WINDOW IS ITS OWN DIAL, and this is the decision the rest turns on.
+`integrityRetentionDays` governs surveillance data about MINORS; a school
+setting it to ninety days is behaving well and the product should encourage it.
+These scans are employment evidence about ADULTS. Coupling them would mean a
+privacy-conservative decision about children silently destroying a school's own
+lateness and pay-dispute evidence — and the first draft did exactly that, by
+running the staff purge inside the telemetry window's early return. Both
+directions now hold: a school with telemetry purging OFF still has its scans
+purged, and a school with scan purging OFF still has its telemetry purged, and
+the result says WHICH half did nothing rather than one flag reading as "this
+school was skipped".
+
+Default 730 days. `School.staffAttendanceEventRetentionDays`, nullable-free with
+a default so nothing moves for a school already live, surfaced on
+/admin/compliance beside the telemetry window — a dial nobody can see is a dial
+nobody sets. // The same card was asserting "days, then purged automatically"
+under a window of 0, which disables purging: it told a DPO the opposite of what
+was configured. Both cards now read "Never" and say so.
+
+BATCHED, AND OUTSIDE THE TELEMETRY TRANSACTION. These windows are new, so the
+first sweep on a mature database has years of rows to remove at once on the
+biggest table there is. Inside that transaction it would be one enormous
+long-held delete — locks, a WAL burst, and a rollback that retries the same
+delete every night for ever. It reuses `deleteInBatches`, the helper written for
+the platform-wide streams for this exact reason.
+
+// GOTCHA: the sweep's own reported total is what an operator reads, and this is
+// the largest stream in it by a wide margin. Omitting it is how that same figure
+// once under-reported millions. It is in the total, and asserted on the figure
+// the SERVICE computes rather than one the test adds up itself.
+
+// GOTCHA found in the same file: the PROCESSOR dropped `failed`. The service
+// counts a school whose purge threw and carries on, which is right — but a catch
+// that does not rethrow leaves `lastOk` true, so the job summary's `failed` field
+// is the operator console's only sight of it. It returned `{schools, purged}`.
+// A sweep skipping four schools every night looked exactly like a healthy one,
+// on the job whose whole purpose is that minors' telemetry does not sit past its
+// window. The existing gate walks the SERVICES for a `failed++` and never asked
+// whether the processor carried it through.
+
+LIVE, through the real endpoint on the rebuilt stack, 1,240 probe scans seeded
+over 300 days:
+  - 730-day window, telemetry DISABLED -> staffEventsDeleted 680,
+    skipped "DISABLED", day rows 18 -> 18. Oldest scan left is exactly
+    today-730: the boundary day is inside the window, as `< cutoff` should mean.
+  - second run -> 0. Idempotent.
+  - window 0 -> 0 purged, staffEventsSkipped "DISABLED".
+  - window 1 -> 559 purged, 3 left dated today and yesterday. Day rows 18.
+  - EXPLAIN on the purge predicate: Index Scan using
+    staff_attendance_event_schoolId_date_idx. No new index — an index nothing
+    selects is write amplification, and this table takes two writes per member
+    of staff per day.
+
+Nine mutations, each failing naming its own property: couple the windows; drop
+the schoolId bound; skip the midnight normalisation; one statement instead of
+batching; purge inside the transaction; omit the stream from the total; lose the
+window snapshot; purge the day row; drop `failed` in the processor.
+
+// GOTCHA on the module gate: the MANUAL route is `@RequireModule(INTEGRITY)`,
+// so a school without that module gets 404 on it. Left as it is — the nightly
+// fleet sweep is not module-gated and is what actually purges these rows;
+// widening a module gate is a product decision, not a defect fix.
+
+### A promise the product made on the screen and broke on the click
+
+Attaching a PDF to a weekly material says, in three places, that pupils can open
+it in the browser — the picker's refusal, the helper text, and the presign's own
+400. The download then presigned `attachment` + `application/octet-stream`, so
+every pupil got a file saved to disk and nothing rendered.
+
+Serving it inline is only safe if the server knows what the bytes ARE, and it
+did not: `confirmUpload` set `fileUploaded: true` on the caller's word alone.
+Three things were wrong there and all three were invisible to the teacher —
+the bytes may never have arrived (a failed PUT still ended with "Attached.");
+the size was a number the CALLER sent, checked against nothing; and the type was
+a claim, the browser-side check beside it being friction rather than a control.
+The Vault's own provider carries the note for the first of these, written for
+this exact failure, and this module was built without it. Sibling asymmetry
+again.
+
+So the fix is a pair, and neither half is safe alone: validate the bytes on
+confirm (exists / size / `%PDF-` magic bytes, refusing in a way that leaves the
+material unattached so the same upload can be retried), and only then serve the
+file as what it was validated to be.
+
+`inline` stopped being a BOOLEAN and became the TYPE the server vouches for.
+That is what keeps the check and the serving joined: there is no way to ask for
+inline serving without naming what was established. It also lets the S3 branch
+pin `ResponseContentType` instead of letting S3 return the object's stored type
+— which came off a presigned PUT and is therefore the uploader's claim, i.e.
+an inline response carrying an attacker-chosen Content-Type, which is the
+stored-XSS this module already has a write-up for. On the local path the type
+rides the SIGNED OP (`get-inline-pdf`), never a query parameter.
+
+// GOTCHA, and the reason to drive it rather than read it: the feature could not
+// have worked locally AT ALL. `KEY_SHAPE` in the local storage controller
+// admits `schools/` and `careers/` — the only prefixes that existed when it was
+// written — and four more have been added since: `lms/`, `discipline/`,
+// `submissions/`, `tasks/`. On the stub provider, which is what the documented
+// local stack runs, every presigned PUT under those four answered 400 "Not
+// available", with a refusal deliberately worded to be indistinguishable from a
+// bad signature. Four upload features that failed at the FIRST step. The
+// allowlist is derived from a named constant now and
+// `a-key-no-upload-could-use.spec.ts` computes the minted set from source, so
+// the seventh prefix cannot be added without one.
+
+// GOTCHA, found while verifying the first: the school LOGO is presigned in FIVE
+// places and rendered in an <img> in all of them; three asked for inline and two
+// did not — and the two were the PUBLIC ones, the login page by slug and the
+// member shell. A browser was handed attachment + octet-stream for an image it
+// was being asked to display, so the custom logo, which is a PAID perk gated on
+// the subscription being in good standing, did not appear on the page it was
+// bought for. Collapsed to one private `logoUrl()`; the gate asserts there is
+// exactly ONE presign site, because any number above one can drift again.
+
+LIVE, end to end on the rebuilt stack:
+  - confirm with nothing uploaded -> 400 "No file has arrived yet", fileUploaded
+    still false.
+  - HTML uploaded as `notes.pdf` claiming `application/pdf` -> PUT 200 (a bucket
+    takes what it is given), confirm 400 "That file is not a PDF", fileUploaded
+    still false.
+  - a real PDF -> PUT 200, confirm 201, fileUploaded true.
+  - GET the download URL, then fetch it: `Content-Type: application/pdf`,
+    `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`.
+  - the URL's HMAC recomputes against op `get-inline-pdf` and against no other,
+    so the grant cannot be edited on.
+  - one character changed in the signature -> 400.
+
+Nine mutations across the three files, each naming its own property.

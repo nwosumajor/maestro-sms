@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **348 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **350 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **348 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **350 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1029,14 +1029,13 @@ These are the rules; the log is why each one exists.
 - **A DIARY IS THE MIRROR OF A REGISTER, AND AN ASCENDING CAP EATS THE FUTURE.**
   A register is read oldest-first and a newest-first cap drops the row it exists
   to surface; a diary is read for what is NEXT and an ascending cap drops that.
-  Meetings had `mySlots` and `myBookings` on `startsAt ASC` under a cap with NO
-  date filter: at a 61-teacher secondary three years in (10,980 slots, 1,220 to
-  come) a school-wide reader got 200 rows spanning **a single day three years
-  earlier** and zero upcoming — a screen that could never advance. Order so the
-  cap keeps what the screen is FOR, count the rest in SQL, and keep the other end
-  reachable (`?when=past`). // GOTCHA: the correct sibling was one method away —
-  `listOpenSlots` filtered `startsAt >= now` and paged, with a comment reasoning
-  about this exact failure, and was never swept to the other two lists.
+  Meetings had `mySlots`/`myBookings` on `startsAt ASC` capped with NO date
+  filter: a school-wide reader got 200 rows spanning **a single day three years
+  earlier** and zero upcoming. Order so the cap keeps what the screen is FOR,
+  count the rest in SQL, and keep the other end reachable (`?when=past`).
+  // GOTCHA: the correct sibling was one method away — `listOpenSlots` filtered
+  `startsAt >= now`, with a comment about this exact failure, and was never
+  swept to the other two.
 - **A capped list is worse when it is the only route to something else.** The
   billing history was the 50 most recent with no page, and a payment's id appears
   NOWHERE else — so its receipt went with it. Every school crosses the cap in
@@ -1051,28 +1050,22 @@ These are the rules; the log is why each one exists.
   writing a second copy of it in SQL, and report a floor as a floor.
 - **AN OVERDUE ROW IS AN OLD ROW**, so a newest-first cap discards exactly what
   the screen is alarming about. The library listed the 300 most recent loans
-  under a strip counting 1,316 overdue in SQL: 14 reachable, and nothing older
-  than 24 days reachable at ANY url. When a page shows a COUNT, the list beside
-  it must be able to produce those rows — as a FILTER, sorted oldest-first.
+  under a strip counting 1,316 overdue: 14 reachable at ANY url. When a page
+  shows a COUNT, the list beside it must produce those rows — as a FILTER,
+  sorted oldest-first.
 - **WHEN A LIST IS CAPPED, ASK WHETHER THE CONTROL THE READER USES REACHES PAST
-  IT.** Three consecutive sweeps found the same shape: the library catalogue
-  searched in the browser over 200 of 1,800 titles, the discipline picker
-  offering 500 of 1,200 pupils, and `/exams` returning 200 of 540 sittings while
-  the planner filtered those 200 locally — its comment calling it "fast local
-  whittling, so typing never costs a round trip", which is true only if the
-  loaded page is the whole set. **Each time the server could already answer and
-  the screen never asked**; `/exams` had accepted `q`, `hall`, `from`, `to` and
-  `scheduleId` all along, and nothing set `?schedule=` though the page read it.
-  A count is half the fix; the other half is that the filter runs in SQL.
+  IT.** The library catalogue searched in the browser over 200 of 1,800 titles;
+  `/exams` filtered 200 of 540 sittings locally, its comment calling it "fast
+  local whittling", true only if the loaded page is the whole set. **Each time
+  the server could already answer and the screen never asked** — `/exams` had
+  accepted `q`, `hall`, `from`, `to` and `scheduleId` all along. A count is half
+  the fix; the other half is that the filter runs in SQL.
 - **A PICKER IS THE ONLY ROUTE TO THE THING IT NAMES.** `/discipline/file-targets`
-  returned the first 500 people by name with no search and no count, rendered as
-  a plain `<select>`: on a 1,200-pupil roll that was A to K, so **690 pupils
-  could not be named in a complaint at all** — absent from the only control that
-  names them, on the safeguarding path. Widen the REACH without widening the
-  RULE: search inside the SCOPED set (never the directory, which is scoped
-  differently), return a total, and trust a seed only when `seed.length >=
-  total`. `UserPicker`'s own header had recorded this defect for the guardian
-  picker; discipline kept the dropdown.
+  returned the first 500 people by name with no search and no count: on a
+  1,200-pupil roll that was A to K, so **690 pupils could not be named in a
+  complaint at all**, on the safeguarding path. Widen the REACH without widening
+  the RULE: search inside the SCOPED set, return a total, and trust a seed only
+  when `seed.length >= total`.
 - **A TOTAL MUST COUNT ONLY WHAT THE CALLER MAY READ.** When a capped list is
   given a count and a search, both must inherit the list's own scoping. The
   notice board is audience-filtered (a parent sees ALL, staff also see STAFF), so
@@ -1093,53 +1086,40 @@ These are the rules; the log is why each one exists.
   NGN 262,500,000 of 420,000,000. When a predicate is MATERIALISED (an id list),
   the cap belongs to the fleet, not to a page — and crossing it must be reported.
 - **A FIGURE COMPUTED FROM A CAPPED PAGE IS WORSE THAN A SHORT LIST.** The
-  scholarship oversight panel derived its headline statistics from the fetched
-  array — `applications.length`, `awarded.length` — over a `take: 500`. At five
-  years and 1,200 applications leadership was shown **Submitted 500 / In
-  progress 405 / Awarded 29** against a true **1,200 / 980 / 60**: more than half
-  the school's scholarships missing from its own record of them. A short list
-  looks like a list; a wrong number looks like a fact. Count in SQL with a
-  `groupBy`, and keep the summary INDEPENDENT of the filter and the page — or
-  filtering to awards reports that nothing is in progress.
+  scholarship panel derived its headline statistics from the fetched array over
+  a `take: 500`: leadership saw **500 / 405 / 29** against a true
+  **1,200 / 980 / 60**. A short list looks like a list; a wrong number looks
+  like a fact. Count in SQL with a `groupBy`, and keep the summary INDEPENDENT
+  of the filter and the page.
 - **A CAP WITH NO COUNT IS THE COMMONEST DEFECT IN THIS REPO.** Four in one
-  session — billing history, the approvals queue, the alumni register, the SIS
-  review queue — each a list a school reads LATER, each returning a capped page
-  as if it were the whole thing. A scan of every `findMany` with a literal `take`
-  and no `skip` found **65**; most are live work and right, and the shortlist of
-  records is in the log. When you cap, return the TOTAL; when the order is
-  oldest-first the cap is at least benign, and when it is newest-first the cap
-  eats the record.
+  session, each a list a school reads LATER returning a capped page as if it
+  were the whole thing; a scan of every `findMany` with a literal `take` and no
+  `skip` found **65**. When you cap, return the TOTAL; a newest-first cap eats
+  the record, an oldest-first one is at least benign.
 - **A MAKER-CHECKER QUEUE IS MONEY IN LIMBO, AND MUST BE WORKED OLDEST-FIRST.**
   `listPendingPayments` was `createdAt DESC, take: 200` with no count, and a
-  payment sitting there has NOT moved the invoice balance — the family has paid
-  and the invoice still shows what they owe. At a five-year backlog of 901: 200
-  returned, reaching back only to 2023-09-10, **78% of the money awaiting a
-  second signature invisible**. And the queue is not small by default —
-  `effectivePaymentApprovalThresholdMinor` returns 0 for any school off the
-  platform's currency that has not set a figure, so EVERY payment there needs a
-  second signature. Order oldest-first (the cap then drops the newest arrival,
-  not the longest wait), count in SQL, and put the WAIT on the row — an
-  oldest-first queue an approver cannot see the age of is not actionable.
+  payment sitting there has NOT moved the invoice balance. At a five-year
+  backlog of 901, **78% of the money awaiting a second signature was
+  invisible** — and the queue is not small by default, since
+  `effectivePaymentApprovalThresholdMinor` returns 0 for an unset school off the
+  platform's currency. Order oldest-first, count in SQL, and put the WAIT on the
+  row.
 - **A register is not a queue.** A capped newest-first list DROPS the oldest —
   which is exactly the row a review queue exists to surface, because a pending
   row is pending precisely because nobody has dealt with it. Page and count **in
   SQL**; a filter applied in memory only ever sees the rows that survived the
   cap. Work a queue **oldest-first**; a count must not be narrowed by the filter.
 - **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** The calendar's
-  candidate read had no lower bound on recurring events, so every series ever
-  created stayed a candidate for ever; ordered oldest-first under a 500 cap, the
-  DEAD ones were fetched first, each expanded to zero occurrences, and the budget
-  was spent before the query reached anything current. Measured at five years:
-  600 finished weekly clubs -> **a blank calendar** with ten real events sitting
-  in the window; 495 -> half the term shown and nothing saying so. Filter on the
-  thing that makes a row USEFUL to the window (`recurrenceUntil >= from`, keeping
-  open-ended series), and fetch one row PAST the cap so truncation is detected
-  rather than assumed absent.
+  candidate read had no lower bound on recurring events, so dead series were
+  fetched first under a 500 cap and each expanded to zero occurrences. At five
+  years, 600 finished weekly clubs -> **a blank calendar** with ten real events
+  in the window. Filter on what makes a row USEFUL to the window
+  (`recurrenceUntil >= from`, keeping open-ended series), and fetch one row PAST
+  the cap so truncation is detected rather than assumed absent.
 - **No silent truncation.** An export is complete or it says it is short — and
-  every row in it must be IDENTIFIABLE. The NDPR staff bundle returned thirty-six
-  payslips as `{gross, net}` with no period, no date and no run: complete, and
-  unreadable. Carry the period, the kind of run, and the status; LABEL a draft
-  rather than dropping it, so no month goes missing from the sequence.
+  every row must be IDENTIFIABLE. The NDPR staff bundle returned thirty-six
+  payslips as `{gross, net}` with no period, date or run: complete, and
+  unreadable. LABEL a draft rather than dropping it, so no month goes missing.
 - **Measure as the APP ROLE under RLS, with a BOUND PARAMETER, on volume, with a
   realistic distribution.** Every one of those four has produced a wrong answer:
   `postgres` bypasses RLS and plans differently; a literal makes Postgres pick an
@@ -1152,10 +1132,9 @@ These are the rules; the log is why each one exists.
   for a parent of three, to look at this week's work. Bound the read to the
   period the SCREEN claims — and return the other periods, because bounding a
   read is only honest if the rest is still reachable.
-- **ALUMNI ONLY EVER GROW**, and the register list was capped at 500 while the
-  broadcast beside it counted in the database and said so in its own comment. 600
-  held, 500 shown, and newest-first ordering meant the OLDEST cohort was the one
-  that vanished — backwards for the one list whose value is its age.
+- **ALUMNI ONLY EVER GROW**, and the register was capped at 500 while the
+  broadcast beside it counted in the database. Newest-first meant the OLDEST
+  cohort vanished — backwards for the one list whose value is its age.
 - **Offset paging needs a TOTAL order.** `gradedAt` alone is not one — a teacher
   marks a set within the same second — and tied rows come back in a different
   order per page, silently skipping some and repeating others: 239 distinct of
@@ -1163,12 +1142,11 @@ These are the rules; the log is why each one exists.
   passed until the double SHUFFLED before sorting: `Array.sort` is stable in V8
   and Postgres is not. And **an index nothing selects is
   write amplification**: measure the variant before adding it.
-- **THE ROW IS THE ROUTE.** The CBT staff console returned the 100 newest exams
-  of 1,350 at five years — and an exam row is the only route to that exam's
-  RESULTS, question PAPER, ANSWER KEY and grade RECORDING, every one of them
-  `cbt/exams/${id}/...` built from that list. A cap on such a list strands four
-  dependent surfaces, not one. Ask what a dropped row was the KEY to, then count
-  in SQL and give the reader a `q` and a `page` that narrow in SQL too.
+- **THE ROW IS THE ROUTE.** The CBT console returned the 100 newest exams of
+  1,350 — and an exam row is the only route to that exam's RESULTS, PAPER,
+  ANSWER KEY and grade RECORDING, all `cbt/exams/${id}/...` built from that
+  list. A cap strands four dependent surfaces, not one. Ask what a dropped row
+  was the KEY to.
 - **Count in the database**; never `findMany().length`. Never a query per row —
   `.map(r => this.toDto(tx, r))` is a query multiplier.
 - **A TENANT-LEADING INDEX SERVES EVERY READ AND NO FOREIGN-KEY CHECK.** Every
@@ -2520,6 +2498,28 @@ they are not the mechanism, and the comments that said they were are corrected.
 // Gate: `a-label-that-linked-nothing` — it DRIVES the script under `DRY_RUN`
 // rather than parsing the bash, which is what the first draft did and why it
 // matched nothing once the scopes moved into a loop.
+
+## An upload is a CLAIM until the server looks at the bytes
+The presigned PUT goes browser→bucket, so confirm is the only moment the API can
+check — and the LMS one checked nothing: it set `fileUploaded` on the caller's
+word. Three facts are settled there and none earlier: the bytes ARRIVED (a
+failed PUT still said "Attached", and pupils got a refusal from storage), they
+fit (the presign's `sizeBytes` is a number the caller SENT), and they are the
+type claimed (`sniffUploadType`, magic bytes). A refusal leaves it unattached so
+the upload can simply be retried.
+**`inline` is the TYPE the server vouches for, never a boolean** — that is what
+keeps the check joined to the serving, and it lets S3 pin
+`ResponseContentType` rather than return the object's stored type, which came
+off the PUT and is the uploader's claim. Locally the type rides the SIGNED OP
+(`get-inline-pdf`), never a query parameter.
+// GOTCHA: the feature could not work locally AT ALL — `KEY_SHAPE` admitted
+`schools/` and `careers/`, the prefixes that existed when it was written, while
+`lms/`, `discipline/`, `submissions/` and `tasks/` were added later: four upload
+features 400ing at the FIRST step, behind a refusal deliberately worded like a
+bad signature. Gate `a-key-no-upload-could-use` computes the minted set from
+source. // GOTCHA: the school LOGO was presigned in FIVE places, three inline
+and two not — the two being the PUBLIC ones, so a PAID logo never rendered on
+the login page. One `logoUrl()` now; the gate asserts exactly ONE presign site.
 
 ## Operating the live system — runbooks
 - **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity

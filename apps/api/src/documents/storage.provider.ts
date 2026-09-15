@@ -11,7 +11,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { signStorageUrl, type StorageOp } from "./local-storage-signing";
+import { inlineOp, signStorageUrl, type InlineType, type StorageOp } from "./local-storage-signing";
 
 /** Injection token for the storage backend (default: StubStorageProvider). */
 export const STORAGE_PROVIDER = Symbol("STORAGE_PROVIDER");
@@ -33,11 +33,14 @@ export interface StorageProvider {
    * as, and a file uploaded as `text/html` would otherwise be served as a page
    * from the bucket's own domain.
    *
-   * `inline` is for objects the SERVER wrote with a type it validated itself —
-   * the school logo, which has to render in an <img>. It is not an option for
-   * anything a member of the public uploaded.
+   * `inline` is THE TYPE the server is willing to vouch for, not a boolean — an
+   * object may be served inline only where the server has established what its
+   * bytes actually are. The school logo (validated on upload, rendered in an
+   * <img>) and a lesson PDF (magic-byte checked when the upload is confirmed)
+   * are the two cases. It is not an option for a file whose type is still only
+   * the uploader's claim.
    */
-  presignDownload(args: { key: string; filename?: string; inline?: boolean }): Promise<PresignResult>;
+  presignDownload(args: { key: string; filename?: string; inline?: InlineType }): Promise<PresignResult>;
   /** Server-side upload of raw bytes (for small assets the API handles itself,
    *  e.g. a school logo the server must later embed into a generated PDF). */
   upload(args: { key: string; body: Buffer; contentType: string }): Promise<void>;
@@ -86,12 +89,13 @@ export class StubStorageProvider implements StorageProvider {
     return { url: this.signedUrl(key, "put"), expiresInSeconds: this.ttl };
   }
 
-  async presignDownload({ key, filename, inline }: { key: string; filename?: string; inline?: boolean }): Promise<PresignResult> {
+  async presignDownload({ key, filename, inline }: { key: string; filename?: string; inline?: InlineType }): Promise<PresignResult> {
     this.logger.log(`[stub] presign GET ${key}`);
     const name = filename ? `&filename=${encodeURIComponent(filename)}` : "";
-    // The operation is part of the SIGNATURE, so "serve this inline" cannot be
-    // switched on by editing the URL — it has to have been granted.
-    return { url: `${this.signedUrl(key, inline ? "get-inline" : "get")}${name}`, expiresInSeconds: this.ttl };
+    // The operation is part of the SIGNATURE, so "serve this inline" — and AS
+    // WHAT — cannot be switched on by editing the URL; it has to have been
+    // granted.
+    return { url: `${this.signedUrl(key, inline ? inlineOp(inline) : "get")}${name}`, expiresInSeconds: this.ttl };
   }
 
   private signedUrl(key: string, op: StorageOp): string {

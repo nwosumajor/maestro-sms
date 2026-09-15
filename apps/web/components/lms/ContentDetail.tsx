@@ -402,6 +402,9 @@ function MaterialView({
       if (!conf.ok) throw new Error(conf.error ?? "Uploaded, but confirming it failed.");
       setName(file.name);
       setMsg("Attached. Pupils see it once this material is published.");
+      // NOTE: the server re-checks the bytes on confirm — that they arrived,
+      // that they fit, and that they really are a PDF. The checks above are
+      // friction that saves a wasted upload, never the control.
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -415,7 +418,11 @@ function MaterialView({
       {description && <p className="text-sm">{description}</p>}
       {name ? (
         <Button size="sm" onClick={download}>
-          Download {name}
+          {/* "Open", because it now opens: the download is presigned inline and
+              the tab shows the PDF. It said "Download" while the API forced an
+              attachment, which was at least honest; saying "Download" now would
+              be the same mismatch pointing the other way. */}
+          Open {name}
         </Button>
       ) : (
         <p className="text-sm text-muted-foreground">
