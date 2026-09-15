@@ -145,7 +145,10 @@ d("Integrity retention purge", () => {
   });
 
   it("purges only rows older than the school's window, and records the run", async () => {
-    const result = await service.purgeSchool(A, RETENTION_DAYS, "SCHEDULED");
+    const result = await service.// 0 = this school keeps its staff clock scans; this suite is about
+    // the telemetry streams. Stated rather than defaulted — the parameter is
+    // required so that choosing is unavoidable.
+    purgeSchool(A, RETENTION_DAYS, "SCHEDULED", 0);
 
     // 2 old of each kind deleted; the 1 recent of each kind survives.
     expect(result.signalsDeleted).toBe(2);
@@ -177,7 +180,7 @@ d("Integrity retention purge", () => {
   });
 
   it("treats a 0-day window as DISABLED (purges nothing)", async () => {
-    const result = await service.purgeSchool(B, 0, "MANUAL");
+    const result = await service.purgeSchool(B, 0, "MANUAL", 0);
     expect(result.skipped).toBe("DISABLED");
     expect(result.signalsDeleted).toBe(0);
     const b = await countFor(B);

@@ -222,8 +222,14 @@ export class IntegrityRetentionService {
   async purgeSchool(
     schoolId: string,
     retentionDays: number,
-    trigger: RetentionTrigger = "MANUAL",
-    staffEventRetentionDays = 0,
+    trigger: RetentionTrigger,
+    // REQUIRED, deliberately, with no default. A default of 0 would mean any
+    // caller that simply forgot this argument silently stopped purging the
+    // largest table on the platform — and nothing would say so, because 0 is a
+    // legitimate value meaning "this school keeps its scans". A required
+    // parameter is a search for every call site, which is the trick that found
+    // the Paystack currency sites and the payment-threshold ones.
+    staffEventRetentionDays: number,
   ): Promise<SchoolRetentionResult> {
     const client = this.db.client;
     const none = (
