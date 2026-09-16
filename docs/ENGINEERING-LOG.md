@@ -17083,3 +17083,63 @@ their own /learning feed, and the download serves
 // where every locale-aware formatter belongs — the gate bans
 // `toLocaleDateString` everywhere else precisely so a component cannot format
 // its own dates on the wrong clock.
+
+### Eight signed-in sections the middleware had never heard of
+
+Found while doing a final per-role pass over the pages fixed above: the demo
+student was redirected to the forced-password-reset page on every surface EXCEPT
+`/meetings`, which answered 200. Chasing the one odd row found eight.
+
+`middleware.ts` gated on a hand-kept `PROTECTED_PREFIXES` list of ~45 sections.
+Walking the app router against it:
+
+    NOT protected: /cbt /exams /feedback /group /kiosk /learning /meetings
+                   /reportcards /suspended
+
+Measured against the running app, each answered **200 with no session at all**,
+while `/dashboard`, `/attendance` and `/classes` redirected to `/login` as they
+should.
+
+THAT GATE IS THREE CONTROLS AT ONCE, and all three were skipped on those eight:
+
+  1. **The 30-day FORCED PASSWORD RESET.** Verified live: the demo student was
+     redirected from /dashboard and /attendance to `/account/password?expired=1`
+     and served **200 on /cbt and /reportcards** — the exam hall, and a child's
+     marks.
+  2. **The per-school MFA MANDATE**, identically. A member of staff the school
+     had required to enrol could work on those eight without enrolling.
+  3. **The unauthenticated redirect to /login.**
+
+NOT A DATA LEAK, and worth stating precisely rather than overselling: the
+anonymous 200 is the loading shell. The page streams `loading.tsx`, the server
+component then calls `auth()` and throws on `session!.user`, and the stream ends
+— 18 KB of shell carrying no school name, no pupil, nothing. Checked by
+extracting the visible text: "MAESTRO-SMS — School Management System Loading".
+What a visitor gets is a page stuck on Loading with no way in and no explanation,
+and what a signed-in user gets is the two holds above silently not applying.
+
+THE FIX IS THE DEFAULT, NOT A LONGER LIST. A hand-kept set only guards what
+somebody remembered, and this one is edited by nobody who is adding a page.
+Inverted to a PUBLIC allowlist in `lib/public-routes.ts`: everything needs a
+session unless named, so a new section under `app/(app)` is protected by
+EXISTING and opening a page to the public is a deliberate line (Golden Rule #7).
+Public is the bounded set it should be: the marketing site, sign-in and recovery,
+the public intake forms, and the certificate verifier — which is public BY DESIGN
+so somebody holding a printed card can check it. `/manual` and `/runbooks` stay
+signed-in.
+
+// GOTCHA: `/icon.png`. Next serves `app/icon.png` through the same matcher, so
+// a naive default-deny redirects the FAVICON to /login and breaks it on the
+// public marketing site. Anything ending in an extension is an asset, not a
+// page.
+
+// GOTCHA: the rule lives in its own module rather than inside `middleware.ts`
+// so the test can drive the REAL function. The first draft of the test
+// reimplemented `isPublic` locally — and immediately disagreed with the real one
+// about `/icon.png`, which is the whole objection to a test that carries its own
+// copy of the logic: it proves the test agrees with itself.
+
+Gate `every-signed-in-page-needs-a-session` walks the router and asserts no
+section under `app/(app)` is public, that the public ones still are, and that the
+middleware gates on the allowlist rather than a protect-list. Three mutations:
+open /cbt (fails naming it), close /login, drop the asset exemption.

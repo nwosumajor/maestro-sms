@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **355 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **356 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **355 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **356 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -981,12 +981,12 @@ These are the rules; the log is why each one exists.
   in the same file. That confusion IS the defect.
 - **A COUNTER MUST COUNT WHAT WAS DELIVERED, NOT WHAT WAS ITERATED.** The fee
   reminder sweep counted `reminded` per INVOICE whether or not a guardian
-  existed, so a school with 30 billable invoices and no guardian links was told
-  "30 reminded" having told nobody. Count recipients; name the shortfall.
+  existed: 30 billable invoices, no guardian links, "30 reminded" and nobody
+  told. Count recipients; name the shortfall.
 - **REPORT WHAT YOU DID NOT DO.** Silent partial success is the commonest shape
-  here: a roll call that named nobody missing, a sweep that marked every overdue
-  boarder handled including those it told nobody about, `notified: 2500` of
-  5,000. Count what was WRITTEN, never the list in hand, and name the shortfall.
+  here: a roll call naming nobody missing, a sweep marking every overdue boarder
+  handled including those it told nobody about, `notified: 2500` of 5,000. Count
+  what was WRITTEN, never the list in hand.
 - **A refusal must not assert something untrue, and should name the way out.**
   "Not in this school" said of a classmate; "ask an administrator to reactivate
   it" where no such button exists. **404-not-403** so a refusal never confirms
@@ -1008,19 +1008,19 @@ These are the rules; the log is why each one exists.
   by `useFormat()`. **A DTO that reports money must say what currency it is in.**
 - **A gateway is ALWAYS told the currency**, and settlement REFUSES a mismatch
   before posting. One posting path (`InvoiceSettlementService`), so one guard.
-- **A naira constant is not a rule for every school.** And the two fail-safes
-  point OPPOSITE ways: an unset **control** tightens (every payment reviewed),
-  an unset **charge** goes to zero (a charge that guesses bills a family).
+- **A naira constant is not a rule for every school**, and the two fail-safes
+  point OPPOSITE ways: an unset **control** tightens (every payment reviewed), an
+  unset **charge** goes to zero (a charge that guesses bills a family).
 - **There is no FX rate in this platform.** Refuse and say so; never convert.
 
 ### Time
 - **"Today" is the SCHOOL's calendar day** (`schoolToday(tz)`), not the server's
   UTC day — registers, term locks, clock-ins, overdue states, expiry stages.
   Fifteen surfaces have been corrected for this.
-- **A `@db.Date` is a DAY, not an instant.** It serialises as midnight UTC, so
-  rendering it in a zone west of UTC shows the PREVIOUS day (`isCalendarDate`).
-- **Validate a date by ROUND TRIP** (`isoDay`): JavaScript ROLLS rather than
-  refusing, so `2026-04-31` parses cleanly as 1 May. A shape check is not enough.
+- **A `@db.Date` is a DAY, not an instant** — midnight UTC, so a zone west of UTC
+  shows the PREVIOUS day (`isCalendarDate`).
+- **Validate a date by ROUND TRIP** (`isoDay`): JS ROLLS rather than refusing, so
+  `2026-04-31` parses cleanly as 1 May — a shape check is not enough.
 
 ### Lists, queues and scale
 - **A DIARY IS THE MIRROR OF A REGISTER, AND AN ASCENDING CAP EATS THE FUTURE.**
@@ -1116,8 +1116,8 @@ These are the rules; the log is why each one exists.
   before sorting: `Array.sort` is stable in V8, Postgres is not. And **an index
   nothing selects is write amplification** — measure before adding.
 - **THE ROW IS THE ROUTE.** The CBT console returned the 100 newest exams of
-  1,350 — and an exam row is the only route to its RESULTS, PAPER, ANSWER KEY and
-  grade RECORDING. A cap strands four surfaces, not one.
+  1,350 — an exam row is the only route to its RESULTS, PAPER, ANSWER KEY and
+  grade RECORDING, so a cap strands four surfaces, not one.
 - **Count in the database**; never `findMany().length`. Never a query per row —
   `.map(r => this.toDto(tx, r))` is a query multiplier, and so is a name lookup
   inside a loop (the open-duels list was N+1 twice: 200 round trips for 100
@@ -1130,39 +1130,32 @@ These are the rules; the log is why each one exists.
 
 ### Authorization and tenancy
 - **A permission has TWO halves**: the route gate says whether you may read at
-  all, the service's wide-role set says whose. They live in different files and
-  they drift — a grant whose row scope refuses it is a dead grant, and it renders
-  as an empty screen rather than a 403.
+  all, the service's wide-role set says whose. They drift — a grant whose row
+  scope refuses it is dead, and renders as an empty screen rather than a 403.
 - **`super_admin` holds no standing role scope over a tenant's data.** The
   supported route to it is impersonation: step-up gated, time limited, audited.
-- **Work, duties and approvals go only to somebody who is STILL HERE**
-  (`assertStillHere`, `holdersOf`). Addressing a leaver is addressing nobody.
-- **A stage-holder must be able to open its own door**, and an approver must be
-  able to SEE what the decision turns on. Both have their own gates.
+- **Work and approvals go only to somebody STILL HERE** (`assertStillHere`,
+  `holdersOf`). Addressing a leaver is addressing nobody.
+- **A stage-holder must open its own door**, and an approver must SEE what the
+  decision turns on. Both have their own gates.
 - **A chain resolved at SUBMIT goes stale when somebody LEAVES.** Admissions
   drops an unstaffable stage at submit and refuses an approval that would strand
   the rest — both look FORWARD, and neither reaches the approver who exits while
   the item waits. Measured: 252 of 5,000 schools' applications sat at a stage
-  with no ACTIVE holder, undecidable in BOTH directions (approve and reject both
-  403) and shown as ordinary pending work. There is no reassign and no reset, so
-  the fix is to SAY it — on the row, in a school-wide count no filter can hide,
-  and in the refusal, which must name the vacancy rather than describe the
-  caller.
+  with no ACTIVE holder, undecidable in BOTH directions and shown as ordinary
+  pending work. There is no reassign, so the fix is to SAY it — on the row, in a
+  count no filter can hide, and in the refusal, which names the vacancy.
 - **Never trust an id from the body.** Check the KIND (a pupil made a subject
-  teacher, a guardian attached to a member of staff), not merely that it exists.
-  A permission helper that answers "MAY I reach this pupil" is not the same
-  question as "IS this a pupil of ours", and for a school-wide caller the first
-  returns without touching the database: the Vault stored a report card against
-  ANOTHER SCHOOL's pupil, and against its own teacher, on 201s. Check with the
-  shared scope (`EVER_ENROLLED_STUDENT`, `NOT_A_STUDENT`) — ever-enrolled, since
-  a school still owes a leaver their records. **Order the two checks so the
-  refusals cannot differ**: told apart, they answer "is this uuid real here?".
-  And an id the caller supplied that names nothing is a **400 (P2003 in
-  `MalformedIdFilter`)**, not the 500 the foreign key used to produce.
+  teacher, a guardian attached to staff), not merely that it exists. "MAY I reach
+  this pupil" is not "IS this a pupil of ours", and for a school-wide caller the
+  first returns without touching the database: the Vault stored a report card
+  against ANOTHER SCHOOL's pupil on a 201. Check with the shared scope
+  (`EVER_ENROLLED_STUDENT`, `NOT_A_STUDENT`) — ever-enrolled, since a school owes
+  a leaver their records. **Order the checks so the refusals cannot differ.** An
+  id naming nothing is a **400 (P2003 in `MalformedIdFilter`)**, not a 500.
 - **Read-then-write at READ COMMITTED is not a guard.** Prefer a UNIQUE INDEX
-  where the rule is expressible, an advisory lock where it is not — and a guard
-  and the race behind it must answer with the SAME status, or the race becomes
-  observable.
+  where the rule is expressible, an advisory lock where it is not — and the guard
+  and the race must answer with the SAME status.
 
 ### Completeness of a change
 - **A control the product imposes must have a way to FINISH it** — and a way OUT.
@@ -1170,6 +1163,19 @@ These are the rules; the log is why each one exists.
   recurring charge with no cancel; a model with a create and no update (**64**,
   one holding an answer key); an open duel only a TEACHER could close, which its
   own host could not even see.
+- **A ROUTE GATE MUST BE DEFAULT-DENY, NOT A LIST OF WHAT TO PROTECT.**
+  `middleware.ts` held a hand-kept `PROTECTED_PREFIXES` and the app outgrew it:
+  `/cbt`, `/exams`, `/feedback`, `/group`, `/kiosk`, `/learning`, `/meetings`,
+  `/reportcards` answered **200 with no session**. That gate is THREE controls —
+  the /login redirect, the 30-day forced reset and the MFA mandate — so a user
+  with an expired password was held out of /dashboard and could open the exam
+  hall and a child's report cards. No data escaped (the page streams its loading
+  shell, then throws on `session!.user`) — a gap, not a leak, and worth stating
+  precisely. Inverted to a PUBLIC allowlist in `lib/public-routes.ts`; gate
+  `every-signed-in-page-needs-a-session` walks the router. // GOTCHA: Next serves
+  `app/icon.png` through the same matcher, so default-deny must exempt ASSETS.
+  // GOTCHA: the rule lives in its OWN module so the test drives the REAL
+  function — the first draft reimplemented it and disagreed about `/icon.png`.
 - **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below, and the
   one a user meets. `/attendance`'s "take →", the ONE control for taking a
   missing register, pointed at `/classes/<id>`, not a route. Gate
@@ -1656,29 +1662,18 @@ turn timers / 15s countdown / hard-disconnect handling for actively-played
 sockets.
 
 **FULL-STACK VERIFIED end-to-end (2026-06-27) against a real Postgres 18 (UTC)
-— a SNAPSHOT OF THAT DATE, and its counts have since grown (24 RLS files → 112,
-71 RLS-enabled tenant tables → 196, 298 api tests → 4,000+). Read the numbers
-below as what was true then. What keeps coverage honest TODAY is not this
-paragraph but the gate: `rls.e2e-spec.ts` introspects `pg_class` for every table
-carrying a `schoolId` and fails if one lacks a cross-tenant case, so the set
-under test is computed rather than counted by hand. `ultimate_participant`
-remains the one documented exemption, still true.**
-migrate deploy (all migrations incl. all 6 game ones) → all 24 RLS files apply
-clean (`ON_ERROR_STOP=1`) → seed OK (game RBAC confirmed in DB: 10 `game.*` perms;
-ultimate.admin→super_admin, ultimate.consent→school_admin, ultimate.enroll→
-principal+school_admin). The ENTIRE api jest suite passes: **40 suites / 298 tests**
-(every module + RLS cross-tenant incl. ultimate + all 5 game modes + the new
-`GET /races`; the RLS suite now proves isolation for EVERY one of the 71 RLS-enabled
-tenant tables + a coverage meta-test that fails if a new one is added untested).
-game-engine **118/118**, monorepo typecheck **13/13**, and the web
-**production build** compiles all routes incl. the 7 game screens. Two pre-existing
-game e2e assertions were FIXED (a winner's cracking guess necessarily equals the
-secret and legitimately shows in the public move log / own history — the naive
-`not.toContain(secret)` over the whole view was wrong; now asserts the UN-cracked
-secret never leaks + the stored secret/target column is cleared). NOTE: these DB
-suites `describe.skip` without `TEST_DATABASE_URL`+`TEST_ADMIN_URL`, so they had
-never actually executed before this run.
-
+— a SNAPSHOT OF THAT DATE.** migrate deploy, every RLS file clean under
+`ON_ERROR_STOP=1`, seed, the whole api suite, game-engine, typecheck and a web
+production build. Every COUNT it carried has since rotted, which is what a number
+typed into prose does; what keeps coverage honest is the GATE, not this
+paragraph: `rls.e2e-spec.ts` introspects `pg_class` for every table carrying a
+`schoolId` and fails if one lacks a cross-tenant case, so the set under test is
+COMPUTED. `ultimate_participant` is still the one documented exemption.
+// GOTCHA from that run: a winner's cracking guess NECESSARILY equals the secret
+and legitimately shows in the move log, so `not.toContain(secret)` over the whole
+view was wrong — assert the UN-cracked secret never leaks and the stored column
+is cleared. And those DB suites `describe.skip` without `TEST_DATABASE_URL` +
+`TEST_ADMIN_URL`, so they had never once executed before it.
 Binding points even from here:
 - Build order: pure scoring engine first (variable length — 4/5/6 distinct
   digits; `length` is a PARAMETER, never hard-coded; test N=4/5/6), then a
