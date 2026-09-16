@@ -30,6 +30,7 @@
 // =============================================================================
 
 import { readFileSync, readdirSync } from "node:fs";
+import { needsSession } from "../../../web/lib/public-routes";
 import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
 
@@ -138,18 +139,38 @@ describe("the page policy", () => {
   });
 
   it("still applies the auth rules to every prefix it used to", () => {
-    // The matcher now runs almost everywhere so the CSP can reach public pages,
-    // which means the protected list moved into code. Losing an entry here is
-    // an authentication hole, not a styling bug.
+    // ANCHORED TO THE PROPERTY, not to the old implementation's shape. This
+    // listed the protected prefixes as SUBSTRINGS of middleware.ts and went red
+    // when the gate was INVERTED to default-deny — a change that strengthened
+    // exactly what it guards, since eight signed-in sections had been missing
+    // from that list and answered 200 with no session.
+    //
+    // The question is whether these paths need a session, so it asks the real
+    // function. Losing one is an authentication hole, not a styling bug.
     for (const p of ["/dashboard", "/admin", "/fees", "/hr", "/operator", "/scan", "/manual", "/runbooks", "/account"]) {
-      expect(mw).toContain(`"${p}"`);
+      expect({ path: p, needsSession: needsSession(p) }).toEqual({ path: p, needsSession: true });
     }
+    // ...and that the middleware actually consults it.
     expect(mw).toMatch(/isProtected\(pathname\)/);
+    expect(mw).toMatch(/needsSession/);
   });
 
   it("matches a prefix only on a boundary", () => {
-    // `/feesomething` must not be treated as `/fees`.
-    expect(mw).toMatch(/pathname === p \|\| pathname\.startsWith\(`\$\{p\}\/`\)/);
+    // `/feesomething` must not be treated as `/fees`, and `/loginx` must not
+    // inherit `/login`'s public grant — the boundary matters in BOTH directions
+    // now that the list is an allowlist.
+    expect(needsSession("/feesomething")).toBe(true);
+    expect(needsSession("/loginx")).toBe(true);
+    expect(needsSession("/login")).toBe(false);
+    expect(needsSession("/login/whatever")).toBe(false);
+  });
+
+  it("lets the public in only where the product means to", () => {
+    // The inverse risk of a default-deny gate: locking out the sign-in page, or
+    // the certificate verifier a card-holder needs.
+    for (const p of ["/", "/login", "/reset-password", "/apply", "/verify/card/x/y", "/icon.png"]) {
+      expect({ path: p, needsSession: needsSession(p) }).toEqual({ path: p, needsSession: false });
+    }
   });
 });
 
