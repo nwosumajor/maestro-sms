@@ -176,7 +176,15 @@ export function RegisterBoard({ canConfigure = false }: { canConfigure?: boolean
                         <td className="py-1 pr-3"><Teacher r={r} /></td>
                         <td className="py-1 pr-3 text-right text-xs text-muted-foreground">{r.enrolled} on roll</td>
                         <td className="py-1 text-right">
-                          <Link href={`/classes/${r.classId}`}>
+                          {/* THE REGISTER, not the class. This pointed at
+                              `/classes/<id>`, which is NOT a route — the class
+                              pages are /info, /roster and /content — so the one
+                              button on the one board that exists to get a
+                              missing register taken answered "404: This page
+                              could not be found." The board is rendered FIRST on
+                              /attendance because it is the time-critical thing
+                              on the page, so it is also the likeliest click. */}
+                          <Link href={`/attendance?classId=${r.classId}`}>
                             <Button size="sm" variant="outline">take →</Button>
                           </Link>
                         </td>

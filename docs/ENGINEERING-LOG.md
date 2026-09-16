@@ -17001,3 +17001,85 @@ Live, end to end on the rebuilt stack, after the boundary fix:
   - a school admin can submit on a pupil's behalf (`submitProfile` is scoped by
     `assertCanAccessStudent`), so "the school completes it for them" is a real
     path and the supervisor/admin review still needs two other people.
+
+### Six reports from the field, and what each one actually was
+
+All six were real. Four were defects, one was a missing feature, one was sound.
+
+**1. THE ONE BUTTON THAT EXISTS TO TAKE A MISSING REGISTER ANSWERED "PAGE NOT
+FOUND".** `RegisterBoard`'s "take →" linked to `/classes/<id>`, which is not a
+route — the class pages are `/info`, `/roster`, `/content`, `/analytics`. The
+board is rendered FIRST on /attendance, deliberately, because an outstanding
+register is the only time-critical thing on the page; so it is also the
+likeliest click, and it 404'd. Two more sites had the same link: a pupil's
+current class on their profile, and an unstaffed lesson on the timetable. And
+`ClassAttendanceBoard` already carried a COMMENT saying `/classes/<id>` is not a
+route — a comment asserting a rule three other files were breaking, which is the
+shape this repo keeps recording.
+
+Gate `a-link-to-a-page-that-is-not-there`: every LITERAL href in the web,
+`${…}` normalised to one segment, matched against the routes the app actually
+declares. It found a FOURTH on its first run — `ArchivePanel` told a school to
+"set up the year on the calendar" and linked `/admin/calendar`, which has never
+existed; the academic year is set up on /classes. A link to a page that is not
+there is worse than no link, and that one sat on the screen where somebody has
+just been told they cannot proceed without it.
+
+**2. THE PUPIL YOU JUST PICKED, WHOSE NAME THEN DISAPPEARED.** `StudentPicker`
+and `UserPicker` showed the choice as the input's PLACEHOLDER, resolved by
+looking the id up in `[...seed, ...results]` on every render. Choosing clears the
+query, which clears `results` — so anybody found by SEARCHING the server (that
+is, anyone outside the page's small seed) vanished from the control the instant
+they were chosen. The form looked empty while `value` held a good id, which on
+/classes means enrolling a pupil whose name you can no longer see, and in
+meetings means the "names selected do not show steady" the report describes.
+
+Even when it resolved, a placeholder is grey, reads as "nothing here yet", and
+disappears as soon as somebody types. The choice is now REMEMBERED in state and
+rendered as text above the box. // The sibling `PeoplePicker` had it right all
+along — it keeps its chosen people and renders them first, with a comment
+explaining that is the answer to "who have I got so far". These two were never
+swept.
+
+**3. THE PAGE JUMPED TO THE TOP.** Next's App Router scrolls to the top of the
+document on every navigation, and the attendance pupil-picker sits near the
+BOTTOM of a long page — under the register board, the reminder button, the class
+board and the register card. Clicking a pupil threw the viewport to the top while
+the history that click asked for rendered off-screen. `{ scroll: false }` on both
+pushes and on the history pagination. On a page whose whole task is checking
+several pupils in a row, that scroll IS the work.
+
+**4. A DUEL YOU COULD NOT SEE AND COULD NOT WITHDRAW.** `listOpenGames` dropped
+the caller's own lobby — correct for a list titled "games you can JOIN", and it
+left a player's own open duel visible on NO screen at all. One opened by mistake,
+or one nobody ever joined, sat in every other pupil's list indefinitely, and the
+only way to close it was `POST /games/:id/end`, gated on `game.match.moderate` —
+a teacher. A create with no undo, on a list that only grows.
+
+`POST /games/:id/cancel` (`game.play`): the HOST withdraws their own, and the
+narrowing is the point — LOBBY only, one seat only. The moment somebody joins
+there is an opponent with a stake in it and closing it is a moderation decision
+again; the refusal says so rather than only saying no. 404-not-403 for a caller
+with no seat. // The same read was N+1 TWICE — a seats query and a name lookup
+inside the loop, so a page of 100 lobbies meant 200 extra round trips on the
+games hub, which is a child's first screen. Both batched.
+
+**5. THE LMS PDF IS SOUND** — verified end to end rather than read. Teacher
+creates a MATERIAL and attaches a PDF; before approval the student gets 404 on
+the download and the material is absent from their class list. Two-stage approval
+(head teacher, then principal, each a different person, engine-enforced) →
+PUBLISHED. The student then sees it in the class list WITH its filename, on
+their own /learning feed, and the download serves
+`Content-Type: application/pdf`, `Content-Disposition: inline`,
+`X-Content-Type-Options: nosniff`, with `%PDF-1.7` as the first bytes.
+
+// FOUND WHILE FINISHING: `StaffAttendanceHistory` — committed EARLIER IN THIS
+// SAME SESSION — formatted its dates with the bare `shortDate`/`timeOfDay`
+// exports (pinned to the PLATFORM's locale and timezone) and its month names
+// with `toLocaleDateString(undefined, …)`, which is the BROWSER's locale. A
+// school's own attendance record labelled by whichever laptop was looking at it.
+// The region gate caught it; I had not run that gate when I shipped the
+// component. `monthLabel` now lives in `lib/format.ts` behind `useFormat()`,
+// where every locale-aware formatter belongs — the gate bans
+// `toLocaleDateString` everywhere else precisely so a component cannot format
+// its own dates on the wrong clock.

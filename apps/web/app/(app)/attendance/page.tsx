@@ -209,6 +209,9 @@ export default async function AttendancePage({
                     <div className="flex gap-2">
                       <Link
                         href={`/attendance?studentId=${selectedId}&page=${page - 1}`}
+                        // The history table is at the foot of a long page;
+                        // scrolling to the top would hide the page just turned.
+                        scroll={false}
                         aria-disabled={page <= 1}
                         className={buttonVariants({
                           size: "sm",
@@ -220,6 +223,9 @@ export default async function AttendancePage({
                       </Link>
                       <Link
                         href={`/attendance?studentId=${selectedId}&page=${page + 1}`}
+                        // The history table is at the foot of a long page;
+                        // scrolling to the top would hide the page just turned.
+                        scroll={false}
                         aria-disabled={page >= pages}
                         className={buttonVariants({
                           size: "sm",

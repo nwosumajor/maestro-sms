@@ -99,7 +99,9 @@ export default async function StudentProfilePage({ params }: { params: { id: str
                 {" · "}
                 {profile.currentClass ? (
                   <>
-                    <Link href={`/classes/${profile.currentClass.id}`} className="font-medium text-primary hover:underline">
+                    {/* `/classes/<id>` is not a route; /info is the class's
+                        own page. */}
+                    <Link href={`/classes/${profile.currentClass.id}/info`} className="font-medium text-primary hover:underline">
                       {profile.currentClass.name}
                     </Link>
                     {/* WHERE, not only WHICH — the question a visitor asks. */}

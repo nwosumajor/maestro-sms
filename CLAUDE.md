@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **354 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **355 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **354 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **355 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -959,7 +959,9 @@ These are the rules; the log is why each one exists.
   `claims-in-claude-md`, `pricing-consistency`, `runbook-freshness`,
   `what-the-help-page-promises`, `api-doc-is-current`.
 - **A comment asserting agreement is not agreement.** Two files each carried
-  "same rule as the report card" while disagreeing with it and with each other.
+  "same rule as the report card" while disagreeing with it and each other — and
+  `ClassAttendanceBoard` warned that `/classes/<id>` is not a route while three
+  other files linked to it.
 - **A CATEGORY NOBODY EMITS IS A FILTER THAT ANSWERS NOTHING, AND A SWITCH THAT
   GOVERNS NOTHING.** `NotificationInput.type` was `NotificationTypeValue |
   string`, so the union gated nothing and four hand-kept lists grew beside it
@@ -978,11 +980,9 @@ These are the rules; the log is why each one exists.
   all source and passed a mutation, because the same string was a WORKFLOW type
   in the same file. That confusion IS the defect.
 - **A COUNTER MUST COUNT WHAT WAS DELIVERED, NOT WHAT WAS ITERATED.** The fee
-  reminder sweep incremented `reminded` per INVOICE whether or not a guardian
+  reminder sweep counted `reminded` per INVOICE whether or not a guardian
   existed, so a school with 30 billable invoices and no guardian links was told
-  "30 reminded" having told nobody. Count the recipients, name the shortfall
-  (`unreachable`) — found by a CROSS-MODULE audit, since neither side is wrong
-  alone.
+  "30 reminded" having told nobody. Count recipients; name the shortfall.
 - **REPORT WHAT YOU DID NOT DO.** Silent partial success is the commonest shape
   here: a roll call that named nobody missing, a sweep that marked every overdue
   boarder handled including those it told nobody about, `notified: 2500` of
@@ -1001,13 +1001,11 @@ These are the rules; the log is why each one exists.
   `money-is-not-divided-by-a-hundred`.
 - **A SHARED HELPER CALLED WITH ITS DEFAULT IS STILL A PLATFORM-CURRENCY SITE.**
   `money(amountMinor, currency = PLATFORM_REGION.currency)` — so `money(x)` is
-  the bug written with the *correct* helper, and it is the spelling that
-  survived after every hand-rolled `₦${…}` had been swept. `school-currency`
-  now scans `app/(app)` PAGES as well as `components/` (it did neither for
-  server pages, which is where two live defects sat beside fixed siblings) and
-  flags a bare `money(x)`, skipping one shadowed by `useFormat()` or a local
-  `moneyIn(region)`. **And a DTO that reports money must say what currency it is
-  in** — a screen cannot format what it was never told.
+  the bug written with the *correct* helper, the spelling that survived after
+  every hand-rolled `₦${…}` was swept. `school-currency` scans `app/(app)` PAGES
+  as well as `components/` (it did neither for server pages, where two live
+  defects sat beside fixed siblings) and flags a bare `money(x)` unless shadowed
+  by `useFormat()`. **A DTO that reports money must say what currency it is in.**
 - **A gateway is ALWAYS told the currency**, and settlement REFUSES a mismatch
   before posting. One posting path (`InvoiceSettlementService`), so one guard.
 - **A naira constant is not a rule for every school.** And the two fail-safes
@@ -1035,8 +1033,8 @@ These are the rules; the log is why each one exists.
   comment about this exact failure, and was never swept to the other two.
 - **A capped list is worse when it is the only route to something else.** The
   billing history was the 50 most recent with no page, and a payment's id appears
-  NOWHERE else — so its receipt went with it, unreachable while the route that
-  serves it works perfectly. Ask what a dropped row was the key to.
+  NOWHERE else — its receipt went with it, unreachable while the route serving it
+  works. Ask what a dropped row was the key to.
 - **"Live work is bounded" is an assumption, not a fact.** The approvals queue
   read the newest 500 PENDING rows and narrowed in memory. Live work is bounded
   by what the school has never got round to DECIDING, and that grows: at three
@@ -1065,16 +1063,15 @@ These are the rules; the log is why each one exists.
   tells a family that notices exist which they may not read. **Widening the
   REACH must never widen the RULE.**
 - **A JUMP-TO BOX IS STILL A CAP.** The omnibox showed six per category with no
-  count: "Adebayo" matched 150 pupils and returned six arbitrary ones, so *not
-  on the roll* and *one of the 144 I did not show* rendered identically. Return
-  `shown`/`total`, order by a TOTAL order, offer "see all" only where a query
-  page exists, and count only when the `PER_CATEGORY + 1`-th row proves more.
+  count: "Adebayo" matched 150 pupils and returned six arbitrary ones, so *not on
+  the roll* and *one of the 144 I did not show* read identically. Return
+  `shown`/`total`, order by a TOTAL order, and count only when the
+  `PER_CATEGORY + 1`-th row proves more.
 - **AND THE FILTER A TOTAL IS COMPUTED OVER CAN ITSELF BE TRUNCATED.** The
-  operator revenue screen aggregates in SQL over the whole filter and says so —
-  while the filter was the first 500 name-matching schools fed to a `schoolId
-  IN`: at 800 it reported NGN 262,500,000 of 420,000,000. A MATERIALISED
-  predicate's cap belongs to the fleet, not a page, and crossing it is
-  reportable.
+  operator revenue screen aggregates in SQL over the whole filter — while the
+  filter was the first 500 name-matching schools in a `schoolId IN`: at 800 it
+  reported NGN 262,500,000 of 420,000,000. A MATERIALISED predicate's cap belongs
+  to the fleet, not a page.
 - **A FIGURE COMPUTED FROM A CAPPED PAGE IS WORSE THAN A SHORT LIST.** The
   scholarship panel derived its headlines from the fetched array over a
   `take: 500`: leadership saw **500 / 405 / 29** against a true
@@ -1090,15 +1087,14 @@ These are the rules; the log is why each one exists.
   queue small by default — `effectivePaymentApprovalThresholdMinor` returns 0 off
   the platform's currency. Oldest-first, count in SQL, WAIT on the row.
 - **A register is not a queue.** A capped newest-first list DROPS the oldest —
-  exactly the row a review queue exists to surface. Page and count **in SQL**; a
-  filter applied in memory only sees rows that survived the cap. Work a queue
-  **oldest-first**, and never narrow the count by the filter.
+  exactly the row a review queue exists to surface. Page and count **in SQL**;
+  filtering in memory only sees rows that survived the cap. Work a queue
+  **oldest-first**; never narrow the count by the filter.
 - **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** The calendar had
-  no lower bound on recurring events, so dead series were fetched first under a
-  500 cap and each expanded to zero: 600 finished weekly clubs -> **a blank
-  calendar** with ten real events in the window. Filter on what makes a row
-  USEFUL to the window (`recurrenceUntil >= from`), and fetch one row PAST the
-  cap so truncation is detected rather than assumed absent.
+  no lower bound on recurring events, so dead series filled a 500 cap first and
+  each expanded to zero: 600 finished clubs -> **a blank calendar** with ten real
+  events in the window. Filter on what makes a row USEFUL (`recurrenceUntil >=
+  from`), and fetch one row PAST the cap so truncation is detected.
 - **No silent truncation.** An export is complete or says it is short, and every
   row must be IDENTIFIABLE — the NDPR bundle returned 36 payslips as
   `{gross, net}` with no period, date or run: complete, and unreadable.
@@ -1123,7 +1119,9 @@ These are the rules; the log is why each one exists.
   1,350 — and an exam row is the only route to its RESULTS, PAPER, ANSWER KEY and
   grade RECORDING. A cap strands four surfaces, not one.
 - **Count in the database**; never `findMany().length`. Never a query per row —
-  `.map(r => this.toDto(tx, r))` is a query multiplier.
+  `.map(r => this.toDto(tx, r))` is a query multiplier, and so is a name lookup
+  inside a loop (the open-duels list was N+1 twice: 200 round trips for 100
+  lobbies, on a child's first screen).
 - **A TENANT-LEADING INDEX SERVES EVERY READ AND NO FOREIGN-KEY CHECK.**
   `(schoolId, studentId)` is right for every scoped read, and an FK check gets a
   bare `studentId` with no tenant to lead with, so it seq-scans — 73 of the 79
@@ -1167,27 +1165,35 @@ These are the rules; the log is why each one exists.
   observable.
 
 ### Completeness of a change
-- **A control the product imposes must have a way to FINISH it** — and a way
-  OUT. A maker-checker raised on a tier whose decide route was module-gated; a
-  recurring charge with no cancel; a model with a create and no update (**64 of
-  them**, one of which held an answer key).
+- **A control the product imposes must have a way to FINISH it** — and a way OUT.
+  A maker-checker raised on a tier whose decide route was module-gated; a
+  recurring charge with no cancel; a model with a create and no update (**64**,
+  one holding an answer key); an open duel only a TEACHER could close, which its
+  own host could not even see.
+- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below, and the
+  one a user meets. `/attendance`'s "take →", the ONE control for taking a
+  missing register, pointed at `/classes/<id>`, not a route. Gate
+  `a-link-to-a-page-that-is-not-there` matches every literal href against the
+  declared routes; it found a fourth on its first run.
+- **A PICKER MUST REMEMBER WHAT WAS PICKED.** The choice was a PLACEHOLDER
+  re-derived from `[...seed, ...results]`; choosing clears the query, which
+  clears `results`, so anybody found by SEARCH vanished on being chosen. Hold it
+  in state, render it as TEXT. (`PeoplePicker` was right and was never swept.)
+- **`{ scroll: false }` WHEN A NAVIGATION UPDATES A SECTION IN PLACE.** Next
+  scrolls to the top on every push; the attendance pupil-picker sits at the FOOT
+  of a long page, so clicking a pupil hid the history it asked for.
 - **A ROUTE NO SCREEN CALLS IS A DOOR MISSING FROM THE OUTSIDE.** `GET
-  /members/scan/today` — permission-gated, audited, RLS-scoped — was reached
-  from nowhere. The existing gates catch a service method no CONTROLLER reaches;
-  this was one level out. When a read answers a question the product claims to
-  answer, check that something ASKS it.
+  /members/scan/today` was reached from nowhere — one level out from the gates
+  that catch a service method no CONTROLLER reaches.
 - **A SUMMARY MUST NOT NARROW WITH THE FILTER BELOW IT.** The desk's day counts
   are a `groupBy` over the whole day, independent of `?purpose=` and the page —
-  otherwise filtering to check-ins reports that nobody has left. The question is
-  answered before a row is read, and the list is evidence rather than the
-  answer.
+  otherwise filtering to check-ins reports that nobody has left.
 - **A field the API accepts that no screen sends** is a feature nobody has
-  (`a-field-no-screen-can-fill-in`); **a service method no controller reaches**
-  is a fix that shipped with no door (`service-methods-nobody-calls`); **a page
-  nothing links to** is not delivered (`every-page-can-be-reached`). *Present is
-  not the same as findable* — a whole feature styled as a caption was invisible.
-- **A duty given with a notice is taken away with one** — but retract only what
-  was actually SENT, or the retraction is the first the recipient hears of it.
+  (`a-field-no-screen-can-fill-in`); **a method no controller reaches** shipped
+  with no door (`service-methods-nobody-calls`); **a page nothing links to** is
+  not delivered (`every-page-can-be-reached`). *Present is not findable.*
+- **A duty given with a notice is taken away with one** — retract only what was
+  actually SENT.
 - **Fixing where it hurts and leaving the siblings is how the class survives.**
 
 ### Tests, gates and probes
@@ -1198,11 +1204,12 @@ These are the rules; the log is why each one exists.
   matching a digit in a timestamp, an assertion satisfied by the COMMENT
   explaining its own fix (strip comments), and an `as` cast defeating a
   `Record<Key, true>` completeness check entirely.
-- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE
-  proves nothing. Read `Test Suites:` as well as `Tests:`.
+- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE proves
+  nothing. Read `Test Suites:` as well as `Tests:`. A jest pattern passed where a
+  FLAG belongs matches no tests and exits 1.
 - **A gate that walks must assert it scanned something** — a walk that finds no
   files produces no offenders and passes green.
-- **A test on a helper proves nothing about its caller.** Drive the real service.
+- **A test on a helper proves nothing about its caller.** Drive the real thing.
 - **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY ON THE CLOCK.** The
   report card prints "Generated DD/MM/YYYY, HH:MM:SS", so `not.toMatch(/\b33\b/)`
   over the extracted PDF fails ~3.3% of runs — which presents as a flaky suite
@@ -1210,8 +1217,9 @@ These are the rules; the log is why each one exists.
   passes with the cell wrong whenever the clock reads `:29:`. Read the CELL
   (`cells[indexOf(row) + 1]`). And pin the collision as a test rather than hoping:
   fake `Date` only (`doNotFake` the timer family, pdfkit needs real ones).
-- **Anchor a test to the PROPERTY, not to the text.** Fixed-text assertions have
-  gone red on changes that STRENGTHENED what they guard nine times.
+- **Anchor a test to the PROPERTY, not the text** (nor a column's POSITION).
+  Fixed-text assertions have gone red on changes that STRENGTHENED what they
+  guard ten times.
 - **An over-wide gate is the same failure as a blind one** — it teaches its next
   reader to add an exemption, and an exemption granted for a false positive is a
   hole with a note on it. Delete the rule rather than exempt what it wrongly
@@ -1230,9 +1238,9 @@ These are the rules; the log is why each one exists.
 
 ### Operational safety
 - **Fail closed at BOOT** where a mis-set value is unrecoverable afterwards
-  (encryption key, auth secret, storage provider, public URL, email sender, and
-  now `API_BASE_URL` — `apps/web/lib/env.ts` + `apps/web/instrumentation.ts`). An
-  env var set to an EMPTY STRING is not unset, and `??` is blind to it.
+  (encryption key, auth secret, storage provider, public URL, email sender,
+  `API_BASE_URL`). An env var set to an EMPTY STRING is not unset; `??` is blind
+  to it.
   // GOTCHA: **"boot" means the process EXITS.** Two weaker versions of this
   check were built first and neither failed closed. A throw in the ACCESSOR is
   caught by the caller's own try/catch — `/schools` answered **200** with
@@ -1242,16 +1250,15 @@ These are the rules; the log is why each one exists.
   deploy. Verify against `node .next/standalone/…/server.js`, not `next start`,
   which refuses `output: standalone`; keep the check LAZY, since `next build`
   runs with `NODE_ENV=production` and the variable is legitimately absent then.
-- **A secret's SHAPE is not its PROVENANCE** — a well-formed key published in
-  this repo is compromised for ever (`PUBLISHED_SECRETS`).
-- **One school's failure must not end the fleet's sweep.** Catch per school,
-  NAME it, and COUNT it into the result the operator console reads — a count
-  nobody surfaces is a count nobody acts on.
-- **Never seed a demo account into production** (`SEED_DEMO_DATA`, fail-closed).
-- **Probe hygiene:** never overwrite a real user's password (bcrypt is
-  unrecoverable — mint a token instead); scope every cleanup by id or timestamp;
-  check what the container is actually RUNNING before believing a live result;
-  `git checkout` on an uncommitted file discards the FIX, not the mutation.
+- **A secret's SHAPE is not its PROVENANCE** — a well-formed key published in this
+  repo is compromised for ever (`PUBLISHED_SECRETS`). Never seed a demo account
+  into production (`SEED_DEMO_DATA`, fail-closed).
+- **One school's failure must not end the fleet's sweep.** Catch per school, NAME
+  it, and COUNT it into the result the operator console reads.
+- **Probe hygiene:** never overwrite a real user's password (mint a token);
+  scope every cleanup by id or timestamp; check what the container is RUNNING
+  before believing a live result; `git checkout` on an uncommitted file discards
+  the FIX, not the mutation.
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
@@ -2382,41 +2389,34 @@ guard reads role→perms from the DB).
 Twenty-five fixes found by asking, of each control, "is it applied on every path
 that does the thing?" The durable facts:
 
-- **A REGISTER IS NOT A QUEUE.** `LIST_CAP = 500` claims inbox views "only ever
-  surface the most-recent page" — true of live work, false whenever the list is
-  also the record a school reads LATER. Approvals, the leave register and
-  assessments now take filters + `page` and return `{items,total,page,pageSize}`
-  with the MATCHING total (before: 702 workflow requests returned 500; 541
-  assessments hid 41 with no filter that could reach them). Filter in SQL, and a
-  search must AND onto the caller's scoping, never replace it. `mine=1` is
-  narrowed in memory ON PURPOSE (a stage permission inside a JSON column), safe
-  only because live work is bounded. A fee run's DRAFTs finish with
-  `POST /invoices/issue-bulk` — there was no batch way to issue a batch, so
-  hostel rent stayed invisible.
+- **A REGISTER IS NOT A QUEUE.** `LIST_CAP = 500` claims inbox views "only
+  surface the most-recent page" — true of live work, false when the list is also
+  the record a school reads LATER. Approvals, leave and assessments take filters
+  + `page` and return the MATCHING total (before: 702 workflow requests returned
+  500). Filter in SQL, and a search must AND onto the caller's scoping. `mine=1`
+  is narrowed in memory ON PURPOSE (a stage permission inside JSON), safe only
+  because live work is bounded. A fee run's DRAFTs finish with
+  `POST /invoices/issue-bulk` — there was no batch way to issue a batch.
 - **ELEVATION REACHES THE UI.** `activeGrantPermissions` is the ONE definition of
-  what a grant gives, called by the guard AND by login/refresh; the session
-  carries `elevated` and `sessionPermissions()` merges it. Before, a grant was
-  honoured by the API and lit up no screen. A stage decided under a grant is in
-  the IMMUTABLE trail — the reviewer's comment no longer REPLACES the system's
-  notes (`??` became a join), which is where that fact vanished.
-- **"TODAY" IS THE SCHOOL'S DAY** — now also the transport boarding register
+  what a grant gives, called by the guard AND by login/refresh. Before, a grant
+  was honoured by the API and lit up no screen. A stage decided under a grant is
+  in the IMMUTABLE trail — the reviewer's comment no longer REPLACES the
+  system's notes (`??` became a join), which is where that fact vanished.
+- **"TODAY" IS THE SCHOOL'S DAY** — including the transport boarding register
   (keyed on `(passenger,date,direction)`, so a wrong day OVERWRITES another
-  journey) and the exam-day board's default. Six remaining `toISOString()` uses
-  label a document; they do not key a record.
+  journey). Remaining `toISOString()` uses label a document, never key a record.
 - **A CONTROL WITH ANOTHER WAY ROUND IT IS NOT A CONTROL.** The leaver document
-  gate ran on `getDownloadUrl` and not on `streamFile` — the door the web uses.
-  Both call one `assertReleasable` BEFORE the bytes are fetched. A RECEIPT is
-  never gated: withholding personal data over a debt is unlawful, not firm.
+  gate ran on `getDownloadUrl`, not `streamFile` — the door the web uses. Both
+  call one `assertReleasable`. A RECEIPT is never gated: withholding personal
+  data over a debt is unlawful, not firm.
 - **EXITED USERS CANNOT AUTHENTICATE.** `validateLogin`, `refreshClaims` and the
   password-reset path all refuse a non-ACTIVE user, which BOUNDS a whole class of
-  "a leaver still has X" worries — check it first. Staff may not REPLY to a pupil
-  who has left; a class change deliberately does NOT end a conversation, because
-  that moves it to WhatsApp.
+  "a leaver still has X" worries. A class change deliberately does NOT end a
+  conversation, because that moves it to WhatsApp.
 - **MONEY MUST SAY WHERE IT WENT.** A library fine lands on an ISSUED invoice (a
   DRAFT is not a bill — hidden from families and out of receivables, so an UNPAID
-  fine was visible only by being paid), records the METHOD, bills the charge if
-  it is missing rather than taking cash with nothing on the ledger, and tells the
-  family at both ends.
+  fine was visible only by being paid), records the METHOD, and bills the charge
+  rather than taking cash with nothing on the ledger.
 - **REPORT WHAT YOU DID NOT DO.** The exeat sweep marked every overdue boarder
   as handled including the ones it could tell nobody about; it now marks only
   what it alerted, and alerts the FAMILY in their own words. An alumni broadcast
@@ -2425,9 +2425,9 @@ that does the thing?" The durable facts:
   nightly now (`attendance.rollup` in the jobs catalogue), 452 ms -> 32 ms with
   IDENTICAL figures.
 - **A SIGNAL IS NOT A PENALTY.** Scholarship signals report `disciplineUpheld`
-  and `disciplineOpen` separately and NEVER a DISMISSED complaint — `discipline.file`
-  is held by students, so a single count let a classmate's accusation count
-  against a child asking for help with fees.
+  and `disciplineOpen` separately, never a DISMISSED complaint — `discipline.file`
+  is held by students, so one count let a classmate's accusation count against a
+  child asking for help with fees.
 
 **Gates added, each validated by reintroducing the defect it exists for:**
 `service-methods-nobody-calls` (a dead read is a query somebody can wire up in

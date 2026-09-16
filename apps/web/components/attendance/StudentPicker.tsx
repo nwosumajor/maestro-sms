@@ -25,6 +25,20 @@ const RESULT_CAP = 60;
  * still pays nothing: with a handful of children the chips render and no request is
  * ever made.
  */
+/**
+ * // GOTCHA: `{ scroll: false }` on both pushes, and it is not cosmetic.
+ *
+ * Next's App Router scrolls to the TOP of the document on every navigation, and
+ * this control sits near the BOTTOM of /attendance — under the missing-register
+ * board, the reminder button, the class board and the register card. So clicking
+ * a pupil threw the viewport back to the top while the history the click asked
+ * for rendered off-screen, and the reader had to scroll all the way down again
+ * to see the answer. On a page where checking several pupils in a row is the
+ * whole task, that is the work.
+ *
+ * The same applies to this page's pagination links, which carry `scroll={false}`
+ * for the same reason.
+ */
 export function StudentPicker({
   students,
   selectedId,
@@ -69,7 +83,7 @@ export function StudentPicker({
   const chip = (s: Student) => (
     <button
       key={s.id}
-      onClick={() => router.push(`/attendance?studentId=${s.id}`)}
+      onClick={() => router.push(`/attendance?studentId=${s.id}`, { scroll: false })}
       className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
         s.id === selectedId ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent"
       }`}
@@ -105,7 +119,7 @@ export function StudentPicker({
         {shown.map((s) => (
           <button
             key={s.id}
-            onClick={() => router.push(`/attendance?studentId=${s.id}`)}
+            onClick={() => router.push(`/attendance?studentId=${s.id}`, { scroll: false })}
             className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
               s.id === selectedId ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent"
             }`}

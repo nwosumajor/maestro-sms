@@ -68,4 +68,18 @@ export interface OpenGameDto {
   difficultyLength: number;
   createdAt: Date;
   hostDisplayName: string;
+  /**
+   * The caller HOSTS this one.
+   *
+   * The list used to drop the caller's own lobby (`if (host.userId === p.userId)
+   * continue`), which is right for a "games you can JOIN" list and left a
+   * player's own open duel visible on NO screen at all. So a duel opened by
+   * mistake, or one nobody ever joined, sat in everyone else's list for ever
+   * with its host unable to see it, let alone withdraw it — a create with no
+   * undo, on a table that only grows.
+   *
+   * It is returned now, flagged, so the hub can show it as "waiting" with a
+   * Cancel beside it rather than a Join.
+   */
+  mine: boolean;
 }

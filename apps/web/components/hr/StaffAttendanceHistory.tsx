@@ -5,7 +5,7 @@ import type { Serialized, StaffAttendanceHistoryDto } from "@sms/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { timeOfDay, shortDate } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { interpretApiError } from "@/lib/api-error";
 
 type History = Serialized<StaffAttendanceHistoryDto>;
@@ -23,15 +23,6 @@ function hoursAndMinutes(mins: number): string {
   return h > 0 ? `${h}h ${mins % 60}m` : `${mins}m`;
 }
 
-/** "2026-08" → "August 2026". Month names come from the VIEWER's locale. */
-function monthLabel(ym: string): string {
-  const [y, m] = ym.split("-").map(Number);
-  return new Date(Date.UTC(y, (m ?? 1) - 1, 1)).toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
 
 /**
  * One member of staff's attendance, compiled per month.
@@ -42,6 +33,12 @@ function monthLabel(ym: string): string {
  * most often.
  */
 export function StaffAttendanceHistory({ userId, initial }: { userId: string; initial: History | null }) {
+  // A SCHOOL's attendance record is read in the SCHOOL's region — its dates are
+  // its own calendar days and its month names its own language, not the
+  // platform's and not whichever laptop is looking at it. `shortDate` and
+  // `timeOfDay` were imported straight from `lib/format`, whose bare exports
+  // are pinned to the platform's locale and timezone.
+  const { shortDate, timeOfDay, monthLabel } = useFormat();
   const [data, setData] = React.useState<History | null>(initial);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);

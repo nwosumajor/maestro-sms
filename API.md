@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **913 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **914 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -554,6 +554,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **913 routes across 90
 | PUT | `/game-settings` | 🔑 `game.settings.manage` · 📦 `games` | Update — game settings |
 | POST | `/games` | 🔑 `game.play` · 📦 `games` | Create — games |
 | GET | `/games/:id` | 🔑 `game.leaderboard.read` · 📦 `games` | Get — games |
+| POST | `/games/:id/cancel` | 🔑 `game.play` · 📦 `games` | The HOST withdraws their own duel while it is still waiting for somebody. `game.play`, not `game.match.moderate`: a player closing a lobby nobody has joined is tidying up after themselves, not moderating. |
 | POST | `/games/:id/end` | 🔑 `game.match.moderate` · 📦 `games` | Moderator force-end of a stuck/abusive duel — ends with no winner. |
 | POST | `/games/:id/forfeit` | 🔑 `game.play` · 📦 `games` | Forfeit |
 | POST | `/games/:id/guess` | 🔑 `game.play` · 📦 `games` | Guess |

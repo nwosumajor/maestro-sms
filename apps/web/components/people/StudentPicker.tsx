@@ -36,10 +36,32 @@ export function StudentPicker({
   const [busy, setBusy] = React.useState(false);
   const [open, setOpen] = React.useState(false);
 
-  const selected = React.useMemo(
-    () => [...seed, ...(results ?? [])].find((s) => s.id === value),
-    [seed, results, value],
-  );
+  /**
+   * WHO IS PICKED — REMEMBERED, not re-derived.
+   *
+   * `selected` used to be looked up in `[...seed, ...results]` on every render.
+   * Choosing clears the query, which clears `results`, so a pupil found by
+   * SEARCHING the server (i.e. anyone not in the page's small seed) vanished
+   * from the control the instant they were chosen: the field showed its
+   * placeholder again and the form looked empty while `value` held a perfectly
+   * good id. On enrolment that means enrolling a pupil you can no longer see the
+   * name of; the sibling `PeoplePicker` keeps its chosen people in state and
+   * shows them first, and says so in a comment — these two were never swept.
+   *
+   * Held in state, and re-derived ONLY as a fallback (a parent may set `value`
+   * from outside, e.g. a saved draft), so it survives both the cleared query and
+   * a re-render.
+   */
+  const [picked, setPicked] = React.useState<PickedStudent | null>(null);
+  const selected = React.useMemo(() => {
+    if (picked && picked.id === value) return picked;
+    return [...seed, ...(results ?? [])].find((s) => s.id === value) ?? null;
+  }, [picked, seed, results, value]);
+
+  // A parent clearing the field must clear the remembered name with it.
+  React.useEffect(() => {
+    if (!value) setPicked(null);
+  }, [value]);
 
   React.useEffect(() => {
     const needle = q.trim();
@@ -72,9 +94,19 @@ export function StudentPicker({
 
   return (
     <div className={`relative ${className}`}>
+      {/* THE CHOICE IS TEXT, NOT A PLACEHOLDER. A placeholder is grey, reads as
+          "nothing here yet", and disappears the moment somebody types — so even
+          when it resolved, the field looked empty. The name now sits above the
+          box and stays put. */}
+      {selected && (
+        <p className="mb-1 truncate text-sm font-medium" title={selected.name}>
+          {selected.name}
+        </p>
+      )}
       <input
         disabled={disabled}
-        placeholder={selected ? selected.name : placeholder}
+        placeholder={selected ? "Search to change…" : placeholder}
+        aria-label={selected ? `Selected: ${selected.name}. Search to change.` : placeholder}
         className="w-full rounded-md border bg-background p-1.5 text-sm"
         value={q}
         onChange={(e) => {
@@ -90,6 +122,7 @@ export function StudentPicker({
           type="button"
           className="absolute right-2 top-1.5 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
+            setPicked(null);
             onChange("");
             setQ("");
           }}
@@ -110,6 +143,7 @@ export function StudentPicker({
                     s.id === value ? "text-primary" : ""
                   }`}
                   onClick={() => {
+                    setPicked(s);
                     onChange(s.id, s);
                     setQ("");
                     setOpen(false);

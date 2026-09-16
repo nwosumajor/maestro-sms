@@ -96,7 +96,19 @@ export class GameService {
     return view;
   }
 
-  /** Lobbies in the caller's school still waiting for a second player. */
+  /**
+   * Lobbies in the caller's school still waiting for a second player.
+   *
+   * INCLUDES THE CALLER'S OWN, flagged. Dropping it was right for a list titled
+   * "games you can join" and left a player's own open duel on no screen
+   * anywhere — so one opened by mistake, or one nobody ever joined, sat in
+   * everyone else's list for ever and its host could not withdraw it.
+   *
+   * TWO QUERIES, NOT TWO PER GAME. This ran a `gamePlayer.findMany` and a
+   * `displayName` lookup inside the loop — up to 200 extra round trips for a
+   * page of 100 lobbies, on the games hub, which is a child's first screen. The
+   * seats and the names are each asked for once.
+   */
   async listOpenGames(p: Principal): Promise<OpenGameDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const games = await tx.game.findMany({
@@ -104,25 +116,71 @@ export class GameService {
         orderBy: { createdAt: "desc" },
         take: 100,
       });
-      const out: OpenGameDto[] = [];
-      for (const g of games) {
-        const players = await tx.gamePlayer.findMany({
-          where: { gameId: g.id },
-          select: { userId: true },
-        });
-        // Open = exactly one player, and the caller isn't already in it.
-        if (players.length !== 1) continue;
-        const host = players[0] as { userId: string };
-        if (host.userId === p.userId) continue;
-        out.push({
+      if (games.length === 0) return [];
+
+      const seats = (await tx.gamePlayer.findMany({
+        where: { gameId: { in: games.map((g) => g.id) } },
+        select: { gameId: true, userId: true },
+      })) as Array<{ gameId: string; userId: string }>;
+      const seatsOf = new Map<string, string[]>();
+      for (const s of seats) seatsOf.set(s.gameId, [...(seatsOf.get(s.gameId) ?? []), s.userId]);
+
+      // Open = exactly one player. Resolve only those hosts' names.
+      const open = games.filter((g) => (seatsOf.get(g.id) ?? []).length === 1);
+      const hostIds = [...new Set(open.map((g) => (seatsOf.get(g.id) as string[])[0]))];
+      const names = await this.displayNames(tx, hostIds);
+
+      return open.map((g) => {
+        const hostId = (seatsOf.get(g.id) as string[])[0];
+        return {
           id: g.id,
           difficultyLength: g.difficultyLength,
           createdAt: g.createdAt,
-          hostDisplayName: await this.displayName(tx, host.userId),
-        });
-      }
-      return out;
+          hostDisplayName: names.get(hostId) ?? "A player",
+          mine: hostId === p.userId,
+        };
+      });
     });
+  }
+
+  /**
+   * The HOST withdraws their own duel while it is still waiting.
+   *
+   * Separate from the moderator's `endGame`, and deliberately narrower: only the
+   * host, and only while the lobby has exactly ONE seat. Once somebody has
+   * joined there is an opponent with a stake in the game, and closing it is a
+   * moderation decision rather than a host's — `POST /games/:id/end` is that
+   * door and it is gated on `game.match.moderate`.
+   *
+   * Recorded as ABANDONED like any other closed game, so nothing has to learn a
+   * new state, and audited under its own action so the trail can tell a host
+   * tidying up from a teacher stepping in.
+   */
+  async cancelOwnGame(p: Principal, gameId: string): Promise<GameDto> {
+    const view = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const game = await this.requireGame(tx, gameId);
+      const seats = (await tx.gamePlayer.findMany({
+        where: { gameId },
+        select: { userId: true },
+      })) as Array<{ userId: string }>;
+      // 404-not-403: a player who is not in this game learns nothing about it.
+      if (!seats.some((s) => s.userId === p.userId)) throw new NotFoundException("Game not found");
+      if (game.status !== "LOBBY") {
+        throw new ConflictException("This game has already started — ask a teacher to end it.");
+      }
+      if (seats.length !== 1) {
+        throw new ConflictException("Somebody has already joined — ask a teacher to end it.");
+      }
+      await tx.gamePlayer.updateMany({ where: { gameId }, data: { secret: null } });
+      await tx.game.update({
+        where: { id: gameId },
+        data: { status: "ABANDONED", currentTurnPlayerId: null, finishedAt: new Date() },
+      });
+      await this.log(tx, p, "game.cancel", "game", gameId);
+      return this.buildGameView(tx, gameId, p.userId);
+    });
+    this.events.emitChanged(gameId);
+    return view;
   }
 
   // --- join / setup -------------------------------------------------------
@@ -380,6 +438,17 @@ export class GameService {
   private async displayName(tx: TenantTx, userId: string): Promise<string> {
     const u = await tx.user.findFirst({ where: { id: userId }, select: { name: true } });
     return u?.name ?? "Player";
+  }
+
+  /** The same question for MANY users, in one query — a name lookup inside a
+   *  loop is a query multiplier, and the open-games list had one. */
+  private async displayNames(tx: TenantTx, userIds: string[]): Promise<Map<string, string>> {
+    if (userIds.length === 0) return new Map();
+    const users = (await tx.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, name: true },
+    })) as Array<{ id: string; name: string | null }>;
+    return new Map(users.map((u) => [u.id, u.name ?? "Player"]));
   }
 
   /**
