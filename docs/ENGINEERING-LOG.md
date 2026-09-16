@@ -16799,3 +16799,205 @@ LIVE, end to end on the rebuilt stack:
   - one character changed in the signature -> 400.
 
 Nine mutations across the three files, each naming its own property.
+
+### A template a school could fill in completely and still be chased for
+
+`SIS_REQUIRED_PROFILE_FIELDS` decides when a pupil's profile counts as COMPLETE.
+The bulk-import template had no column for two of them. Measured by running the
+real template through the real rule:
+
+    template columns        : name, email, admissionNumber, dateOfBirth, gender,
+                              phone, address, class
+    required to be COMPLETE : dateOfBirth, gender, phone, addressLine1, city, state
+    STILL MISSING           : [ 'city', 'state' ]
+
+So a school that imported an accurate, complete register had EVERY pupil land
+INCOMPLETE, and the nightly sweep nudged every one of them — and their guardians
+— for two facts it had never been offered anywhere to type. A nudge is supposed
+to mean "we genuinely do not know this". It meant "the template is two columns
+short", and nothing in the product could tell the difference. The
+silent-partial-success class again, pointed at families rather than at an
+operator, and at the scale of a whole roll.
+
+THE RULE THAT DECIDES WHAT BELONGS IN THE TEMPLATE, written down because it is
+the durable part: a column exists for every fact THE SCHOOL is the authority on,
+plus every field the platform requires before a profile counts as complete.
+Anything else is asked of the family, who are the authority on it and who will
+keep it current. Medical details and emergency contacts are deliberately absent
+and must stay absent — they are encrypted, separately audited and staff-owned,
+and a spreadsheet passed around an office is the wrong custody for them.
+
+The template is now `name, admissionNumber, class, dateOfBirth, gender, email,
+phone, addressLine1, addressLine2, city, state`, all optional but the name, and
+WHAT YOU LEAVE BLANK IS EXACTLY WHAT THE PUPIL IS ASKED FOR. One definition in
+`@sms/types` — it existed TWICE, as `TEMPLATE_HEADERS` in the service and `COLS`
+in the web component, hand-kept, with the file matched BY HEADER NAME, so drift
+between them was never a crash: it was a column a school filled in and the
+platform dropped.
+
+Gate `a-template-that-can-finish-a-profile` takes the file the product actually
+hands a school, parses its worked example, and fails unless a pupil created from
+it needs no chasing at all. Asserting on the column list alone would pass with an
+example that leaves the new columns blank. The SECOND example is deliberately
+sparse and the gate checks that too — a file whose every example is complete
+teaches a school nothing about which blanks cost it a reminder.
+
+// GOTCHA: the export beside it, `/admin/export/students.csv`, was
+// `#, Name, Class, Status` — four display columns no path could read back. So
+// there was no export→correct→re-upload loop either, and combined with a
+// create-only import (below) a school that got its first import slightly wrong
+// faced fixing it one pupil at a time for ever. It round-trips the template
+// now, off the same `SIS_IMPORT_COLUMNS` table, so a column appears at both
+// ends or at neither. A GENERATED sign-in identifier is exported BLANK on
+// purpose: handing the platform's own invention back as though it were the
+// pupil's address would, on re-upload, turn it into a supplied email and change
+// how the account is treated.
+
+### The address that took the class column with it
+
+The import parsed with `line.split(",")`. The address is the field most likely to
+contain a comma and a spreadsheet quotes such a cell. Measured on the real parser:
+
+    input   : ...,"12 Main St, Ikeja",SS3 Science A
+    address : "12 Main St
+    class   : Ikeja"
+
+The address was silently truncated AND every later column shifted by one, so the
+pupil enrolled in NO class — `Ikeja"` matched nothing and the row then looked
+like any other pupil awaiting placement. Two corrupt records from one comma, on
+the one path a school uses to load its entire roll.
+
+`parseCsv` in `@sms/types` is quote-aware and handles what a spreadsheet actually
+emits: quoted fields, embedded commas, embedded newlines, `""` as an escaped
+quote, CRLF, and a UTF-8 BOM — which Excel writes and which would otherwise land
+inside the FIRST HEADER, so `name` arrives as `﻿name`, every row has no name,
+and the whole file is rejected as empty with nothing on the screen able to
+explain why. `csvCellOf` is the writing half, and a test round-trips the awkward
+cells through both.
+
+### The columns the door threw away
+
+The template gained `city`, `state` and `addressLine2`. Driving a real import end
+to end against the live stack, they did not arrive:
+
+    PROBE Ada Complete | PRB-001 | 2012-05-01 | F | 08000000001 |  |  |  | INCOMPLETE
+
+Address, city and state all blank, on a row that supplied every one of them —
+and the pupil still INCOMPLETE, which is the exact symptom the whole change was
+meant to remove. Every status along the way was a success: 201 staged, 201
+approved, `created: 2`.
+
+The cause was a THIRD hand-kept copy of the column list — the Zod schema at the
+controller, which nobody had mentioned because it is not called a template. A
+`z.object` STRIPS what it does not declare, so the school's work was discarded
+between the file and the database in silence.
+
+EVERY UNIT TEST PASSED, and would have gone on passing: they drive the service
+directly and never cross the boundary that was dropping the columns. This is the
+"guard on one door" shape inverted — not a check missing from one path, but a
+DECLARATION missing from one path — and the only thing that found it was running
+the feature.
+
+The durable fix is the type system, not a fourth careful copy.
+`SIS_IMPORT_COLUMNS` is `as const` so its keys form a union, and the controller
+carries
+
+    type ColumnWithNoValidator = Exclude<SisImportColumnKey, keyof typeof sisRowShape>;
+    const _everyColumnValidated: [ColumnWithNoValidator] extends [never]
+      ? true
+      : ["a template column has no validator:", ColumnWithNoValidator] = true;
+
+so the next column added without a validator fails to COMPILE, naming itself:
+
+    error TS2322: Type 'boolean' is not assignable to type
+      ["a template column has no validator:", "postalCode"]
+
+An assignment rather than a test, deliberately: the failure has to land on
+whoever adds the column, in the file they are already editing.
+
+// GOTCHA: the FIRST version of that check ended in
+// `as Record<SisImportColumnKey, true>`, and a cast defeats the check entirely
+// — it compiled happily with a column missing. Verified by adding `postalCode`
+// and watching it pass, which is the only reason it is not still there. A
+// compile-time gate needs the same mutation validation a runtime one does.
+
+// GOTCHA: `as const` drops an OMITTED property from that member's type, so the
+// union loses it and `col.profileField` stops compiling for the whole array.
+// Every entry states all four properties, nulls included; the literal keys are
+// worth more than the brevity.
+
+### An import that could only ever be done once
+
+A row matching a pupil already on roll was counted as a "duplicate" and dropped.
+The file was a one-shot: no bulk route to correct a typo, fill in the columns a
+school did not have on the day, or load the addresses it gathered later.
+
+It is an upsert now, keyed on the ADMISSION NUMBER — the school's own identifier,
+the key the guardian upload already matches on, and unlike a generated sign-in
+identifier it does not change when a name is corrected.
+
+ONE RULE MAKES IT SAFE: **a blank cell never clears a stored value.** A school
+re-uploading its roll with only the address columns filled must not wipe every
+date of birth it loaded last term. The other reading destroys data nobody asked
+to destroy and nothing would report it — a cleared field looks exactly like one
+that was never supplied. Written as `COALESCE(v.col, p.col)`, asserted on the
+STATEMENT rather than on the bound values, because a test that checked only the
+payload would pass against an UPDATE setting every column to the row's nulls.
+
+An update rewrites a child's record, so it goes through the same maker-checker
+approval a creation does — and the approver is shown the FIELDS that would
+change, per pupil, before deciding. A count alone asks somebody to sign for
+something they cannot see. The preview is capped at 25 and the COUNT is the true
+total; a field the file repeats unchanged is not counted at all, or every
+re-upload would read as if it would rewrite the whole school and a reviewer would
+learn to approve without looking.
+
+SCALE, and both halves matter:
+  - WHICH ROWS ARE UPDATES is asked BEFORE the hashing, not after. bcrypt is the
+    dominant cost of an import at roughly 100 ms a row, and an update needs no
+    account and therefore no password. Hashing first would burn a minute and a
+    half of CPU on a 1,000-pupil correction that creates nobody, and would do it
+    again every time a school made one.
+  - THE UPDATE IS ONE STATEMENT PER CHUNK, an `UPDATE … FROM (VALUES …)`. Prisma
+    has no bulk update with per-row values, and a loop of `update()` calls inside
+    an interactive transaction is exactly the trap this method already carries a
+    comment about: Prisma caps one at FIVE SECONDS, so a school correcting 400
+    records would get "Internal server error" and whether it worked would depend
+    on how busy the task was.
+
+// GOTCHA: `total` was `prepared.length`, and `prepared` no longer holds the
+// update rows — so a 400-row correction would have reported itself as a 0-row
+// import. Counted across both.
+
+Six mutations, each failing naming its own property: drop COALESCE (data loss);
+hash every row; one UPDATE per pupil; remove the `city` column from the template;
+empty the preview; report the total off `prepared`.
+
+// GOTCHA in the test double, made and then fixed here: `$executeRaw` is a
+// TAGGED TEMPLATE, so the first argument IS the TemplateStringsArray — and
+// reading `.values` off an array returns `Array.prototype.values`, a FUNCTION,
+// not the bound parameters. A double built that way captures nothing and vouches
+// for any statement. The bound values are the rest args, and a `Prisma.sql`
+// fragment among them carries its own, so they have to be flattened.
+
+// An existing test read `header.endsWith(",class")` and went red when the
+// template gained its missing columns — a change that STRENGTHENED what the file
+// can carry. Where a column SITS was never the property; that it is the one
+// offered is. Re-anchored.
+
+Live, end to end on the rebuilt stack, after the boundary fix:
+  - import a complete row (address containing a comma) and a sparse one ->
+    `12 Main St, Ikeja` / Lagos / Lagos all land; the sparse pupil's blanks stay
+    blank. `missingProfileFields` is now [] for the complete pupil, so the sweep
+    says "looks complete, press Submit" instead of naming two columns that had
+    nowhere to be typed; the sparse one is chased for exactly the four it lacks.
+  - export the roll -> headers identical to the template, and the file re-parses
+    through the shipped parser with the comma-bearing address intact.
+  - correct it: Bolu's four blanks filled, and Ada's row sent carrying ONLY
+    `city`. The dry run named both pupils and the exact fields, `city: Lagos ->
+    Ibadan` among them. After approval: city changed, and date of birth, gender,
+    phone, address and state all UNTOUCHED — the COALESCE property holding on
+    real data. `updated: 2, created: 0`, no new accounts, no credentials issued.
+  - a school admin can submit on a pupil's behalf (`submitProfile` is scoped by
+    `assertCanAccessStudent`), so "the school completes it for them" is a real
+    path and the supervisor/admin review still needs two other people.

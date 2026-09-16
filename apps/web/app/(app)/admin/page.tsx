@@ -94,7 +94,7 @@ export default async function AdminPage() {
     { label: "Long-term archives", href: "/admin/archives", perm: "privacy.archive.manage", desc: "Year snapshots for a records request years later" },
     // Two CSV exports that existed with no download link anywhere — a leader
     // could not get their own roster out of the product without an API call.
-    { label: "Student roster (CSV)", href: "/api/sms/admin/export/students.csv", perm: "rbac.manage", desc: "Every student, for a spreadsheet or a return", download: true },
+    { label: "Student roster (CSV)", href: "/api/sms/admin/export/students.csv", perm: "rbac.manage", desc: "Every pupil in the import template's own shape — correct it and upload it back", download: true },
     { label: "Staff list (CSV)", href: "/api/sms/admin/export/staff.csv", perm: "rbac.manage", desc: "Every staff member and their roles", download: true },
     { label: "Create profiles", href: "/admin/users", perm: "rbac.manage", desc: "Add staff, teachers, parents, students" },
     { label: "Roles & access", href: "/admin/roles", perm: "rbac.manage", desc: "Assign roles to users" },

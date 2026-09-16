@@ -22,7 +22,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { autoSuffixLoginOnClash, isPlatformTierRole, requiresContactEmail } from "@sms/types";
-import { NON_STAFF_ROLE_NAMES } from "@sms/types";
+import { NON_STAFF_ROLE_NAMES, SIS_IMPORT_COLUMNS, SIS_IMPORT_HEADERS } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -140,16 +140,55 @@ export class AdminService {
     });
   }
 
-  /** Every student with the class they are actively enrolled in. */
+  /**
+   * The roll, IN THE SHAPE OF THE IMPORT TEMPLATE — so a school can export it,
+   * correct it in a spreadsheet, and upload the same file back.
+   *
+   * It used to be `#, Name, Class, Status`: four display columns that no path
+   * could read. So there was no bulk way to fix a typo or fill in the address
+   * details a school gathered after its first import — the only route was one
+   * pupil at a time, for ever, on the record of every child in the school.
+   * Round-tripping the template turns "get it right first time" into "correct
+   * it in bulk", which is the difference between an import a school can live
+   * with and one it dreads.
+   *
+   * SCALE: this is O(the school's ROLL), not of its lifetime — a roll is
+   * bounded by the building. Two queries whatever its size, and the profile
+   * columns come from the same `SIS_IMPORT_COLUMNS` table the template is built
+   * from, so an added column appears at both ends or at neither.
+   */
   async studentRosterCsv(p: Principal): Promise<string> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // ON ROLL — the roster is who is HERE, so a not-yet-enrolled pupil still
       // appears but one who has left does not. Leavers have their own register.
-      const students = await tx.user.findMany({
+      const students = (await tx.user.findMany({
         where: ON_ROLL_STUDENT,
-        select: { id: true, name: true, status: true },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          loginEmailGenerated: true,
+          studentProfile: {
+            select: {
+              admissionNumber: true,
+              dateOfBirth: true,
+              gender: true,
+              phone: true,
+              addressLine1: true,
+              addressLine2: true,
+              city: true,
+              state: true,
+            },
+          },
+        },
         orderBy: { name: "asc" },
-      });
+      })) as unknown as Array<{
+        id: string;
+        name: string;
+        email: string;
+        loginEmailGenerated: boolean;
+        studentProfile: Record<string, unknown> | null;
+      }>;
       // ONE query for every active enrolment, not one per student.
       const enrolments = students.length
         ? await tx.enrollment.findMany({
@@ -163,17 +202,31 @@ export class AdminService {
         { actorId: p.userId, action: "admin.students.export", entity: "user", entityId: "roster", schoolId: p.schoolId, metadata: { count: students.length } },
         tx,
       );
-      const lines = ['"#","Name","Class","Status"'];
-      students.forEach((u, i) => {
-        lines.push(
-          [
-            csvCell(String(i + 1)),
-            csvCell(u.name),
-            csvCell(classOf.get(u.id) ?? "Not enrolled"),
-            csvCell(u.status),
-          ].join(","),
-        );
-      });
+
+      const cellFor = (u: (typeof students)[number], key: string): string => {
+        if (key === "name") return u.name;
+        // A GENERATED identifier is left BLANK, deliberately. Exporting one and
+        // importing it back would hand the platform's own invention to a school
+        // as though it were the pupil's address — and on a re-upload it would be
+        // a supplied email, changing how the account is treated. Only an address
+        // the school actually gave comes back out.
+        if (key === "class") return classOf.get(u.id) ?? "";
+        if (key === "email") return u.loginEmailGenerated ? "" : u.email;
+        const col = SIS_IMPORT_COLUMNS.find((c) => c.key === key);
+        const v = col?.profileField ? u.studentProfile?.[col.profileField] : null;
+        if (v == null) return "";
+        // A @db.Date is a DAY. `toISOString` on midnight UTC is the same day, and
+        // YYYY-MM-DD is what the template asks for and what the parser reads.
+        return v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+      };
+
+      const lines = [SIS_IMPORT_HEADERS.join(",")];
+      for (const u of students) {
+        // `csvCell` (not csvCellOf): it quotes AND guards against a leading
+        // formula character, because this file is opened in a spreadsheet and a
+        // pupil's name is attacker-supplied text.
+        lines.push(SIS_IMPORT_HEADERS.map((h) => csvCell(cellFor(u, h))).join(","));
+      }
       return `${lines.join("\n")}\n`;
     });
   }

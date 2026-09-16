@@ -1,6 +1,13 @@
 "use client";
 
-import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge } from "@sms/types";
+import {
+  BULK_IMPORT_MAX_ROWS,
+  bulkImportTooLarge,
+  parseCsv,
+  SIS_IMPORT_COLUMNS,
+  SIS_IMPORT_HEADERS,
+  SIS_REQUIRED_PROFILE_FIELDS,
+} from "@sms/types";
 import type { StudentImportBatchDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -13,28 +20,31 @@ import { readApiError } from "@/lib/api-error";
 
 type Batch = Serialized<StudentImportBatchDto>;
 
-// `class` takes the class NAME or CODE — what the school already calls it and
-// what is printed on the classes page. It used to be `classId`, a raw uuid:
-// nobody has one to hand, so filling this in meant digging an id out of a URL
-// per class and pasting it once per pupil, with no way to check the result.
-const COLS = ["name", "email", "admissionNumber", "dateOfBirth", "gender", "phone", "address", "class"] as const;
+// The columns and the parser both come from `@sms/types`.
+//
+// This file used to carry its OWN copy of the header list, hand-kept beside the
+// API's. The CSV is matched BY HEADER NAME, so a drift between the two was not a
+// crash — it was a column a school filled in and the platform quietly dropped.
+//
+// It also used to parse with `line.split(",")`. The address is the column most
+// likely to contain a comma, and a spreadsheet quotes it: `"12 Main St, Ikeja"`
+// became `address: '"12 Main St'` with every later column SHIFTED BY ONE, so the
+// pupil enrolled in a class called `Ikeja"`. `parseCsv` is quote-aware.
 
-/** Parse a CSV string (header row + data rows) into typed SIS rows. */
-function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const cells = line.split(",").map((c) => c.trim());
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { if (cells[i]) row[h] = cells[i]; });
-    return row;
-  });
-}
+/** Which profile fields the family is asked for when a column is left blank. */
+const REQUIRED_FOR_COMPLETE = new Set<string>(SIS_REQUIRED_PROFILE_FIELDS);
 
 export function SisImport({ batches, currentUserId }: { batches: Batch[]; currentUserId: string }) {
   const router = useRouter();
-  const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,SS3 Science A\nBolu Eze,,ADM-002,2012-09-14,M,,,JSS1`);
+  // The starting text is the SAME shape as the downloaded template, built from
+  // the same header list — so pasting and downloading can never disagree.
+  const [csv, setCsv] = React.useState(
+    [
+      SIS_IMPORT_HEADERS.join(","),
+      `Ada Lovelace,ADM-001,SS3 Science A,2012-05-01,F,ada@example.com,08000000000,"12 Main St, Ikeja",,Lagos,Lagos`,
+      `Bolu Eze,ADM-002,JSS1,2012-09-14,M,,,,,,`,
+    ].join("\n"),
+  );
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   // One-time credentials from the LAST approval — shown once, never persisted.
@@ -71,19 +81,19 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
     const rows = parsed
       // Only NAME is required — the sign-in identifier is generated from it.
       .filter((r) => r.name)
-      .map((r) => ({
-        name: r.name,
-        email: r.email || null,
-        admissionNumber: r.admissionNumber || null,
-        dateOfBirth: r.dateOfBirth || null,
-        gender: r.gender || null,
-        phone: r.phone || null,
-        address: r.address || null,
-        // Either spelling reaches the server; it resolves a name or code and
-        // the DRY RUN reports any that match nothing, before anything is created.
-        class: r.class || null,
-        classId: r.classId || null,
-      }));
+      // BUILT FROM THE COLUMN TABLE, not hand-listed. A hand-listed mapper is
+      // exactly how `city` and `state` get added to the template and dropped on
+      // the way to the server — which is the defect this change exists for.
+      // `parseCsv` has already folded the legacy `address`/`classId` headers
+      // onto their current names.
+      .map((r) => {
+        const row: Record<string, string | null> = { name: r.name };
+        for (const col of SIS_IMPORT_COLUMNS) {
+          if (col.key === "name") continue;
+          row[col.key] = r[col.key] || null;
+        }
+        return row;
+      });
     if (rows.length === 0) { setMsg("No valid rows — every row needs at least a name."); return; }
     // Say it BEFORE the upload. The server refuses the same file with the same
     // sentence; meeting that after choosing a file teaches nothing the picker
@@ -96,7 +106,12 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
     setBusy(false);
     if (res.ok) {
       const b = (await res.json()) as Batch;
-      setMsg(`Staged ${b.summary?.total ?? rows.length} rows (${b.summary?.newCount ?? "?"} new, ${b.summary?.duplicateCount ?? "?"} duplicate). Awaiting approval by a different admin.`);
+      const upd = b.summary?.updateCount ?? 0;
+      setMsg(
+        `Staged ${b.summary?.total ?? rows.length} rows (${b.summary?.newCount ?? "?"} new` +
+          (upd ? `, ${upd} to update` : "") +
+          `, ${b.summary?.duplicateCount ?? "?"} duplicate). Awaiting approval by a different admin.`,
+      );
       router.refresh();
     } else setMsg(await readApiError(res));
   };
@@ -109,7 +124,10 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
       const b = (await res.json()) as Batch;
       if (action === "approve") {
         setCreds(b.credentials ?? null);
-        setMsg(`Approved — created ${b.summary?.created ?? 0}, skipped ${b.summary?.skipped ?? 0}.`);
+        setMsg(
+          `Approved — created ${b.summary?.created ?? 0}, updated ${b.summary?.updated ?? 0}, ` +
+            `skipped ${b.summary?.skipped ?? 0}.`,
+        );
       } else setMsg("Batch rejected.");
       router.refresh();
     } else setMsg(await readApiError(res, "A different admin (not the uploader) must approve."));
@@ -147,7 +165,20 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>Download CSV template</Button>
+            <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>Download blank template</Button>
+            {/* THE CORRECTION LOOP, and the reason it is on THIS screen: the
+                roster export is in the template's own shape, so fixing a typo or
+                filling in the columns you did not have on the day is a download,
+                an edit and an upload — not one pupil at a time for ever. It was
+                only ever linked from the admin dashboard, away from the page
+                where somebody realises they need it. */}
+            <a
+              href="/api/sms/admin/export/students.csv"
+              download
+              className="inline-flex h-8 items-center rounded-md border border-input bg-card px-3 text-xs font-medium hover:bg-accent"
+            >
+              Download current roll (to correct)
+            </a>
             <Label
               htmlFor="sis-file"
               className="inline-flex h-8 cursor-pointer items-center rounded-md border border-input bg-card px-3 text-xs font-medium hover:bg-accent"
@@ -157,12 +188,65 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
             <input id="sis-file" type="file" accept=".csv,text/csv" className="sr-only" onChange={onFile} />
           </div>
           <form onSubmit={stage} className="space-y-3">
+            {/* WHAT EACH COLUMN IS FOR, on the screen that asks for the file.
+                The template's own example rows are the other half of this, but a
+                school deciding WHICH of its records to gather needs to see the
+                list before it opens a spreadsheet. */}
+            <details className="rounded-md border border-border">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-medium">
+                What goes in each column ({SIS_IMPORT_COLUMNS.length})
+              </summary>
+              <div className="border-t border-border px-3 py-2">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Only <span className="font-mono">name</span> is required. Fill in what your register already
+                  holds — <strong>every blank marked &ldquo;asked of the family&rdquo; becomes a reminder</strong>{" "}
+                  to the pupil and their guardians until somebody completes it, so a column you can fill in now
+                  is a chase you never have to make.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border text-left text-muted-foreground">
+                        <th className="py-1 pr-3 font-medium">Column</th>
+                        <th className="py-1 pr-3 font-medium">What it is</th>
+                        <th className="py-1 font-medium">If left blank</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {SIS_IMPORT_COLUMNS.map((col) => (
+                        <tr key={col.key} className="border-b border-border/50 last:border-0 align-top">
+                          <td className="py-1 pr-3 font-mono">{col.key}</td>
+                          <td className="py-1 pr-3">
+                            {col.label}
+                            {col.hint && <span className="block text-muted-foreground">{col.hint}</span>}
+                          </td>
+                          <td className="py-1">
+                            {col.required ? (
+                              <span className="text-destructive">the row is skipped</span>
+                            ) : REQUIRED_FOR_COMPLETE.has(col.profileField ?? "") ? (
+                              "asked of the family"
+                            ) : (
+                              "left empty"
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Medical details and emergency contacts are deliberately not in this file — they are entered
+                  on the pupil&rsquo;s own record, where they are encrypted and every read is logged.
+                </p>
+              </div>
+            </details>
             <div className="space-y-1.5">
               <Label htmlFor="sis-csv">CSV (header row required)</Label>
               <p className="text-xs text-muted-foreground">
-                Only <span className="font-mono">name</span> is required. Write{" "}
-                <span className="font-mono">class</span> the way you say it — &ldquo;SS3 Science A&rdquo; or the
-                class code. Anything that matches no class is listed back to you before anything is created.
+                Write <span className="font-mono">class</span> the way you say it — &ldquo;SS3 Science A&rdquo;
+                or the class code. Anything that matches no class is listed back to you before anything is
+                created. A cell containing a comma must be in &ldquo;quotes&rdquo;, which is what a spreadsheet
+                does for you.
               </p>
               <Textarea id="sis-csv" value={csv} onChange={(e) => setCsv(e.target.value)} rows={6} className="font-mono text-xs" />
             </div>
@@ -215,9 +299,10 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
           {batches.length === 0 && <p className="text-sm text-muted-foreground">No batches yet.</p>}
           {batches.map((b) => {
             const mine = b.uploadedById === currentUserId;
+            const updateCount = b.summary?.updateCount ?? 0;
             return (
-              <div key={b.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
-                <div>
+              <div key={b.id} className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-border px-3 py-2">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">
                     {b.rowCount} rows{" "}
                     <Badge variant={b.status === "APPROVED" ? "secondary" : b.status === "REJECTED" ? "destructive" : "outline"}>
@@ -228,9 +313,66 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
                   {b.summary && (
                     <p className="text-xs text-muted-foreground">
                       {b.status === "APPROVED"
-                        ? `created ${b.summary.created ?? 0}, skipped ${b.summary.skipped ?? 0}`
-                        : `${b.summary.newCount} new, ${b.summary.duplicateCount} duplicate`}
+                        ? `created ${b.summary.created ?? 0}, updated ${b.summary.updated ?? 0}, skipped ${b.summary.skipped ?? 0}`
+                        : `${b.summary.newCount} new, ${updateCount} to update, ${b.summary.duplicateCount} duplicate`}
                     </p>
+                  )}
+                  {/* CLASSES THE FILE NAMED THAT MATCH NOTHING — before anything
+                      is created, because a misspelt class enrols the pupil
+                      nowhere and would otherwise say nothing. */}
+                  {b.summary?.unknownClasses && b.summary.unknownClasses.length > 0 && (
+                    <p className="mt-1 text-xs text-destructive">
+                      No class matches: {b.summary.unknownClasses.join(", ")}. Those pupils will be created but
+                      not enrolled.
+                    </p>
+                  )}
+                  {/* WHAT AN APPROVAL WOULD CHANGE ON PUPILS ALREADY ON ROLL.
+                      An update rewrites a child's record, so the person
+                      approving it has to be able to SEE what it rewrites — a
+                      count alone asks somebody to sign for something invisible. */}
+                  {b.status === "PENDING" && updateCount > 0 && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs text-muted-foreground">
+                        {updateCount} existing {updateCount === 1 ? "pupil" : "pupils"} would be changed — review
+                        before approving
+                      </summary>
+                      <div className="mt-1 max-h-56 overflow-auto rounded-md border border-border">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-border text-left text-muted-foreground">
+                              <th className="px-2 py-1 font-medium">Admission no.</th>
+                              <th className="px-2 py-1 font-medium">Pupil</th>
+                              <th className="px-2 py-1 font-medium">Changes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(b.summary?.updates ?? []).map((u) => (
+                              <tr key={u.admissionNumber} className="border-b border-border/50 align-top last:border-0">
+                                <td className="px-2 py-1 font-mono">{u.admissionNumber}</td>
+                                <td className="px-2 py-1">{u.name}</td>
+                                <td className="px-2 py-1">
+                                  {u.changes.map((c) => (
+                                    <span key={c.field} className="mr-2 inline-block">
+                                      <span className="font-mono">{c.field}</span>{" "}
+                                      <span className="text-muted-foreground">{c.from ?? "(blank)"}</span> →{" "}
+                                      <span>{c.to}</span>
+                                    </span>
+                                  ))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {updateCount > (b.summary?.updates?.length ?? 0) && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Showing the first {b.summary?.updates?.length ?? 0} of {updateCount}.
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        A blank cell never clears a stored value — only the columns listed above change.
+                      </p>
+                    </details>
                   )}
                 </div>
                 {b.status === "PENDING" && (

@@ -73,9 +73,14 @@ const rowsOf = (staged: Record<string, unknown> | null) => staged?.rows as Array
 
 describe("the template header", () => {
   it("offers `class`, not `classId`", () => {
+    // ANCHORED TO THE PROPERTY, not to the column's POSITION. This read
+    // `header.endsWith(",class")` and went red when the template gained its
+    // missing columns and `class` stopped being last — a change that
+    // STRENGTHENED what the file can carry. Where the column sits was never the
+    // point; that it is the one offered is.
     const h = harness(CLASSES);
     const header = h.svc.csvTemplate().split("\n")[0];
-    expect(header.endsWith(",class")).toBe(true);
+    expect(header.split(",")).toContain("class");
     expect(header).not.toContain("classId");
   });
 

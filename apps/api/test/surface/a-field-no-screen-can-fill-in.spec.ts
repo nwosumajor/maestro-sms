@@ -79,9 +79,32 @@ function walkWeb(dir: string, out: string[] = []): string[] {
 }
 
 const WEB = join(__dirname, "..", "..", "..", "web");
-const webSrc = walkWeb(WEB)
-  .map((f) => readFileSync(f, "utf8"))
-  .join("\n");
+const webFiles = walkWeb(WEB);
+
+/**
+ * Shared field tables a screen MAPS OVER to build a request body.
+ *
+ * The gate asks whether the web MENTIONS an identifier — a proxy that this
+ * pattern defeats. `SisImport.tsx` builds its payload by iterating
+ * `SIS_IMPORT_COLUMNS`, so it sends every key in that table and NONE of them
+ * appears as a literal anywhere in the web. Grepping the web alone therefore
+ * reported `addressLine2` as a field nobody could supply, when in fact it is a
+ * column on the form, in the downloaded template and in the export.
+ *
+ * Exempting it would have been the wrong repair — an exemption granted for a
+ * false positive is a hole with a note on it. The table is part of the screen,
+ * so the gate reads it as part of the screen.
+ *
+ * Each entry is checked below to be genuinely imported by a web file, so this
+ * list cannot quietly grow into a way of hiding real gaps.
+ */
+const SHARED_FIELD_TABLES: { file: string; exportName: string }[] = [
+  { file: "packages/types/src/dto/student-import-template.ts", exportName: "SIS_IMPORT_COLUMNS" },
+];
+const REPO = join(__dirname, "..", "..", "..", "..");
+const sharedSrc = SHARED_FIELD_TABLES.map((t) => readFileSync(join(REPO, t.file), "utf8")).join("\n");
+
+const webSrc = [...webFiles.map((f) => readFileSync(f, "utf8")), sharedSrc].join("\n");
 
 /** Every optional field on a body schema declared in a controller. */
 function optionalBodyFields(): Map<string, string[]> {
@@ -118,6 +141,17 @@ describe("every optional input is one somebody can actually supply", () => {
   it("every field no screen sends is a decision somebody wrote down", () => {
     const undeclared = unsent.filter((f) => !(f in API_ONLY) && !(f in AWAITING_A_SCREEN));
     expect(undeclared).toEqual([]);
+  });
+
+  it("only counts a shared field table the web ACTUALLY iterates", () => {
+    // Otherwise SHARED_FIELD_TABLES becomes a way to silence the gate: add a
+    // file, and every identifier in it reads as sendable. Each entry must be
+    // imported by a real web file.
+    const webText = webFiles.map((f) => readFileSync(f, "utf8")).join("\n");
+    for (const t of SHARED_FIELD_TABLES) {
+      expect({ table: t.exportName, importedByTheWeb: webText.includes(t.exportName) })
+        .toEqual({ table: t.exportName, importedByTheWeb: true });
+    }
   });
 
   it("the backlog SHRINKS — an entry that a screen now sends must be removed", () => {
