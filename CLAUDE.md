@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **361 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **362 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **361 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **362 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1009,15 +1009,15 @@ These are the rules; the log is why each one exists.
   // GOTCHA: `listOpenSlots` one method away filtered `startsAt >= now`, with a
   comment about this exact failure, and was never swept to the other two.
 - **A capped list is worse when it is the only route to something else.** The
-  billing history was the 50 most recent with no page, and a payment's id appears
-  NOWHERE else — its receipt went with it, unreachable while the route serving it
-  works. Ask what a dropped row was the key to.
+  billing history was the 50 most recent with no page, and a payment's id
+  appears NOWHERE else, so its receipt went with it — unreachable while the
+  route serving it works. Ask what a dropped row was the key to.
 - **"Live work is bounded" is an assumption, not a fact.** The approvals queue
-  read the newest 500 PENDING rows and narrowed in memory. Live work is bounded
-  by what the school has never got round to DECIDING, and that grows: at three
-  years, 666 pending, a reported total of 500, the 166 OLDEST unreachable at any
-  page. Scan oldest-first against the one shared predicate, and report a floor
-  as a floor.
+  read the newest 500 PENDING rows and narrowed in memory — but live work is
+  bounded by what the school never got round to DECIDING, and that grows: at
+  three years, 666 pending, a reported total of 500, the 166 OLDEST unreachable
+  at any page. Scan oldest-first on the one shared predicate; report a floor as
+  a floor.
 - **AN OVERDUE ROW IS AN OLD ROW**, so a newest-first cap discards what the
   screen is alarming about: 300 recent loans under a strip counting 1,316
   overdue, 14 reachable at ANY url. When a page shows a COUNT, the list beside it
@@ -1031,8 +1031,8 @@ These are the rules; the log is why each one exists.
 - **A PICKER IS THE ONLY ROUTE TO THE THING IT NAMES.** `/discipline/file-targets`
   returned the first 500 by name with no search and no count: on a 1,200-pupil
   roll that was A to K, so **690 pupils could not be named in a complaint at
-  all**, on the safeguarding path. Search inside the SCOPED set, return a total,
-  and trust a seed only when `seed.length >= total`.
+  all**. Search inside the SCOPED set, return a total, and trust a seed only
+  when `seed.length >= total`.
 - **A TOTAL MUST COUNT ONLY WHAT THE CALLER MAY READ.** A capped list's count
   and search must inherit the list's own scoping. The notice board is
   audience-filtered, so its `count` and `q` carry the same filter — the
@@ -1069,11 +1069,10 @@ These are the rules; the log is why each one exists.
   exactly the row a review queue exists to surface. Page and count **in SQL**;
   filtering in memory only sees rows that survived the cap. Work a queue
   **oldest-first**; never narrow the count by the filter.
-- **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** The calendar had
-  no lower bound on recurring events, so dead series filled a 500 cap first and
-  each expanded to zero: 600 finished clubs -> **a blank calendar** with ten real
-  events in the window. Filter on what makes a row USEFUL (`recurrenceUntil >=
-  from`), and fetch one row PAST the cap so truncation is detected.
+- **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** With no lower
+  bound on recurring events, 600 dead series filled a 500 cap and each expanded
+  to zero: **a blank calendar**. Filter on what makes a row USEFUL
+  (`recurrenceUntil >= from`), and fetch one PAST the cap to detect truncation.
 - **No silent truncation.** An export is complete or says it is short, and every
   row must be IDENTIFIABLE — the NDPR bundle returned 36 payslips as
   `{gross, net}` with no period, date or run: complete, and unreadable.
@@ -1083,24 +1082,21 @@ These are the rules; the log is why each one exists.
   not get; a dev-sized table picks the other plan; one pupil holding all 5,000
   invoices measures nothing.
 - **O(lifetime), not O(size)** is the shape that degrades invisibly — it tracks
-  how long a school has been on the platform, or a PUPIL at the school.
-  `/grades/mine` returned every mark ever, unpaged: 2,430 rows / 831 KB for a
-  parent of three, to look at this week's work. Bound the read to the period the
-  SCREEN claims — and keep the other periods reachable.
+  how long a school, or a PUPIL, has been here. `/grades/mine` returned every
+  mark ever, unpaged: 2,430 rows / 831 KB for a parent of three, to see this
+  week's work. Bound it to the period the SCREEN claims; keep the rest reachable.
 - **ALUMNI ONLY EVER GROW**: a newest-first cap loses the OLDEST cohort, which
   is backwards for the one list whose value is its age.
-- **Offset paging needs a TOTAL order.** `gradedAt` alone is not one — tied rows
-  come back differently per page, silently skipping and repeating: 239 distinct
-  of 270 across six pages. Add `id`. The test passed until the double SHUFFLED
-  before sorting: `Array.sort` is stable in V8, Postgres is not. And **an index
-  nothing selects is write amplification** — measure before adding.
-- **THE ROW IS THE ROUTE.** The CBT console returned the 100 newest exams of
-  1,350 — an exam row is the only route to its RESULTS, PAPER, ANSWER KEY and
-  grade RECORDING, so a cap strands four surfaces, not one.
+- **Offset paging needs a TOTAL order.** `gradedAt` alone is not one: 239
+  distinct rows of 270 across six pages. Add `id`. The test passed until the
+  double SHUFFLED before sorting — `Array.sort` is stable in V8, Postgres is
+  not. And **an index nothing selects is write amplification**; measure first.
+- **THE ROW IS THE ROUTE.** The CBT console returned the 100 newest of 1,350
+  exams — and an exam row is the only route to its RESULTS, PAPER, ANSWER KEY
+  and grade RECORDING, so a cap strands four surfaces, not one.
 - **Count in the database**; never `findMany().length`. Never a query per row —
   `.map(r => this.toDto(tx, r))` is a query multiplier, and so is a name lookup
-  inside a loop (the open-duels list was N+1 twice: 200 round trips for 100
-  lobbies, on a child's first screen).
+  in a loop (open duels was N+1 twice: 200 round trips for 100 lobbies).
 - **A TENANT-LEADING INDEX SERVES EVERY READ AND NO FOREIGN-KEY CHECK.**
   `(schoolId, studentId)` is right for every scoped read, and an FK check gets a
   bare `studentId` with no tenant to lead with, so it seq-scans — 73 of the 79
@@ -2043,32 +2039,36 @@ the processors, following ONE HOP into the services a swept method calls
 // the capped read was invisible because the gate was reading a type.
 
 ## A capped sweep must report its BACKLOG, not just what it took
-Every scheduled sweep bounds its read with a `take`, deliberately. Each reported
-only what it TOOK, so a run that cleared its 500 and left 100,000 behind produced
-the same line as one that emptied the queue. Measured at 3,500 schools after a
-queue outage stranded 21,918 deliveries: three hourly runs each returned
-`scanned=500 requeued=500 failed=0` — every console signal green — while 21,858
-families were still waiting (~44 hours to even attempt them). **`backlog` is a
-FOURTH fact**: not `failed` (tried and could not), not `skipped` (not due), not
-`unreachable` (about the data) — DUE work queued behind a cap, and the number
-that says whether the sweep is keeping up. All four capped sweeps report it
-(`notification-recovery`, `sis-nudge`, `submission-retention`, term `archive`),
-each counting with the SAME predicate its page uses — named once so they cannot
-drift. `JobRunsService` reads it like `failed` (opt-in, null = no notion of one);
-the console shows a **Behind** badge with the magnitude. A real `failed`
-outranks it. Gate: `a-sweep-that-was-behind-and-said-nothing`.
+Every scheduled sweep bounds its read, deliberately, and each reported only what
+it TOOK — so a run that cleared its 500 and left 100,000 behind read exactly like
+one that emptied the queue. Measured at 3,500 schools after a queue outage
+stranded 21,918 deliveries: three hourly runs each returned `scanned=500
+requeued=500 failed=0`, every console signal green, 21,858 families still
+waiting. **`backlog` is a FOURTH fact**: not `failed` (tried and could not), not
+`skipped` (not due), not `unreachable` (about the data) — DUE work queued behind
+a cap. Every capped sweep reports it, counting with the SAME predicate its page
+uses, named once so they cannot drift. `JobRunsService` reads it like `failed`
+(opt-in, null = no notion of one) and the console shows a **Behind** badge; a
+real `failed` outranks it. Gate: `a-sweep-that-was-behind-and-said-nothing`.
 // GOTCHA: adding one `count()` broke six existing doubles — each must now count
 the SAME set its `findMany` draws from, or it passes against a service computing
 the backlog from the wrong predicate.
+// **AND A CAP ONLY ADVANCES IF TAKING A ROW REMOVES IT FROM THE PREDICATE THE
+PAGE IS DRAWN FROM.** The declined-applicant purge paged over APPLICATIONS and
+wrote only to `document_submission`, so the same 500 matched every night for
+ever: run 1 cleared 409 files, runs 2-4 cleared NONE, 191 birth certificates
+held permanently while `backlog` sat frozen at 475,036 — which reads as
+"behind", never as "stuck". Page the WORK, count the backlog on that predicate.
+The double that hid it ignored `take`; the gate went blind on the fix because
+`hasLiteralTake` knew `take:` and not a raw `LIMIT`.
 
 ## PURGING A TENANT: index the referencing columns first
-The 73 unindexed FKs into `user` this file records are harmless until somebody
-hard-deletes a tenant's users, then every delete seq-scans each of them. Measured
-removing a 1,500-school fixture: **25 min and 11 min without committing**. The
-documented remedy works exactly as written — 23 temporary indexes on the
-referencing columns built in **1.2 s**, the same delete committed **1,370,900
-rows in 3 m 6 s**, indexes dropped after. Do this before offboarding a real
-school.
+The 73 unindexed FKs into `user` are harmless until somebody hard-deletes a
+tenant's users, then every delete seq-scans each of them: a 1,500-school fixture
+ran **25 min without committing**. The remedy works as written — 23 temporary
+indexes on the referencing columns in **1.2 s**, the delete then committing
+**1,370,900 rows in 3 m 6 s**, indexes dropped after. Do this before offboarding
+a real school.
 
 ## Background jobs: a sweep that skipped a school must SAY so
 `JobRunsService.failedCount` reads a **`failed`** field off each job's stored
@@ -2243,9 +2243,9 @@ is 14:00 in Lagos and 09:00 in Toronto. It runs hourly and acts on a school only
 when THAT school's local clock reads `REGISTER_REMINDER_LOCAL_HOUR` (14), so
 each school is reminded once in its own afternoon and 23 of the 24 ticks
 correctly do nothing. `skipped` is therefore a large, healthy number here.
-// It does not nag: weekends and days outside the current term are skipped, a
-class with nobody on roll is not an outstanding register, and a teacher gets ONE
-message listing all their classes rather than one per class.
+// It does not nag: weekends and days outside the term are skipped, a class with
+nobody on roll is not an outstanding register, and a teacher gets ONE message
+listing all their classes rather than one per class.
 // `notified` counts TEACHERS TOLD, not registers walked; `unreachable` counts
 outstanding registers whose class has no ACTIVE supervisor — nobody can be
 reminded about those. The board says so (`teacherActive: false`), because

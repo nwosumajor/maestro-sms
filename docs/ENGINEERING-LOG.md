@@ -17467,3 +17467,81 @@ Mutation-validated three ways, each failing the right test by name: dropping
 `isPlatform = false` (the platform org's own staff fold into a customer
 headcount), dropping `status = 'ACTIVE'` (the attention queue starts chasing
 switched-off tenants), and inlining the ids as text instead of binding them.
+
+### The retention sweep that ran every night and never got past the first 500
+
+The declined-applicant purge exists for one obligation: a family sends a child's
+birth certificate before anyone has decided anything, and when the school says
+no, the platform must let the file go. It is scheduled nightly, capped at 500,
+and reports a `backlog` so an operator can see it falling behind.
+
+**It could not reach anything past the first 500, ever.** The page was drawn
+from declined APPLICATIONS; the sweep's only write is to `document_submission`.
+Nothing about an application changes when its files go, so the identical 500
+rows matched again the next night, and the night after that.
+
+Driven against a real database — 2,000,000 applications, 600 of them declined
+and holding a file:
+
+    run 1   applications 500   filesPurged 409   backlog 475,036
+    run 2   applications 500   filesPurged   0   backlog 475,036
+    run 3   applications 500   filesPurged   0   backlog 475,036
+    run 4   applications 500   filesPurged   0   backlog 475,036
+    still held: 191 birth certificates, permanently
+
+The jobs console showed a healthy run every night: no `failed`, no error, an
+`applications: 500` that reads like work. `backlog` was the one honest signal
+and it said the wrong thing — frozen at exactly 475,036 reads as "behind and
+catching up", never as "stuck". It was not even measuring work: it counted
+declined applications past the window whether or not any file was still held,
+so the number had no relationship to what remained to be done.
+
+**A capped sweep only advances if taking a row REMOVES it from the predicate the
+page is drawn from.** So the unit is now the FILE: every row selected is a file
+still held, clearing it drops it out, and the backlog counted over the same
+predicate genuinely falls. Same fixture, after:
+
+    run 1   applications 191   filesPurged 191   backlog 0
+    run 2   applications   0   filesPurged   0   backlog 0   (31 ms)
+
+// WHY THE TESTS COULD NOT SEE IT: the double's `findMany` ignored `take`, so
+// one run cleared the whole fixture and every assertion passed. That is the
+// fixture trap this repo already records, in its quietest form — not a double
+// modelling the wrong contract, but one silently dropping the single parameter
+// the defect lives in. The double now applies the service's own
+// `RETENTION_BATCH`, and the new case runs the sweep TWICE.
+
+Two indexes, and the reason they were missing is worth keeping. Every index on
+both tables led with `schoolId` — right for every screen a school opens, and
+useless to a fleet sweep, which has no tenant to lead with. The old inner lookup
+filtered `document_submission` on `("subjectKind", "subjectId")` with no
+`schoolId`, so each of the 500 lookups in a run scanned the whole table.
+
+    document_submission ("subjectId") WHERE subjectKind = 'ADMISSION_APPLICATION'
+                                        AND "storageKey" IS NOT NULL
+    admission_application (status, "updatedAt")
+
+// GOTCHA: a PARTIAL index is only usable where the planner can PROVE its
+// predicate from the query's own. Here both halves are constants in the SQL, so
+// it can. It could not have been made partial on `status = 'REJECTED'` instead,
+// because Prisma sends that as `CAST($1::text AS "AdmissionStatus")` — a
+// parameter, which no partial predicate can be proven from. That is why the
+// application-side index is a plain composite.
+// GOTCHA: the page takes NO `ORDER BY`, deliberately. Every row selected is
+// work and leaves the predicate once done, so which 500 come first changes
+// nothing about whether the rest are reached — and asking for an order makes
+// the planner join the whole candidate set before it can take a page: 180 ms
+// ordered against 14.8 ms unordered on 40,000 held files, for the same work.
+
+// AND THE GATE FOR THIS DEFECT CLASS WENT BLIND ON THE FIX. `hasLiteralTake`
+// matched `take:` only, so moving the read to a raw `LIMIT ${RETENTION_BATCH}`
+// — necessary, since it joins two tables Prisma has no relation between —
+// dropped `purgeRejected` out of `a-sweep-that-was-behind-and-said-nothing`
+// entirely, taking its backlog requirement with it. A gate that COMPUTES its
+// set is no help if the predicate filtering that set knows one spelling. It
+// reads both now, and the discovery test names `purgeRejected()` so the
+// coverage cannot be lost again quietly.
+
+Mutation-validated: dropping `storageKey IS NOT NULL` from the predicate (the
+defect's exact shape) fails the progress case; a double that ignores the cap
+fails it too; narrowing the detector back to `take:` fails the discovery test.

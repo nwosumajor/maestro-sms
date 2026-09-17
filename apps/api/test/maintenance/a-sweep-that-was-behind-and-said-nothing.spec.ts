@@ -133,11 +133,14 @@ describe("every capped sweep reports its backlog", () => {
     // fee reminder through. This asserts the discovery itself found sweeps, and
     // found more than the four that used to be typed in by hand.
     // Anchored to the sweeps it must REACH rather than to a count, which would
-    // rot the moment one is added. These three are the capped ones this gate is
-    // about, and `sendFeeReminders` is reachable only through the one-hop
-    // follow — the very path the defect hid behind.
+    // rot the moment one is added. `sendFeeReminders` is reachable only through
+    // the one-hop follow — the very path the defect hid behind — and
+    // `purgeRejected` caps with a raw SQL `LIMIT` rather than a Prisma `take`,
+    // the spelling that silently dropped it out of this set once already.
     const reached = CAPPED_SWEEPS.map((c) => c.why);
-    expect(reached).toEqual(expect.arrayContaining(["sendFeeReminders()", "recoverPending()"]));
+    expect(reached).toEqual(
+      expect.arrayContaining(["sendFeeReminders()", "recoverPending()", "purgeRejected()"]),
+    );
     expect(CAPPED_SWEEPS.length).toBeGreaterThanOrEqual(3);
     for (const { file } of CAPPED_SWEEPS) {
       expect(readFileSync(file, "utf8").length).toBeGreaterThan(1_000);
