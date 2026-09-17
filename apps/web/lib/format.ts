@@ -214,7 +214,33 @@ export function formattersFor(region: DisplayRegion) {
     weekdayDate: (v: string | Date | null | undefined) => weekdayDate(v, region),
     /** Today, as the school reckons it — see `todayIn`. */
     today: () => todayIn(region.timezone),
+    /** A "YYYY-MM" month key -> "August 2026", in the SCHOOL's language. */
+    monthLabel: (ym: string) => monthLabel(ym, region),
   };
+}
+
+/**
+ * A calendar MONTH, named in the school's language.
+ *
+ * Lives here rather than in the component that wanted it, because every
+ * locale-aware formatter does: `school-dates-use-the-schools-region` bans
+ * `toLocaleDateString` everywhere else, and it is right to — a component that
+ * formats its own dates is one that will format them on the BROWSER's clock,
+ * which is how a Nigerian school's own attendance record came to be labelled by
+ * whichever laptop was looking at it.
+ *
+ * The month key is a calendar month, not an instant, so the ZONE is fixed at
+ * UTC deliberately (the `isCalendarDate` reasoning); what follows the school is
+ * the LANGUAGE.
+ */
+export function monthLabel(ym: string, region: DisplayRegion): string {
+  const [y, m] = ym.split("-").map(Number);
+  if (!y || !m) return ym;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(region.locale, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 export function titleCase(s: string): string {

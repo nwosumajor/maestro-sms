@@ -115,6 +115,24 @@ model School {
   /// privileged retention job; rows older than this are purged. Per-school policy
   /// on the global registry (RLS-exempt). 0 disables purging for the school.
   integrityRetentionDays Int      @default(365)
+  /// Retention window (days) for the RAW staff clock-in/out scan stream
+  /// (staff_attendance_event). Purged by the same privileged sweep; 0 disables
+  /// purging for the school.
+  ///
+  /// DELIBERATELY ITS OWN DIAL, not `integrityRetentionDays`. That window is
+  /// surveillance data about MINORS and should die quickly — a school setting it
+  /// to 90 days is behaving well. These scans are about ADULTS in an employment
+  /// relationship, and they are the evidence behind a lateness case and a pay
+  /// dispute; destroying them on the pupil-privacy dial would delete a school's
+  /// own employment evidence as a side effect of a privacy decision, silently.
+  ///
+  /// Two years by default: long enough to cover an employment dispute looking
+  /// back over a full contract year, and far short of carrying the largest table
+  /// the platform projects through every backup.
+  ///
+  /// The DAY ROW (`staff_attendance`) is never purged at any age — it IS the
+  /// employment record. This window governs only the scans it was projected from.
+  staffAttendanceEventRetentionDays Int @default(730)
   /// How many YEARS a departed pupil's record is kept before the school is
   /// prompted to dispose of it. Years, not days, because school records are
   /// governed in years and because the two windows answer different questions:
@@ -364,6 +382,7 @@ model School {
   schoolBranding           SchoolBranding?
   schoolGroupMembers       SchoolGroupMember[]
   staffAttendances         StaffAttendance[]
+  staffAttendanceEvents    StaffAttendanceEvent[]
   staffChecklists          StaffChecklist[]
   staffChecklistItems      StaffChecklistItem[]
   staffDocuments           StaffDocument[]

@@ -32,7 +32,7 @@ import type { Request, Response } from "express";
 import crypto from "node:crypto";
 import { MAX_UPLOAD_BYTES } from "@sms/types";
 import { Public } from "../auth/public.decorator";
-import { signStorage, type StorageOp } from "./local-storage-signing";
+import { inlineTypeOf, signStorage, type InlineType, type StorageOp } from "./local-storage-signing";
 import { safeDownloadType, safeFilename } from "./safe-content-type";
 import { STORAGE_PROVIDER, StubStorageProvider } from "./storage.provider";
 import { Inject } from "@nestjs/common";
@@ -52,7 +52,39 @@ import type { StorageProvider } from "./storage.provider";
 // The traversal guard is kept EXPLICIT rather than expressed in the character
 // class: `[a-zA-Z0-9/_.-]` happily matches `..`, so the shape alone would have
 // traded one bug for a worse one.
-const KEY_SHAPE = /^(schools|careers)\/[a-zA-Z0-9-]+\/[a-zA-Z0-9/_.-]+$/;
+/**
+ * Every top-level namespace a storage key is minted under.
+ *
+ * IT KNEW ABOUT TWO OF SIX. The shape was written when `schools/` and
+ * `careers/` were the only prefixes, and four more were added afterwards
+ * without it — `lms/` (a subject teacher's weekly PDF), `discipline/` (evidence
+ * on a complaint), `submissions/` (a pupil's work) and `tasks/` (an attachment
+ * on a task). On the stub provider, which is what the documented local stack
+ * runs, every presigned PUT under those four answered 400 "Not available": four
+ * upload features that could not upload at all, each failing at the FIRST step,
+ * with a refusal deliberately worded to be indistinguishable from a bad
+ * signature. Measured by driving the LMS one end to end.
+ *
+ * An allowlist that only ever learned about what existed when it was written is
+ * the hand-kept-set defect this repo keeps recording, so
+ * `a-key-no-upload-could-use.spec.ts` derives the minted set from source and
+ * fails on the next prefix added without one.
+ *
+ * NOTE this is a SHAPE check, never the authorisation — the HMAC is. It exists
+ * to keep a traversal or an odd key out of the filesystem path below.
+ */
+export const STORAGE_KEY_PREFIXES = [
+  "schools",
+  "careers",
+  "lms",
+  "discipline",
+  "submissions",
+  "tasks",
+] as const;
+
+const KEY_SHAPE = new RegExp(
+  `^(${STORAGE_KEY_PREFIXES.join("|")})\\/[a-zA-Z0-9-]+\\/[a-zA-Z0-9/_.-]+$`,
+);
 
 
 /** Collect a request body, refusing rather than buffering past the cap. Returns
@@ -96,12 +128,18 @@ export class LocalStorageController {
 
   /** Did this URL carry a signature for THIS operation? Returns the served type
    *  for an inline grant, or null when it did not. */
-  private allows(key: string, op: "get-inline", exp: string | undefined, sig: string | undefined): { contentType: string } | null {
+  private allows(key: string, op: StorageOp, exp: string | undefined, sig: string | undefined): { contentType: InlineType } | null {
+    const type = inlineTypeOf(op);
+    if (!type) return null;
     try {
       this.check(key, op, exp, sig);
-      // The logo is the only inline case and is always an image; anything the
-      // allowlist does not recognise still degrades to a byte stream.
-      return { contentType: "image/png" };
+      // The type comes from the OP, which is inside the HMAC — never from a
+      // query parameter. It used to be hard-coded `image/png` because the logo
+      // was the only inline case; a lesson PDF is the second, and reading the
+      // type off the URL would have put an attacker-chosen Content-Type back on
+      // an inline response. Anything the allowlist does not recognise still
+      // degrades to a byte stream in `safeDownloadType`.
+      return { contentType: type };
     } catch {
       return null;
     }
@@ -140,7 +178,12 @@ export class LocalStorageController {
     // Two DIFFERENT operations, and which one was granted is in the signature.
     // A URL cannot be edited into serving a stored file as something a browser
     // will render — that has to have been signed for.
-    const inline = this.allows(key, "get-inline", exp, sig);
+    // Each inline grant is a DIFFERENT signed operation, so this asks for the
+    // one that was actually granted rather than assuming the only one there
+    // used to be. Falling through to a plain `get` check keeps the refusal
+    // identical for a bad signature and an unsigned inline attempt.
+    const inline =
+      this.allows(key, "get-inline", exp, sig) ?? this.allows(key, "get-inline-pdf", exp, sig);
     if (!inline) this.check(key, "get", exp, sig);
     const bytes = await this.storage.download(key);
     if (!bytes) throw new BadRequestException("Not available");

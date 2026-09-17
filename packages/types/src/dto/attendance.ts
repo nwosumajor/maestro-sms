@@ -34,6 +34,19 @@ export interface RegisterStatusRowDto {
    * this class" is a different problem from "the teacher has not taken it".
    */
   teacherActive: boolean;
+  /**
+   * May the READER of this board take this register?
+   *
+   * The server's own rule, so the UI never re-derives it. The board had no such
+   * field and drew a "take" control on every row — including for a principal,
+   * who may SEE every register and write none, and who was therefore offered the
+   * button on all of them and refused only on SAVE, after marking the class.
+   *
+   * The rule is the class's NAMED supervisor, plus school_admin as cover; a head
+   * who genuinely runs a class takes its register the moment they are named its
+   * supervisor.
+   */
+  canTake: boolean;
 }
 
 /**
@@ -57,4 +70,82 @@ export interface RegisterStatusDto {
   remindersActive: boolean;
   /** Why it would not. Null when it would. */
   remindersOffReason: RegisterReminderOffReason | null;
+}
+
+/**
+ * Which grain a compiled attendance history is cut at.
+ *
+ * Three, because three different questions get asked of the same record: a
+ * MONTH is how a pattern is spotted ("every Monday in March"), a TERM is how the
+ * school reports and what the report card states, and a SESSION is how a year is
+ * compared with the one before it.
+ */
+export type AttendanceGrain = "month" | "term" | "session";
+
+/** One compiled bucket of a pupil's attendance. */
+export interface AttendanceBucketDto {
+  /** Stable key — "2026-09" for a month, the term or session id otherwise. */
+  key: string;
+  /** "September 2026", "First Term", "2025/2026". */
+  label: string;
+  /** The window this bucket covers, inclusive. Null only where a term or session
+   *  has no dates configured, which is itself worth seeing in an audit. */
+  from: string | null;
+  to: string | null;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  /** Registers this pupil appears in — the denominator, not the school's days. */
+  total: number;
+  /** `attendanceRatePct`: LATE attends, EXCUSED does not. Null when total is 0,
+   *  because a rate over no registers is not 0% — it is unknown. */
+  percent: number | null;
+  /**
+   * PROVENANCE, which is the point of the thing in an audit.
+   *
+   * ROLLUP — read from `attendance_term_rollup`, computed once when the term
+   * ended and never recomputed, so it is what the school reported at the time.
+   * LIVE — aggregated from the register records now. The current term is always
+   * LIVE, because the rollup deliberately only covers ENDED terms; a reader who
+   * cannot tell the two apart cannot tell a settled figure from a moving one.
+   */
+  source: "ROLLUP" | "LIVE";
+}
+
+/**
+ * A pupil's attendance compiled for audit, at one grain.
+ *
+ * Paged over BUCKETS rather than records: a pupil's day rows are O(how long they
+ * have been at the school), and an investigation opens years. Terms and sessions
+ * are inherently few (three and one a year); months are ten. So the page is
+ * generous and the count is exact.
+ */
+export interface AttendanceCompiledDto {
+  studentId: string;
+  studentName: string | null;
+  grain: AttendanceGrain;
+  buckets: AttendanceBucketDto[];
+  /** Buckets that exist in total, so a page is never mistaken for the record. */
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Totals across the pupil's WHOLE history, independent of the page — an audit
+   *  that reports only what fitted on a page is worse than one that says nothing. */
+  lifetime: { present: number; absent: number; late: number; excused: number; total: number; percent: number | null };
+  /**
+   * Registers that fall in NO bucket at this grain — days the school took a
+   * register outside every term it has configured.
+   *
+   * Always 0 for months, because every date is in some month. For terms and
+   * sessions it is real and was invisible: measured on one demo pupil, the terms
+   * summed to 162 against a lifetime of 193, so 16% of their record was missing
+   * from the view and a reader adding the terms up would either think the tool
+   * was broken or quietly cite the wrong total.
+   *
+   * Named rather than folded in, because the two readings differ: a register
+   * outside every term is usually a gap in the CALENDAR, not in the child's
+   * attendance, and an investigation needs to know which it is looking at.
+   */
+  outsideAnyBucket: number;
 }

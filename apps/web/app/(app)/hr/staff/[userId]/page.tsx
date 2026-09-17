@@ -1,4 +1,4 @@
-import type { AppraisalDto, DisciplinaryCaseDto, EmployeeDto, EmploymentChangeDto, PayComponentDto, StaffChecklistDto, StaffDocumentDto, StaffExitDto, SubmissionChecklistDto, TrainingRecordDto, Serialized, StaffHandoverDto } from "@sms/types";
+import type { StaffAttendanceHistoryDto, AppraisalDto, DisciplinaryCaseDto, EmployeeDto, EmploymentChangeDto, PayComponentDto, StaffChecklistDto, StaffDocumentDto, StaffExitDto, SubmissionChecklistDto, TrainingRecordDto, Serialized, StaffHandoverDto } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -14,6 +14,7 @@ import { ExitPanel } from "@/components/hr/ExitPanel";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { HandoverPanel } from "@/components/hr/HandoverPanel";
 import { DocumentChecklist } from "@/components/documents/DocumentChecklist";
+import { StaffAttendanceHistory } from "@/components/hr/StaffAttendanceHistory";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,10 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
   const canDiscipline = hasPermission(user.permissions, "hr.disciplinary.manage");
   const canWrite = hasPermission(user.permissions, "hr.write");
   const canApprove = hasPermission(user.permissions, "hr.salary.approve");
-  const [checklists, documents, training, appraisals, reviewers, cases, components, employee, changes, exits, docChecklist, handover] = await Promise.all([
+  // Attendance has its OWN read permission now — seeing an employment record is
+  // not the same authority as reading a colleague's day-by-day movements.
+  const canSeeAttendance = hasPermission(user.permissions, "hr.attendance.read");
+  const [checklists, documents, training, appraisals, reviewers, cases, components, employee, changes, exits, docChecklist, handover, attendance] = await Promise.all([
     apiGet<Serialized<StaffChecklistDto>[]>(`/hr/staff/checklists?userId=${userId}`),
     apiGet<Serialized<StaffDocumentDto>[]>(`/hr/staff/documents?userId=${userId}`),
     apiGet<Serialized<TrainingRecordDto>[]>(`/hr/staff/training?userId=${userId}`),
@@ -51,6 +55,12 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
     // "what would we have to cover" is the question a head asks the moment
     // somebody hands in their notice.
     canWrite ? apiGet<Serialized<StaffHandoverDto>>(`/hr/staff/${userId}/handover`) : Promise.resolve(null),
+    // The months arrive already COMPILED — the component never counts rows, and
+    // a figure derived from a fetched page stops being true the moment the page
+    // is not the whole set.
+    canSeeAttendance
+      ? apiGet<Serialized<StaffAttendanceHistoryDto>>(`/hr/attendance/staff/${userId}`)
+      : Promise.resolve(null),
   ]);
   // The employment record is where a name comes from; it hangs off `user`. The
   // five lists below are a fallback for a record this reader cannot see, never
@@ -85,6 +95,8 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
         )}
         {canWrite && <EmploymentLifecycle userId={userId} employee={employee} initial={changes ?? []} canApprove={canApprove} />}
         {canWrite && <CompensationPanel userId={userId} initial={components ?? []} />}
+
+        {canSeeAttendance && <StaffAttendanceHistory userId={userId} initial={attendance} />}
         {canWrite && <ExitPanel userId={userId} initial={exits ?? []} canApprove={canApprove} />}
         {canWrite && <HandoverPanel handover={handover} />}
         <StaffLifecyclePanel userId={userId} checklists={checklists ?? []} documents={documents ?? []} training={training ?? []} />

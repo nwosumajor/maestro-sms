@@ -82,6 +82,16 @@ export interface CompliancePostureDto {
   erasurePending: number;
   /** Days of behavioural telemetry on minors retained (School.integrityRetentionDays). */
   integrityRetentionDays: number;
+  /**
+   * Days the RAW staff clock-in/out scans are retained
+   * (School.staffAttendanceEventRetentionDays). A SEPARATE window on purpose:
+   * that one is surveillance of children and should be short, this one is
+   * employment evidence about adults. 0 = never purged.
+   *
+   * The day row it is projected into is the employment record and is kept at any
+   * age, which is what makes purging the scans safe to state on this screen.
+   */
+  staffEventRetentionDays: number;
   /** Guardian consents on file, and how many students have none — the coverage
    *  question a DPO asks about lawful basis. */
   consent: { recorded: number; studentsWithout: number };

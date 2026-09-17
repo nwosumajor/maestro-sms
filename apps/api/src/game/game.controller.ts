@@ -51,6 +51,20 @@ export class GameController {
     return this.games.getGame(p, id);
   }
 
+  /**
+   * The HOST withdraws their own duel while it is still waiting for somebody.
+   *
+   * `game.play`, not `game.match.moderate`: a player closing a lobby nobody has
+   * joined is tidying up after themselves, not moderating. The service holds the
+   * narrowing — host only, LOBBY only, one seat only — and 404s a caller with no
+   * seat rather than confirming the game exists.
+   */
+  @Post(":id/cancel")
+  @RequirePermission(GAME_PERMISSIONS.PLAY)
+  cancel(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<GameDto> {
+    return this.games.cancelOwnGame(p, id);
+  }
+
   /** Moderator force-end of a stuck/abusive duel — ends with no winner. */
   @Post(":id/end")
   @RequirePermission(GAME_PERMISSIONS.MATCH_MODERATE)

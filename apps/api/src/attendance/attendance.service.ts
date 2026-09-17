@@ -19,6 +19,7 @@ import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue, RegisterStatusDto } from "@sms/types";
 import {
   isSchoolDay, ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct } from "@sms/types";
+import type { AttendanceBucketDto, AttendanceCompiledDto, AttendanceGrain } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -60,6 +61,20 @@ import { dateWindow } from "../common/status-filter";
 //
 // This grants SIGHT, not cover: REGISTER_COVER_ROLES stays school_admin alone,
 // because the register records who physically looked at the room.
+/**
+ * Buckets per page of a compiled history. Generous on purpose: an investigation
+ * opens a whole year at a time, and three terms or ten months is not a page
+ * worth splitting. Months over five years is sixty — two pages.
+ */
+const COMPILED_BUCKETS_PER_PAGE = 36;
+
+/** "2026-09" -> "September 2026". Rendered server-side so every reader of an
+ *  audit sees the same label, whatever their browser's locale. */
+function monthLabel(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(Date.UTC(y, (m ?? 1) - 1, 1)).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin", "head_teacher"]);
 /**
  * Roles that may take ANY class's register, to cover an absent supervisor.
@@ -76,6 +91,27 @@ const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin", 
  * See test/security/no-standing-superadmin.spec.ts.
  */
 const REGISTER_COVER_ROLES = new Set(["school_admin"]);
+
+/**
+ * MAY THIS PERSON TAKE THIS CLASS'S REGISTER — the one definition.
+ *
+ * It was written twice: once in `assertCanTakeRegister` (what the API enforces)
+ * and once inline in the by-class board's `canTake` (what the UI offers). Two
+ * copies of one rule is how a screen comes to offer a button the server refuses,
+ * which is the shape this repo keeps recording. Both now call this, and so does
+ * the outstanding-register board, which carried no such field at all and drew a
+ * "take" control for everybody.
+ *
+ * The rule is RESPONSIBILITY, not rank: the class's NAMED supervisor, plus
+ * school_admin as cover. A principal or head teacher who genuinely runs a class
+ * takes its register the moment they are named its supervisor — verified live,
+ * 403 before and 201 after — so a teaching head needs no exception. What
+ * seniority does NOT confer is signing for a room you did not look at.
+ */
+export function canTakeRegister(p: Principal, supervisorId: string | null): boolean {
+  if (p.roles.some((r) => REGISTER_COVER_ROLES.has(r))) return true;
+  return !!supervisorId && supervisorId === p.userId;
+}
 /** Edits to a register older than this (days) need maker-checker approval. */
 const STALE_REGISTER_DAYS = 7;
 /** Statuses that notify the student's guardians. */
@@ -841,7 +877,6 @@ export class AttendanceService {
       const statBy = new Map(stats.map((s) => [s.classId, s]));
       const regBy = new Map(registers.map((r) => [r.classId, r._count._all]));
       const supBy = new Map(supervisors.map((u) => [u.id, u.name]));
-      const cover = p.roles.some((r) => REGISTER_COVER_ROLES.has(r));
 
       return {
         ...base,
@@ -860,8 +895,8 @@ export class AttendanceService {
             supervisorId: c.supervisorId,
             supervisorName: c.supervisorId ? supBy.get(c.supervisorId) ?? null : null,
             // Exactly the server's own rule, so the UI cannot offer a button the
-            // API will refuse.
-            canTake: cover || (!!c.supervisorId && c.supervisorId === p.userId),
+            // API will refuse — the SAME function the enforcement calls.
+            canTake: canTakeRegister(p, c.supervisorId),
             ...s,
             ratePct,
             registersTaken: regBy.get(c.id) ?? 0,
@@ -987,6 +1022,12 @@ export class AttendanceService {
             // reminded. Naming that is the difference between a register
             // somebody forgot and one nobody is responsible for.
             teacherActive: teacher ? teacher.status === "ACTIVE" : false,
+            // WHETHER THIS READER MAY TAKE IT. This board had no such field and
+            // drew a "take" control on every row, so a principal — who may SEE
+            // every register and write none — was offered the button on all of
+            // them and refused on save, after marking the class. Same function
+            // the API enforces with.
+            canTake: canTakeRegister(p, c.supervisorId),
           };
         }),
       };
@@ -1097,8 +1138,7 @@ export class AttendanceService {
       select: { id: true, name: true, supervisorId: true },
     })) as { id: string; name: string; supervisorId: string | null } | null;
     if (!cls) throw new NotFoundException("Class not found");
-    if (p.roles.some((r) => REGISTER_COVER_ROLES.has(r))) return;
-    if (cls.supervisorId && cls.supervisorId === p.userId) return;
+    if (canTakeRegister(p, cls.supervisorId)) return;
 
     // Can they at least SEE it? If not, keep the 404 so nothing is disclosed.
     await this.assertTeacherOfClass(tx, p, classId);
@@ -1119,6 +1159,265 @@ export class AttendanceService {
   }
 
   /** school staff / self / parent-of-child / teacher-of-the-student. 404 else. */
+  /**
+   * A PUPIL'S ATTENDANCE COMPILED FOR AUDIT — per month, per term, per session.
+   *
+   * The record already answered "which days" (paged, windowed) and "this term so
+   * far". Neither answers the question an investigation actually asks: how many
+   * days was this child absent in each month of Year 9, and how does that
+   * compare with Year 8? Reading that off a day list means paging through a
+   * thousand rows and counting by hand, which is exactly how a wrong number
+   * reaches a meeting.
+   *
+   * SCOPING IS INHERITED, NOT REWRITTEN. `assertCanAccessStudent` is the one
+   * rule — school-wide roles see every pupil, a teacher only pupils in classes
+   * they teach, a parent their own children, a pupil themselves, everyone else a
+   * 404. A second copy of a visibility rule is how the two drift, and when a
+   * scoping rule drifts the failure is silent.
+   *
+   * WHY TERMS COME FROM THE ROLLUP AND MONTHS DO NOT. `attendance_term_rollup`
+   * is computed once when a term ENDS and never recomputed, so it is what the
+   * school reported at the time — which is the figure an audit wants, not a
+   * recount that might disagree with the report card already filed. But the
+   * rollup deliberately covers ended terms ONLY, so the CURRENT term has no row:
+   * reading the table alone would show this term as zero, which reads as "never
+   * attended" rather than "not settled yet". Unrolled terms are therefore
+   * computed LIVE and every bucket says WHICH it is.
+   *
+   * // GOTCHA: the rollup is keyed `(termId, classId, studentId)`, so a pupil who
+   * // moved class mid-term has SEVERAL rows for one term. They are SUMMED. Taking
+   * // the first would report a fraction of the term and look entirely plausible.
+   */
+  async compiledHistory(
+    p: Principal,
+    studentId: string,
+    opts: { grain?: AttendanceGrain; page?: number } = {},
+  ): Promise<AttendanceCompiledDto> {
+    const grain: AttendanceGrain = opts.grain === "term" || opts.grain === "session" ? opts.grain : "month";
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = COMPILED_BUCKETS_PER_PAGE;
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      await this.assertCanAccessStudent(tx, p, studentId);
+      const student = (await tx.user.findFirst({ where: { id: studentId }, select: { name: true } })) as
+        | { name: string }
+        | null;
+
+      // LIFETIME TOTALS, independent of the grain and of the page. An audit that
+      // reports only what fitted on a page is worse than one that says nothing,
+      // and this is one grouped query whatever the history's length.
+      // ONE unbounded pass, and it is the only one. It has to be unbounded — a
+      // lifetime total that stopped at a page would be the very thing an audit
+      // must not report — so it also returns the SPAN, which is what says how
+      // many months of history exist without a second scan over every partition.
+      const life = (await tx.$queryRaw(Prisma.sql`
+        SELECT count(*) FILTER (WHERE status = 'PRESENT')::int  AS present,
+               count(*) FILTER (WHERE status = 'ABSENT')::int   AS absent,
+               count(*) FILTER (WHERE status = 'LATE')::int     AS late,
+               count(*) FILTER (WHERE status = 'EXCUSED')::int  AS excused,
+               min("date")                                       AS first_day,
+               max("date")                                       AS last_day
+        FROM attendance_record
+        WHERE "studentId" = ${studentId}::uuid
+      `)) as Array<{ present: number; absent: number; late: number; excused: number; first_day: Date | null; last_day: Date | null }>;
+      const l = life[0] ?? { present: 0, absent: 0, late: 0, excused: 0, first_day: null, last_day: null };
+      const lifetime = this.counts(l.present, l.absent, l.late, l.excused);
+
+      // THE PAGE IS A DATE WINDOW for months, not a slice of everything.
+      //
+      // Slicing in memory meant fetching every month to show 36 of them, which
+      // is the "count in the database" rule broken in the other direction — and
+      // with a partitioned table it also meant planning every partition. The
+      // window is derived from the page so page 5 costs what page 1 does.
+      //
+      // Terms and sessions are inherently few (three and one a year) and come
+      // from the rollup, so they are not worth windowing and are sliced as
+      // before.
+      //
+      // ANCHOR THE WINDOW ON THE PUPIL'S LAST RECORDED DAY, not on today. A
+      // leaver's record ends when they left, so a window counted back from today
+      // would put page 1 somewhere after their final register — an empty page
+      // under a total saying thirty-six months exist, which is precisely the
+      // shape a record kept for audit must never take. `last_day` is already in
+      // hand from the lifetime pass, so this costs nothing.
+      const anchor =
+        l.last_day ?? schoolToday((await this.region.inTx(tx, p.schoolId)).timezone);
+      const newest = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
+      const from = new Date(Date.UTC(newest.getUTCFullYear(), newest.getUTCMonth() - page * pageSize + 1, 1));
+      const to = new Date(Date.UTC(newest.getUTCFullYear(), newest.getUTCMonth() - (page - 1) * pageSize + 1, 1));
+      const all = grain === "month"
+        ? await this.monthBuckets(tx, studentId, { from, to })
+        : await this.termBuckets(tx, studentId, grain);
+
+      // WHAT THIS GRAIN CANNOT SHOW. Terms and sessions only cover the dates a
+      // school has configured, and registers get taken in the gaps between them.
+      // Measured on one pupil: the terms summed to 162 against a lifetime of
+      // 193, so 16% of the record was silently absent and a reader adding the
+      // terms would have cited the wrong total. Derived from figures already in
+      // hand — no extra query — and 0 for months by construction.
+      const bucketed = all.reduce((n, b) => n + b.total, 0);
+      return {
+        studentId,
+        studentName: student?.name ?? null,
+        grain,
+        // Months are ALREADY the page (the window did it); terms and sessions
+        // are sliced, because they are few and fetched whole.
+        buckets: grain === "month" ? all : all.slice((page - 1) * pageSize, page * pageSize),
+        // HOW MANY MONTHS EXIST, from the span — not the length of the page,
+        // which for months IS the window and would report the page as the whole
+        // record. Terms and sessions are fetched whole, so their length is the
+        // total.
+        total:
+          grain === "month"
+            ? l.first_day && l.last_day
+              ? (l.last_day.getUTCFullYear() - l.first_day.getUTCFullYear()) * 12 +
+                (l.last_day.getUTCMonth() - l.first_day.getUTCMonth()) +
+                1
+              : 0
+            : all.length,
+        page,
+        pageSize,
+        lifetime,
+        outsideAnyBucket: Math.max(0, lifetime.total - bucketed),
+      };
+    });
+  }
+
+  /** Shared shaping so every bucket and the lifetime row agree on the rate. */
+  private counts(present: number, absent: number, late: number, excused: number) {
+    const total = present + absent + late + excused;
+    // ONE definition of the rate, shared with the term summary and the report
+    // card: LATE attends, EXCUSED does not.
+    return { present, absent, late, excused, total, percent: attendanceRatePct({ present, late, absent, excused }) };
+  }
+
+  /** Per-MONTH, aggregated in one pass over the (month-partitioned) records. */
+  /**
+   * Per-MONTH, aggregated in one pass — and BOUNDED BY DATE, which is not an
+   * optimisation but the difference between a page and a stall.
+   *
+   * `attendance_record` is partitioned by month, and an aggregate with no date
+   * predicate has to PLAN every partition. Measured on 1.29M records with 52
+   * partitions (five years plus the window the extender keeps ahead):
+   *
+   *     unbounded            planning 88.6 ms, execution  9.4 ms
+   *     bounded to one year  planning  0.58 ms, execution  1.3 ms
+   *
+   * Planning was NINETY PER CENT of the cost, and it grows with the number of
+   * partitions — 8.9 ms at 5, 88.6 ms at 52 — which tracks the PLATFORM's age,
+   * not the pupil's record. So an unbounded version gets slower every month for
+   * every school, including schools that joined yesterday, and nothing in the
+   * data would explain why.
+   *
+   * The window comes from the page, so paging back through a pupil's history
+   * costs the same per page as the first one.
+   */
+  private async monthBuckets(
+    tx: TenantTx,
+    studentId: string,
+    window: { from: Date; to: Date },
+  ): Promise<AttendanceBucketDto[]> {
+    const rows = (await tx.$queryRaw(Prisma.sql`
+      SELECT to_char(date_trunc('month', "date"), 'YYYY-MM')            AS key,
+             min("date")                                                AS from_date,
+             max("date")                                                AS to_date,
+             count(*) FILTER (WHERE status = 'PRESENT')::int             AS present,
+             count(*) FILTER (WHERE status = 'ABSENT')::int              AS absent,
+             count(*) FILTER (WHERE status = 'LATE')::int                AS late,
+             count(*) FILTER (WHERE status = 'EXCUSED')::int             AS excused
+      FROM attendance_record
+      WHERE "studentId" = ${studentId}::uuid
+        AND "date" >= ${window.from} AND "date" < ${window.to}
+      GROUP BY 1
+      ORDER BY 1 DESC
+    `)) as Array<{ key: string; from_date: Date; to_date: Date; present: number; absent: number; late: number; excused: number }>;
+    return rows.map((r) => ({
+      key: r.key,
+      label: monthLabel(r.key),
+      from: r.from_date.toISOString().slice(0, 10),
+      to: r.to_date.toISOString().slice(0, 10),
+      ...this.counts(r.present, r.absent, r.late, r.excused),
+      // Months are always recounted: there is no month-grained rollup, and
+      // saying ROLLUP here would claim a provenance this figure does not have.
+      source: "LIVE" as const,
+    }));
+  }
+
+  /** Per-TERM from the rollup where it exists, live where it does not — and per
+   *  SESSION by summing that term's own terms, so the two can never disagree. */
+  private async termBuckets(tx: TenantTx, studentId: string, grain: AttendanceGrain): Promise<AttendanceBucketDto[]> {
+    const terms = (await tx.term.findMany({
+      select: { id: true, name: true, startDate: true, endDate: true, sessionId: true },
+      orderBy: [{ startDate: "desc" }],
+    })) as Array<{ id: string; name: string; startDate: Date | null; endDate: Date | null; sessionId: string }>;
+    if (terms.length === 0) return [];
+
+    // SUMMED across classes: `(termId, classId, studentId)` means a pupil who
+    // changed class mid-term has more than one row for the term.
+    const rollups = (await tx.attendanceTermRollup.groupBy({
+      by: ["termId"],
+      where: { studentId },
+      _sum: { present: true, absent: true, late: true, excused: true },
+    } as never)) as unknown as Array<{
+      termId: string;
+      _sum: { present: number | null; absent: number | null; late: number | null; excused: number | null };
+    }>;
+    const byTerm = new Map(rollups.map((r) => [r.termId, r._sum]));
+
+    // Only terms with NO rollup are recounted, and only those are read from the
+    // register at all — so a settled term costs one row, however old.
+    const unrolled = terms.filter((t) => !byTerm.has(t.id) && t.startDate && t.endDate);
+    const live = new Map<string, { present: number; absent: number; late: number; excused: number }>();
+    for (const t of unrolled) {
+      const g = (await tx.attendanceRecord.groupBy({
+        by: ["status"],
+        where: { studentId, date: { gte: t.startDate!, lte: t.endDate! } },
+        _count: { _all: true },
+      } as never)) as unknown as Array<{ status: string; _count: { _all: number } }>;
+      const n = (s: string) => g.find((x) => x.status === s)?._count._all ?? 0;
+      live.set(t.id, { present: n("PRESENT"), absent: n("ABSENT"), late: n("LATE"), excused: n("EXCUSED") });
+    }
+
+    const termBuckets: AttendanceBucketDto[] = terms.map((t) => {
+      const roll = byTerm.get(t.id);
+      const c = roll
+        ? { present: roll.present ?? 0, absent: roll.absent ?? 0, late: roll.late ?? 0, excused: roll.excused ?? 0 }
+        : (live.get(t.id) ?? { present: 0, absent: 0, late: 0, excused: 0 });
+      return {
+        key: t.id,
+        label: t.name,
+        from: t.startDate ? t.startDate.toISOString().slice(0, 10) : null,
+        to: t.endDate ? t.endDate.toISOString().slice(0, 10) : null,
+        ...this.counts(c.present, c.absent, c.late, c.excused),
+        source: roll ? ("ROLLUP" as const) : ("LIVE" as const),
+      };
+    });
+    if (grain === "term") return termBuckets;
+
+    // A SESSION IS THE SUM OF ITS TERMS, built from the buckets above rather
+    // than from a second query over the register — two paths to one figure is
+    // how a year total comes to disagree with the terms printed beneath it.
+    const sessions = (await tx.academicSession.findMany({
+      select: { id: true, name: true, startDate: true, endDate: true },
+      orderBy: [{ startDate: "desc" }],
+    })) as Array<{ id: string; name: string; startDate: Date | null; endDate: Date | null }>;
+    const sessionOfTerm = new Map(terms.map((t) => [t.id, t.sessionId]));
+    return sessions.map((sess) => {
+      const mine = termBuckets.filter((b) => sessionOfTerm.get(b.key) === sess.id);
+      const sum = (f: (b: AttendanceBucketDto) => number) => mine.reduce((n, b) => n + f(b), 0);
+      return {
+        key: sess.id,
+        label: sess.name,
+        from: sess.startDate ? sess.startDate.toISOString().slice(0, 10) : null,
+        to: sess.endDate ? sess.endDate.toISOString().slice(0, 10) : null,
+        ...this.counts(sum((b) => b.present), sum((b) => b.absent), sum((b) => b.late), sum((b) => b.excused)),
+        // A session is only as settled as its LEAST settled term: if any term in
+        // it is still being counted, the year total is still moving, and saying
+        // ROLLUP would overstate what this figure is.
+        source: mine.every((b) => b.source === "ROLLUP") && mine.length > 0 ? ("ROLLUP" as const) : ("LIVE" as const),
+      };
+    });
+  }
+
   private async assertCanAccessStudent(tx: TenantTx, p: Principal, studentId: string) {
     if (this.isSchoolWide(p)) return;
     if (p.userId === studentId) return;

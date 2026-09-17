@@ -348,12 +348,76 @@ export interface StaffAttendanceDto {
   userId: string;
   userName: string | null;
   date: Date;
-  status: "PRESENT" | "LATE" | "ABSENT";
-  source: "ADMIN" | "SELF_KIOSK" | "BIOMETRIC";
+  status: StaffAttendanceStatus;
+  source: "ADMIN" | "SELF_KIOSK" | "BIOMETRIC" | "SYSTEM";
+  /** First arrival scan of the school day. */
   clockInAt: Date | null;
+  /**
+   * Last departure scan, when there is one. NULL means nobody recorded a
+   * departure — a real and common state, distinct from a zero-length day, so no
+   * screen should render it as "0 hours".
+   */
+  clockOutAt: Date | null;
+  /**
+   * Minutes between the two, or null when the day is still open. Computed on the
+   * server so that a school, a payslip and a report cannot each do the
+   * subtraction slightly differently.
+   */
+  minutesOnSite: number | null;
   /** Anomaly SIGNAL (off-site IP etc.) for human review — never auto-punitive. */
   flagged: boolean;
   note: string | null;
+}
+
+/**
+ * ON_LEAVE is not a kind of absence, which is why it is its own status: an
+ * authorised absence and a no-show were the same "unmarked" state, and marking
+ * somebody ABSENT counted their approved leave against them.
+ */
+export type StaffAttendanceStatus = "PRESENT" | "LATE" | "ABSENT" | "ON_LEAVE";
+
+/** One month of a person's attendance, compiled in SQL. */
+export interface StaffAttendanceMonthDto {
+  /** "2026-08" — the school's month, sortable and safe to use as a key. */
+  month: string;
+  present: number;
+  late: number;
+  absent: number;
+  onLeave: number;
+  /** Off-site or otherwise anomalous clock-ins — a SIGNAL for review, never a penalty. */
+  flagged: number;
+  /**
+   * Days that were clocked into and never closed. NOT an absence and NOT a
+   * failure: it is the number somebody should ask about, and folding it into
+   * either of the others would hide it.
+   */
+  openSpans: number;
+  /** Summed across the days that HAVE both ends; null when none do. */
+  minutesOnSite: number | null;
+}
+
+/**
+ * One member of staff's attendance record.
+ *
+ * The months are COMPILED IN SQL over the whole history and paged, so this costs
+ * the same for somebody in their eighth year as in their first: a per-day read
+ * is O(how long they have worked here), which is the shape that degrades
+ * invisibly and only in production.
+ *
+ * `days` is the chosen month only — bounded by the calendar at 31 rows — so the
+ * detail a reader actually opens is never a growing list.
+ */
+export interface StaffAttendanceHistoryDto {
+  userId: string;
+  userName: string | null;
+  months: StaffAttendanceMonthDto[];
+  /** Months the person has ANY record for — so a page can say what it is not showing. */
+  totalMonths: number;
+  page: number;
+  pageSize: number;
+  /** The month `days` covers ("2026-08"), and its day rows. */
+  month: string | null;
+  days: StaffAttendanceDto[];
 }
 
 /** The day's register: every active employee with their mark (or none yet). */

@@ -92,8 +92,9 @@ export function UnstaffedLessons({ rows }: { rows: Row[] }) {
                     <span>
                       <span className="text-muted-foreground">{title(l.dayOfWeek)}</span>{" "}
                       {l.startsAt ?? l.periodName} ·{" "}
+                      {/* `/info` — `/classes/<id>` is not a route. */}
                       {l.classId ? (
-                        <Link href={`/classes/${l.classId}`} className="hover:underline">
+                        <Link href={`/classes/${l.classId}/info`} className="hover:underline">
                           {l.className}
                         </Link>
                       ) : (

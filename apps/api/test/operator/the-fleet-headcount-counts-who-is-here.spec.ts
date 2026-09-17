@@ -19,7 +19,9 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Prisma } from "@sms/db";
 import { ON_ROLL_STUDENT, ON_ROLL_STUDENT_ROLE_ROW, EVER_ENROLLED_STUDENT } from "../../src/common/student-scope";
+import { ALL_CUSTOMER_SCHOOLS, inSchoolScope } from "../../src/operator/operator-fleet";
 
 const sql = readFileSync(join(__dirname, "../../src/operator/operator-people.ts"), "utf8");
 
@@ -40,7 +42,13 @@ describe("the cross-tenant headcount query", () => {
 
   it("still groups per school, so one tenant cannot absorb another's count", () => {
     expect(sql).toMatch(/GROUP BY ur\."schoolId"/);
-    expect(sql).toMatch(/WHERE ur\."schoolId" = ANY/);
+    // The filter is built by the shared scope helper rather than written out
+    // here, so this drives the real function instead of matching its text —
+    // either form must narrow by the school column.
+    expect(sql).toMatch(/WHERE \$\{inSchoolScope\(/);
+    for (const scope of [["11111111-1111-1111-1111-111111111111"], ALL_CUSTOMER_SCHOOLS]) {
+      expect(inSchoolScope(Prisma.sql`ur."schoolId"`, scope).sql).toContain('ur."schoolId"');
+    }
   });
 });
 

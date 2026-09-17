@@ -153,14 +153,42 @@ describe("what the provider tells its callers", () => {
     expect(src).toMatch(/requestChecksumCalculation: "WHEN_REQUIRED"/);
   });
 
-  it("uses inline for the school logo and nothing a member of the public uploaded", async () => {
+  it("never serves a Vault file inline, whatever the caller asks for", async () => {
+    // ANCHORED TO THE PROPERTY, not to the spelling. This asserted the literal
+    // `inline: true` and went red the day `inline` became the served TYPE
+    // ("image/png") rather than a flag — a change that STRENGTHENED what it
+    // guards, since a caller can no longer ask for inline serving without
+    // naming what the server validated the bytes as.
+    //
+    // The property is unchanged: Vault documents come from members of the
+    // public and are always an attachment.
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const branding = readFileSync(join(__dirname, "../../src/branding/branding.service.ts"), "utf8");
-    expect(branding).toMatch(/inline: true/);
     for (const f of ["documents.service.ts", "supplied-documents.service.ts"]) {
       const s = readFileSync(join(__dirname, "../../src/documents", f), "utf8");
-      expect(s).not.toMatch(/inline: true/);
+      expect({ file: f, inline: /\binline\s*:/.test(s) }).toEqual({ file: f, inline: false });
+    }
+  });
+
+  it("only serves inline where the SERVER established the type", async () => {
+    // The two cases, and what makes each safe: the school logo is validated on
+    // upload and rendered in an <img>; a lesson PDF is magic-byte checked when
+    // its upload is confirmed. Both NAME the type rather than passing a flag,
+    // which is what keeps the check and the serving joined — and what lets the
+    // S3 branch pin `ResponseContentType` instead of echoing the object's
+    // stored type, which came off a presigned PUT and is the uploader's claim.
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const root = join(__dirname, "../../src");
+    const cases: Array<[string, string]> = [
+      ["branding/branding.service.ts", "image/png"],
+      ["lms/lms-content.service.ts", "application/pdf"],
+    ];
+    for (const [file, type] of cases) {
+      const s = readFileSync(join(root, file), "utf8");
+      expect({ file, named: s.includes(`inline: "${type}"`) }).toEqual({ file, named: true });
+      // Never the boolean form, which would leave the type unstated.
+      expect({ file, flag: /inline:\s*true/.test(s) }).toEqual({ file, flag: false });
     }
   });
 });

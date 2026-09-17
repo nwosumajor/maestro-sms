@@ -54,7 +54,15 @@ function makeService(opts: { batch?: Row | null; existingEmails?: string[] }) {
       createMany: fan(userCreate),
     },
     userRole: { create: userRoleCreate, createMany: fan(userRoleCreate) },
-    studentProfile: { create: profileCreate, createMany: fan(profileCreate), findMany: jest.fn().mockResolvedValue([]) },
+    studentProfile: {
+      create: profileCreate,
+      createMany: fan(profileCreate),
+      // HONOURS the admission-number filter. The service asks this twice for
+      // different reasons — every number in use (to allocate around) and the
+      // rows a file would UPDATE — and a stub answering both with the same
+      // empty list would let the update path vanish unnoticed.
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     enrollment: {
       create: enrollCreate,
       createMany: fan(enrollCreate),
@@ -76,7 +84,14 @@ function makeService(opts: { batch?: Row | null; existingEmails?: string[] }) {
       ),
     },
   } as unknown as TenantTx;
-  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+  // BOTH runners. The service reads which rows are UPDATES on the read-only
+  // handle before it hashes anything, and a double missing a method every real
+  // client has fails in a way that reads as a code fault rather than a fixture
+  // one.
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   return { service: new StudentImportService(db as never, audit as never), userCreate, profileCreate, enrollCreate, batchUpdate };
 }

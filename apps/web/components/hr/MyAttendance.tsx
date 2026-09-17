@@ -40,12 +40,12 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
   const today = todayIn(timezone);
   const todayMark = history.find((m) => String(m.date).slice(0, 10) === today);
 
-  async function clockIn() {
+  async function punch(action: "clock-in" | "clock-out") {
     if (!code.trim()) return;
     setBusy(true);
     setErr(null);
     setMsg(null);
-    const res = await fetch(`/api/sms/hr/attendance/clock-in`, {
+    const res = await fetch(`/api/sms/hr/attendance/${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: code.trim() }),
@@ -55,7 +55,11 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
     setBusy(false);
     if (res.ok) {
       setCode("");
-      setMsg(`Clocked in — marked ${String((data as Mark).status).toLowerCase()}.`);
+      setMsg(
+        action === "clock-in"
+          ? `Clocked in — marked ${String((data as Mark).status).toLowerCase()}.`
+          : "Clocked out — have a good evening.",
+      );
       const h = await fetch(`/api/sms/hr/attendance/me`);
       if (h.ok) setHistory((await h.json()) as Mark[]);
     } else {
@@ -68,14 +72,27 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">My attendance</CardTitle>
-        <CardDescription>Enter the code on the school display to clock in for today.</CardDescription>
+        <CardDescription>Enter the code on the school display to clock in, and again when you leave.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {todayMark ? (
-          <p className="text-sm">
+        {/* THE DAY HAS TWO ENDS. This showed a status and stopped: once you had
+            clocked in there was nothing more to do, because there was nothing
+            more the system could record. */}
+        {todayMark && (
+          <p className="flex flex-wrap items-center gap-2 text-sm">
             Today: <Badge variant={STATUS_VARIANT[todayMark.status] ?? "secondary"}>{todayMark.status.toLowerCase()}</Badge>
+            {todayMark.clockInAt && (
+              <span className="text-xs text-muted-foreground">in {timeOfDay(todayMark.clockInAt)}</span>
+            )}
+            {todayMark.clockOutAt && (
+              <span className="text-xs text-muted-foreground">· out {timeOfDay(todayMark.clockOutAt)}</span>
+            )}
           </p>
-        ) : (
+        )}
+        {/* Clocking OUT is offered only once there is something to close, and
+            clocking IN only once per day — so the control on screen is always
+            the one thing that can actually happen next. */}
+        {(!todayMark || (todayMark.clockInAt && !todayMark.clockOutAt)) && (
           <div className="flex items-end gap-2">
             <Input
               className="w-36 font-mono tracking-widest"
@@ -85,8 +102,12 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
               value={code}
               onChange={(e) => setCode(e.target.value)}
             />
-            <Button size="sm" onClick={clockIn} disabled={busy || code.trim().length < 6}>
-              Clock in
+            <Button
+              size="sm"
+              onClick={() => punch(todayMark ? "clock-out" : "clock-in")}
+              disabled={busy || code.trim().length < 6}
+            >
+              {todayMark ? "Clock out" : "Clock in"}
             </Button>
           </div>
         )}
@@ -102,6 +123,8 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
                 {m.clockInAt && (
                   <span className="text-xs text-muted-foreground">
                     {timeOfDay(m.clockInAt)}
+                    {/* No recorded departure is a real state, not zero hours. */}
+                    {m.clockOutAt ? `–${timeOfDay(m.clockOutAt)}` : " – no clock-out"}
                   </span>
                 )}
               </li>

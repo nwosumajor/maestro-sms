@@ -208,6 +208,19 @@ export class LmsContentController {
     return this.content.revertToRevision(p, id, revisionId);
   }
 
+  /**
+   * Copy this item onto every other arm of the same stream.
+   *
+   * Same permission as cloning one, because it does the same thing: a bulk door
+   * easier to open than the single one would be a way round the checks rather
+   * than a shortcut through them. Authoring rights are re-checked PER ARM.
+   */
+  @Post("content/:id/copy-to-arms")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
+  copyToArms(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.content.copyContentToArms(p, id);
+  }
+
   @Post("content/:id/clone")
   @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
   clone(

@@ -258,11 +258,24 @@ export class FeesService {
       const due = await tx.invoice.count({ where });
       const invoices = await tx.invoice.findMany({
         where,
-        // OLDEST DEBT FIRST. There was no `orderBy` at all, so which 2,000 the
-        // sweep took was whatever Postgres returned — plausibly the SAME 2,000
-        // each week, which makes the other 3,001 families never chased rather
-        // than chased late. A queue is worked from the front.
-        orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+        // LEAST RECENTLY CHASED FIRST, and never-chased before either.
+        //
+        // An unpaid invoice never leaves this predicate — the sweep writes a
+        // notification, not the invoice — so ordering by DUE DATE alone took
+        // the identical page every week for ever. That was the previous fix
+        // here, and it made the problem deterministic rather than solving it:
+        // measured on 2,100 overdue invoices against a cap of 2,000, two full
+        // runs each sent 2,000 reminders about the SAME 2,000 invoices, and the
+        // 100 newest arrears were never chased once — the most collectable end
+        // of the book. `backlog` read 105 on both runs, which says "behind",
+        // not "stuck".
+        //
+        // `lastRemindedAt` is the one thing the sweep changes, so ordering by
+        // it rotates: a school with more arrears than the cap now chases
+        // everybody over a few runs instead of 2,000 families weekly and the
+        // rest never. Due date breaks the tie, so within one rotation the
+        // oldest debt is still asked for first.
+        orderBy: [{ lastRemindedAt: { sort: "asc", nulls: "first" } }, { dueDate: "asc" }, { id: "asc" }],
         // `currency` is selected because the reminder QUOTES the balance. An
         // invoice carries its own currency per row, so an NGN invoice prints in
         // naira whatever the school has since moved to.
@@ -334,6 +347,7 @@ export class FeesService {
     // school can fix it by linking a guardian.
     let reminded = 0;
     let unreachable = 0;
+    const remindedIds: string[] = [];
     for (const inv of targets) {
       const overdue = inv.dueDate < today;
       const guardians = guardiansBy.get(inv.studentId) ?? [];
@@ -352,6 +366,16 @@ export class FeesService {
         data: { invoiceId: inv.id, outstandingMinor: inv.outstanding },
       }, [], guardians);
       reminded++;
+      remindedIds.push(inv.id);
+    }
+    // STAMPED AFTER THE FACT, in one statement, and only for invoices a family
+    // was actually told about: an `unreachable` invoice has not been chased, so
+    // marking it would push a pupil with no guardian linked to the back of the
+    // rotation for ever and hide the very gap `unreachable` exists to report.
+    if (remindedIds.length) {
+      await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.invoice.updateMany({ where: { id: { in: remindedIds } }, data: { lastRemindedAt: new Date() } }),
+      );
     }
     // A FOURTH FACT beside reminded / unreachable / failed: due work left behind
     // the cap. Not `failed` (tried and could not), not `unreachable` (nobody to

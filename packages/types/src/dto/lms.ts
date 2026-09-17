@@ -31,6 +31,16 @@ export interface ClassOverviewDto {
   students: number;
   /** Max ACTIVE enrolments, or null when the school has not set one. */
   capacity: number | null;
+  /**
+   * The class's BASE room — "SS1A stays in Hall A".
+   *
+   * Carried here because a field that can be SET and never SEEN is not a
+   * feature: it was written by three paths and read only by its own uniqueness
+   * guard, so a school could assign every class a room and find it nowhere on
+   * screen. Distinct from the per-subject room pin (Chemistry -> the lab).
+   */
+  homeRoomId: string | null;
+  homeRoomName: string | null;
   /** Assigned class teachers (not counting subject-only teachers). */
   teachers: number;
   /** Distinct subject offerings defined for the class. */

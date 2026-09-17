@@ -27,12 +27,40 @@ const classShape = {
   stage: z.enum(SUBJECT_STAGES).nullish(),
   stream: z.enum(CLASS_STREAMS).nullish(),
   arm: z.enum(CLASS_ARMS).nullish(),
+  /** The class's BASE room — where the cohort is when it is not elsewhere. */
+  homeRoomId: z.string().uuid().nullish(),
 };
+
+/**
+ * Create every arm of one stream in a single action.
+ *
+ * Each arm names its OWN class teacher, because the rule that a class has one
+ * from the moment it exists is not something a bulk endpoint may bypass.
+ * Capped at the alphabet: a school that needs more arms than letters has a
+ * different problem, and an unbounded loop here is an unbounded write.
+ */
+const createArmsSchema = z.object({
+  stage: z.enum(SUBJECT_STAGES).nullish(),
+  level: z.number().int().min(0).max(50).nullish(),
+  stream: z.enum(CLASS_STREAMS).nullish(),
+  arms: z
+    .array(
+      z.object({
+        arm: z.enum(CLASS_ARMS),
+        supervisorId: z.string().uuid().nullish(),
+        homeRoomId: z.string().uuid().nullish(),
+      }),
+    )
+    .min(1)
+    .max(CLASS_ARMS.length),
+});
 // A class is created WITH its class teacher: they take its register and answer
 // for it, so a class without one has a roll and nobody responsible for it.
 const createClassSchema = z.object({
   name: z.string().min(1),
-  supervisorId: z.string().uuid({ message: "Choose the class teacher for this class" }),
+  // OPTIONAL. A class may be laid out before its staffing is settled; the gap
+  // is reported on the classes page rather than blocked here.
+  supervisorId: z.string().uuid().nullish(),
   ...classShape,
 });
 const updateClassSchema = z.object({
@@ -97,6 +125,12 @@ const syllabusSchema = z.object({
     .max(60),
 });
 const syllabusStatusSchema = z.object({ status: z.enum(["PLANNED", "TAUGHT"]) });
+/** Which plan to copy: the offering it belongs to, named exactly as `GET /syllabus` names it. */
+const syllabusCopySchema = z.object({
+  classId: z.string().uuid(),
+  subjectId: z.string().uuid(),
+  termId: z.string().uuid(),
+});
 const gradingPolicySchema = z.object({
   scale: z.string().max(24).optional(),
   // Floors only — there is nowhere to type a ceiling, which is what makes a gap
@@ -198,6 +232,22 @@ export class LmsController {
     return this.lms.createClass(p, body);
   }
 
+  /**
+   * SS1A, SS1B, SS1C in one action.
+   *
+   * Same permission as creating one, because it creates the same thing: a bulk
+   * door that is easier to open than the single one would be a way round the
+   * checks rather than a shortcut through them.
+   */
+  @Post("classes/arms")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  createArms(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(createArmsSchema)) body: z.infer<typeof createArmsSchema>,
+  ) {
+    return this.lms.createArms(p, body);
+  }
+
   /** Update class progression (level / next class) + supervisor + metadata. */
   @Put("classes/:classId")
   @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
@@ -228,6 +278,22 @@ export class LmsController {
     @Query("termId") termId: string,
   ) {
     return this.syllabus.get(p, { classId, subjectId, termId });
+  }
+
+  /**
+   * Copy this term plan onto the other arms of the same stream.
+   *
+   * Same gate as writing one plan — the service re-checks that the caller may
+   * write the SOURCE offering, and skips any arm that already has a plan rather
+   * than replacing it.
+   */
+  @Post("syllabus/copy-to-arms")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  copySyllabusToArms(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(syllabusCopySchema)) b: z.infer<typeof syllabusCopySchema>,
+  ) {
+    return this.syllabus.copyToArms(p, b);
   }
 
   /** Every plan the caller may see for a term — the review view. */

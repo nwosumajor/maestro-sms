@@ -44,6 +44,18 @@ model Class {
   /// is one class. Also chosen, never typed — a free-text arm produces "A",
   /// "a", "A " and "1" as four arms of one stream.
   arm          String?
+  /// The class's BASE ROOM — where this cohort is when it is not somewhere else.
+  ///
+  /// Distinct from `ClassSubjectOffering.preferredRoomId`, which pins ONE SUBJECT
+  /// to a specialist room (Chemistry -> the lab). This is the room the class
+  /// belongs to: where a visitor is sent, where a cover teacher goes, and what a
+  /// timetabled lesson should default to when it needs no special room.
+  ///
+  /// Scalar uuid with a DB-level FK to room (no Prisma relation — the documented
+  /// pattern that keeps these models lean). Nullable: plenty of schools rotate
+  /// rooms and have no such thing, and an invented default would be a lie about
+  /// where a child can be found.
+  homeRoomId   String?  @db.Uuid
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

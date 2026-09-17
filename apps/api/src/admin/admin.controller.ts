@@ -3,7 +3,7 @@ import { isoDay } from "../common/calendar-day";
 import { Body, Controller, Delete, Get, Header, Param, Post, Put } from "@nestjs/common";
 import { z } from "zod";
 import { ADMIN_PERMISSIONS, LMS_PERMISSIONS, SIS_PERMISSIONS } from "@sms/types";
-import type { StudentImportBatchDto } from "@sms/types";
+import type { SisImportColumnKey, StudentImportBatchDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -32,7 +32,24 @@ const importSchema = z.object({
     .min(1)
     .max(500),
 });
-const sisRowSchema = z.object({
+/**
+ * One validator per template column — TYPED AGAINST THE COLUMN LIST, so a column
+ * cannot be added to the template without one.
+ *
+ * This schema was a THIRD hand-kept copy of the column list (the service and the
+ * web component held the other two), and a Zod object STRIPS what it does not
+ * declare. So `city`, `state` and `addressLine2` were offered by the template,
+ * typed by a school, sent by the browser, and silently discarded at the door —
+ * the school's work thrown away between the file and the database with every
+ * status along the way a success.
+ *
+ * Found by driving a real import end to end against the live stack. Every unit
+ * test passed: they call the service directly and never cross the boundary that
+ * was dropping the columns. `Record<SisImportColumnKey, ZodTypeAny>` is the
+ * durable fix — the next column fails to COMPILE without a validator rather than
+ * being quietly dropped.
+ */
+const sisRowShape = {
   name: z.string().min(1).max(200),
   // Optional: omitted => a sign-in identifier is generated from the name and the
   // school's domain. Most pupils have no address of their own.
@@ -41,10 +58,31 @@ const sisRowSchema = z.object({
   dateOfBirth: isoDay.nullish(),
   gender: z.string().max(20).nullish(),
   phone: z.string().max(40).nullish(),
-  address: z.string().max(400).nullish(),
+  addressLine1: z.string().max(400).nullish(),
+  addressLine2: z.string().max(400).nullish(),
+  city: z.string().max(120).nullish(),
+  state: z.string().max(120).nullish(),
   class: z.string().max(120).nullish(),
+  // The two LEGACY spellings, still accepted so a file a school built last term
+  // keeps importing. Not template columns any more, so the check below does not
+  // require them.
+  address: z.string().max(400).nullish(),
   classId: z.string().uuid().nullish(),
-});
+};
+/**
+ * COMPLETENESS, at COMPILE TIME: every template column has a validator above.
+ *
+ * Without it the next column added to `SIS_IMPORT_COLUMNS` is offered to
+ * schools, typed in, sent — and stripped here, silently. Expressed as an
+ * assignment rather than a test because the failure has to land on whoever adds
+ * the column, in the file they are already editing.
+ */
+type ColumnWithNoValidator = Exclude<SisImportColumnKey, keyof typeof sisRowShape>;
+const _everyColumnValidated: [ColumnWithNoValidator] extends [never]
+  ? true
+  : ["a template column has no validator:", ColumnWithNoValidator] = true;
+void _everyColumnValidated;
+const sisRowSchema = z.object(sisRowShape);
 // See BULK_IMPORT_MAX_ROWS: one upload must finish inside a request, because the
 // sign-in slips ride only on the approval response. The outer .max is the DoS
 // bound; the refine is what the uploader READS — "at most 200 element(s)" tells

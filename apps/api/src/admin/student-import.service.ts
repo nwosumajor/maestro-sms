@@ -23,11 +23,20 @@ import { hashEachWithoutBlocking } from "../foundation/bulk-hash";
 import { Prisma } from "@sms/db";
 import { schoolSlugOf } from "../foundation/login-email";
 import { allocateAdmissionNumber } from "../foundation/admission-number";
-import { BULK_IMPORT_MAX_ROWS, bulkImportTooLarge, generateLoginEmail } from "@sms/types";
+import {
+  BULK_IMPORT_MAX_ROWS,
+  bulkImportTooLarge,
+  csvCellOf,
+  generateLoginEmail,
+  SIS_IMPORT_COLUMNS,
+  SIS_IMPORT_HEADERS,
+  STUDENT_IMPORT_UPDATE_PREVIEW,
+} from "@sms/types";
 import type {
   StudentImportBatchDto,
   StudentImportRow,
   StudentImportSummary,
+  StudentImportUpdatePreview,
 } from "@sms/types";
 import { assertClassCapacity } from "../common/class-capacity";
 import {
@@ -41,31 +50,35 @@ import {
 } from "../integrity/integrity.foundation";
 
 /**
- * The template a school actually fills in.
+ * The template a school actually fills in — defined ONCE, in `@sms/types`.
+ *
+ * It lived here AND in `SisImport.tsx` as two hand-kept arrays. The file is
+ * parsed by HEADER NAME, so drift between them is not a crash: it is a column a
+ * school fills in and the platform silently drops. `SIS_IMPORT_COLUMNS` is the
+ * one definition and both sides read it.
  *
  * The class column used to be `classId` — a raw 36-character UUID, one per
- * pupil. Nobody has that. To fill in a spreadsheet you would have to dig an id
- * out of a URL for every class, paste it hundreds of times, and then be unable
- * to check your own work, because a column of uuids cannot be read back.
- *
- * It is now `class`, and it takes what the school already calls the class: its
- * NAME ("SS3 Science A") or its CODE. Both are unique per school and both are
- * visible on the classes page. A uuid still resolves, so any file somebody
- * already built keeps working.
+ * pupil. Nobody has that. It is now `class`, taking what the school already
+ * calls the class: its NAME ("SS3 Science A") or its CODE. Both are unique per
+ * school and both are visible on the classes page. A uuid still resolves, so any
+ * file somebody already built keeps working.
  */
 /** A value shaped like an id, so an already-built file still resolves. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const TEMPLATE_HEADERS = [
-  "name",
-  "email",
-  "admissionNumber",
-  "dateOfBirth",
-  "gender",
-  "phone",
-  "address",
-  "class",
-];
+/** The stored values an update is compared against and written over. */
+interface ExistingProfile {
+  id: string;
+  studentId: string;
+  admissionNumber: string | null;
+  dateOfBirth: Date | null;
+  gender: string | null;
+  phone: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+}
 
 interface BatchRow {
   id: string;
@@ -98,18 +111,71 @@ export class StudentImportService {
   }
 
   /**
-   * A blank CSV template with the SIS header row + two example rows.
-   * The `email` column is OPTIONAL — the second example leaves it empty to show
-   * that, since most pupils have no address and a sign-in identifier is
-   * generated from the name.
+   * A blank CSV template: the header row + two example rows.
+   *
+   * The examples are the documentation. They show the class written the way a
+   * school writes it, and they show which columns may be left blank — the second
+   * pupil has no email (a sign-in identifier is generated from the name) and no
+   * address, so the family will be asked for it.
+   *
+   * THE FIRST EXAMPLE IS DELIBERATELY COMPLETE, because a school that copies it
+   * produces profiles that need no chasing at all. The old template could not
+   * express that: it had no `city` or `state` column, so even a perfectly filled
+   * file left every pupil INCOMPLETE and nudged nightly.
+   *
+   * Every cell is quoted through `csvCellOf`, because the address is the field
+   * most likely to contain a comma and the template must be readable by the
+   * parser it ships with.
    */
   csvTemplate(): string {
-    // The sample rows SHOW the class written the way a school writes it, so the
-    // format is obvious from the file itself rather than from documentation
-    // somebody has to be told exists.
-    const withEmail = ["Ada Lovelace", "ada@example.com", "ADM-001", "2012-05-01", "F", "08000000000", "12 Main St", "SS3 Science A"];
-    const noEmail = ["Bolu Eze", "", "ADM-002", "2012-09-14", "M", "", "", "JSS1"];
-    return `${TEMPLATE_HEADERS.join(",")}\n${withEmail.join(",")}\n${noEmail.join(",")}\n`;
+    const filled: Record<string, string> = {
+      name: "Ada Lovelace",
+      admissionNumber: "ADM-001",
+      class: "SS3 Science A",
+      dateOfBirth: "2012-05-01",
+      gender: "F",
+      email: "ada@example.com",
+      phone: "08000000000",
+      addressLine1: "12 Main St, Ikeja",
+      addressLine2: "",
+      city: "Lagos",
+      state: "Lagos",
+    };
+    const sparse: Record<string, string> = {
+      name: "Bolu Eze",
+      admissionNumber: "ADM-002",
+      class: "JSS1",
+      dateOfBirth: "2012-09-14",
+      gender: "M",
+    };
+    const line = (row: Record<string, string>) =>
+      SIS_IMPORT_HEADERS.map((h) => csvCellOf(row[h] ?? "")).join(",");
+    return `${SIS_IMPORT_HEADERS.join(",")}\n${line(filled)}\n${line(sparse)}\n`;
+  }
+
+  /**
+   * The profile columns a row carries, mapped by the ONE table in `@sms/types`.
+   *
+   * Written as a loop over `SIS_IMPORT_COLUMNS` rather than as a hand-listed
+   * object literal, because a hand-listed one is how `city` and `state` come to
+   * be added to the template and silently dropped on the way to the database —
+   * which is the same shape as the defect this whole change exists for.
+   */
+  private profileFieldsOf(row: StudentImportRow): Record<string, string | Date | null> {
+    const source = row as unknown as Record<string, string | null | undefined>;
+    const out: Record<string, string | Date | null> = {};
+    for (const col of SIS_IMPORT_COLUMNS) {
+      if (!col.profileField) continue;
+      // `address` is the legacy single-line column and still lands on
+      // addressLine1 — a file a school built last term must keep working.
+      const raw = (source[col.key] ?? (col.key === "addressLine1" ? source.address : null))?.toString().trim();
+      out[col.profileField] = raw ? raw : null;
+    }
+    // A date column is a DATE, not a string, and an unparseable one must not
+    // become `Invalid Date` on the row — it is left null and the pupil is asked.
+    const dob = out.dateOfBirth;
+    out.dateOfBirth = typeof dob === "string" && !Number.isNaN(Date.parse(dob)) ? new Date(dob) : null;
+    return out;
   }
 
   /**
@@ -137,7 +203,37 @@ export class StudentImportService {
     return found?.id ?? null;
   }
 
-  /** Stage a PENDING batch and compute a dry-run summary (new vs duplicate email). */
+  /**
+   * What this row would CHANGE on a pupil already on roll.
+   *
+   * A BLANK CELL NEVER CLEARS A STORED VALUE. That is the whole safety of making
+   * the import an upsert: a school re-uploading its roll with only the address
+   * columns filled in must not wipe every date of birth it loaded last term.
+   * Blank means "I am not changing this", because the other reading destroys
+   * data that nobody asked to destroy and nothing would report it.
+   */
+  private changesFor(
+    row: StudentImportRow,
+    current: Record<string, unknown>,
+  ): { field: string; from: string | null; to: string | null }[] {
+    const next = this.profileFieldsOf(row);
+    const out: { field: string; from: string | null; to: string | null }[] = [];
+    for (const [field, value] of Object.entries(next)) {
+      if (value === null) continue; // blank = leave alone
+      const before = current[field];
+      const to = value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
+      const from =
+        before instanceof Date
+          ? before.toISOString().slice(0, 10)
+          : before == null
+            ? null
+            : String(before);
+      if (from !== to) out.push({ field, from, to });
+    }
+    return out;
+  }
+
+  /** Stage a PENDING batch and compute a dry-run summary (new / update / duplicate). */
   async stage(p: Principal, inputRows: StudentImportRow[]) {
 
     let rows = inputRows;
@@ -177,10 +273,57 @@ export class StudentImportService {
         return ref ? { ...r, classId: resolved.get(ref) ?? null } : r;
       });
 
+      // WHICH ROWS MATCH A PUPIL ALREADY ON ROLL, by admission number — ONE
+      // query for the whole file, never one per row. The admission number is the
+      // right key: it is the school's own identifier, it is what the guardian
+      // upload matches on, and unlike a generated sign-in identifier it does not
+      // change when a pupil's name is corrected.
+      const suppliedAdm = [
+        ...new Set(rows.map((r) => r.admissionNumber?.trim()).filter((a): a is string => Boolean(a))),
+      ];
+      const existingProfiles = suppliedAdm.length
+        ? ((await tx.studentProfile.findMany({
+            where: { admissionNumber: { in: suppliedAdm } },
+            select: {
+              admissionNumber: true,
+              dateOfBirth: true,
+              gender: true,
+              phone: true,
+              addressLine1: true,
+              addressLine2: true,
+              city: true,
+              state: true,
+              student: { select: { name: true } },
+            },
+          })) as unknown as Array<Record<string, unknown> & { admissionNumber: string; student: { name: string } | null }>)
+        : [];
+      const byAdm = new Map(existingProfiles.map((e) => [e.admissionNumber, e]));
+
+      let updateCount = 0;
+      let unchangedCount = 0;
+      const updates: StudentImportUpdatePreview[] = [];
+      for (const r of rows) {
+        const adm = r.admissionNumber?.trim();
+        const current = adm ? byAdm.get(adm) : undefined;
+        if (!current) continue;
+        const changes = this.changesFor(r, current);
+        if (changes.length === 0) { unchangedCount++; continue; }
+        updateCount++;
+        // A SAMPLE, not the file. A reviewer reads a handful of rows and a
+        // total; listing five hundred would make the summary unreadable and the
+        // batch row enormous — and the count is what says how many there are.
+        if (updates.length < STUDENT_IMPORT_UPDATE_PREVIEW) {
+          updates.push({ admissionNumber: adm as string, name: current.student?.name ?? "", changes });
+        }
+      }
+
       const summary: StudentImportSummary = {
         total: rows.length,
-        newCount: rows.length - duplicateCount,
+        // A row matching an existing pupil is no longer counted as NEW — it used
+        // to be counted as a duplicate and dropped in silence.
+        newCount: rows.length - duplicateCount - updateCount - unchangedCount,
         ...(unknownClasses.length ? { unknownClasses } : {}),
+        ...(updateCount ? { updateCount, updates } : {}),
         duplicateCount,
       };
       const batch = await tx.studentImportBatch.create({
@@ -233,20 +376,66 @@ export class StudentImportService {
       return (batch.rows as StudentImportRow[] | null) ?? [];
     });
 
+    // PHASE 1b: WHICH ROWS ARE UPDATES, asked BEFORE the hashing below.
+    //
+    // An update needs no account and therefore no password, and bcrypt is the
+    // dominant cost of this whole operation — roughly 100 ms a row. Hashing
+    // first and discovering afterwards that a row was an update would burn a
+    // minute and a half of CPU on a 1,000-pupil re-upload that creates nobody,
+    // and would do it again on every correction a school ever makes.
+    //
+    // ONE query, keyed on the admission numbers the file actually supplies. It
+    // also carries the CURRENT values, because the update statement writes
+    // COALESCE(new, old) and the audit needs to say what changed.
+    const suppliedAdm = [
+      ...new Set(rows.map((r) => r.admissionNumber?.trim()).filter((a): a is string => Boolean(a))),
+    ];
+    const existingByAdm = new Map<string, ExistingProfile>(
+      (suppliedAdm.length
+        ? ((await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+            tx.studentProfile.findMany({
+              where: { admissionNumber: { in: suppliedAdm } },
+              select: {
+                id: true,
+                studentId: true,
+                admissionNumber: true,
+                dateOfBirth: true,
+                gender: true,
+                phone: true,
+                addressLine1: true,
+                addressLine2: true,
+                city: true,
+                state: true,
+              },
+            }),
+          )) as unknown as ExistingProfile[])
+        : []
+      ).map((e) => [e.admissionNumber as string, e]),
+    );
+    const isUpdateRow = (r: StudentImportRow) => {
+      const adm = r.admissionNumber?.trim();
+      return Boolean(adm && existingByAdm.has(adm));
+    };
+
     // PHASE 2 (outside any tx — bcrypt is slow): a UNIQUE random temporary
-    // password per row. // SECURITY: the old flow gave every imported student
-    // the same well-known default, so any student could open any classmate's
-    // portal until they all rotated. Now each account gets its own secret,
-    // returned ONCE to the approver (never stored in plaintext), and
-    // passwordChangedAt=null forces the student to set their own on first login.
+    // password per row THAT CREATES AN ACCOUNT. // SECURITY: the old flow gave
+    // every imported student the same well-known default, so any student could
+    // open any classmate's portal until they all rotated. Now each account gets
+    // its own secret, returned ONCE to the approver (never stored in
+    // plaintext), and passwordChangedAt=null forces the student to set their own
+    // on first login.
     // SEQUENTIAL, yielding between hashes. `Promise.all` over bcryptjs starves
     // the event loop for the WHOLE batch — see foundation/bulk-hash.ts.
+    const updateRows = rows.filter(isUpdateRow);
     const prepared = await hashEachWithoutBlocking(
-      rows,
+      rows.filter((r) => !isUpdateRow(r)),
       () => crypto.randomBytes(9).toString("base64url"),
       (row, tempPassword, passwordHash) => ({ row, tempPassword, passwordHash }),
     );
     const credentials: { name: string; email: string; tempPassword: string; admissionNumber: string }[] = [];
+    /** Rows that matched a pupil and would change nothing — neither created nor
+     *  updated, and NOT a failure. Counted so the totals still add up. */
+    let unchanged = 0;
 
     // PHASE 3a (batched reads): everything the row loop used to ask the database
     // for, asked ONCE. It used to run 5-6 sequential round trips PER ROW inside
@@ -368,7 +557,10 @@ export class StudentImportService {
       issued.add(loginEmail);
       const providedAdm = row.admissionNumber?.trim() || null;
       if (providedAdm && usedAdmNo.has(providedAdm)) {
-        skipped++; // a SUPPLIED admission number that is already taken
+        // A genuine clash now: rows matching a pupil on roll were filtered out
+        // of `prepared` and are applied as UPDATES below, so anything still
+        // reaching here collides with a number allocated during THIS batch.
+        skipped++;
         continue;
       }
       const admissionNumber = providedAdm ?? allocateAdmissionNumber(usedAdmNo, admissionYear);
@@ -394,11 +586,10 @@ export class StudentImportService {
       newProfiles.push({
         schoolId: p.schoolId,
         studentId: userId,
+        // The allocated/supplied number wins over whatever the row carried, so
+        // the login slip and the profile always agree.
+        ...this.profileFieldsOf(row),
         admissionNumber,
-        dateOfBirth: row.dateOfBirth ? new Date(row.dateOfBirth) : null,
-        gender: row.gender ?? null,
-        phone: row.phone ?? null,
-        addressLine1: row.address ?? null,
       });
       if (row.classId) {
         newEnrolments.push({ schoolId: p.schoolId, classId: row.classId, studentId: userId });
@@ -409,6 +600,18 @@ export class StudentImportService {
       // cannot sign in with what they were handed.
       credentials.push({ name: row.name, email: loginEmail, tempPassword, admissionNumber });
       created++;
+    }
+
+    // The updates, and WHAT each one changes — computed here so the audit row
+    // can say it and the reviewer's preview and the write cannot disagree.
+    const updatePayloads: { current: ExistingProfile; next: Record<string, string | Date | null> }[] = [];
+    let updatedCount = 0;
+    for (const row of updateRows) {
+      const current = existingByAdm.get(row.admissionNumber!.trim())!;
+      const changes = this.changesFor(row, current as unknown as Record<string, unknown>);
+      if (changes.length === 0) { unchanged++; continue; }
+      updatePayloads.push({ current, next: this.profileFieldsOf(row) });
+      updatedCount++;
     }
 
     // PHASE 3c (write tx): CLAIM the batch (guarded flip — a concurrent approver
@@ -453,6 +656,47 @@ export class StudentImportService {
         for (const chunk of chunked(newRoles, 500)) await tx.userRole.createMany({ data: chunk });
         for (const chunk of chunked(newProfiles, 500)) await tx.studentProfile.createMany({ data: chunk });
         for (const chunk of chunked(newEnrolments, 500)) await tx.enrollment.createMany({ data: chunk });
+        // THE UPDATES, IN ONE STATEMENT PER CHUNK — never one per pupil.
+        //
+        // Prisma has no bulk update with per-row values, and a loop of
+        // `update()` calls inside an interactive transaction is precisely the
+        // trap this method already carries a comment about: Prisma caps one at
+        // FIVE SECONDS, so a school correcting 400 records would get "Internal
+        // server error" and whether it worked would depend on how busy the task
+        // was. An UPDATE ... FROM (VALUES …) is one round trip whatever the size.
+        //
+        // COALESCE(new, old) is the semantic, and it is the reason an upsert is
+        // safe to offer at all: a BLANK CELL LEAVES THE STORED VALUE ALONE. A
+        // school re-uploading its roll with only the address columns filled must
+        // not wipe every date of birth it loaded last term — and nothing would
+        // have reported that, because a cleared field looks exactly like one
+        // that was never supplied.
+        for (const chunk of chunked(updatePayloads, 500)) {
+          const values = Prisma.join(
+            chunk.map(
+              (u) => Prisma.sql`(${u.current.id}::uuid, ${
+                u.next.dateOfBirth as Date | null
+              }::date, ${u.next.gender as string | null}::text, ${u.next.phone as string | null}::text, ${
+                u.next.addressLine1 as string | null
+              }::text, ${u.next.addressLine2 as string | null}::text, ${
+                u.next.city as string | null
+              }::text, ${u.next.state as string | null}::text)`,
+            ),
+          );
+          await tx.$executeRaw`
+            UPDATE student_profile p SET
+              "dateOfBirth"  = COALESCE(v."dateOfBirth", p."dateOfBirth"),
+              gender         = COALESCE(v.gender, p.gender),
+              phone          = COALESCE(v.phone, p.phone),
+              "addressLine1" = COALESCE(v."addressLine1", p."addressLine1"),
+              "addressLine2" = COALESCE(v."addressLine2", p."addressLine2"),
+              city           = COALESCE(v.city, p.city),
+              state          = COALESCE(v.state, p.state),
+              "updatedAt"    = now()
+            FROM (VALUES ${values}) AS v(id, "dateOfBirth", gender, phone, "addressLine1", "addressLine2", city, state)
+            WHERE p.id = v.id
+          `;
+        }
       } catch (err) {
         // A pre-check cannot beat a concurrent import, and P2002 is the final
         // guarantee — the same reasoning login-email.ts records. Nothing is
@@ -467,10 +711,14 @@ export class StudentImportService {
         throw err as Error;
       }
       const summary: StudentImportSummary = {
-        total: prepared.length,
+        // The whole file, not just the rows that could create — `prepared` no
+        // longer holds the update rows, so reading its length here would report
+        // a 400-row correction as a 0-row import.
+        total: prepared.length + updateRows.length,
         newCount: created,
         duplicateCount: skipped,
         created,
+        updated: updatedCount,
         skipped,
         errors: errors.length,
       };
@@ -478,7 +726,17 @@ export class StudentImportService {
         where: { id },
         data: { status: "APPROVED", reviewedById: p.userId, summary: summary as unknown as Prisma.InputJsonValue },
       });
-      await this.log(tx, p, "student.import.approve", id, { created, skipped, errors: errors.length });
+      await this.log(tx, p, "student.import.approve", id, {
+        created,
+        updated: updatedCount,
+        unchanged,
+        skipped,
+        errors: errors.length,
+        // WHOSE record changed, so the trail names the pupils rather than only
+        // counting them. Admission numbers, not names: the trail is read beside
+        // the school's own register.
+        updatedAdmissionNumbers: updatePayloads.map((u) => u.current.admissionNumber),
+      });
       // credentials ride ONLY on this response (shown once; never persisted).
       return { ...this.toDto(updated as unknown as BatchRow), credentials };
     });

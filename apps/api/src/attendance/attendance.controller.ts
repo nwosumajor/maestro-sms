@@ -13,6 +13,8 @@ import { AttendanceService } from "./attendance.service";
 import { AttendanceRollupService } from "./attendance-rollup.service";
 import { RegisterReminderService } from "./register-reminder.service";
 import { JobRunsService } from "../maintenance/job-runs.service";
+import { pageNumber } from "../common/status-filter";
+import type { AttendanceCompiledDto, AttendanceGrain } from "@sms/types";
 
 /** Query-string numbers arrive as strings; coerce and bound them at the boundary. */
 const pageSchema = z.coerce.number().int().min(1).max(100_000).optional();
@@ -181,6 +183,29 @@ export class AttendanceController {
   }
 
   /** A student's current-term totals (% present, absences, lates). Same scoping. */
+  /**
+   * A pupil's attendance COMPILED — per month, per term or per session.
+   *
+   * `attendance.read` and the SAME `assertCanAccessStudent` the day list uses,
+   * so the rule is inherited rather than restated: school-wide roles see every
+   * pupil, a teacher only pupils in classes they teach, a parent their own
+   * children, a pupil themselves, anyone else a 404. A second copy of a
+   * visibility rule is how the two come to disagree in silence.
+   */
+  @Get("students/:studentId/attendance/compiled")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  studentCompiled(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Query("grain") grain?: string,
+    @Query("page") page?: string,
+  ): Promise<AttendanceCompiledDto> {
+    return this.attendance.compiledHistory(p, studentId, {
+      grain: grain as AttendanceGrain | undefined,
+      page: pageNumber(page),
+    });
+  }
+
   @Get("students/:studentId/attendance/summary")
   @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
   studentSummary(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {

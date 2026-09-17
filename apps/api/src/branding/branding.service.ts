@@ -78,6 +78,28 @@ export class BrandingService {
     return `schools/${schoolId}/branding/logo`;
   }
 
+  /**
+   * A signed URL for a school's logo — ONE definition, because there were five.
+   *
+   * Every one of them presigns the same object for the same purpose (an <img>
+   * on a page), and three asked for an inline grant while two did not. The two
+   * that did not are the PUBLIC ones — the login page by slug, and the member
+   * shell — so on those a browser was handed
+   * `Content-Disposition: attachment` + `application/octet-stream` for an image
+   * it was being asked to RENDER, and the school's own logo did not appear on
+   * the page it was bought for.
+   *
+   * Classic sibling asymmetry: the rule was reasoned out, written down, applied
+   * to the files in front of whoever wrote it, and not swept. A sixth correct
+   * copy would be right five times, so there is now one.
+   */
+  private async logoUrl(key: string | null | undefined): Promise<string | null> {
+    if (!key) return null;
+    // `image/png` is the type the SERVER established: `uploadLogo` validates the
+    // bytes and writes them itself, which is what makes an inline grant safe.
+    return (await this.storage.presignDownload({ key, inline: "image/png" })).url;
+  }
+
   /** Direct logo upload: the API stores the bytes itself (so it can later embed the
    *  logo into generated certificates / report cards). Principal / school_admin only. */
   async uploadLogo(p: Principal, body: Buffer, contentType: string): Promise<SchoolBrandingDto> {
@@ -94,7 +116,7 @@ export class BrandingService {
         tx,
       );
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
-      const logoUrl = (await this.storage.presignDownload({ key, inline: true })).url;
+      const logoUrl = await this.logoUrl(key);
       return this.dto(school?.slug ?? "", logoUrl, b);
     });
     this.invalidateBranding(p.schoolId, out.slug);
@@ -150,7 +172,7 @@ export class BrandingService {
       );
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
       const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
-      const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey, inline: true })).url : null;
+      const logoUrl = await this.logoUrl(b?.logoKey);
       return this.dto(school?.slug ?? "", logoUrl, b);
     });
     this.invalidateBranding(p.schoolId, out.slug);
@@ -161,7 +183,7 @@ export class BrandingService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
       const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
-      const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey, inline: true })).url : null;
+      const logoUrl = await this.logoUrl(b?.logoKey);
       return this.dto(school?.slug ?? "", logoUrl, b);
     });
   }
@@ -203,7 +225,7 @@ export class BrandingService {
       }),
     );
     // Presign OUTSIDE the cache — the signed URL has its own short lifetime.
-    const logoUrl = data.logoKey ? (await this.storage.presignDownload({ key: data.logoKey })).url : null;
+    const logoUrl = await this.logoUrl(data.logoKey);
     return {
       schoolName: data.schoolName,
       logoUrl,
@@ -247,7 +269,7 @@ export class BrandingService {
     });
 
     // Presign OUTSIDE the cache — the signed URL has its own short lifetime.
-    const logoUrl = data.logoKey ? (await this.storage.presignDownload({ key: data.logoKey })).url : null;
+    const logoUrl = await this.logoUrl(data.logoKey);
     return { schoolName: data.schoolName, logoUrl };
   }
 }

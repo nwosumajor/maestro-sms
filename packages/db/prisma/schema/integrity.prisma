@@ -330,6 +330,11 @@ model IntegrityRetentionRun {
   /// deleted none of these, because the sweep did not cover them yet.
   xapiDeleted      Int @default(0)
   scansDeleted     Int @default(0)
+  /// Raw staff clock-in/out scans purged, and the window that was applied.
+  /// Nullable window rather than 0: a historical run applied NO staff window at
+  /// all, which is a different fact from having applied a window of zero.
+  staffEventsDeleted       Int  @default(0)
+  staffEventRetentionDays  Int?
 
   /// SCHEDULED (cron worker) | MANUAL (admin-triggered).
   trigger   String

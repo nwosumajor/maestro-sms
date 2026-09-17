@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **915 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -45,6 +45,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | POST | `/public/password-reset/request` | 🌐 public | PUBLIC: request a forgot-password reset email. |
 | GET | `/public/plan-pricing` | 🌐 public | Effective per-tier pricing (operator overrides merged over defaults) — the landing page derives its prices from this |
 | GET | `/public/schools` | 🌐 public | Public list of onboarded schools (parent directory; excludes the platform org) |
+| GET | `/public/schools/by-slug` | 🌐 public | PUBLIC: resolve the schools a family has CHOSEN, by slug. |
 
 ---
 
@@ -265,7 +266,8 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | GET | `/classes/:classId/attendance` | 🔑 `attendance.read` · 📦 `attendance` | Class register history |
 | POST | `/classes/:classId/attendance` | 🔑 `attendance.write` · 📦 `attendance` | Take the daily register (auto-notifies guardians on absence) |
 | GET | `/students/:studentId/attendance` | 🔑 `attendance.read` · 📦 `attendance` | A student's attendance |
-| GET | `/students/:studentId/attendance/summary` | 🔑 `attendance.read` · 📦 `attendance` | A student's current-term totals (% present, absences, lates). |
+| GET | `/students/:studentId/attendance/compiled` | 🔑 `attendance.read` · 📦 `attendance` | A pupil's attendance COMPILED — per month, per term or per session. `attendance.read` and the SAME `assertCanAccessStudent` the day list uses, so the rule is inherited rather than restated: school-wide roles see every… |
+| GET | `/students/:studentId/attendance/summary` | 🔑 `attendance.read` · 📦 `attendance` | Student Summary |
 
 ---
 
@@ -553,6 +555,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | PUT | `/game-settings` | 🔑 `game.settings.manage` · 📦 `games` | Update — game settings |
 | POST | `/games` | 🔑 `game.play` · 📦 `games` | Create — games |
 | GET | `/games/:id` | 🔑 `game.leaderboard.read` · 📦 `games` | Get — games |
+| POST | `/games/:id/cancel` | 🔑 `game.play` · 📦 `games` | The HOST withdraws their own duel while it is still waiting for somebody. `game.play`, not `game.match.moderate`: a player closing a lobby nobody has joined is tidying up after themselves, not moderating. |
 | POST | `/games/:id/end` | 🔑 `game.match.moderate` · 📦 `games` | Moderator force-end of a stuck/abusive duel — ends with no winner. |
 | POST | `/games/:id/forfeit` | 🔑 `game.play` · 📦 `games` | Forfeit |
 | POST | `/games/:id/guess` | 🔑 `game.play` · 📦 `games` | Guess |
@@ -664,6 +667,8 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | POST | `/hr/appraisals/:id/submit` | 🔑 `hr.appraisal.manage` · 📦 `hr` | Submit Appraisal |
 | GET | `/hr/appraisals/me` | 🔑 `hr.self` · 📦 `hr` | My Appraisals |
 | POST | `/hr/attendance/clock-in` | 🔑 `hr.self` · 📦 `hr` | Staff clock-in with the current display code (hr.self). |
+| POST | `/hr/attendance/clock-out` | 🔑 `hr.self` · 📦 `hr` | Staff clock-OUT with the current display code (hr.self). |
+| POST | `/hr/attendance/day-close/run` | 🔑 `hr.attendance.amend` · 📦 `hr` | Close today's register by hand — SCHOOL-SCOPED. |
 | GET | `/hr/attendance/devices` | 🔑 `hr.read` · 📦 `hr` | List Devices |
 | POST | `/hr/attendance/devices` | 🔑 `hr.write` · 📦 `hr` | Register a terminal — the HMAC secret is returned ONCE. |
 | DELETE | `/hr/attendance/devices/:id` | 🔑 `hr.write` · 📦 `hr` | Remove Device |
@@ -672,11 +677,12 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | DELETE | `/hr/attendance/enrollments/:id` | 🔑 `hr.write` · 📦 `hr` | Unenroll |
 | GET | `/hr/attendance/kiosk` | 🔑 `hr.read` · 📦 `hr` | Kiosk Config |
 | PUT | `/hr/attendance/kiosk` | 🔑 `hr.write` · 📦 `hr` | Update Kiosk |
-| GET | `/hr/attendance/kiosk/code` | 🔑 `hr.read` · 📦 `hr` | The rotating gate-display code (staff-operated screen; hr.read). |
-| POST | `/hr/attendance/mark` | 🔑 `hr.write` · 📦 `hr` | Mark |
+| GET | `/hr/attendance/kiosk/code` | 🔑 `hr.kiosk.display` · 📦 `hr` | The rotating gate-display code — on its OWN narrow permission. |
+| POST | `/hr/attendance/mark` | 🔑 `hr.attendance.amend` · 📦 `hr` | Mark |
 | GET | `/hr/attendance/me` | 🔑 `hr.self` · 📦 `hr` | My History |
-| GET | `/hr/attendance/register/:date` | 🔑 `hr.read` · 📦 `hr` | Register |
-| GET | `/hr/attendance/summary` | 🔑 `hr.read` · 📦 `hr` | Both optional — omitted means the school's current month. |
+| GET | `/hr/attendance/register/:date` | 🔑 `hr.attendance.read` · 📦 `hr` | Register |
+| GET | `/hr/attendance/staff/:userId` | 🔑 `hr.attendance.read` · 📦 `hr` | ONE member of staff's record, compiled per month. `hr.attendance.read` — the same gate as the register, because this is the same data about the same people, narrowed to one of them. |
+| GET | `/hr/attendance/summary` | 🔑 `hr.attendance.read` · 📦 `hr` | Both optional — omitted means the school's current month. |
 | DELETE | `/hr/components/:id` | 🔑 `hr.write` · 📦 `hr` | Remove Component |
 | GET | `/hr/disciplinary` | 🔑 `hr.disciplinary.manage` · 📦 `hr` | Disciplinary cases |
 | POST | `/hr/disciplinary/:id/entries` | 🔑 `hr.disciplinary.manage` · 📦 `hr` | Add Entry |
@@ -808,6 +814,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | POST | `/classes/:classId/subjects/copy-to-arms` | 🔑 `class.write` · 📦 `lms` | Copy this class's subject set onto every other arm of the same stream — one action instead of one configuration per arm. |
 | POST | `/classes/:classId/teachers` | 🔑 `enrollment.write` · 📦 `lms` | Assign a teacher to a class |
 | DELETE | `/classes/:classId/teachers/:teacherId` | 🔑 `enrollment.write` · 📦 `lms` | Take a class teacher off a class — the counterpart the assign route never had, so class-wide access could be granted and never revoked. |
+| POST | `/classes/arms` | 🔑 `class.write` · 📦 `lms` | SS1A, SS1B, SS1C in one action. |
 | GET | `/classes/mine` | 🔑 `class.read` · 📦 `lms` | The caller's relationship-scoped classes |
 | GET | `/classes/overview` | 🔑 `class.read` · 📦 `lms` | The caller's classes with roll / capacity / supervisor / teaching counts — what the classes page is actually managed by. |
 | GET | `/content/:id` | 🔑 `lms.content.read` · 📦 `lms` | Content detail (reviewer) |
@@ -816,6 +823,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | POST | `/content/:id/clone` | 🔑 `lms.content.write` · 📦 `lms` | Clone |
 | POST | `/content/:id/complete` | 🔑 `lms.content.read` · 📦 `lms` | Mark Complete |
 | DELETE | `/content/:id/complete` | 🔑 `lms.content.read` · 📦 `lms` | Unmark Complete |
+| POST | `/content/:id/copy-to-arms` | 🔑 `lms.content.write` · 📦 `lms` | Copy this item onto every other arm of the same stream. |
 | GET | `/content/:id/download` | 🔑 `lms.content.read` · 📦 `lms` | Download attachment |
 | GET | `/content/:id/forum` | 🔑 `lms.content.read` · 📦 `lms` | Course forum |
 | POST | `/content/:id/forum` | 🔑 `lms.forum.post` · 📦 `lms` | Course forum |
@@ -863,6 +871,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **906 routes across 90
 | GET | `/syllabus` | 🔑 `class.read` · 📦 `lms` | The plan for one offering in one term. |
 | PUT | `/syllabus` | 🔑 `class.read` · 📦 `lms` | Create or replace a term plan. |
 | DELETE | `/syllabus/:id` | 🔑 `class.read` · 📦 `lms` | Remove a plan and its weeks. |
+| POST | `/syllabus/copy-to-arms` | 🔑 `class.read` · 📦 `lms` | Copy this term plan onto the other arms of the same stream. |
 | PUT | `/syllabus/items/:id/status` | 🔑 `class.read` · 📦 `lms` | Mark a week taught, or put it back to planned. |
 | GET | `/syllabus/term/:termId` | 🔑 `class.read` · 📦 `lms` | Every plan the caller may see for a term — the review view. |
 | GET | `/users` | 🔑 `class.write` · 📦 `lms` | Staff-scoped user picker |

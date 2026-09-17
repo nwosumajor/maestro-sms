@@ -232,9 +232,15 @@ export function ArchivePanel({
         <Alert variant="info" className="mb-3">
           <AlertTitle>This school has no academic sessions yet</AlertTitle>
           <AlertDescription className="text-xs">
+            {/* `/admin/calendar` has never existed. The academic year — sessions,
+                terms and holidays — is set up by `AcademicCalendar`, which is
+                mounted on /classes. A link to a page that is not there is worse
+                than no link: it tells somebody the setup is somewhere it is not,
+                on the screen where they have just been told they cannot proceed
+                without it. */}
             Set up the year on the{" "}
-            <a href="/admin/calendar" className="underline">
-              calendar
+            <a href="/classes" className="underline">
+              classes page
             </a>{" "}
             first. You can still take a whole-school export below, but it will not be bounded to a year.
           </AlertDescription>

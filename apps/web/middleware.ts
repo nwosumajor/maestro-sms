@@ -3,7 +3,8 @@
 //
 // 1. AUTH. Protect the signed-in app: no session -> /login, an expired password
 //    or a mandated-but-unenrolled 2FA -> held on the relevant page. This applies
-//    to the prefixes in PROTECTED_PREFIXES and nowhere else.
+//    to EVERYTHING except the public allowlist below — see `isPublic`, and the
+//    eight sections that were silently outside the old protect-list.
 //
 // 2. CSP. Give every PAGE a per-request nonce so `script-src` can be real. This
 //    has to cover the PUBLIC pages too — the login form, the marketing home,
@@ -16,58 +17,14 @@
 // widening the matcher without this would have redirected every visitor to
 // /login, and narrowing it by accident would have let somebody into the app.
 import { NextResponse } from "next/server";
+import { needsSession } from "@/lib/public-routes";
 import { auth } from "@/lib/auth";
 import { THEME_SCRIPT_CSP_HASH } from "@/lib/theme-script";
 
 /** The signed-in app. Everything not listed here is public by design. */
-const PROTECTED_PREFIXES = [
-  "/dashboard",
-  "/admin",
-  "/analytics",
-  "/classes",
-  "/content",
-  "/gradebook",
-  "/workflows",
-  "/assessments",
-  "/notifications",
-  "/students",
-  "/timetable",
-  "/certificates",
-  "/attendance",
-  "/fees",
-  "/hostel",
-  "/transport",
-  "/library",
-  "/tasks",
-  "/polls",
-  "/discussion",
-  "/discipline",
-  "/forms",
-  "/alumni",
-  "/reports",
-  "/scan",
-  "/billing",
-  "/documents",
-  "/account",
-  "/messages",
-  "/calendar",
-  "/hr",
-  "/leave",
-  "/games",
-  "/operator",
-  "/directory",
-  "/announcements",
-  "/family",
-  "/scholarships",
-  "/help",
-  "/manual",
-  "/runbooks",
-];
-
-/** `/fees` and `/fees/anything`, but never `/feesomething`. */
-function isProtected(pathname: string): boolean {
-  return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-}
+// The public allowlist and the default-deny rule live in `lib/public-routes`,
+// so a test can drive the REAL function rather than a copy of its logic.
+const isProtected = needsSession;
 
 /**
  * The page policy.

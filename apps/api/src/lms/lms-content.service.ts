@@ -66,6 +66,7 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { NotificationService } from "../notifications/notification.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
+import { sniffUploadType } from "../documents/sniff-upload";
 import {
   canonicalEmbedUrl,
   computeEngagementPercent,
@@ -110,6 +111,8 @@ type ContentRow = {
   authorId: string;
   approvalRequestId: string | null;
   moduleId: string | null;
+  /** The syllabus week this item teaches, in its OWN class's plan. */
+  syllabusItemId: string | null;
   subjectId: string | null;
   termId: string | null;
   fileKey: string | null;
@@ -343,16 +346,58 @@ export class LmsContentService {
     return this.storage.presignUpload({ key: presign.key, contentType: presign.contentType });
   }
 
+  /**
+   * The upload says it finished. Check — three things, none settleable earlier.
+   *
+   * The bytes go browser→bucket through a presigned PUT, so the API never sees
+   * them on the way in and this is its only chance to look. It did not look at
+   * all: it set `fileUploaded: true` on the word of the caller.
+   *
+   * 1. THE BYTES ARRIVED. A PUT that failed, or a browser closed mid-upload,
+   *    left the material marked as having a file and the teacher told
+   *    "Attached." Pupils then got a refusal from storage on the one button the
+   *    feature exists for. The Vault's own provider carries the note for exactly
+   *    this — "confirming an upload without asking this means telling a family
+   *    their child's report card is ready when the bytes may never have
+   *    arrived" — and this module was written without it.
+   *
+   * 2. IT IS WITHIN THE CAP. The size checked at presign is a NUMBER THE CALLER
+   *    SENT, not the size of anything.
+   *
+   * 3. IT IS ACTUALLY A PDF. `contentType` is likewise a claim; the browser
+   *    check beside it is friction, not a control. This is what makes serving
+   *    the file inline safe — see `downloadUrl`.
+   *
+   * A failure leaves `fileUploaded` FALSE, so the same material can simply be
+   * uploaded again rather than needing to be recreated.
+   */
   async confirmUpload(p: Principal, contentId: string): Promise<LmsContentDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const key = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const row = await this.requireContent(tx, contentId);
       await this.assertTeacherOfClass(tx, p, row.classId);
       if (!row.fileKey) throw new BadRequestException("No upload was started");
+      return row.fileKey;
+    });
+
+    const bytes = await this.storage.download(key);
+    if (!bytes) throw new BadRequestException("No file has arrived yet. Please choose the PDF again.");
+    if (bytes.length > MAX_MATERIAL_BYTES) {
+      throw new BadRequestException(
+        `That file is ${(bytes.length / 1024 / 1024).toFixed(1)} MB. The limit is ${MAX_MATERIAL_BYTES / 1024 / 1024} MB.`,
+      );
+    }
+    if (sniffUploadType(bytes) !== "application/pdf") {
+      throw new BadRequestException("That file is not a PDF. Pupils can only open a PDF in the browser.");
+    }
+
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await this.requireContent(tx, contentId);
+      await this.assertTeacherOfClass(tx, p, row.classId);
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },
         data: { fileUploaded: true },
       })) as ContentRow;
-      await this.log(tx, p, "lms.content.upload.confirm", contentId);
+      await this.log(tx, p, "lms.content.upload.confirm", contentId, { sizeBytes: bytes.length });
       return this.toDto(updated, true, await this.nameOf(tx, updated.authorId));
     });
   }
@@ -367,7 +412,23 @@ export class LmsContentService {
       await this.log(tx, p, "lms.content.download", contentId);
       return { key: row.fileKey, fileName: row.fileName ?? "material.pdf" };
     });
-    return this.storage.presignDownload({ key: file.key, filename: file.fileName });
+    // INLINE, because that is what the product says. Attaching one promises
+    // "pupils can open it in the browser" in three places — the picker's
+    // refusal, the helper text and the presign's own error — and the download
+    // forced `attachment` + `application/octet-stream`, so every pupil got a
+    // file saved to disk instead. A promise the product makes on the screen and
+    // breaks on the click.
+    //
+    // Safe because `confirmUpload` established the bytes ARE a PDF, and the
+    // served type is pinned to that rather than echoed from the upload's claim.
+    // Naming the type here rather than passing a flag is what makes that
+    // dependency impossible to lose: there is no way to ask for inline without
+    // saying what the server vouches for.
+    return this.storage.presignDownload({
+      key: file.key,
+      filename: file.fileName,
+      inline: "application/pdf",
+    });
   }
 
   // --- approval workflow ----------------------------------------------------
@@ -1571,6 +1632,171 @@ export class LmsContentService {
       await this.snapshot(tx, p, row, `Cloned from "${src.title}"`);
       await this.log(tx, p, "lms.content.clone", row.id, { sourceId: contentId, targetClassId: targetClass });
       return this.toDto(row, true, await this.nameOf(tx, row.authorId));
+    });
+  }
+
+  /**
+   * COPY THIS CLASS'S CONTENT ONTO THE OTHER ARMS OF THE SAME STREAM.
+   *
+   * `LmsContent.classId` is required, so notes, materials and quizzes belong to
+   * ONE class — SS1 Science A, B and C each need their own. The only copy path
+   * was `clone`, which moves one item to one class: three arms of twelve notes
+   * is twenty-four operations.
+   *
+   * WHAT IT CARRIES, AND WHAT IT DELIBERATELY DOES NOT:
+   *
+   *   status     -> DRAFT, always. Carrying approval would let one approval in
+   *                 SS1A publish into three arms nobody reviewed — a control
+   *                 with a way round it is not a control.
+   *   subject,
+   *   term       -> KEPT, and this is the change from `clone`. Both are
+   *                 school-wide ids and, across arms of one stream and year, the
+   *                 same by construction. They are the GRADEBOOK TAG: a quiz
+   *                 tagged (subjectId, termId) is what a subject teacher pulls
+   *                 into the report card's assignment component. `clone` drops
+   *                 them because an arbitrary cross-class target may teach
+   *                 neither — right there, wrong here, and dropping them would
+   *                 turn one copy into twelve retagging jobs whose omission is
+   *                 invisible until a report card is short a component.
+   *   module,
+   *   syllabusItem -> DROPPED. `LmsModule` is class-scoped and a syllabus item
+   *                 belongs to that arm's own plan, so those ids mean nothing in
+   *                 the target. Re-pointing the syllabus item to the equivalent
+   *                 week is deliberately NOT attempted: it needs the plans to
+   *                 correspond week for week, which nothing guarantees, and
+   *                 silently attaching notes to the wrong week is worse than
+   *                 leaving them untagged.
+   *
+   * SKIPS an arm that already has content with the same title, so it is safe to
+   * press twice and cannot quietly duplicate a note somebody has since edited.
+   */
+  async copyContentToArms(
+    p: Principal,
+    contentId: string,
+  ): Promise<{
+    copied: Array<{ classId: string; className: string; /** attached to that arm's matching week */ week: boolean }>;
+    skipped: Array<{ className: string; reason: string }>;
+  }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const src = await this.requireContent(tx, contentId);
+      await this.assertTeacherOfClass(tx, p, src.classId);
+
+      const source = (await tx.class.findFirst({
+        where: { id: src.classId },
+        select: { stage: true, level: true, stream: true, name: true },
+      })) as { stage: string | null; level: number | null; stream: string | null; name: string } | null;
+      if (!source) throw new NotFoundException("Class not found");
+      if (!source.stage || source.level == null) {
+        throw new BadRequestException("Set this class's stage and year before copying its content to other arms.");
+      }
+      const siblings = (await tx.class.findMany({
+        where: { id: { not: src.classId }, stage: source.stage, level: source.level, stream: source.stream },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })) as Array<{ id: string; name: string }>;
+      if (siblings.length === 0) throw new BadRequestException(`${source.name} has no other arms to copy to.`);
+
+      // WHICH WEEK, IN EACH ARM'S OWN PLAN — resolved for every arm in TWO
+      // queries, before the loop, so this costs the same at ten arms as at two.
+      //
+      // Re-pointing is safe here and is not safe in general. `copyToArms` on the
+      // syllabus creates an arm's weeks FROM THE SAME SOURCE, so after that the
+      // plans correspond by construction — same week numbers, same topics. The
+      // TOPIC is checked as well as the number, and that check is the whole
+      // safeguard: it is what distinguishes "this arm's plan came from the same
+      // place" from "this arm happens to have a week 3 about something else".
+      // Where it cannot prove correspondence it leaves the note untagged, which
+      // is recoverable; attaching notes to the wrong week is not.
+      const weekByClass = new Map<string, string>();
+      if (src.syllabusItemId) {
+        const srcItem = (await tx.subjectSyllabusItem.findFirst({
+          where: { id: src.syllabusItemId },
+          select: { week: true, topic: true, syllabus: { select: { subjectId: true, termId: true } } },
+        })) as { week: number; topic: string; syllabus: { subjectId: string; termId: string } | null } | null;
+        // Read from the ITEM'S OWN plan rather than the content's `subjectId`
+        // and `termId`: those are the gradebook tag and may be null while the
+        // item is set, and the plan is what actually says which offering this
+        // week belongs to.
+        if (srcItem?.syllabus) {
+          const armPlans = (await tx.subjectSyllabus.findMany({
+            where: {
+              classId: { in: siblings.map((a) => a.id) },
+              subjectId: srcItem.syllabus.subjectId,
+              termId: srcItem.syllabus.termId,
+            },
+            select: { id: true, classId: true },
+          })) as Array<{ id: string; classId: string }>;
+          if (armPlans.length > 0) {
+            const classOfPlan = new Map(armPlans.map((pl) => [pl.id, pl.classId]));
+            const matches = (await tx.subjectSyllabusItem.findMany({
+              where: {
+                syllabusId: { in: armPlans.map((pl) => pl.id) },
+                week: srcItem.week,
+                topic: srcItem.topic,
+              },
+              select: { id: true, syllabusId: true },
+            })) as Array<{ id: string; syllabusId: string }>;
+            for (const m of matches) {
+              const cls = classOfPlan.get(m.syllabusId);
+              if (cls) weekByClass.set(cls, m.id);
+            }
+          }
+        }
+      }
+
+      const copied: Array<{ classId: string; className: string; week: boolean }> = [];
+      const skipped: Array<{ className: string; reason: string }> = [];
+      for (const arm of siblings) {
+        // MAY THE COPIER AUTHOR IN THAT ARM? Checked per arm rather than assumed
+        // from the source: a subject teacher of SS1A does not necessarily teach
+        // SS1B, and a bulk action must not become a way to write into a class
+        // the caller could not write into one at a time. `canAuthor` is the
+        // existing boolean form of that question — a second copy of it here
+        // would be one more definition of "may author" to drift.
+        const mayWrite = await this.canAuthor(tx, p, arm.id);
+        if (!mayWrite) {
+          skipped.push({ className: arm.name, reason: "you do not teach this arm" });
+          continue;
+        }
+        const dup = await tx.lmsContent.findFirst({
+          where: { classId: arm.id, title: src.title },
+          select: { id: true },
+        });
+        if (dup) {
+          skipped.push({ className: arm.name, reason: "already has content with this title" });
+          continue;
+        }
+        const row = (await tx.lmsContent.create({
+          data: {
+            schoolId: p.schoolId,
+            classId: arm.id,
+            type: src.type,
+            title: src.title,
+            body: src.body as Prisma.InputJsonValue,
+            status: "DRAFT",
+            authorId: p.userId,
+            fileKey: src.fileKey,
+            fileName: src.fileName,
+            fileUploaded: src.fileUploaded,
+            moduleId: null,
+            // The arm's OWN week when the plans demonstrably correspond, null
+            // otherwise — never the source's item, which belongs to another
+            // arm's plan.
+            syllabusItemId: weekByClass.get(arm.id) ?? null,
+            subjectId: src.subjectId,
+            termId: src.termId,
+          },
+        })) as ContentRow;
+        await this.snapshot(tx, p, row, `Copied from ${source.name}`);
+        copied.push({ classId: arm.id, className: arm.name, week: weekByClass.has(arm.id) });
+      }
+      await this.log(tx, p, "lms.content.copy-to-arms", contentId, {
+        sourceClassId: src.classId,
+        copied: copied.length,
+        skipped: skipped.length,
+        weekAttached: copied.filter((c) => c.week).length,
+      });
+      return { copied, skipped };
     });
   }
 

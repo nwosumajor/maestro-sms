@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **340 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **363 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -525,54 +525,31 @@ evidence live beside it, and are worth opening rather than re-deriving:
   PAST_DUE→effective-BASIC) + an RLS cross-tenant case on the new payment table.
 
 ## Revenue program (July 2026) — BUILT
-Eight monetization levers on the billing/gateway rails (branch feat/revenue-program):
-(1) **Fee-collection TAKE-RATE**: operator-set convenience fee (flat+bp+cap, ZERO
-fail-safe default) via the Paystack split's `transaction_charge` — global
-`platform_fee_config` (rls/71, plan_price posture), per-school bearer choice
-(PARENT adds to the charge / SCHOOL nets less; `school.paymentFeeBearer`,
-fee.manage+step-up), webhook credits the ledger with the INVOICE amount only
-(`payment.platformFeeMinor` records the cut). Operator GET/PUT
-`/operator/platform-fees`. (2) **Admission-form fees**: `school.admissionFormFeeMinor`
-snapshot per application; public checkout at intake + retry init; webhook stamps
-`formFeePaidAt` idempotently; PAID/UNPAID chips + fee setting on /admin/admissions;
-fee shown on the public directory. (3) **Saved-card AUTO-RENEW**: reusable Paystack
-authorization captured from the school's own charge (field-encrypted,
-`school_subscription.paystackAuthorizationEnc`/`cardLast4`/`autoRenew`); dunning
-sweep charges ~2 days pre-lapse at CURRENT seats (≤1 attempt/20h via AUTO-
-references; declines → notice + normal dunning). (4) **Proration + TRUE-UP**:
-`platform_subscription_payment.kind` (RENEWAL extends / UPGRADE restarts from now,
-unused time credited at checkout via pure `prorationCreditMinor` / TRUEUP updates
-seats only, never priceMinor); overview quotes `planChangeCreditMinor` + a seat
-top-up (`computeTrueUpMinor`, MIN_CHARGE_MINOR floor) with one-click checkout.
-(5) **Promos + AGENTS**: global `promo_code` (percent off FIRST charge, validated at
-checkout, usedCount++ on settle) + `agent`/`agent_commission` (rls/72; commission
-ledger DENY-ALL to the app role, unique schoolId = once-only) accrued on the first
-paid sub of an attributed school (onboarding `agentCode` → provisioning stamps
-`subscription.agentId`); operator Growth console manages both + payouts.
-(6) **MESSAGE CREDITS**: append-only `message_credit_entry` (rls/73); bundles
-(`MESSAGE_CREDIT_BUNDLES`) bought via checkout (webhook credits, idempotent);
-each SMS/WHATSAPP delivery debits 1 ONLY after the gateway CONFIRMS the send
-(a per-job ALLOWANCE from `balanceInTx` gates the attempt — read once and shared
-out, so two metered channels can't both spend the school's last credit — and
-`debitInTx` fires post-send, so a failed delivery never spends a paid credit),
-empty balance fails those channels soft;
-WHATSAPP channel added (enum+types+Twilio `whatsapp:`); `user.phone`
-self-service on /account. **Operator oversight** (`/operator/message-credits`,
-`OperatorCreditsService`): cross-tenant balance list (search + paginate, one
-grouped aggregate over the privileged client, reason-split into purchased/
-sent/adjusted) + a per-school ledger drill-down + a comp/debit lever
-(`platform.subscription.manage`, step-up, audited — writes a normal ADJUST
-ledger row via the ordinary tenant client with the GUC set to the target
-school, same pattern as the subscription comp). (7) **GROUP console** (MODULES.GROUP add-on): global
-`school_group(+member,director)` registry (rls/74 deny-all; operator-managed,
-step-up) — DIRECTORSHIP is the authorization; /group renders cross-campus
-aggregates (never PII) via privileged reads, audited. (8) **CBT exam hall**
-(MODULES.CBT add-on): banks→questions (answerIndex SERVER-ONLY until a sitting
-closes)→timed exams (server-sampled per sitting)→sittings (clock is server law,
-auto-expire on read, auto-marks are staff-reviewed numbers — Golden Rule #8);
-`cbt.manage`/`cbt.take` seeded; rls/75 (sittings never hard-deleted). Migrations
-20260829–20260905, RLS 71–75, RLS-e2e cases for every new tenant table. Verified:
-494 API tests, web build 78 routes.
+Eight monetization levers on the billing/gateway rails. (1) **Fee-collection
+TAKE-RATE** — operator-set convenience fee (flat+bp+cap, ZERO fail-safe default)
+via the Paystack split's `transaction_charge`; global `platform_fee_config`
+(rls/71), per-school bearer choice (`school.paymentFeeBearer`), webhook credits
+the ledger with the INVOICE amount only (`payment.platformFeeMinor` records the
+cut). (2) **Admission-form fees** — `school.admissionFormFeeMinor` snapshot per
+application, public checkout at intake, webhook stamps `formFeePaidAt`
+idempotently. (3) **Saved-card AUTO-RENEW** — reusable Paystack authorization
+field-encrypted on `school_subscription`; dunning charges ~2 days pre-lapse at
+CURRENT seats (<=1 attempt/20h). (4) **Proration + TRUE-UP** —
+`platform_subscription_payment.kind` (RENEWAL extends / UPGRADE restarts, unused
+time credited / TRUEUP updates seats only, never `priceMinor`). (5) **Promos +
+AGENTS** — global `promo_code` (percent off FIRST charge) + `agent`/
+`agent_commission` (rls/72, ledger DENY-ALL to the app role, unique schoolId =
+once-only). (6) **MESSAGE CREDITS** — append-only `message_credit_entry` (rls/73);
+each SMS/WHATSAPP delivery debits 1 ONLY after the gateway CONFIRMS, gated by a
+per-job ALLOWANCE from `balanceInTx` so two metered channels cannot both spend the
+last credit; empty balance fails those channels soft. Operator oversight at
+`/operator/message-credits`. (7) **GROUP console** (MODULES.GROUP) — global
+`school_group` registry (rls/74 deny-all); DIRECTORSHIP is the authorization,
+`/group` renders cross-campus aggregates, never PII. (8) **CBT exam hall**
+(MODULES.CBT) — banks -> questions (answerIndex SERVER-ONLY until a sitting
+closes) -> timed exams -> sittings (clock is server law, auto-marks are
+staff-reviewed numbers, Golden Rule #8); rls/75. Migrations 20260829–20260905,
+RLS 71–75, an RLS-e2e case for every new tenant table.
 
 ## Project structure
 - Monorepo (Turborepo + pnpm workspaces).
@@ -925,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **340 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **363 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -959,7 +936,9 @@ These are the rules; the log is why each one exists.
   `claims-in-claude-md`, `pricing-consistency`, `runbook-freshness`,
   `what-the-help-page-promises`, `api-doc-is-current`.
 - **A comment asserting agreement is not agreement.** Two files each carried
-  "same rule as the report card" while disagreeing with it and with each other.
+  "same rule as the report card" while disagreeing with it and each other — and
+  `ClassAttendanceBoard` warned that `/classes/<id>` is not a route while three
+  other files linked to it.
 - **A CATEGORY NOBODY EMITS IS A FILTER THAT ANSWERS NOTHING, AND A SWITCH THAT
   GOVERNS NOTHING.** `NotificationInput.type` was `NotificationTypeValue |
   string`, so the union gated nothing and four hand-kept lists grew beside it
@@ -978,21 +957,18 @@ These are the rules; the log is why each one exists.
   all source and passed a mutation, because the same string was a WORKFLOW type
   in the same file. That confusion IS the defect.
 - **A COUNTER MUST COUNT WHAT WAS DELIVERED, NOT WHAT WAS ITERATED.** The fee
-  reminder sweep incremented `reminded` once per INVOICE regardless of whether a
-  guardian existed: a school with 30 billable invoices and no guardian links was
-  told "30 reminded" having told nobody, and every school in a 5,000-school
-  fleet would have. Count the recipients, and name the shortfall (`unreachable`)
-  — found by a CROSS-MODULE audit, because fees counts its loop and
-  notifications decides who hears, and neither is wrong alone.
+  reminder sweep counted `reminded` per INVOICE whether or not a guardian
+  existed: 30 billable invoices, no guardian links, "30 reminded" and nobody
+  told. Count recipients; name the shortfall.
 - **REPORT WHAT YOU DID NOT DO.** Silent partial success is the commonest shape
-  here: a roll call that named nobody missing, a sweep that marked every overdue
-  boarder handled including those it told nobody about, `notified: 2500` of
-  5,000. Count what was WRITTEN, never the list in hand, and name the shortfall.
+  here: a roll call naming nobody missing, a sweep marking every overdue boarder
+  handled including those it told nobody about, `notified: 2500` of 5,000. Count
+  what was WRITTEN, never the list in hand.
 - **A refusal must not assert something untrue, and should name the way out.**
   "Not in this school" said of a classmate; "ask an administrator to reactivate
-  it" where no such button exists; a refusal that describes the paper it is
-  refusing. **404-not-403** so a refusal never confirms what it hides — and the
-  inverse: it must not DENY what the product has already shown on screen.
+  it" where no such button exists. **404-not-403** so a refusal never confirms
+  what it hides — and the inverse: it must not DENY what the product has already
+  shown on screen.
 
 ### Money
 - **Never sum across currencies**; return a currency with every total. A `_sum`
@@ -1002,294 +978,245 @@ These are the rules; the log is why each one exists.
   `money-is-not-divided-by-a-hundred`.
 - **A SHARED HELPER CALLED WITH ITS DEFAULT IS STILL A PLATFORM-CURRENCY SITE.**
   `money(amountMinor, currency = PLATFORM_REGION.currency)` — so `money(x)` is
-  the bug written with the *correct* helper, and it is the spelling that
-  survived after every hand-rolled `₦${…}` had been swept. `school-currency`
-  now scans `app/(app)` PAGES as well as `components/` (it did neither for
-  server pages, which is where two live defects sat beside fixed siblings) and
-  flags a bare `money(x)`, skipping one shadowed by `useFormat()` or a local
-  `moneyIn(region)`. **And a DTO that reports money must say what currency it is
-  in** — a screen cannot format what it was never told.
+  the bug written with the *correct* helper, the spelling that survived after
+  every hand-rolled `₦${…}` was swept. `school-currency` scans `app/(app)` PAGES
+  as well as `components/` (it did neither for server pages, where two live
+  defects sat beside fixed siblings) and flags a bare `money(x)` unless shadowed
+  by `useFormat()`. **A DTO that reports money must say what currency it is in.**
 - **A gateway is ALWAYS told the currency**, and settlement REFUSES a mismatch
   before posting. One posting path (`InvoiceSettlementService`), so one guard.
-- **A naira constant is not a rule for every school.** And the two fail-safes
-  point OPPOSITE ways: an unset **control** tightens (every payment reviewed),
-  an unset **charge** goes to zero (a charge that guesses bills a family).
+- **A naira constant is not a rule for every school**, and the two fail-safes
+  point OPPOSITE ways: an unset **control** tightens (every payment reviewed), an
+  unset **charge** goes to zero (a charge that guesses bills a family).
 - **There is no FX rate in this platform.** Refuse and say so; never convert.
 
 ### Time
 - **"Today" is the SCHOOL's calendar day** (`schoolToday(tz)`), not the server's
   UTC day — registers, term locks, clock-ins, overdue states, expiry stages.
   Fifteen surfaces have been corrected for this.
-- **A `@db.Date` is a DAY, not an instant.** It serialises as midnight UTC, so
-  rendering it in a zone west of UTC shows the PREVIOUS day (`isCalendarDate`).
-- **Validate a date by ROUND TRIP** (`isoDay`): JavaScript ROLLS rather than
-  refusing, so `2026-04-31` parses cleanly as 1 May. A shape check is not enough.
+- **A `@db.Date` is a DAY, not an instant** — midnight UTC, so a zone west of UTC
+  shows the PREVIOUS day (`isCalendarDate`).
+- **Validate a date by ROUND TRIP** (`isoDay`): JS ROLLS rather than refusing, so
+  `2026-04-31` parses cleanly as 1 May — a shape check is not enough.
 
 ### Lists, queues and scale
 - **A DIARY IS THE MIRROR OF A REGISTER, AND AN ASCENDING CAP EATS THE FUTURE.**
-  A register is read oldest-first and a newest-first cap drops the row it exists
-  to surface; a diary is read for what is NEXT and an ascending cap drops that.
-  Meetings had both `mySlots` and `myBookings` on `startsAt ASC` under a cap with
-  NO date filter: at a 61-teacher secondary three years in (10,980 slots, 1,220
-  still to come) a school-wide reader got 200 rows spanning **a single day three
-  years earlier** and zero upcoming — a screen that could never advance, because
-  every new slot sorts after the 200 oldest. Order so the cap keeps what the
-  screen is FOR, count the rest in SQL, and keep the other end reachable
-  (`?when=past`). // GOTCHA: the correct sibling was one method away —
-  `listOpenSlots` filtered `startsAt >= now` and paged, with a comment reasoning
-  about this exact failure, and was never swept to the other two lists.
+  A register is read oldest-first; a diary is read for what is NEXT, so an
+  ascending cap drops it. Meetings had `mySlots`/`myBookings` on `startsAt ASC`
+  capped with NO date filter: a school-wide reader got 200 rows spanning **a
+  single day three years earlier** and zero upcoming. Order so the cap keeps what
+  the screen is FOR, count the rest in SQL, keep the other end reachable.
+  // GOTCHA: `listOpenSlots` one method away filtered `startsAt >= now`, with a
+  comment about this exact failure, and was never swept to the other two.
 - **A capped list is worse when it is the only route to something else.** The
-  billing history was the 50 most recent with no page, and a payment's id appears
-  NOWHERE else — so its receipt went with it. At three years a school holds 48
-  rows: every school crosses the cap in year four, and a receipt its auditor asks
-  for is then unreachable while the route that serves it works perfectly. Ask
-  what a dropped row was the key to.
+  billing history was the 50 most recent with no page, and a payment's id
+  appears NOWHERE else, so its receipt went too. Ask what a dropped row was the
+  key to.
 - **"Live work is bounded" is an assumption, not a fact.** The approvals queue
-  read the newest 500 PENDING_REVIEW rows and narrowed in memory, reasoning that
-  live work is bounded by what a school is working on. It is bounded by what the
-  school has never got round to DECIDING, and that grows: at three years, 666
-  pending, a reported total of 500, and the 166 OLDEST unreachable at any page.
-  Scan in batches oldest-first against the one shared predicate rather than
-  writing a second copy of it in SQL, and report a floor as a floor.
-- **AN OVERDUE ROW IS AN OLD ROW**, so a newest-first cap discards exactly what
-  the screen is alarming about. The library listed the 300 most recent loans
-  under a strip counting 1,316 overdue in SQL: 14 reachable, and nothing older
-  than 24 days reachable at ANY url. When a page shows a COUNT, the list beside
-  it must be able to produce those rows — as a FILTER, sorted oldest-first.
+  read the newest 500 PENDING rows and narrowed in memory — but live work is
+  bounded by what the school never got round to DECIDING, and that grows: at
+  three years, 666 pending, a reported total of 500, the 166 OLDEST unreachable
+  at any page. Scan oldest-first on the one shared predicate; report a floor as
+  a floor.
+- **AN OVERDUE ROW IS AN OLD ROW**, so a newest-first cap discards what the
+  screen is alarming about: 300 recent loans under a strip counting 1,316
+  overdue, 14 reachable at ANY url. When a page shows a COUNT, the list beside it
+  must produce those rows — as a FILTER, oldest-first.
 - **WHEN A LIST IS CAPPED, ASK WHETHER THE CONTROL THE READER USES REACHES PAST
-  IT.** Three consecutive sweeps found the same shape: the library catalogue
-  searched in the browser over 200 of 1,800 titles, the discipline picker
-  offering 500 of 1,200 pupils, and `/exams` returning 200 of 540 sittings while
-  the planner filtered those 200 locally — its comment calling it "fast local
-  whittling, so typing never costs a round trip", which is true only if the
-  loaded page is the whole set. **Each time the server could already answer and
-  the screen never asked**; `/exams` had accepted `q`, `hall`, `from`, `to` and
-  `scheduleId` all along, and nothing set `?schedule=` though the page read it.
-  A count is half the fix; the other half is that the filter runs in SQL.
+  IT.** The library searched in the browser over 200 of 1,800 titles; `/exams`
+  filtered 200 of 540 locally. **Each time the server could already answer and
+  the screen never asked** — `/exams` had accepted `q`, `hall`, `from`, `to` and
+  `scheduleId` all along. A count is half the fix; the filter running in SQL is
+  the other.
 - **A PICKER IS THE ONLY ROUTE TO THE THING IT NAMES.** `/discipline/file-targets`
-  returned the first 500 people by name with no search and no count, rendered as
-  a plain `<select>`: on a 1,200-pupil roll that was A to K, so **690 pupils
-  could not be named in a complaint at all** — absent from the only control that
-  names them, on the safeguarding path. Widen the REACH without widening the
-  RULE: search inside the SCOPED set (never the directory, which is scoped
-  differently), return a total, and trust a seed only when `seed.length >=
-  total`. `UserPicker`'s own header had recorded this defect for the guardian
-  picker; discipline kept the dropdown.
-- **A TOTAL MUST COUNT ONLY WHAT THE CALLER MAY READ.** When a capped list is
-  given a count and a search, both must inherit the list's own scoping. The
-  notice board is audience-filtered (a parent sees ALL, staff also see STAFF), so
-  its `count` and its `q` carry the same filter: the principal is shown 501 and
-  the parent 400. A total the caller cannot open would be worse than no total —
-  it tells a family that notices exist which they are not allowed to read.
-  Widening the REACH must never widen the RULE.
+  returned the first 500 by name, no search, no count: on a 1,200-pupil roll
+  that was A to K, so **690 pupils could not be named in a complaint at all**.
+  Search inside the SCOPED set and return a total.
+- **A TOTAL MUST COUNT ONLY WHAT THE CALLER MAY READ.** A capped list's count
+  and search inherit the list's own scoping: the notice board is
+  audience-filtered, so `count` and `q` carry the same filter — 501 for the
+  principal, 400 for the parent. **Widening the REACH must never widen the
+  RULE.**
 - **A JUMP-TO BOX IS STILL A CAP.** The omnibox showed six per category with no
-  count and no order: "Adebayo" matched 150 pupils and returned six arbitrary
-  ones, so *not on the roll* and *one of the 144 I did not show* rendered
-  identically. Six is the right page size; saying nothing is not. Return
-  `shown`/`total` and order by a TOTAL order so the six are explicable — and
-  offer "see all" ONLY where a query page exists (`/students`, `/hr` do;
-  `/classes`, `/fees` do not). Count only when the `PER_CATEGORY + 1`-th row
-  proves there is more, so the common search pays nothing.
+  count, so *not on the roll* and *one of the 144 I did not show* read alike.
+  Return `shown`/`total`, order by a TOTAL order, and count only when the
+  `PER_CATEGORY + 1`-th row proves more.
 - **AND THE FILTER A TOTAL IS COMPUTED OVER CAN ITSELF BE TRUNCATED.** The
-  operator revenue screen aggregates in SQL over the whole filter and says so in
-  a docstring — while the filter was built from the first 500 name-matching
-  schools fed to a `schoolId IN`. At 800 similarly-named schools it reported
-  NGN 262,500,000 of 420,000,000. When a predicate is MATERIALISED (an id list,
-  because the column has no Prisma relation), the cap belongs to the fleet, not
-  to a page — and crossing it must be reported. Careful reasoning aimed one level
-  too low is still a guard on one door.
+  operator revenue screen aggregated in SQL over the whole filter — while that
+  filter was the first 500 name-matching schools: at 800 it reported NGN
+  262,500,000 of 420,000,000.
 - **A FIGURE COMPUTED FROM A CAPPED PAGE IS WORSE THAN A SHORT LIST.** The
-  scholarship oversight panel derived its headline statistics from the fetched
-  array — `applications.length`, `awarded.length` — over a `take: 500`. At five
-  years and 1,200 applications leadership was shown **Submitted 500 / In
-  progress 405 / Awarded 29** against a true **1,200 / 980 / 60**: more than half
-  the school's scholarships missing from its own record of them. A short list
-  looks like a list; a wrong number looks like a fact. Count in SQL with a
-  `groupBy`, and keep the summary INDEPENDENT of the filter and the page — or
-  filtering to awards reports that nothing is in progress.
-- **A CAP WITH NO COUNT IS THE COMMONEST DEFECT IN THIS REPO.** Four in one
-  session — billing history, the approvals queue, the alumni register, the SIS
-  review queue — each a list a school reads LATER, each returning a capped page
-  as if it were the whole thing. A scan of every `findMany` with a literal `take`
-  and no `skip` found **65**; most are live work and right, and the shortlist of
-  records is in the log. When you cap, return the TOTAL; when the order is
-  oldest-first the cap is at least benign, and when it is newest-first the cap
-  eats the record.
-- **A MAKER-CHECKER QUEUE IS MONEY IN LIMBO, AND MUST BE WORKED OLDEST-FIRST.**
+  scholarship panel derived headlines from its fetched `take: 500` array:
+  leadership saw **500 / 405 / 29** against a true **1,200 / 980 / 60**. A short
+  list looks like a list; a wrong number looks like a fact.
+- **A PREDICATE MATERIALISED AS IDS IS SENT TWICE.** "Every customer school"
+  spelled out as a 5,000-element `ARRAY[…]` is a 195 KB statement at 2x the cost
+  of the subquery, and the PLANNING half grows with the fleet (`operator-fleet`).
+- **A CAP WITH NO COUNT IS THE COMMONEST DEFECT IN THIS REPO** — a scan of every
+  `findMany` with a literal `take` and no `skip` found **65**. When you cap,
+  return the TOTAL; a newest-first cap eats the record.
+- **A MAKER-CHECKER QUEUE IS MONEY IN LIMBO, WORKED OLDEST-FIRST.**
   `listPendingPayments` was `createdAt DESC, take: 200` with no count, and a
-  payment sitting there has NOT moved the invoice balance — the family has paid
-  and the invoice still shows what they owe. At a five-year backlog of 901: 200
-  returned, reaching back only to 2023-09-10, **78% of the money awaiting a
-  second signature invisible**. And the queue is not small by default —
-  `effectivePaymentApprovalThresholdMinor` returns 0 for any school off the
-  platform's currency that has not set a figure, so EVERY payment there needs a
-  second signature. Order oldest-first (the cap then drops the newest arrival,
-  not the longest wait), count in SQL, and put the WAIT on the row — an
-  oldest-first queue an approver cannot see the age of is not actionable.
+  payment there has NOT moved the balance: at a 901 backlog **78% of the money
+  awaiting a second signature was invisible**. Nor is it small by default — the
+  threshold resolver returns 0 off the platform's currency.
 - **A register is not a queue.** A capped newest-first list DROPS the oldest —
-  which is exactly the row a review queue exists to surface, because a pending
-  row is pending precisely because nobody has dealt with it. Page and count **in
-  SQL**; a filter applied in memory only ever sees the rows that survived the
-  cap. Work a queue **oldest-first**; a count must not be narrowed by the filter.
-- **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** The calendar's
-  candidate read had no lower bound on recurring events, so every series ever
-  created stayed a candidate for ever; ordered oldest-first under a 500 cap, the
-  DEAD ones were fetched first, each expanded to zero occurrences, and the budget
-  was spent before the query reached anything current. Measured at five years:
-  600 finished weekly clubs -> **a blank calendar** with ten real events sitting
-  in the window; 495 -> half the term shown and nothing saying so. Filter on the
-  thing that makes a row USEFUL to the window (`recurrenceUntil >= from`, keeping
-  open-ended series), and fetch one row PAST the cap so truncation is detected
-  rather than assumed absent.
-- **No silent truncation.** An export is complete or it says it is short — and
-  every row in it must be IDENTIFIABLE. The NDPR staff bundle returned thirty-six
-  payslips as `{gross, net}` with no period, no date and no run: complete, and
-  unreadable. Carry the period, the kind of run, and the status; LABEL a draft
-  rather than dropping it, so no month goes missing from the sequence.
+  exactly the row a review queue exists to surface. Page and count **in SQL**;
+  filtering in memory only sees rows that survived the cap. Work a queue
+  **oldest-first**; never narrow the count by the filter.
+- **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** With no lower
+  bound on recurring events, 600 dead series filled a 500 cap and each expanded
+  to zero: **a blank calendar**. Filter on what makes a row USEFUL
+  (`recurrenceUntil >= from`), and fetch one PAST the cap to detect truncation.
+- **No silent truncation.** An export is complete or says it is short, and every
+  row must be IDENTIFIABLE — the NDPR bundle returned 36 payslips as
+  `{gross, net}` with no period, date or run: complete, and unreadable.
 - **Measure as the APP ROLE under RLS, with a BOUND PARAMETER, on volume, with a
-  realistic distribution.** Every one of those four has produced a wrong answer:
-  `postgres` bypasses RLS and plans differently; a literal makes Postgres pick an
-  index a pooled application will not get; a dev-sized table picks the other
-  plan; and a fixture giving one pupil all 5,000 invoices measures nothing.
+  realistic distribution.** All four have produced a wrong answer: `postgres`
+  bypasses RLS and plans differently; a literal picks an index a pooled app will
+  not get; a dev-sized table picks the other plan; one pupil holding all 5,000
+  invoices measures nothing.
 - **O(lifetime), not O(size)** is the shape that degrades invisibly — it tracks
-  how long a school has been on the platform, or a PUPIL has been at the school.
-  `/grades/mine` returned every mark ever, unpaged, through an `IN` list of every
-  submission id: 810 marks / 277 KB for a pupil three years in, 2,430 / 831 KB
-  for a parent of three, to look at this week's work. Bound the read to the
-  period the SCREEN claims — and return the other periods, because bounding a
-  read is only honest if the rest is still reachable.
-- **ALUMNI ONLY EVER GROW**, and the register list was capped at 500 while the
-  broadcast beside it counted in the database and said so in its own comment. 600
-  held, 500 shown, and newest-first ordering meant the OLDEST cohort was the one
-  that vanished — backwards for the one list whose value is its age.
-- **Offset paging needs a TOTAL order.** `gradedAt` alone is not one — a teacher
-  marks a set within the same second — and tied rows come back in a different
-  order per page, silently skipping some and repeating others: 239 distinct of
-  270 across six pages. Add `id` as the tiebreaker. And note the test for it
-  passed until the double SHUFFLED before sorting: `Array.sort` is stable in V8
-  and Postgres is not. And **an index nothing selects is
-  write amplification**: measure the variant before adding it.
-- **THE ROW IS THE ROUTE.** The CBT staff console returned the 100 newest exams
-  of 1,350 at five years — and an exam row is the only route to that exam's
-  RESULTS, question PAPER, ANSWER KEY and grade RECORDING, every one of them
-  `cbt/exams/${id}/...` built from that list. A cap on such a list strands four
-  dependent surfaces, not one. Ask what a dropped row was the KEY to, then count
-  in SQL and give the reader a `q` and a `page` that narrow in SQL too.
+  how long a school, or a PUPIL, has been here. `/grades/mine` returned every
+  mark ever, unpaged: 2,430 rows / 831 KB for a parent of three, to see this
+  week's work. Bound it to the period the SCREEN claims; keep the rest reachable.
+- **ALUMNI ONLY EVER GROW**: a newest-first cap loses the OLDEST cohort, which
+  is backwards for the one list whose value is its age.
+- **Offset paging needs a TOTAL order.** `gradedAt` alone is not one: 239
+  distinct rows of 270 across six pages. Add `id`. The test passed until the
+  double SHUFFLED before sorting — `Array.sort` is stable in V8, Postgres is
+  not. And **an index nothing selects is write amplification**; measure first.
+- **THE ROW IS THE ROUTE.** The CBT console returned the 100 newest of 1,350
+  exams — and an exam row is the only route to its RESULTS, PAPER, ANSWER KEY
+  and grade RECORDING, so a cap strands four surfaces, not one.
 - **Count in the database**; never `findMany().length`. Never a query per row —
-  `.map(r => this.toDto(tx, r))` is a query multiplier.
-- **A TENANT-LEADING INDEX SERVES EVERY READ AND NO FOREIGN-KEY CHECK.** Every
-  scoped query filters `schoolId` first, so `(schoolId, studentId)` is the right
-  index — and an FK check is handed a bare `studentId` with no tenant to lead
-  with, so it seq-scans. 73 of the 79 foreign keys into `user` are in that
-  position. Harmless, because nothing here hard-deletes a user; it costs an
-  afternoon the day somebody purges a tenant. Index the referencing columns,
-  delete, drop them again.
+  `.map(r => this.toDto(tx, r))` is a query multiplier, and so is a name lookup
+  in a loop (open duels was N+1 twice: 200 round trips for 100 lobbies).
+- **A TENANT-LEADING INDEX SERVES EVERY READ AND NO FOREIGN-KEY CHECK.**
+  `(schoolId, studentId)` is right for every scoped read, and an FK check gets a
+  bare `studentId` with no tenant to lead with, so it seq-scans — 73 of the 79
+  FKs into `user`. Harmless until somebody purges a tenant: index the
+  referencing columns, delete, drop them again.
 
 ### Authorization and tenancy
 - **A permission has TWO halves**: the route gate says whether you may read at
-  all, the service's wide-role set says whose. They live in different files and
-  they drift — a grant whose row scope refuses it is a dead grant, and it renders
-  as an empty screen rather than a 403.
+  all, the service's wide-role set says whose. They drift — a grant whose row
+  scope refuses it is dead, and renders as an empty screen rather than a 403.
 - **`super_admin` holds no standing role scope over a tenant's data.** The
   supported route to it is impersonation: step-up gated, time limited, audited.
-- **Work, duties and approvals go only to somebody who is STILL HERE**
-  (`assertStillHere`, `holdersOf`). Addressing a leaver is addressing nobody.
-- **A stage-holder must be able to open its own door**, and an approver must be
-  able to SEE what the decision turns on. Both have their own gates.
+- **Work and approvals go only to somebody STILL HERE** (`assertStillHere`,
+  `holdersOf`). Addressing a leaver is addressing nobody.
+- **A stage-holder must open its own door**, and an approver must SEE what the
+  decision turns on. Both have their own gates.
 - **A chain resolved at SUBMIT goes stale when somebody LEAVES.** Admissions
   drops an unstaffable stage at submit and refuses an approval that would strand
   the rest — both look FORWARD, and neither reaches the approver who exits while
   the item waits. Measured: 252 of 5,000 schools' applications sat at a stage
-  with no ACTIVE holder, undecidable in BOTH directions (approve and reject both
-  403) and shown as ordinary pending work. There is no reassign and no reset, so
-  the fix is to SAY it — on the row, in a school-wide count no filter can hide,
-  and in the refusal, which must name the vacancy rather than describe the
-  caller.
+  with no ACTIVE holder, undecidable in BOTH directions and shown as ordinary
+  pending work. There is no reassign, so the fix is to SAY it — on the row, in a
+  count no filter can hide, and in the refusal, which names the vacancy.
 - **Never trust an id from the body.** Check the KIND (a pupil made a subject
-  teacher, a guardian attached to a member of staff), not merely that it exists.
-  A permission helper that answers "MAY I reach this pupil" is not the same
-  question as "IS this a pupil of ours", and for a school-wide caller the first
-  returns without touching the database: the Vault stored a report card against
-  ANOTHER SCHOOL's pupil, and against its own teacher, on 201s. Check with the
-  shared scope (`EVER_ENROLLED_STUDENT`, `NOT_A_STUDENT`) — ever-enrolled, since
-  a school still owes a leaver their records. **Order the two checks so the
-  refusals cannot differ**: told apart, they answer "is this uuid real here?".
-  And an id the caller supplied that names nothing is a **400 (P2003 in
-  `MalformedIdFilter`)**, not the 500 the foreign key used to produce.
+  teacher, a guardian attached to staff), not merely that it exists. "MAY I reach
+  this pupil" is not "IS this a pupil of ours", and for a school-wide caller the
+  first returns without touching the database: the Vault stored a report card
+  against ANOTHER SCHOOL's pupil on a 201. Check with the shared scope
+  (`EVER_ENROLLED_STUDENT`, `NOT_A_STUDENT`) — ever-enrolled, since a school owes
+  a leaver their records. **Order the checks so the refusals cannot differ.** An
+  id naming nothing is a **400 (P2003 in `MalformedIdFilter`)**, not a 500.
 - **Read-then-write at READ COMMITTED is not a guard.** Prefer a UNIQUE INDEX
-  where the rule is expressible, an advisory lock where it is not — and a guard
-  and the race behind it must answer with the SAME status, or the race becomes
-  observable.
+  where the rule is expressible, an advisory lock where it is not — and the guard
+  and the race must answer with the SAME status.
 
 ### Completeness of a change
-- **A control the product imposes must have a way to FINISH it** — and a way
-  OUT. A maker-checker raised on a tier whose decide route was module-gated; a
-  recurring charge with no cancel; a model with a create and no update (**64 of
-  them**, one of which held an answer key).
+- **A control the product imposes must have a way to FINISH it** — and a way OUT.
+  A maker-checker raised on a tier whose decide route was module-gated; a
+  recurring charge with no cancel; a model with a create and no update (**64**,
+  one holding an answer key); an open duel only a TEACHER could close, which its
+  own host could not even see.
+- **A ROUTE GATE MUST BE DEFAULT-DENY, NOT A LIST OF WHAT TO PROTECT.**
+  `middleware.ts` held a hand-kept `PROTECTED_PREFIXES` and the app outgrew it:
+  `/cbt`, `/exams`, `/feedback`, `/group`, `/kiosk`, `/learning`, `/meetings`,
+  `/reportcards` answered **200 with no session**. That gate is THREE controls —
+  the /login redirect, the 30-day forced reset and the MFA mandate — so a user
+  with an expired password was held out of /dashboard and could open the exam
+  hall and a child's report cards. No data escaped (the page streams its loading
+  shell, then throws on `session!.user`) — a gap, not a leak, and worth stating
+  precisely. Inverted to a PUBLIC allowlist in `lib/public-routes.ts`; gate
+  `every-signed-in-page-needs-a-session` walks the router. // GOTCHA: Next serves
+  `app/icon.png` through the same matcher, so default-deny must exempt ASSETS.
+  // GOTCHA: the rule lives in its OWN module so the test drives the REAL
+  function — the first draft reimplemented it and disagreed about `/icon.png`.
+- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below, and the
+  one a user meets. `/attendance`'s "take →", the ONE control for taking a
+  missing register, pointed at `/classes/<id>`, not a route. Gate
+  `a-link-to-a-page-that-is-not-there` matches every literal href against the
+  declared routes; it found a fourth on its first run.
+- **A PICKER MUST REMEMBER WHAT WAS PICKED.** The choice was a PLACEHOLDER
+  re-derived from `[...seed, ...results]`; choosing clears the query, which
+  clears `results`, so anybody found by SEARCH vanished on being chosen. Hold it
+  in state, render it as TEXT. (`PeoplePicker` was right and was never swept.)
+- **`{ scroll: false }` WHEN A NAVIGATION UPDATES A SECTION IN PLACE.** Next
+  scrolls to the top on every push; the attendance pupil-picker sits at the FOOT
+  of a long page, so clicking a pupil hid the history it asked for.
 - **A ROUTE NO SCREEN CALLS IS A DOOR MISSING FROM THE OUTSIDE.** `GET
-  /members/scan/today` — the gate desk's movement log, permission-gated, audited,
-  RLS-scoped — was reached from nowhere; `/scan` only did lookup-and-record. The
-  existing gates catch a service method no CONTROLLER reaches; this was one level
-  out, and the route's own 200-row cap (which returned zero check-ins on a
-  2,400-scan day) would have bitten the first day anyone fitted a door. When a
-  read answers a question the product claims to answer, check that something
-  ASKS it.
+  /members/scan/today` was reached from nowhere — one level out from the gates
+  that catch a service method no CONTROLLER reaches.
 - **A SUMMARY MUST NOT NARROW WITH THE FILTER BELOW IT.** The desk's day counts
-  are a `groupBy` over the whole day, deliberately independent of `?purpose=` and
-  the page — otherwise filtering to check-ins reports that nobody has left. It is
-  what makes a 200-row page on a 2,400-scan day honest: the question is answered
-  before a row is read, and the list is evidence rather than the answer.
+  are a `groupBy` over the whole day, independent of `?purpose=` and the page —
+  otherwise filtering to check-ins reports that nobody has left.
 - **A field the API accepts that no screen sends** is a feature nobody has
-  (`a-field-no-screen-can-fill-in`); **a service method no controller reaches**
-  is a fix that shipped with no door (`service-methods-nobody-calls`); **a page
-  nothing links to** is not delivered (`every-page-can-be-reached`). *Present is
-  not the same as findable* — a whole feature styled as a caption was invisible.
-- **A duty given with a notice is taken away with one** — but retract only what
-  was actually SENT, or the retraction is the first the recipient hears of it.
+  (`a-field-no-screen-can-fill-in`); **a method no controller reaches** shipped
+  with no door (`service-methods-nobody-calls`); **a page nothing links to** is
+  not delivered (`every-page-can-be-reached`). *Present is not findable.*
+- **A duty given with a notice is taken away with one** — retract only what was
+  actually SENT.
 - **Fixing where it hurts and leaving the siblings is how the class survives.**
 
 ### Tests, gates and probes
-- **Mutation-validate every gate**: break the fix, watch the test fail *naming
-  the right thing*. Gates have passed for the wrong reason repeatedly — a
-  fixed-size source window that spanned two methods, a same-named method on
-  another service vouching for dead code, a `not.toContain("5")` matching a
-  digit in a timestamp, an assertion satisfied by the COMMENT explaining its own
-  fix (strip comments — `test/support/strip-comments.ts`).
-- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE
-  proves nothing. Read `Test Suites:` as well as `Tests:`.
-- **A gate that walks must assert it scanned something** — a walk that finds no
-  files produces no offenders and passes green.
-- **A test on a helper proves nothing about its caller.** Drive the real service.
-- **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY ON THE CLOCK.** The
-  report card prints "Generated DD/MM/YYYY, HH:MM:SS", so `not.toMatch(/\b33\b/)`
-  over the extracted PDF fails ~3.3% of runs — which presents as a flaky suite
-  and is actually a wrong assertion. The POSITIVE form is worse: `toMatch(/\b29\b/)`
-  passes with the cell wrong whenever the clock reads `:29:`. Read the CELL
-  (`cells[indexOf(row) + 1]`). And pin the collision as a test rather than hoping:
-  fake `Date` only (`doNotFake` the timer family, pdfkit needs real ones).
-- **Anchor a test to the PROPERTY, not to the text.** Fixed-text assertions have
-  gone red on changes that STRENGTHENED what they guard nine times.
+- **Mutation-validate every gate**, compile-time ones included: break the fix,
+  watch it fail *naming the right thing*. Gates have passed for the wrong reason
+  repeatedly — a fixed-size source window spanning two methods, a same-named
+  method vouching for dead code, `not.toContain("5")` matching a digit in a
+  timestamp, an assertion satisfied by the COMMENT explaining its own fix (strip
+  comments), an `as` cast defeating a `Record<Key,true>` check, and a detector
+  matching only LITERALS while the needle was a variable.
+- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE proves
+  nothing. Read `Test Suites:` as well as `Tests:`. A jest pattern passed where a
+  FLAG belongs matches no tests and exits 1.
+- **A gate that walks must assert it scanned something**: no files, no offenders.
+- **A test on a helper proves nothing about its caller.** Drive the real thing.
+- **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY.** `not.toMatch(/\b33\b/)`
+  over a report-card PDF fails ~3.3% of runs on its "Generated … HH:MM:SS" line —
+  a flaky suite that is actually a wrong assertion, and the POSITIVE form passes
+  with the cell wrong whenever the clock reads `:29:`. Read the CELL, pin the
+  collision as a test, and fake `Date` only (pdfkit needs real timers).
+- **Anchor a test to the PROPERTY, not the text** (nor a column's POSITION) —
+  fixed-text assertions have gone red ten times on changes that STRENGTHENED what
+  they guard. **And never prove an ABSENCE by searching a serialised document**:
+  it carries ids, timestamps and counts nobody chose, and a uuid containing the
+  secret ("…925d-**31234**1a1dd8c") failed CI on a test whose property held.
+  Walk the parsed object and compare VALUES.
 - **An over-wide gate is the same failure as a blind one** — it teaches its next
-  reader to add an exemption, and an exemption granted for a false positive is a
-  hole with a note on it. Delete the rule rather than exempt what it wrongly
-  catches.
+  reader to add an exemption, and one granted for a false positive is a hole with
+  a note on it. Delete the rule rather than exempt what it wrongly catches.
 - **FIXTURE TRAPS, over and over:** a stub whose `findMany` ignores the `where`
-  (or `take`/`skip`) passes against a service that stopped filtering; a stub
-  missing a method every real client has (`createMany`, `groupBy`, `$queryRaw`,
-  `$transaction`) fails in a way that reads as a code fault; a stub returning the
-  live object a later `update` mutates makes an audit read the NEW value. **A
-  double must model the CONTRACT, not just the signature.**
+  (or `take`/`skip`) passes against a service that stopped filtering; one missing
+  a method every real client has (`createMany`, `groupBy`, `$queryRaw`) fails in
+  a way that reads as a code fault; one returning the live object a later
+  `update` mutates makes an audit read the NEW value; and `$executeRaw` is a
+  TAGGED TEMPLATE, so `q.values` is `Array.prototype.values` — a function, not
+  the parameters. **A double must model the CONTRACT, not the signature.**
 - **A probe that guesses a field name reports a fact about itself.** Read the
-  STATUS before the body; scope a probe's own queries to the tenant under test;
-  prove the session took (401 to everything reads as "refused" for every route).
+  STATUS before the body; scope a probe's queries to the tenant under test; prove
+  the session took (401 everywhere reads as "refused" for every route).
 - **Drive it, do not read it.** Almost every entry in the log was found by
-  exercising a path — several of them paths that had never once executed.
+  exercising a path — several never once executed.
 
 ### Operational safety
 - **Fail closed at BOOT** where a mis-set value is unrecoverable afterwards
-  (encryption key, auth secret, storage provider, public URL, email sender, and
-  now `API_BASE_URL` — `apps/web/lib/env.ts` + `apps/web/instrumentation.ts`). An
-  env var set to an EMPTY STRING is not unset, and `??` is blind to it.
+  (encryption key, auth secret, storage provider, public URL, email sender,
+  `API_BASE_URL`). An env var set to an EMPTY STRING is not unset; `??` is blind
+  to it.
   // GOTCHA: **"boot" means the process EXITS.** Two weaker versions of this
   check were built first and neither failed closed. A throw in the ACCESSOR is
   caught by the caller's own try/catch — `/schools` answered **200** with
@@ -1299,16 +1226,15 @@ These are the rules; the log is why each one exists.
   deploy. Verify against `node .next/standalone/…/server.js`, not `next start`,
   which refuses `output: standalone`; keep the check LAZY, since `next build`
   runs with `NODE_ENV=production` and the variable is legitimately absent then.
-- **A secret's SHAPE is not its PROVENANCE** — a well-formed key published in
-  this repo is compromised for ever (`PUBLISHED_SECRETS`).
-- **One school's failure must not end the fleet's sweep.** Catch per school,
-  NAME it, and COUNT it into the result the operator console reads — a count
-  nobody surfaces is a count nobody acts on.
-- **Never seed a demo account into production** (`SEED_DEMO_DATA`, fail-closed).
-- **Probe hygiene:** never overwrite a real user's password (bcrypt is
-  unrecoverable — mint a token instead); scope every cleanup by id or timestamp;
-  check what the container is actually RUNNING before believing a live result;
-  `git checkout` on an uncommitted file discards the FIX, not the mutation.
+- **A secret's SHAPE is not its PROVENANCE** — a well-formed key published in this
+  repo is compromised for ever (`PUBLISHED_SECRETS`). Never seed a demo account
+  into production (`SEED_DEMO_DATA`, fail-closed).
+- **One school's failure must not end the fleet's sweep.** Catch per school, NAME
+  it, and COUNT it into the result the operator console reads.
+- **Probe hygiene:** never overwrite a real user's password (mint a token);
+  scope every cleanup by id or timestamp; check what the container is RUNNING
+  before believing a live result; `git checkout` on an uncommitted file discards
+  the FIX, not the mutation.
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
@@ -1337,27 +1263,34 @@ These are the rules; the log is why each one exists.
   `db push` gave CI 287 FKs against production's 318 — tests passing on
   referential integrity production lacks. It also means a broken migration now
   fails CI instead of failing on deploy.
+- **A FAILED `migrate deploy` LOCKS THE WHOLE HISTORY**, and the tempting repair
+  diverges the schema: `resolve --applied` on every unrecorded folder clears the
+  error and lies — six of nine were genuinely ABSENT on the test DB, i.e. a clean
+  history over missing schema, the `plan_price` failure again. RECIPE: verify the
+  FAILED one's objects are ALL present (table, indexes AND constraints),
+  `resolve --applied` just that one, `migrate deploy`, then **`pnpm --filter
+  @sms/db rls`** — migrations bring TABLES, policies are separate, and a GLOBAL
+  table landing with RLS off is invisible to the coverage meta-test, which keys
+  on tables that HAVE a `schoolId`.
 - RLS files use bare `CREATE POLICY` (Postgres has no IF NOT EXISTS for it), so
   they are order-sensitive, not idempotent — the entrypoint applies them per-file
   against a sentinel. `02_foundation_rls.sql` is the ONE exception: its two
   `audit_log` policies DROP-then-CREATE, because `20260824000000_audit_log_
   partition` re-declares those same names. Without that, 02 aborted partway on
   any migrate-deploy DB and silently left the rest of the file unapplied.
-- New tenant table: add an `prisma/rls/NN_*.sql` file and a cross-tenant case to
+- New tenant table: add `prisma/rls/NN_*.sql` and a cross-tenant case to
   `apps/api/test/rls.e2e-spec.ts` (and its afterAll cleanup, child rows BEFORE
-  parents — FK order matters). Register the new rls file in
-  `apps/api/docker-entrypoint.sh` (`apply_rls <file> <last-policy-name>`) — the
+  parents — FK order matters). Register the file in
+  `apps/api/docker-entrypoint.sh` (`apply_rls <file> <last-policy-name>`): the
   entrypoint applies RLS per-file idempotently, keyed on each file's LAST policy
-  as a sentinel, so a new file applies onto an already-initialised DB without
-  re-running the others. NOTE: you NO LONGER hand-edit `TenantTx` — it is
-  `Prisma.TransactionClient` (see below), so new models are typed automatically.
+  as a sentinel, so a new file lands on an initialised DB without re-running the
+  others. Do NOT hand-edit `TenantTx` — it is `Prisma.TransactionClient`.
 - Integrity retention: telemetry on minors (integrity_signal / submission_draft /
-  submission_telemetry) is purged past each school's `School.integrityRetentionDays`
-  window by a privileged BullMQ daily sweep + a per-school manual endpoint
-  (`POST /integrity/retention/run`, perm `integrity.retention.run`). The app role
-  has NO DELETE on those tables; the purge connects via `DATABASE_RETENTION_URL`
-  (falls back to `DATABASE_MIGRATE_URL`); unset → retention DISABLED. See
-  `apps/api/src/integrity/retention` and `prisma/rls/06_*`.
+  submission_telemetry) is purged past `School.integrityRetentionDays` by a
+  privileged daily sweep + `POST /integrity/retention/run`
+  (`integrity.retention.run`). The app role has NO DELETE there; the purge uses
+  `DATABASE_RETENTION_URL` (falls back to `DATABASE_MIGRATE_URL`); unset →
+  retention DISABLED. See `apps/api/src/integrity/retention`, `prisma/rls/06_*`.
 - Tests: **`pnpm --filter @sms/api test:db` runs ALL of it.** A bare `jest`
   SKIPS every DB-gated suite (the RLS e2e among them) because each
   `describe.skip`s without `TEST_DATABASE_URL`, so **a green local run says
@@ -1417,15 +1350,13 @@ These are the rules; the log is why each one exists.
   the shared process closes it for everyone), so a suite can look fine locally
   and still hang CI. Cleanup ordering: `audit_log` rows reference users
   (`audit_log_actorId_fkey`), so delete them BEFORE the suite's `"user"` rows.
-- Seed permission registry: `seed.ts` upserts the UNION of its hand-listed
-  `PERMS` and every key `ROLE_PERMISSIONS` references (`ALL_PERMS`) — a
-  permission added to the role map in `@sms/types` can no longer crash the
-  seed or silently miss the DB. A LIVE DB only gets new permissions when the
-  seed RE-RUNS (compose seeds on first provision only) — after adding a
-  permission, run the seed against the live DB or the new endpoint 403s
-  even for super_admin.
-- Raw SQL in tests must supply `updatedAt` (Prisma `@updatedAt` has no DB
-  default) and quote `"user"` (reserved word).
+- Seed permission registry: `seed.ts` upserts the UNION of its hand-listed `PERMS`
+  and every key `ROLE_PERMISSIONS` references (`ALL_PERMS`), so a permission added
+  to the role map cannot crash the seed or silently miss the DB. A LIVE DB gets
+  new permissions only when the seed RE-RUNS (compose seeds on first provision
+  only) — otherwise the new endpoint 403s even for super_admin.
+- Raw SQL in tests supplies `updatedAt` (Prisma `@updatedAt` has no DB default)
+  and quotes `"user"` (reserved word).
 - Time columns like `Game.turnStartedAt` are `timestamp without time zone`. The
   app round-trips them via Prisma (consistently UTC), but a test that BACK-DATES
   one with raw SQL `now() - interval '…'` stores the DB session's LOCAL wall-clock
@@ -1706,29 +1637,18 @@ turn timers / 15s countdown / hard-disconnect handling for actively-played
 sockets.
 
 **FULL-STACK VERIFIED end-to-end (2026-06-27) against a real Postgres 18 (UTC)
-— a SNAPSHOT OF THAT DATE, and its counts have since grown (24 RLS files → 112,
-71 RLS-enabled tenant tables → 196, 298 api tests → 4,000+). Read the numbers
-below as what was true then. What keeps coverage honest TODAY is not this
-paragraph but the gate: `rls.e2e-spec.ts` introspects `pg_class` for every table
-carrying a `schoolId` and fails if one lacks a cross-tenant case, so the set
-under test is computed rather than counted by hand. `ultimate_participant`
-remains the one documented exemption, still true.**
-migrate deploy (all migrations incl. all 6 game ones) → all 24 RLS files apply
-clean (`ON_ERROR_STOP=1`) → seed OK (game RBAC confirmed in DB: 10 `game.*` perms;
-ultimate.admin→super_admin, ultimate.consent→school_admin, ultimate.enroll→
-principal+school_admin). The ENTIRE api jest suite passes: **40 suites / 298 tests**
-(every module + RLS cross-tenant incl. ultimate + all 5 game modes + the new
-`GET /races`; the RLS suite now proves isolation for EVERY one of the 71 RLS-enabled
-tenant tables + a coverage meta-test that fails if a new one is added untested).
-game-engine **118/118**, monorepo typecheck **13/13**, and the web
-**production build** compiles all routes incl. the 7 game screens. Two pre-existing
-game e2e assertions were FIXED (a winner's cracking guess necessarily equals the
-secret and legitimately shows in the public move log / own history — the naive
-`not.toContain(secret)` over the whole view was wrong; now asserts the UN-cracked
-secret never leaks + the stored secret/target column is cleared). NOTE: these DB
-suites `describe.skip` without `TEST_DATABASE_URL`+`TEST_ADMIN_URL`, so they had
-never actually executed before this run.
-
+— a SNAPSHOT OF THAT DATE.** migrate deploy, every RLS file clean under
+`ON_ERROR_STOP=1`, seed, the whole api suite, game-engine, typecheck and a web
+production build. Every COUNT it carried has since rotted, which is what a number
+typed into prose does; what keeps coverage honest is the GATE, not this
+paragraph: `rls.e2e-spec.ts` introspects `pg_class` for every table carrying a
+`schoolId` and fails if one lacks a cross-tenant case, so the set under test is
+COMPUTED. `ultimate_participant` is still the one documented exemption.
+// GOTCHA from that run: a winner's cracking guess NECESSARILY equals the secret
+and legitimately shows in the move log, so `not.toContain(secret)` over the whole
+view was wrong — assert the UN-cracked secret never leaks and the stored column
+is cleared. And those DB suites `describe.skip` without `TEST_DATABASE_URL` +
+`TEST_ADMIN_URL`, so they had never once executed before it.
 Binding points even from here:
 - Build order: pure scoring engine first (variable length — 4/5/6 distinct
   digits; `length` is a PARAMETER, never hard-coded; test N=4/5/6), then a
@@ -1962,13 +1882,12 @@ ones arrived, so a card labelled **"Revenue · all time"** went DOWN over time.
 Measured at 6,508 payments: NGN 5,000,000 shown against NGN 30,846,756.64 true,
 **83.8% missing**, nothing saying a row was dropped; crossed in year four at 500
 schools. The same array fed the monthly revenue trend, so a growth chart erased
-its own history. Both are SQL aggregates now and the preview takes the 10 rows
-it needed; analytics got FASTER (267ms -> 227ms). // GOTCHA: `revenue.payments`
-was the length of that capped ALL-CURRENCY array while the money was
-home-currency only — a count and a total describing different populations under
-one heading. // GOTCHA: the spec's `$queryRaw` double filtered currency ITSELF,
-so dropping `AND currency = …` from the SQL passed the mutation. A double must
-honour the query's own predicate.
+its own history. Both are SQL aggregates now; analytics got FASTER (267 -> 227ms).
+// GOTCHA: `revenue.payments` was the length of that capped ALL-CURRENCY array
+while the money was home-currency only — a count and a total describing different
+populations under one heading. // GOTCHA: the spec's `$queryRaw` double filtered
+currency ITSELF, so dropping `AND currency = …` passed the mutation. A double
+must honour the query's own predicate.
 
 ## Correcting a school's region — where it lives, and what follows
 `/operator/tenants` (or the directory) -> a school -> **Profile & region** ->
@@ -2005,16 +1924,35 @@ resolved window now, and a row with none says "all years". // GOTCHA:
 common across the web (`sessionId` is on dozens of screens); it asks only
 whether the web MENTIONS it.
 
-## A COUNT-then-INSERT cap is not a cap
-`attemptQuiz` counted a pupil's attempts, compared to `maxAttempts`, then
-inserted — nothing between, and no isolation level is set. Interleaving those
-exact statements in two sessions: both counted 0, both inserted, **two attempts
-on a one-attempt quiz, both numbered 1**. Now
-`@@unique([contentId, studentId, attemptNo])` (migration `20260910000000`), with
-P2002 converted to the guard's own 409 so the race is not observable as a
-different outcome. // GOTCHA: eight concurrent HTTP attempts did NOT reproduce
-it — a concurrency test over HTTP would have called this clean. Interleave the
-statements instead.
+## Races: fit the remedy to the RULE, and distrust a green probe
+Six money paths were read-then-write at READ COMMITTED and each needed a
+DIFFERENT remedy — that is the durable part; the measurements are in the log.
+- **Uniqueness** -> a UNIQUE INDEX. `attemptQuiz` counted then inserted (two
+  attempts on a one-attempt quiz, both numbered 1); one signed webhook replayed
+  concurrently posted SIX payments. Convert P2002 to the guard's own 409, or the
+  index only trades a double-post for a retry loop — a non-2xx makes a rail retry.
+- **A balance invariant** -> an ADVISORY LOCK, because an append-only ledger has
+  no row to lock. One pupil's credit applied to two invoices at once finished at
+  -5,000,000. The CURRENCY belongs in the key: a pupil can hold two balances.
+- **Read-modify-write on a row** -> `SELECT ... FOR UPDATE`, taken by EVERY
+  writer that reads an invoice's money and then writes it. Settlement did not,
+  so its safety was borrowed from whichever other writer held the lock — and two
+  gateway payments have no such neighbour.
+- **A DEFERRED write** -> a RESERVATION, not just a lock. Metered sends debit
+  only after the gateway confirms, so two jobs each read a balance neither had
+  spent; the budget is the balance MINUS in-flight (`attempts` stamped pre-send).
+// GOTCHA: **fixing the lost update is not fixing the race.** `decideAdjustment`
+// had a race-safe DECREMENT with a comment explaining it, while the CAP two
+// lines above still read a stale balance. Read a concurrency comment as a claim
+// about WHAT IT COVERS.
+// GOTCHA: **money AWAITING APPROVAL is already committed against the invoice** —
+// the overpayment guard counted POSTED only, so two payments each for the full
+// balance both passed. Sequential, through the front door: not a race at all.
+// GOTCHA: **distrust a green race probe until you have made it go RED.** Eight
+// concurrent HTTP requests did not reproduce the quiz race (interleave the
+// statements instead), and a settlement probe passed 6/6 until the neighbouring
+// lock was removed. Adding a guard then breaks every double that modelled
+// yesterday's collaborators — that failure is the signal the guard landed.
 
 ## An error message is the SERVER's reason; a hint is only a fallback
 A status usually has several causes and the component knows one. Eleven did
@@ -2075,8 +2013,7 @@ the matching index (migration `20260909000000`). // GOTCHA: a cursor cut on a
 different column than the ordering does not mis-sort, it SKIPS whole runs of
 rows. // GOTCHA: paging on a MUTABLE key can show a bumped row twice or miss it
 — the accepted cost of a recency-ordered inbox, and far better than a message
-from today at position 400. // GOTCHA: `POST /messages/threads` takes
-`recipientId`, SINGULAR.
+from today at position 400. `POST /messages/threads` takes `recipientId`, SINGULAR.
 
 ## A gate whose SET is hand-kept only guards what somebody remembered
 `a-sweep-that-was-behind-and-said-nothing` checked a HAND-KEPT array of four
@@ -2096,112 +2033,42 @@ the processors, following ONE HOP into the services a swept method calls
 // name, which for `): Promise<{ reminded: number … }> {` is the RETURN TYPE —
 // the capped read was invisible because the gate was reading a type.
 
-## Fixing the lost update is not fixing the race
-`decideAdjustment` caps a waiver at the outstanding balance, and its decrement
-was ALREADY race-safe — the comment explains that two adjustments would
-otherwise both compute `total - amount` from one figure and one would be lost.
-The CAP two lines above still read a stale balance: a 10,000,000 invoice with
-two pending 8,000,000 waivers, approved together, both posted and left the
-invoice at **-6,000,000**, 3 runs of 3. A lost update and a violated invariant
-are different failures of the SAME race; read a concurrency comment as a claim
-about what it COVERS. Fixed with the same invoice `FOR UPDATE` the other three
-writers take — every writer that reads an invoice's money then writes it.
-// GOTCHA: adding a guard breaks every double that modelled yesterday's
-// collaborators (five times in one session: isActive, count, $executeRaw twice,
-// send/deliver). Expect it; the failure is the signal the guard landed.
-
-## A deferred debit needs a RESERVATION, not just a lock
-Metered sends read a credit balance once per job, decrement a LOCAL variable,
-and debit the ledger only AFTER the gateway confirms — deliberately, so a failed
-delivery never spends a paid credit. Two concurrent jobs therefore each read a
-balance neither had debited: one purchased credit produced **2 messages sent and
-a balance of -1**. A lock alone cannot fix a deferred write; the budget is now
-the balance MINUS in-flight reservations, and the row already carried one —
-`attempts` is stamped before the gateway is told anything, so a PENDING row with
-an attempt is a credit about to be spent. The advisory lock makes the
-count-and-stamp atomic.
-// Measured both halves: dropping the reservation fails EVERY run, dropping the
-// lock fails 1 in 8 — repeated eight times, because a mutation that passes may
-// mean the test misses the window rather than the code being needless.
-// GOTCHA: in-flight counts only within 15 minutes. A stranded row would
-// otherwise reserve a PAID credit for ever; here the restrictive option is the
-// wrong one, because it withholds something the school bought.
-
-## Every writer that recomputes an invoice's status must take its lock
-`recordPayment` and `approvePayment` take `SELECT ... FOR UPDATE` on the invoice
-before recomputing status from the posted total. `settlement.service` — the ONE
-path every gateway rail funnels through — did not, so its safety came from
-whichever OTHER writer happened to hold the lock. Two GATEWAY payments have no
-such neighbour: two online payments of 5,000,000 on one 10,000,000 invoice, both
-posting, left it **PARTIALLY_PAID in 4 runs out of 4** — a fully paid invoice
-that does not say so, then chased by the reminder sweep, charged late fees and
-counted in receivables. Settlement takes the lock itself now.
-// GOTCHA: **distrust a green race.** The staff-approval-vs-settlement case
-// passed 6/6; only removing `approvePayment`'s lock (probe then failed 1 in 3)
-// showed the probe really raced AND that the safety was borrowed.
-// THREE RACES, THREE REMEDIES: uniqueness -> `@@unique`; a balance invariant ->
-// advisory lock; read-modify-write on a row -> `FOR UPDATE`. Fit the remedy to
-// the RULE.
-
-## A balance read and then spent is a double-spend waiting for two clicks
-`applyCreditToInvoice` aggregated a pupil's credit, took `Math.min`, then wrote
-the spend. Two invoices applied at the same moment each read the WHOLE balance:
-measured on a real Postgres, 5,000,000 of credit became **-5,000,000 with
-10,000,000 applied**. A credit is money the family already handed over, so
-spending it twice credits the school for money it never received.
-No index expresses a balance invariant, so this takes an ADVISORY lock —
-`pg_advisory_xact_lock(hashtext('credit:<school>:<student>:<currency>'))` —
-chosen over `SELECT ... FOR UPDATE` for the reason `TermResultService
-.lockResultRow` already records: an append-only ledger has no row to lock. The
-CURRENCY is in the key because a pupil can hold two independent balances.
-// GOTCHA: only two sites write a negative `deltaMinor`; the scholarship award
-// reversal is safe because it reverses a specific entry BY ID, not a balance.
-
-## One gateway charge posts once — and the race must answer like the guard
-`InvoiceSettlementService.applyOnlinePayment` is the ONE posting path for every
-rail and was "idempotent on the gateway reference" via `findFirst` then
-`create` — read-then-write at READ COMMITTED. Sequential replay passed; SIX
-SIMULTANEOUS deliveries of one signed webhook (identical reference) posted six
-payments against a 5,000,000 invoice — **30,000,000 credited and the invoice
-marked PAID from one payment**. Now `@@unique([invoiceId, reference])` +
-migration `20270301000000`, with P2002 converted to the same `"duplicate"` the
-guard returns. NULL references stay distinct, so manual cash entries are
-unaffected.
-// GOTCHA measured, not assumed: with the index but WITHOUT the catch, the
-// losing deliveries answer **409** — and a non-2xx is what makes a rail retry,
-// so the index alone trades a double-post for a retry loop.
-// GOTCHA: **an idempotency probe that does not RACE confirms the design and
-// misses the defect.** Replaying twice is the obvious test and it passes.
-// And a replay that changes nothing proves idempotency only if the FIRST
-// delivery changed something — seed the precondition, or report INCONCLUSIVE.
-
 ## A capped sweep must report its BACKLOG, not just what it took
-Every scheduled sweep bounds its read with a `take`, deliberately. Each reported
-only what it TOOK, so a run that cleared its 500 and left 100,000 behind produced
-the same line as one that emptied the queue. Measured at 3,500 schools after a
-queue outage stranded 21,918 deliveries: three hourly runs each returned
-`scanned=500 requeued=500 failed=0` — every console signal green — while 21,858
-families were still waiting (~44 hours to even attempt them). **`backlog` is a
-FOURTH fact**: not `failed` (tried and could not), not `skipped` (not due), not
-`unreachable` (about the data) — DUE work queued behind a cap, and the number
-that says whether the sweep is keeping up. All four capped sweeps report it
-(`notification-recovery`, `sis-nudge`, `submission-retention`, term `archive`),
-each counting with the SAME predicate its page uses — named once so they cannot
-drift. `JobRunsService` reads it like `failed` (opt-in, null = no notion of one);
-the console shows a **Behind** badge with the magnitude. A real `failed`
-outranks it. Gate: `a-sweep-that-was-behind-and-said-nothing`.
+Every scheduled sweep bounds its read, deliberately, and each reported only what
+it TOOK — so a run that cleared its 500 and left 100,000 behind read exactly like
+one that emptied the queue. Measured at 3,500 schools after a queue outage
+stranded 21,918 deliveries: three hourly runs each returned `scanned=500
+requeued=500 failed=0`, every console signal green, 21,858 families still
+waiting. **`backlog` is a FOURTH fact**: not `failed` (tried and could not), not
+`skipped` (not due), not `unreachable` (about the data) — DUE work queued behind
+a cap. Every capped sweep reports it, counting with the SAME predicate its page
+uses, named once so they cannot drift. `JobRunsService` reads it like `failed`
+(opt-in, null = no notion of one) and the console shows a **Behind** badge; a
+real `failed` outranks it. Gate: `a-sweep-that-was-behind-and-said-nothing`.
 // GOTCHA: adding one `count()` broke six existing doubles — each must now count
 the SAME set its `findMany` draws from, or it passes against a service computing
 the backlog from the wrong predicate.
+// **AND A CAP ONLY ADVANCES IF TAKING A ROW REMOVES IT FROM THE PREDICATE THE
+PAGE IS DRAWN FROM.** The declined-applicant purge paged over APPLICATIONS and
+wrote only to `document_submission`, so the same 500 matched every night for
+ever: run 1 cleared 409 files, runs 2-4 cleared NONE, 191 birth certificates
+held permanently while `backlog` sat frozen at 475,036 — which reads as
+"behind", never as "stuck". Page the WORK, count the backlog on that predicate.
+// **WHERE THE ROW CANNOT LEAVE, MARK IT** — an unpaid invoice stays overdue, so
+the fee reminder's oldest-first cap chased the SAME 2,000 families weekly and
+the 100 newest arrears never, and ordering by due date is what made that
+certain rather than merely likely. Order by what the sweep CHANGES
+(`lastRemindedAt`, NULLS FIRST), and never mark work nobody was told about.
+// Both hid behind doubles ignoring `take`/`orderBy`; the backlog GATE went
+blind on the first fix because `hasLiteralTake` knew `take:` and not `LIMIT`.
 
 ## PURGING A TENANT: index the referencing columns first
-The 73 unindexed FKs into `user` this file records are harmless until somebody
-hard-deletes a tenant's users, then every delete seq-scans each of them. Measured
-removing a 1,500-school fixture: **25 min and 11 min without committing**. The
-documented remedy works exactly as written — 23 temporary indexes on the
-referencing columns built in **1.2 s**, the same delete committed **1,370,900
-rows in 3 m 6 s**, indexes dropped after. Do this before offboarding a real
-school.
+The 73 unindexed FKs into `user` are harmless until somebody hard-deletes a
+tenant's users, then every delete seq-scans each of them: a 1,500-school fixture
+ran **25 min without committing**. The remedy works as written — 23 temporary
+indexes on the referencing columns in **1.2 s**, the delete then committing
+**1,370,900 rows in 3 m 6 s**, indexes dropped after. Do this before offboarding
+a real school.
 
 ## Background jobs: a sweep that skipped a school must SAY so
 `JobRunsService.failedCount` reads a **`failed`** field off each job's stored
@@ -2376,43 +2243,132 @@ is 14:00 in Lagos and 09:00 in Toronto. It runs hourly and acts on a school only
 when THAT school's local clock reads `REGISTER_REMINDER_LOCAL_HOUR` (14), so
 each school is reminded once in its own afternoon and 23 of the 24 ticks
 correctly do nothing. `skipped` is therefore a large, healthy number here.
-// It does not nag: weekends and days outside the current term are skipped, a
-class with nobody on roll is not an outstanding register, and a teacher gets ONE
-message listing all their classes rather than one per class.
-// `notified` counts TEACHERS TOLD, not registers walked. `unreachable` counts
+// It does not nag: weekends and days outside the term are skipped, a class with
+nobody on roll is not an outstanding register, and a teacher gets ONE message
+listing all their classes rather than one per class.
+// `notified` counts TEACHERS TOLD, not registers walked; `unreachable` counts
 outstanding registers whose class has no ACTIVE supervisor — nobody can be
-reminded about those and they are the ones most likely to go on being missed.
-The board says so too (`teacherActive: false`, "no class teacher"), because
+reminded about those. The board says so (`teacherActive: false`), because
 "nobody is assigned" is a different problem from "the teacher forgot".
 // GOTCHA, and the reason `reminderOffReason` is ONE shared function: a school
-that has never set a CURRENT TERM is skipped every day, for ever, and the only
-trace was a `skipped` count in an operator console the school never opens. The
-board looked exactly like a school whose teachers were being reminded every
-afternoon. It now states it — loudly for `NO_CURRENT_TERM` (which names the
-calendar as the fix), quietly for a weekend or holiday, which need a footnote
-rather than a banner. Sharing the predicate with the sweep also gave the sweep
-HOLIDAY awareness it never had: it would have reminded every teacher in the
-school on a mid-term break, while `registerClosedReason` had known about
-holidays all along.
-// GOTCHA in the same shape, in my own wording: the button reported "Every
-register has been taken today" whenever nothing was outstanding — INCLUDING when
-the sweep had not looked. Reporting a school that is never chased as a school
-with nothing to chase is the silent-success class; `skipped > 0` now says so.
-// GOTCHA: **head_teacher was a DEAD GRANT here** — they hold `attendance.read`
-AND `attendance.amend.review`, which makes them the second person on the chain
-that corrects a stale register, and the API returned them ZERO classes because
-they were missing from `SCHOOL_WIDE_ROLES`. An approver who cannot see what the
-decision turns on. The constant's own neighbour had been asserting the intent
-all along ("Principal, head teacher and junior_admin see every register"), which
-is a comment claiming an agreement that did not exist. Fixed — and it grants
-SIGHT, not cover: `REGISTER_COVER_ROLES` stays `school_admin` alone, because the
-register records who physically looked at the room. The board is gated on
-"who CHASES a register" (write OR amend.review), not on who may take one.
+that never set a CURRENT TERM is skipped every day for ever, and the only trace
+was a `skipped` count in an operator console the school never opens — the board
+looked exactly like one whose teachers were reminded daily. It states it now, and
+sharing the predicate gave the sweep HOLIDAY awareness it never had (it would
+have chased every teacher on a mid-term break).
+// GOTCHA in the same shape: the button reported "Every register has been taken
+today" whenever nothing was outstanding — INCLUDING when the sweep had not
+looked. `skipped > 0` now says so.
+// **WHO MAY TAKE A REGISTER IS ONE FUNCTION** (`canTakeRegister`): the class's
+NAMED supervisor, plus `school_admin` as cover. It was written TWICE — the
+enforcement and the by-class board's `canTake` — while the outstanding board had
+no such field and drew a "take" button for everybody. The principal HOLDS
+`attendance.write` and is refused at row scope, so the form rendered, they marked
+the class, and Save 403'd: a dead grant showing as a form that fails rather than a
+control that is absent. The form is built from the server's takeable list now, and
+the heading follows what the reader can DO.
+// **The rule is RESPONSIBILITY, not rank** — verified: a principal is 403 on a
+class they do not supervise and **201 the moment they are named its supervisor**,
+so a teaching head needs no exception. Two reasons not to widen it: principals
+hold `attendance.amend.review`, so authoring would make the approver of a
+correction its author; and a register attests "I looked at this room" — a gap that
+is VISIBLE is safer than one filled in by somebody who was not there.
+// GOTCHA: **head_teacher was a DEAD GRANT here** — they hold
+`attendance.amend.review`, making them the second person on the chain that
+corrects a stale register, and the API returned them ZERO classes because they
+were missing from `SCHOOL_WIDE_ROLES`: an approver who cannot see what the
+decision turns on. Its own neighbour asserted the intent all along, which is a
+comment claiming an agreement that did not exist. It grants SIGHT, not cover.
 // `GET /attendance/registers` now carries the class teacher, and `RegisterBoard`
 on /attendance shows BOTH lists — still-to-take with the person to ask, and a
 collapsed "Taken (n)" — where it used to show only a count of the gaps. The
 manual trigger is SCHOOL-scoped (`attendance.write`), never the fleet.
 
+## Staff attendance: a SPAN, closed by a sweep, corrected by two people
+It recorded ARRIVALS only and the biometric ingest dropped departure scans as
+duplicates. Scans append to `staff_attendance_event` (rls/113, append-only); the
+day row is a PROJECTION — first IN, last OUT. // GOTCHA: clock-OUT is NOT
+windowed (a window catches a late ARRIVAL), and `minutesOnSite` is NULL not 0.
+// **ABSENCE WAS NEVER RECORDED** — `summary()` counts rows that EXIST, so anyone
+who never clocked in was neither. `StaffDayCloseService` acts on each school's own
+19:00 (late, or evening activities become absences): unmarked -> ABSENT, approved
+leave -> ON_LEAVE; `openSpans` apart; ONE `createMany` per school, counting what
+was WRITTEN. // **EVERY READER COULD REWRITE THEIR OWN RECORD**:
+`hr.attendance.read`/`.amend` split, self-marking REFUSED, past 7 days needs a
+senior `.amend.review` holder. `/kiosk` shows the code alone — it needed
+`hr.read`, so the corridor screen showed the register.
+
+## A CARD THAT DOES NOT RENDER LOOKS EXACTLY LIKE ONE THAT SHOULD NOT
+`/classes` gated its create-a-class card on `students`, which the page had been
+changed to fetch as a bare `Promise.resolve(null)` — so the ONLY route to
+creating a class was absent for every role, silently. Gate:
+`a-card-that-can-never-render`. // GOTCHA: a probe searching for a string it did
+not take FROM THE THING IT TESTS asks about the page, not the component.
+// A class teacher is EXPECTED, NOT REQUIRED — the rule asserted an invariant the
+data lacks (30 of 31 have none) and blocked laying out next year before staffing.
+NAMED OR NOBODY: a pupil or leaver refused, an existing one cannot be cleared.
+// `POST /classes/arms` creates a stream's arms at once; `Class.homeRoomId` is a
+BASE room (one per class, refusal names the holder), distinct from the
+per-SUBJECT `preferredRoomId`. Syllabus and notes copy to arms too: SKIP never
+overwrite, notes land DRAFT keeping the (subject, term) gradebook tag.
+
+## MEASURE AT THE LEVEL A USER MEETS, NOT ONLY IN EXPLAIN
+A lifetime `groupBy` on a partitioned table is 64.8ms planning / 3.5ms execution —
+and the ENDPOINT cannot tell 63 partitions from 15 (24ms vs 26ms). Postgres caches
+the plan PER PREPARED STATEMENT PER CONNECTION (first EXECUTE 18.4ms, then 0.8ms)
+and Prisma pools connections, so it is paid once per connection, not per request.
+EXPLAIN forces a fresh plan; production does not. **Three unbounded reads found by
+a sweep were therefore LEFT ALONE.**
+// **What DOES degrade is HYDRATION.** `/operator/analytics` fetched every
+`student_profile` on the platform for two histograms: 0.5s at 0 pupils, 3.2s at
+200,000, against 64ms for the same question as an aggregate — 4.5M rows and ~70s
+at the 5,000-school target. The per-school sibling already did it in SQL.
+// **The PUBLIC front door shipped the fleet**: `/public/schools` returned every
+school unpaged and unsearchable (678 KB, 631ms, the slowest page in the app), its
+own comment conceding the shape and answering with a rate limit — which bounds how
+OFTEN the cost is paid, not the cost. Paged + searched in SQL: 6.8 KB, 42ms.
+// GOTCHA: a route on the PUBLIC controller without `@Public()` answers 401, and
+the only symptom was a school's own enrol link silently not preselecting it.
+
+## O(lifetime) ALSO ARRIVES AS PARTITION COUNT — the SLICING pays, not the planning
+An aggregate over `attendance_record` with no date predicate PLANS every partition
+(unbounded 88.6ms planning / 9.4ms execution; bounded to a year 0.58 / 1.3), and
+planning tracks the PLATFORM's age. **Bound every aggregate over a partitioned
+table by date; make the PAGE a window, not a slice** — and keep at most ONE
+unbounded pass (the lifetime audit total), returning the SPAN so the total needs
+no second scan.
+// GOTCHA: **a window is anchored on the RECORD, not on today** — counted back
+from today it lands after a LEAVER's final register: an empty page 1 under a total
+saying thirty months exist, and a leaver is this screen's likeliest reader.
+// GOTCHA: Postgres REFUSES a partition for a month with rows already in DEFAULT;
+`AuditPartitionService` detects it and counts `failed`, and there is no remedy tool.
+// GOTCHA: **an unindexed FK is harmless until somebody PURGES.** A user delete is
+checked by `audit_log."actorId"` on a PARTITIONED table with no index on it, so it
+scans every partition: 12 minutes without finishing. The remedy works — 71
+temporary indexes in 0.9s, then 410k rows in 8m36s — but the recorded
+"1,370,900 rows in 3m6s" is ONE fixture, not a rate.
+
+## A pupil's attendance compiles at THREE grains, and says which are settled
+`GET /students/:id/attendance/compiled?grain=month|term|session`. Scoping is
+INHERITED from `assertCanAccessStudent`, not restated. // GOTCHA:
+`attendance_term_rollup` covers ENDED terms ONLY, so reading it alone shows the
+CURRENT term as zero — "never attended" rather than "not settled". Unrolled terms
+compute LIVE, every bucket carries `source: ROLLUP|LIVE`, and a session is only as
+settled as its least settled term. // GOTCHA: the rollup is keyed
+`(termId, classId, studentId)` — a pupil who moved class mid-term has SEVERAL
+rows and they must be SUMMED, or you report a fraction of the term and it looks
+entirely normal. // A session is summed from the TERM buckets, never a second
+query.
+
+## A staff record is read PER PERSON, and must not grow with their service
+`GET /hr/attendance/staff/:userId` + the card on `/hr/staff/[userId]`: months
+COMPILED IN SQL and paged. A per-day read is O(length of SERVICE); on 250,440
+rows the covering `INCLUDE (status, flagged, clocks)` took it 41.8ms -> 12.5ms
+(Index Only Scan) while a plain composite did not pay for its write cost — for
+PUPILS the same measurement said add NO index. // GOTCHA: `DROP INDEX; CREATE
+INDEX CONCURRENTLY` in one `psql -c` is one transaction and CONCURRENTLY cannot
+run in one — the pair rolls back and you then measure the index you think you
+dropped.
 ## Attendance register — write windows (BUILT)
 Three tiers gate a register write (`AttendanceService.markAttendance`):
 - **≤7 days old**: applied directly.
@@ -2433,48 +2389,34 @@ guard reads role→perms from the DB).
 Twenty-five fixes found by asking, of each control, "is it applied on every path
 that does the thing?" The durable facts:
 
-- **A REGISTER IS NOT A QUEUE.** `LIST_CAP = 500` says inbox views "only ever
-  surface the most-recent page" — true of live work, false whenever the list is
-  also the record a school reads LATER. Approvals (`GET /workflows`), the leave
-  register (`GET /hr/leave/requests`) and assessments (`GET /assessments`) now
-  take filters + `page` and return `{items,total,page,pageSize}` with the
-  MATCHING total. Measured before: 702 workflow requests returned 500; 800 leave
-  requests hid 300; 541 assessments hid 41 with no filter that could reach them.
-  Filter in SQL — filtering in memory still only sees the recent rows. A search
-  must AND onto the caller's scoping, never replace it. `mine=1` on approvals is
-  narrowed in memory ON PURPOSE (it depends on a stage permission inside a JSON
-  column) and is safe only because live work is bounded; history is paged in the
-  database. A fee run's DRAFTs are finished with `POST /invoices/issue-bulk`
-  (explicit ids, capped, partial success reported) — there was no batch way to
-  issue a batch, so hostel rent stayed invisible.
+- **A REGISTER IS NOT A QUEUE.** `LIST_CAP = 500` claims inbox views "only
+  surface the most-recent page" — true of live work, false when the list is also
+  the record a school reads LATER. Approvals, leave and assessments take filters
+  + `page` and return the MATCHING total (before: 702 workflow requests returned
+  500). Filter in SQL, and a search must AND onto the caller's scoping. `mine=1`
+  is narrowed in memory ON PURPOSE (a stage permission inside JSON), safe only
+  because live work is bounded. A fee run's DRAFTs finish with
+  `POST /invoices/issue-bulk` — there was no batch way to issue a batch.
 - **ELEVATION REACHES THE UI.** `activeGrantPermissions` is the ONE definition of
-  what a grant gives you, called by the guard AND by login/refresh; the session
-  carries `elevated` and `sessionPermissions()` merges it. Before, a grant was
-  honoured by the API and lit up no screen. The AppShell says when authority is
-  borrowed. A workflow stage decided under a grant is recorded in the IMMUTABLE
-  trail — the reviewer's comment no longer REPLACES the system's notes (`??`
-  became a join), which is where that fact used to vanish.
-- **"TODAY" IS THE SCHOOL'S DAY** — now also the transport boarding register
+  what a grant gives, called by the guard AND by login/refresh. Before, a grant
+  was honoured by the API and lit up no screen. A stage decided under a grant is
+  in the IMMUTABLE trail — the reviewer's comment no longer REPLACES the
+  system's notes (`??` became a join), which is where that fact vanished.
+- **"TODAY" IS THE SCHOOL'S DAY** — including the transport boarding register
   (keyed on `(passenger,date,direction)`, so a wrong day OVERWRITES another
-  journey) and the exam-day board's default. Six remaining `toISOString()` uses
-  label a document; they do not key a record.
-- **A CONTROL WITH ANOTHER WAY ROUND IT IS NOT A CONTROL.** The leaver
-  document gate ran on `getDownloadUrl` and not on `streamFile` — the door the
-  web actually uses. Both now call one `assertReleasable`, BEFORE the bytes are
-  fetched. A RECEIPT is never gated: withholding personal data over a debt is
-  unlawful rather than firm.
+  journey). Remaining `toISOString()` uses label a document, never key a record.
+- **A CONTROL WITH ANOTHER WAY ROUND IT IS NOT A CONTROL.** The leaver document
+  gate ran on `getDownloadUrl`, not `streamFile` — the door the web uses. Both
+  call one `assertReleasable`. A RECEIPT is never gated: withholding personal
+  data over a debt is unlawful, not firm.
 - **EXITED USERS CANNOT AUTHENTICATE.** `validateLogin`, `refreshClaims` and the
-  password-reset path all refuse a non-ACTIVE user. This BOUNDS a whole class of
-  "a leaver still has X" worries — check it before treating one as live. Staff
-  may no longer REPLY to a pupil who has left (the thread stays readable, the
-  office remains reachable); a class change deliberately does NOT end a
+  password-reset path all refuse a non-ACTIVE user, which BOUNDS a whole class of
+  "a leaver still has X" worries. A class change deliberately does NOT end a
   conversation, because that moves it to WhatsApp.
-- **MONEY MUST SAY WHERE IT WENT.** A library fine now lands on an ISSUED
-  invoice (a DRAFT is not a bill: hidden from families, excluded from
-  receivables — so an UNPAID fine was invisible and became visible only by being
-  paid), records the METHOD it was paid by (the journal has a Method column and
-  everything read CASH), bills the charge if it is missing rather than taking
-  cash with nothing on the ledger, and tells the family at both ends.
+- **MONEY MUST SAY WHERE IT WENT.** A library fine lands on an ISSUED invoice (a
+  DRAFT is not a bill — hidden from families and out of receivables, so an UNPAID
+  fine was visible only by being paid), records the METHOD, and bills the charge
+  rather than taking cash with nothing on the ledger.
 - **REPORT WHAT YOU DID NOT DO.** The exeat sweep marked every overdue boarder
   as handled including the ones it could tell nobody about; it now marks only
   what it alerted, and alerts the FAMILY in their own words. An alumni broadcast
@@ -2483,10 +2425,9 @@ that does the thing?" The durable facts:
   nightly now (`attendance.rollup` in the jobs catalogue), 452 ms -> 32 ms with
   IDENTICAL figures.
 - **A SIGNAL IS NOT A PENALTY.** Scholarship signals report `disciplineUpheld`
-  and `disciplineOpen` separately and NEVER a DISMISSED complaint. `discipline
-  .file` is held by students, so the old single count let a classmate's
-  accusation — and a complaint the school had rejected — count against a child
-  asking for help with fees.
+  and `disciplineOpen` separately, never a DISMISSED complaint — `discipline.file`
+  is held by students, so one count let a classmate's accusation count against a
+  child asking for help with fees.
 
 **Gates added, each validated by reintroducing the defect it exists for:**
 `service-methods-nobody-calls` (a dead read is a query somebody can wire up in
@@ -2520,6 +2461,65 @@ they are not the mechanism, and the comments that said they were are corrected.
 // Gate: `a-label-that-linked-nothing` — it DRIVES the script under `DRY_RUN`
 // rather than parsing the bash, which is what the first draft did and why it
 // matched nothing once the scopes moved into a loop.
+
+## An upload is a CLAIM until the server looks at the bytes
+The presigned PUT goes browser→bucket, so confirm is the only moment the API can
+check — and the LMS one checked nothing: it set `fileUploaded` on the caller's
+word. Three facts are settled there and none earlier: the bytes ARRIVED (a
+failed PUT still said "Attached", and pupils got a refusal from storage), they
+fit (the presign's `sizeBytes` is a number the caller SENT), and they are the
+type claimed (`sniffUploadType`, magic bytes). A refusal leaves it unattached so
+the upload can simply be retried.
+**`inline` is the TYPE the server vouches for, never a boolean** — that is what
+keeps the check joined to the serving, and it lets S3 pin
+`ResponseContentType` rather than return the object's stored type, which came
+off the PUT and is the uploader's claim. Locally the type rides the SIGNED OP
+(`get-inline-pdf`), never a query parameter.
+// GOTCHA: the feature could not work locally AT ALL — `KEY_SHAPE` admitted
+`schools/` and `careers/`, the prefixes that existed when it was written, while
+`lms/`, `discipline/`, `submissions/` and `tasks/` were added later: four upload
+features 400ing at the FIRST step, behind a refusal deliberately worded like a
+bad signature. Gate `a-key-no-upload-could-use` computes the minted set from
+source. // GOTCHA: the school LOGO was presigned in FIVE places, three inline
+and two not — the two being the PUBLIC ones, so a PAID logo never rendered on
+the login page. One `logoUrl()` now; the gate asserts exactly ONE presign site.
+
+## A BULK TEMPLATE IS A CONTRACT WITH THE COMPLETION RULE
+The SIS template had no `city`/`state` column while `SIS_REQUIRED_PROFILE_FIELDS`
+demands both — so a school importing an ACCURATE, COMPLETE register had every
+pupil land INCOMPLETE and the nightly sweep nudged every one of them, and their
+guardians, for two facts it had never been offered anywhere to type. A nudge must
+mean "we genuinely do not know this".
+**What belongs in a template:** every fact THE SCHOOL is the authority on, plus
+every field required for completeness; the rest is asked of the family, who are
+the authority on it. Medical and emergency contacts stay OUT — encrypted,
+separately audited, and a spreadsheet is the wrong custody. `SIS_IMPORT_COLUMNS`
+is the ONE definition; gate `a-template-that-can-finish-a-profile` parses the
+template's OWN worked example and fails unless a pupil built from it needs no
+chasing (and that the SPARSE example still does, or the file teaches nothing).
+// GOTCHA: **a `z.object` at the boundary STRIPS what it does not declare**, and
+it was a THIRD hand-kept copy of the column list — so the new columns were
+offered, typed in, sent and discarded at the door, every status a success and
+EVERY UNIT TEST GREEN (they drive the service and never cross it). Only running
+the import found it. Fix is the type system: keys `as const` plus
+`Exclude<Key, keyof shape> extends never ? true : [...]`, so the next column
+fails to COMPILE naming itself. A `Record<Key, true>` written with an `as` cast
+does NOT work. Under `as const` an OMITTED property leaves the union, so every
+entry states all four, nulls included.
+// GOTCHA: `line.split(",")` — the address is the field likeliest to hold a comma
+and a spreadsheet quotes it, so `"12 Main St, Ikeja"` truncated the address AND
+shifted every later column, enrolling the pupil in a class called `Ikeja"`.
+`parseCsv` handles quotes, embedded newlines, `""`, CRLF and the BOM Excel writes
+(which otherwise lands in the FIRST HEADER, so every row has no name).
+// GOTCHA: an import that only CREATES is a one-shot. Upsert on the admission
+number — **a blank cell never clears a stored value** (`COALESCE(v,p)`), or a
+re-upload carrying only addresses wipes every date of birth and nothing reports
+it. An update rewrites a child's record, so it keeps maker-checker and the
+approver is shown the FIELDS that change. Decide which rows are updates BEFORE
+hashing (bcrypt ~100ms/row; an update needs no account) and write them as ONE
+`UPDATE … FROM (VALUES …)` per chunk, never a loop inside the 5-second
+interactive transaction. The roster export round-trips the template, so
+correcting a roll is a download and an upload, not one pupil at a time for ever.
 
 ## Operating the live system — runbooks
 - **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity

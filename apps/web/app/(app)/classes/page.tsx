@@ -30,6 +30,9 @@ export default async function ClassesPage() {
   if (!hasPermission(user.permissions, "class.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "class.write");
   const canManageSubjects = hasPermission(user.permissions, "subject.manage");
+  // Rooms belong to the timetable. Fetched only when the caller may read them,
+  // so the base-room picker is absent rather than empty-and-broken.
+  const canReadRooms = hasPermission(user.permissions, "timetable.read");
   const canPromote = hasPermission(user.permissions, "class.promote");
   const canApprovePromotion = hasPermission(user.permissions, "class.promote.approve");
   const canManageAcademic = hasPermission(user.permissions, "academic.manage");
@@ -51,7 +54,14 @@ export default async function ClassesPage() {
     canPromote ? apiGet<Serialized<PromotionBatchDto>[]>("/promotions") : Promise.resolve(null),
     canManageAcademic ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
     // Offering fixed-room picker (CSP input); null (no timetable.read) hides it.
-    canManageSubjects ? apiGet<{ id: string; name: string }[]>("/timetable/rooms") : Promise.resolve(null),
+    // Rooms serve TWO controls now — the subject-offering room and a class's
+    // BASE room — so the condition is "may either of them be used", and it asks
+    // for `timetable.read` because that is the permission the route actually
+    // requires. Gating a fetch on a different permission than the endpoint
+    // checks is how a picker comes to be empty for somebody who may use it.
+    (canManageSubjects || canWrite) && canReadRooms
+      ? apiGet<{ id: string; name: string }[]>("/timetable/rooms")
+      : Promise.resolve(null),
     canManageAcademic ? apiGet<Serialized<SchoolHolidayDto>[]>("/academic/holidays") : Promise.resolve(null),
     // What an incomplete calendar has switched off. Same source as the sessions
     // above, so the panel cannot disagree with the editor beside it.
@@ -86,8 +96,20 @@ export default async function ClassesPage() {
           )}
         </div>
 
-        {canWrite && classes && students && staff && (
-          <ClassAdmin classes={classes} students={students} users={staff} />
+        {/* THE CREATE-A-CLASS CARD, WHICH NOBODY COULD SEE.
+            The condition required `students`, and `students` was hard-coded to
+            null when the roster stopped being prefetched ("the enrol/link
+            controls search on demand"). So the render condition kept a
+            dependency the optimisation had removed, and the only place in the
+            product where a class can be created has not appeared for anyone
+            since — silently, because a card that does not render looks exactly
+            like a card that is not meant to be there.
+
+            `students` is optional in the component (it defaults to []), so the
+            condition is now the two things actually needed: may this person
+            write, and did the class list load. */}
+        {canWrite && classes && staff && (
+          <ClassAdmin classes={classes} students={students ?? []} users={staff} rooms={rooms ?? []} />
         )}
 
         {/* The bulk form sits beside its single-row sibling rather than

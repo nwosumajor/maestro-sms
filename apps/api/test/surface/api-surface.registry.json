@@ -793,6 +793,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /hr/attendance/staff/:p": {
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/StaffAttendanceHistory.tsx on the staff detail page"
+    },
     "GET /hr/attendance/summary": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1317,6 +1321,10 @@
       "kind": "system",
       "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
+    "GET /public/schools/by-slug": {
+      "kind": "ui",
+      "note": "EnrollForm on /enroll — resolves the schools a family has CHOSEN, by slug"
+    },
     "GET /quiz-sessions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1460,6 +1468,10 @@
     "GET /students/:p/attendance": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/attendance/compiled": {
+      "kind": "ui",
+      "note": "reviewed: reached from components/attendance/PupilAttendanceCompiled.tsx on /attendance"
     },
     "GET /students/:p/attendance/summary": {
       "kind": "ui",
@@ -2041,6 +2053,10 @@
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
     },
+    "POST /classes/arms": {
+      "kind": "ui",
+      "note": "reviewed: reached from the ArmsBuilder on components/lms/ClassAdmin.tsx"
+    },
     "POST /competitions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2064,6 +2080,10 @@
     "POST /content/:p/complete": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /content/:p/copy-to-arms": {
+      "kind": "ui",
+      "note": "reviewed: reached from the content editor's copy control"
     },
     "POST /content/:p/forum": {
       "kind": "ui",
@@ -2273,6 +2293,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /games/:p/cancel": {
+      "kind": "ui",
+      "note": "OpenDuels on /games — the host withdraws their own waiting duel"
+    },
     "POST /games/:p/end": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2380,6 +2404,14 @@
     "POST /hr/attendance/clock-in": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/attendance/clock-out": {
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/MyAttendance.tsx"
+    },
+    "POST /hr/attendance/day-close/run": {
+      "kind": "ui",
+      "note": "reviewed: reached from the shared SweepButton on the staff attendance page"
     },
     "POST /hr/attendance/devices": {
       "kind": "ui",
@@ -3144,6 +3176,10 @@
     "POST /submissions/:p/grade": {
       "kind": "internal",
       "note": "The gradebook's assessment-grade write, and the ONLY way to set grade.status (DRAFT | PUBLISHED). No UI calls it: the registry claimed GradingConsole did and that file never has — the console posts term-results instead. Kept because it is now REACHABLE at all: an identically-pathed LMS route on another prefixless controller shadowed it until 2026-08, so a teacher posting its documented body got somebody else's 400."
+    },
+    "POST /syllabus/copy-to-arms": {
+      "kind": "ui",
+      "note": "reviewed: reached from the syllabus planner on /classes"
     },
     "POST /tasks": {
       "kind": "ui",

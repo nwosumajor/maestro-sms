@@ -34,6 +34,7 @@ import { OpenRaceForm } from "@/components/game/OpenRaceForm";
 import { OpenTournamentForm } from "@/components/game/OpenTournamentForm";
 import { CreateLeagueForm } from "@/components/game/CreateLeagueForm";
 import { GameSettingsForm } from "@/components/game/GameSettingsForm";
+import { OpenDuels } from "@/components/game/OpenDuels";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -228,26 +229,11 @@ export default async function GamesPage() {
               </SectionIcon>
               <div>
                 <CardTitle className="text-base">Open duels</CardTitle>
-                <CardDescription>Waiting for an opponent — jump in.</CardDescription>
+                <CardDescription>Waiting for an opponent — jump in, or withdraw your own.</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <ul>
-                {openGames.map((g) => (
-                  <li
-                    key={g.id}
-                    className="flex items-center justify-between border-b border-border px-4 py-2.5 last:border-0"
-                  >
-                    <span className="text-sm">
-                      <span className="font-medium">{g.hostDisplayName}</span>{" "}
-                      <span className="text-muted-foreground">· {g.difficultyLength} digits</span>
-                    </span>
-                    <Link href={`/games/duel/${g.id}`} className={ctaOutline}>
-                      Join
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <OpenDuels games={openGames} ctaClass={ctaOutline} />
             </CardContent>
           </Card>
         )}

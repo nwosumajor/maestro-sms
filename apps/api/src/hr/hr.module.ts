@@ -40,10 +40,14 @@ import { StaffReminderService } from "./staff-reminder.service";
 import { StaffReminderScheduler } from "./staff-reminder.scheduler";
 import { StaffReminderProcessor } from "./staff-reminder.processor";
 import { DocumentsModule } from "../documents/documents.module";
+import { StaffDayCloseService } from "./staff-day-close.service";
+import { StaffDayCloseScheduler } from "./staff-day-close.scheduler";
+import { StaffDayCloseProcessor } from "./staff-day-close.processor";
+import { STAFF_DAY_CLOSE_QUEUE } from "./staff-day-close.constants";
 import { usingS3 } from "../documents/storage-provider.config";
 
 @Module({
-  imports: [WorkflowModule, NotificationModule, BrandingModule, DocumentsModule, BullModule.registerQueue({ name: HR_REMINDER_QUEUE })],
+  imports: [WorkflowModule, NotificationModule, BrandingModule, DocumentsModule, BullModule.registerQueue({ name: HR_REMINDER_QUEUE }), BullModule.registerQueue({ name: STAFF_DAY_CLOSE_QUEUE })],
   controllers: [
     HrController,
     LeaveController,
@@ -69,6 +73,9 @@ import { usingS3 } from "../documents/storage-provider.config";
     PayrollService,
     CompensationService,
     StaffAttendanceService,
+    StaffDayCloseService,
+    StaffDayCloseScheduler,
+    StaffDayCloseProcessor,
     DutyService,
     EmploymentService,
     ExitService,

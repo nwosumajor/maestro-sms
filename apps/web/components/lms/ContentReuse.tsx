@@ -43,6 +43,7 @@ export function ContentItemTools({
   const [revs, setRevs] = React.useState<Rev[] | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [note, setNote] = React.useState<string | null>(null);
 
   async function loadHistory() {
     if (open) {
@@ -65,6 +66,37 @@ export function ContentItemTools({
     else setErr(r.error);
   }
 
+  /**
+   * Copy this item onto every other arm of the same stream.
+   *
+   * Distinct from Clone, which makes one copy in one class. The arms of a stream
+   * teach the same thing, so writing a note once and copying it is the ordinary
+   * case; doing it one class at a time is where twelve notes became twenty-four
+   * operations. Each copy lands as a DRAFT in its arm and keeps its subject and
+   * term tag, so it still counts toward the report card there.
+   */
+  async function copyToArms() {
+    setBusy(true);
+    setErr(null);
+    const r = await req("POST", `/content/${contentId}/copy-to-arms`, {});
+    setBusy(false);
+    if (!r.ok) { setErr(r.error); return; }
+    const d = r.data as {
+      copied: Array<{ className: string; week: boolean }>;
+      skipped: Array<{ className: string; reason: string }>;
+    };
+    // REPORTS WHAT IT DID NOT DO, per arm and why — "copied to 2 arms" with a
+    // third silently skipped is the failure this codebase keeps recording.
+    setNote(
+      // SAYS WHERE IT LANDED IN THE PLAN. A copy attached to the arm's matching
+      // week appears in its weekly view; one that could not be matched is a
+      // DRAFT a teacher must attach by hand, and that difference is worth a word.
+      `Copied to ${d.copied.length === 0 ? "no arms" : d.copied.map((c) => `${c.className}${c.week ? "" : " (not attached to a week)"}`).join(", ")}.` +
+        (d.skipped.length ? ` Skipped: ${d.skipped.map((x) => `${x.className} (${x.reason})`).join("; ")}` : ""),
+    );
+    onChanged();
+  }
+
   async function revert(revisionId: string) {
     setBusy(true);
     setErr(null);
@@ -79,9 +111,13 @@ export function ContentItemTools({
 
   return (
     <div className="ml-auto flex flex-col items-end gap-1">
+      {note && <p className="max-w-sm text-right text-xs text-muted-foreground">{note}</p>}
       <div className="flex items-center gap-1">
         <Button type="button" size="sm" variant="ghost" className="h-8" onClick={clone} disabled={busy}>
           Clone
+        </Button>
+        <Button type="button" size="sm" variant="ghost" className="h-8" onClick={() => void copyToArms()} disabled={busy}>
+          Copy to arms
         </Button>
         <Button type="button" size="sm" variant="ghost" className="h-8" onClick={loadHistory}>
           {open ? "Hide history" : "History"}

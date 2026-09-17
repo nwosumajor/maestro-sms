@@ -37,15 +37,21 @@ export class IntegrityRetentionController {
   async run(@CurrentPrincipal() p: Principal) {
     // Read THIS school's configured window from the registry via the tenant
     // runner (RLS-scoped), then purge with the privileged client.
-    const days = await this.db.runAsTenant(p, async (tx) => {
-      const s = await tx.school.findUnique({
+    const windows = await this.db.runAsTenant(p, async (tx) => {
+      const s = (await tx.school.findUnique({
         where: { id: p.schoolId },
-        select: { integrityRetentionDays: true },
-      });
-      return (s?.integrityRetentionDays as number | undefined) ?? 0;
+        select: { integrityRetentionDays: true, staffAttendanceEventRetentionDays: true },
+      })) as { integrityRetentionDays?: number; staffAttendanceEventRetentionDays?: number } | null;
+      return {
+        // BOTH windows, or the manual button does a different job from the
+        // nightly sweep — and the one stream it would silently leave behind is
+        // the largest table on the platform.
+        telemetry: s?.integrityRetentionDays ?? 0,
+        staffEvents: s?.staffAttendanceEventRetentionDays ?? 0,
+      };
     });
     return this.jobRuns.record("integrity.retention", "MANUAL", () =>
-      this.retention.purgeSchool(p.schoolId, days, "MANUAL"),
+      this.retention.purgeSchool(p.schoolId, windows.telemetry, "MANUAL", windows.staffEvents),
     );
   }
 

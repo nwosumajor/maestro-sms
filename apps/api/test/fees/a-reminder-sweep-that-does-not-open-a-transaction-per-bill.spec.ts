@@ -28,6 +28,13 @@ function makeService(bills: number, guardiansPer = 2) {
       // Counted, not walked: the count is one query and must not be mistaken
       // for the per-bill transactions this spec is about.
       count: jest.fn(() => { calls.push("invoice.count"); return Promise.resolve(invoices.length); }),
+      // The sweep stamps what it chased so the NEXT run advances past it. One
+      // statement for the whole page, which is the same rule this spec is
+      // about: the work must not grow one-per-person.
+      updateMany: jest.fn((a: { where: { id: { in: string[] } } }) => {
+        calls.push("invoice.updateMany");
+        return Promise.resolve({ count: a.where.id.in.length });
+      }),
     },
     payment: { findMany: jest.fn(() => { calls.push("payment.findMany"); return Promise.resolve([]); }) },
     parentChild: {
@@ -72,6 +79,14 @@ describe("the overdue-fee sweep", () => {
     const { service, calls } = makeService(50, 3);   // 150 recipients
     await service.sendFeeReminders(p, { overdueOnly: true });
     expect(calls.filter((c) => c === "tx").length).toBeLessThan(10);
+  });
+
+  it("records what it chased in ONE statement, not one per bill", async () => {
+    // The stamp is what lets the next run reach the families this one capped
+    // out. Writing it per invoice would undo the whole point of this spec.
+    const { service, calls } = makeService(50, 3);
+    await service.sendFeeReminders(p, { overdueOnly: true });
+    expect(calls.filter((c) => c === "invoice.updateMany")).toHaveLength(1);
   });
 
   // The half that must not be traded away.

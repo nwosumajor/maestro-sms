@@ -39,10 +39,22 @@ export function UserPicker({
   const [busy, setBusy] = React.useState(false);
   const [open, setOpen] = React.useState(false);
 
-  const selected = React.useMemo(
-    () => [...seed, ...(results ?? [])].find((u) => u.id === value),
-    [seed, results, value],
-  );
+  /**
+   * WHO IS PICKED — REMEMBERED, not re-derived. Same fix, same reason, same
+   * commit as `StudentPicker`: choosing clears the query, which clears
+   * `results`, so anybody found by SEARCHING rather than sitting in the page's
+   * seed vanished from the control the instant they were chosen. Swept together
+   * because fixing one and leaving the other is how this class survives.
+   */
+  const [picked, setPicked] = React.useState<PickedUser | null>(null);
+  const selected = React.useMemo(() => {
+    if (picked && picked.id === value) return picked;
+    return [...seed, ...(results ?? [])].find((u) => u.id === value) ?? null;
+  }, [picked, seed, results, value]);
+
+  React.useEffect(() => {
+    if (!value) setPicked(null);
+  }, [value]);
 
   React.useEffect(() => {
     const needle = q.trim();
@@ -74,9 +86,16 @@ export function UserPicker({
 
   return (
     <div className={`relative ${className}`}>
+      {/* The choice is TEXT, not a placeholder — see StudentPicker. */}
+      {selected && (
+        <p className="mb-1 truncate text-sm font-medium" title={selected.name}>
+          {selected.name}
+        </p>
+      )}
       <input
         disabled={disabled}
-        placeholder={selected ? selected.name : placeholder}
+        placeholder={selected ? "Search to change…" : placeholder}
+        aria-label={selected ? `Selected: ${selected.name}. Search to change.` : placeholder}
         className="w-full rounded-md border bg-background p-1.5 text-sm"
         value={q}
         onChange={(e) => {
@@ -92,6 +111,7 @@ export function UserPicker({
           type="button"
           className="absolute right-2 top-1.5 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
+            setPicked(null);
             onChange("");
             setQ("");
           }}
@@ -112,6 +132,7 @@ export function UserPicker({
                     u.id === value ? "text-primary" : ""
                   }`}
                   onClick={() => {
+                    setPicked(u);
                     onChange(u.id, u);
                     setQ("");
                     setOpen(false);

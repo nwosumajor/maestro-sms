@@ -14,6 +14,13 @@ const owner: Principal = { schoolId: "platform", userId: "owner", roles: ["super
 
 function makeClient() {
   const now = new Date();
+  /** The two pupils the demographics assertions describe. ONE fixture, served to
+   *  both the aggregate double and the (now unused) findMany, so the test cannot
+   *  agree with itself while disagreeing with the service. */
+  const PROFILE_FIXTURE: Array<{ gender: string | null; dateOfBirth: Date | null }> = [
+    { gender: "male", dateOfBirth: new Date("2015-01-01") },
+    { gender: "Female", dateOfBirth: new Date("2012-01-01") },
+  ];
   /**
    * The revenue figures are AGGREGATED IN SQL now (see
    * `a-lifetime-total-that-shrank`): a capped newest-first page summed in Node
@@ -79,6 +86,29 @@ function makeClient() {
           },
         ];
       }
+      // DEMOGRAPHICS, now counted in Postgres rather than fetched and tallied in
+      // Node — the read this replaced pulled EVERY student_profile row on the
+      // platform (4.5M at the 5,000-school target) to build two histograms.
+      // Computed FROM THE SAME FIXTURE the old `studentProfile.findMany` served,
+      // so the assertions below still describe the same two pupils and a double
+      // returning fixed numbers could not vouch for a broken query.
+      if (sql.includes("student_profile")) {
+        const rows = PROFILE_FIXTURE;
+        if (sql.includes("GROUP BY p.gender")) {
+          const by = new Map<string | null, number>();
+          for (const r of rows) by.set(r.gender, (by.get(r.gender) ?? 0) + 1);
+          return [...by].map(([gender, n]) => ({ gender, n }));
+        }
+        const age = (d: Date) => Math.floor((now.getTime() - d.getTime()) / (365.25 * 864e5));
+        const band = (a: number) =>
+          a <= 5 ? "b0" : a <= 10 ? "b1" : a <= 13 ? "b2" : a <= 16 ? "b3" : a <= 18 ? "b4" : "b5";
+        const out: Record<string, number> = { unknown: 0, b0: 0, b1: 0, b2: 0, b3: 0, b4: 0, b5: 0 };
+        for (const r of rows) {
+          if (!r.dateOfBirth) out.unknown += 1;
+          else out[band(age(r.dateOfBirth))] += 1;
+        }
+        return [out];
+      }
       if (sql.includes("date_trunc")) {
         return [{ month: now, count: 2 }]; // both students enrolled this month
       }
@@ -87,11 +117,11 @@ function makeClient() {
     user: {
       findMany: jest.fn().mockResolvedValue([{ createdAt: now }, { createdAt: now }]),
     },
+    // Kept so a regression to the hydrating read is VISIBLE: if the service goes
+    // back to fetching profiles, this spy records the call and the assertion
+    // below catches it.
     studentProfile: {
-      findMany: jest.fn().mockResolvedValue([
-        { gender: "male", dateOfBirth: new Date("2015-01-01") },
-        { gender: "Female", dateOfBirth: new Date("2012-01-01") },
-      ]),
+      findMany: jest.fn().mockResolvedValue(PROFILE_FIXTURE),
     },
     platformSubscriptionPayment: {
       findMany: jest.fn().mockResolvedValue([
@@ -158,6 +188,27 @@ describe("PlatformAnalyticsService", () => {
     // demographics: normalised gender across all profiles.
     expect(out.demographics.profiled).toBe(2);
     expect(out.demographics.gender).toEqual({ Male: 1, Female: 1 });
+  });
+
+  it("COUNTS the demographics in Postgres — it never fetches the profiles", async () => {
+    // THE DEFECT THIS EXISTS FOR. It fetched every `student_profile` row on the
+    // platform — `{ gender, dateOfBirth }` for every pupil in every school — and
+    // tallied them in a JS loop for two small histograms. Measured live: 0.5s at
+    // zero pupils, 3.2s at 200,000 — about 15ms per thousand, all of it
+    // hydration, while Postgres answers the same question as an aggregate in
+    // 64ms. A real fleet of 5,000 schools at ~900 pupils is 4.5M profiles, i.e.
+    // roughly SEVENTY SECONDS and 4.5M objects live in the API task, on the
+    // platform owner's own dashboard.
+    //
+    // The per-school sibling in `analytics.service.ts` already did this in SQL,
+    // with a comment saying why. The half left behind was the one running over
+    // five thousand times as many rows.
+    const client = makeClient();
+    const { service } = makeService(client);
+    await service.overview(owner);
+    expect(client.studentProfile.findMany).not.toHaveBeenCalled();
+    const sql = (client.$queryRaw as jest.Mock).mock.calls.map((c) => JSON.stringify(c[0])).join(" ");
+    expect(sql).toContain("student_profile");
   });
 
   it("keeps a DOLLAR payment out of both the headline AND the chart", async () => {

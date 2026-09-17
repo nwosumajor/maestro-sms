@@ -16123,3 +16123,1512 @@ WHAT WAS ALREADY SOUND, checked the same way rather than assumed:
 // first thing to grep for. Repointed at the one definition, which makes those
 // two assertions cover FIVE doors instead of two, and the membership question is
 // delegated by name to the gate that computes it.
+
+### The staff register recorded arrivals, and called that attendance
+
+Asked how staff attendance works for HR, a school admin and a principal — and
+whether time-in and time-out are accurate, controllable and consistent — the
+answer to the second half was that there was no time-out at all.
+
+`staff_attendance` carried `clockInAt` and no departure column: no route, no
+service method, no screen, and no `hoursWorked` anywhere in the repo. One row
+per person per day, `@@unique([userId, date])`, written once by whichever scan
+arrived first.
+
+The sharp edge was in the biometric path. A gate terminal reports EVERY scan,
+and after the morning most of what it sends is somebody leaving — and the ingest
+did this:
+
+    const existing = await tx.staffAttendance.findFirst({ where: { userId, date } });
+    if (existing) { alreadyMarked++; continue; }
+
+So the departures were arriving on a signed, authenticated, audited endpoint and
+going in the bin, while the response reported the batch accepted. The data
+needed to build the missing feature was already being delivered and discarded.
+
+FIX: a day is a SPAN, not a stamp. Every scan appends to an append-only
+`staff_attendance_event` (rls/113, INSERT+SELECT only) and the day row is a
+PROJECTION of it — first IN, last OUT. `clockOutAt` on the row, `minutesOnSite`
+computed once on the server, and a `POST /hr/attendance/clock-out` on the same
+proof-of-presence code. // GOTCHA: clock-OUT is deliberately NOT windowed. The
+window exists to catch a late ARRIVAL; applying it to a departure would refuse
+everybody who stays past it, which is most of the staff most days. // GOTCHA:
+`minutesOnSite` is NULL, never 0, with no departure — "we do not know when they
+left" and "they were here for no time" are different facts, and only one is ever
+true of somebody who scanned in. // The event log is append-only precisely so a
+later correction cannot rewrite the scan it contradicts.
+
+**AND ABSENCE WAS NEVER RECORDED AT ALL.** `summary()` counts the rows that
+exist, so a member of staff who never clocked in had no row and was neither
+present nor absent — the register said "unmarked" and the month counted nothing.
+Absence was recorded only where a human marked each absentee by hand, which on a
+kiosk or biometric school nobody does. There was no scheduled job of any kind:
+the PUPIL register got a reminder sweep and a nightly rollup for exactly this,
+and its sibling got neither.
+
+`StaffDayCloseService` closes the day hourly on each school's OWN evening tick
+(19:00 local — deliberately late, because closing at 17:00 would file an ABSENT
+against everyone running an evening activity). Anyone unmarked becomes ABSENT;
+anyone with APPROVED leave becomes ON_LEAVE, which is the second half of the
+same defect — nothing wrote attendance from leave, so an authorised absence and
+a no-show were one state, and marking somebody ABSENT counted their own approved
+leave against them. `openSpans` is counted separately: clocked in, never out, is
+the one thing a human should look at and folding it into either number hides it.
+
+**AND EVERY READER COULD REWRITE THEIR OWN RECORD.** `hr.read` and `hr.write`
+were held by exactly the same four roles and `mark()` was a plain upsert on any
+`userId` and any `date` — so anyone who could see the register could rewrite any
+mark for anyone, including themselves, including last year, with no step-up and
+no second signature. Salary changes are maker-checker here; payroll finalise is
+maker-checker; amending a PUPIL register past seven days needs a second
+approver. This record — read back in a lateness conversation and cited in a
+disciplinary file — had none. Now: `hr.attendance.read` / `.amend` split,
+self-marking refused outright (not flagged: a signal nobody reviews is not a
+control), and past 7 days a `STAFF_ATTENDANCE_AMENDMENT` that a SENIOR holder of
+`hr.attendance.amend.review` — never an hr_clerk, never the initiator — must
+approve, applied in the approval's own transaction.
+
+// GOTCHA: the type spine refused the shortcut, twice, and was right both times.
+// `WorkflowStage.permission` only accepts a declared `WorkflowPermission`, which
+// stopped me reusing `hr.attendance.amend` as its own reviewer gate — the
+// senior-tier permission it forced is the better control, because a clerk's late
+// correction should reach a manager and not another clerk. And a mutation
+// folding ON_LEAVE into ABSENT would not COMPILE, because the literal types have
+// no overlap.
+
+WEB: `/kiosk` renders the rotating code full-screen and nothing else behind the
+narrowest permission in the module (`hr.kiosk.display`). It had lived on the HR
+attendance page, so the screen standing in a corridor all day had to be signed in
+as somebody with `hr.read` and rendered every member of staff's attendance and
+the month's roll-up beside the six digits it was there to show. Also: the page
+passed `year`/`month` from the SERVER's clock while deriving the register day
+from the SCHOOL's two lines above — defeating a correct default whose docstring
+says "it is the school's month" — so around a month boundary it showed 1
+February's register beside January's roll-up; and "unmarked" was muted grey, the
+quietest thing on the one row needing action, now an amber badge.
+
+// FOUR EXISTING GATES WENT RED, every one of them earning its place: the manual
+// trigger was not wrapped in `record(…, "MANUAL")` so a hand-run day-close would
+// have been invisible to the operator console; the cron/catalogue map had no
+// entry; a double lacked the new collaborator; and `what-the-approver-is-shown`
+// refused a request whose title carried a date but not WHOSE attendance or what
+// to — an approver cannot countersign a claim about a colleague from a date, so
+// the payload now carries a real summary and the file joined MUST_SUMMARISE.
+
+// AND ONE TEST HAD TO CHANGE ITS MIND HONESTLY: `still refuses a genuine
+// duplicate` encoded the OLD rule, that a second scan on a marked day is a
+// duplicate. That rule WAS the defect. It now asserts the property it was really
+// protecting — that no SECOND attendance row is ever created for one person-day.
+
+// SELF-INFLICTED, and worth recording because the repo already warns about it:
+// I ran `git checkout` on `attendance.service.ts` to undo a probe mutation and
+// discarded every uncommitted change in the file. "git checkout on an
+// uncommitted file discards the FIX, not the mutation" is in the probe-hygiene
+// list; I rebuilt the ten changes and verified each by reading the file back
+// rather than trusting the patch. Mutations after that were reversed by hand.
+
+### "How has this person's attendance been?" had no answer in the product
+
+The register showed TODAY. The monthly roll-up showed THIS MONTH across
+everybody. The only per-person read was `myHistory` — self-only, 60 rows, no
+count, no paging, no compilation — and the staff detail page had no attendance
+section at all. So the question a head of school actually asks about one
+colleague could not be asked.
+
+`GET /hr/attendance/staff/:userId` answers it: months COMPILED IN SQL and paged,
+with the day-by-day detail for one chosen month. Web: an Attendance card on
+`/hr/staff/[userId]`.
+
+THE SHAPE THAT MATTERS is that a per-day read is O(how long the person has
+worked here) — roughly 250 rows a year, so a colleague in year eight costs eight
+times what a new starter does for a screen showing the same thing. Measured as
+the app role, under RLS, with a bound parameter, on 250,440 rows (120 staff x 8
+years) — the four conditions this log keeps recording, because each has produced
+a wrong answer on its own:
+
+    existing (userId,date) unique only     Bitmap Heap Scan   41.8 ms
+    plain (schoolId,userId,date)           Index Scan         34.8 ms
+    + INCLUDE (status, flagged, clocks)    Index Only Scan    12.5 ms
+
+The INCLUDE is the whole difference — it removes the heap fetch — and the plain
+composite barely pays for its write cost, so only the covering index ships. The
+fixture was deleted afterwards: 250k rows left in the test database would slow
+every other DB-gated suite and nothing would say why.
+
+// GOTCHA: I "dropped" the covering index and re-measured, and the plan still
+// named it — `DROP INDEX; CREATE INDEX CONCURRENTLY` in one `psql -c` is a
+// single transaction and CONCURRENTLY cannot run in one, so the pair failed and
+// rolled back. The measurement that followed was of the index I thought I had
+// removed. Check what the database is actually RUNNING before believing a
+// result, exactly as the probe-hygiene list says about containers.
+
+Accuracy rules the DTO now carries: the month totals and the day rows come from
+the SAME table so they cannot disagree; the counts come from the database rather
+than `rows.filter(...).length`, which stops being true the moment a month is
+bigger than a page; `minutesOnSite` is NULL for a month with nothing closed
+rather than 0; and days left OPEN are their own number rather than folded into
+absences.
+
+// FOUR MORE GATES, all correct. `a-filter-nobody-validated` caught `?page=`
+// parsed with a bare `Number()` — NaN for "abc", a negative offset for "-3" —
+// where every other paged read goes through one `pageNumber()`.
+// `every-student-table-is-accounted-for` required the new table to be
+// classified (STAFF_ONLY: a pupil holds no employment record).
+// `api-doc-is-current` and `api-surface` required API.md regenerated and each
+// new route to declare how a human reaches it — the door-from-the-outside rule.
+
+// AND THE MIGRATION'S BACKFILL WAS NOT IDEMPOTENT, which only showed up because
+// I applied it by hand to the dev database and then re-ran it: every existing
+// day would have gained a SECOND arrival event. Harmless to a first/last
+// projection and junk in the record it is meant to BE. Guarded with NOT EXISTS;
+// a re-run now reports `INSERT 0 0`. Every other statement in the file was
+// already `IF NOT EXISTS` — the one that wasn't is the one that writes data.
+
+### A pupil's attendance compiled for audit — month, term and session
+
+The record answered "which days" (paged, windowed) and "this term so far".
+Neither answers what an investigation asks: how many days was this child absent
+in each month of Year 9, and how does that compare with Year 8? Reading that off
+a day list means paging a thousand rows and counting by hand, which is how a
+wrong number reaches a meeting.
+
+`GET /students/:studentId/attendance/compiled?grain=month|term|session`, rendered
+above the day log on /attendance. The SCOPING IS INHERITED, not restated — the
+same `assertCanAccessStudent` the day list uses, so school_admin / principal /
+head_teacher / junior_admin see every pupil, a teacher only pupils in classes
+they teach (all three teaching links, ACTIVE enrolment), a parent their own
+children, a pupil themselves, anyone else a 404. Verified live per role.
+
+TWO THINGS DECIDE WHETHER AN AUDIT CAN RELY ON IT, and both fail plausibly:
+
+1. `attendance_term_rollup` is computed once when a term ENDS and never
+   recomputed — exactly what an audit wants, the figure the school reported at
+   the time rather than a recount that might disagree with the card already
+   filed. But it covers ENDED terms ONLY. Reading the table alone shows the
+   CURRENT term as zero, which reads as "never attended" rather than "not
+   settled yet". Unrolled terms are computed LIVE, and every bucket carries
+   `source: ROLLUP | LIVE` so a reader can tell a settled figure from a moving
+   one. A session is only as settled as its least settled term.
+2. The rollup is keyed `(termId, classId, studentId)`, so a pupil who moved class
+   mid-term has SEVERAL rows for one term. They are SUMMED.
+
+A SESSION IS BUILT FROM THE TERM BUCKETS, not from a second query over the
+register: two paths to one figure is how a year total comes to disagree with the
+terms printed beneath it. And the rate is `attendanceRatePct` — LATE attends,
+EXCUSED does not — shared with the term summary and the report card, with NULL
+rather than 0 over no registers, because a rate over nothing is unknown and 0%
+reads as truancy.
+
+MEASURED, and the answer was "add no index". 834,800 records (400 pupils x 8
+years), as the app role under RLS with a bound parameter: one pupil's whole
+history compiles in **17.5 ms**, because `attendance_record` is already
+PARTITIONED BY MONTH with a per-partition `(schoolId, studentId)` index. A
+covering index would have shaved a few milliseconds off an already-fast read on
+a table written to on every register — the discipline is to measure the variant
+BEFORE adding it, and here that meant not adding one.
+
+// GOTCHA, and my own test was the one that failed it: a mutation grouping the
+// rollup by `(termId, classId)` — the exact "reports a fraction of the term"
+// defect — PASSED against my first double, because the double summed per term
+// whatever `by` it was handed. A stub that ignores the query's own arguments
+// vouches for a service that stopped asking them. Fixed to honour `by`; the
+// mutation then failed with `Expected 58, Received 28`. Same shape as the
+// `findMany` stubs that ignore `where` recorded above, and worth noting that it
+// caught me while I was writing a test specifically about that column.
+
+// AND DRIVING IT FOUND A DEFECT IN THE THING I HAD JUST BUILT. On real data the
+// four terms summed to 162 registers against a lifetime of 193: the missing 31
+// were taken on dates in the GAPS BETWEEN configured term dates (20 Dec–4 Jan,
+// 3–19 Apr). So the term and session grains silently omitted 16% of the pupil's
+// record — on the screen whose whole purpose is being cited at somebody. A
+// reader adding the terms up would either mistrust the tool or quietly quote the
+// smaller number. `outsideAnyBucket` now names it, in words that say it is
+// usually a gap in the CALENDAR rather than in the child's attendance, because
+// the two readings call for different action. Zero for months by construction,
+// clamped at zero so a stale rollup cannot print a negative "missing" figure on
+// an audit screen. It was invisible to every unit test, because a fixture's
+// terms cover its fixture's dates.
+
+### The profile showed a pupil's blood group but not which class they are in
+
+`StudentProfileDto` carried admission number, date of birth, address and contact
+details, and neither the class the pupil sits in nor who is responsible for them.
+The detail page fetched contacts, medical, guardians and scan history; a teacher
+or a principal opening a pupil could not see the first thing anybody wants.
+
+DERIVED FROM THE ACTIVE ENROLMENT, NOT STORED, and that is the whole design.
+SIX writers move a pupil between classes — promotion, demotion, graduation,
+transfer, withdrawal and the two bulk importers — so a denormalised
+`currentClassId` would have to be correct in all six, and the one that forgot
+would leave a pupil showing last year's class for ever with nothing to say it was
+wrong. Deriving it means the promotion batch, which already closes the source
+enrolment before opening the destination, updates the profile by construction.
+
+The invariant that rests on was measured, not assumed: on the demo school, 900
+pupils with exactly ONE active enrolment each and none with two. The read is
+ordered `enrolledAt desc` anyway, so that if it were ever broken this returns the
+most recent placement rather than an arbitrary one.
+
+Driven end to end against a real Postgres (`the-profile-follows-a-promotion`):
+JSS 1A / Mrs Old -> close the source, open the destination -> JSS 2A / Mr New,
+with the SUPERVISOR following because the class changed and nothing about the
+pupil was rewritten; graduating out then reports "not in a class" rather than
+keeping the class they have left. Mutation-validated: reading any enrolment
+rather than the ACTIVE one fails it.
+
+THREE STATES, REPORTED APART, because they need different actions: not placed in
+a class (one such pupil on the demo school); no form teacher assigned (a rota
+gap — 30 of the demo school's classes have none); and a form teacher who has
+LEFT, which is a handover nobody finished. The leaver's NAME is never returned,
+because showing it invites somebody to contact a person who is gone.
+
+// GOTCHA: an existing spec pinned the profile with exact `toEqual`, so an
+// ADDITIVE change read as a scoping failure. Those cases assert WHO MAY READ a
+// profile, not the column set, so they are re-anchored to `toMatchObject` on the
+// identifying field and the new fields have their own tests. Anchor a test to
+// the PROPERTY, not the text.
+
+// GOTCHA, mine again: my verification probe reported the fields missing from the
+// live API. They were not — the probe's BFF path 404'd and it read the body
+// without looking at the status, so it reported a fact about itself. Printing
+// the STATUS first showed it in one run. Third time this session; the rule is in
+// the probe-hygiene list and I keep rediscovering it.
+
+### The only place a class can be created had not rendered for anyone
+
+`/classes` gated its create-a-class card on four things:
+
+    {canWrite && classes && students && staff && <ClassAdmin ... />}
+
+and three lines above, `students` was hard-coded:
+
+    // Roster no longer prefetched: the enrol/link controls search on demand.
+    Promise.resolve(null),
+
+The optimisation removed the data; the render condition kept depending on it. So
+the card could never be true — not "hard to find" but ABSENT, for every role,
+since that change. A card that does not render looks exactly like a card that was
+never meant to be there, which is why nobody noticed: the page still had plenty
+on it, and the missing thing was the only route to creating a class at all.
+
+// AND I ASSERTED IT WAS REACHABLE, TWICE, ON A STRING MATCH FROM ANOTHER
+// COMPONENT. My probe grepped the rendered page for "New class", found it, and
+// I concluded the form was there. It came from `ClassSubjectsAdmin`'s
+// `aria-label="New class name"` — a RENAME field in a different card. The create
+// card's own title, "Manage classes", was never in the page and I never looked
+// for it. The repo's own rule covers this ("grepping SSR HTML matches the JS
+// bundle, not a rendered row; assert the prop"), and the general form is worse:
+// a probe that searches for a string it did not take FROM THE THING IT IS
+// TESTING is asking a question about the whole page, not about the component.
+
+GATE: `a-card-that-can-never-render` walks every server page, pairs the names
+destructured from `await Promise.all([...])` with the array's elements
+positionally, and fails when a name fetched as a bare `Promise.resolve(null)` is
+then used to gate a component. The conditional form
+(`cond ? apiGet(...) : Promise.resolve(null)`) is the ordinary permission gate
+and is not flagged. Mutation-validated: restoring the condition fails it, naming
+the page and the variable. // GOTCHA: its own "a walk that finds nothing passes
+green" assertion caught the first version scanning ZERO files — `walkTs` matches
+`.ts` and pages are `.tsx`.
+
+A CLASS TEACHER IS NOW EXPECTED, NOT REQUIRED — a deliberate reversal. The
+requirement was added to stop the gap growing, and the reasoning was right, but
+the mechanism asserted an invariant the data does not have (30 of 31 classes have
+no supervisor) while doing nothing about those, and it blocked the ordinary way a
+school works: lay out next year's classes, staff them later. A required field
+people satisfy by naming whoever is in the dropdown is worse than an empty one,
+because a wrong name is acted on and an empty one is chased. The rule is now
+NAMED OR NOBODY, never wrong, never quietly removed — a pupil or a leaver is
+still refused on every path, a class that HAS one still cannot have it cleared,
+and the classes list already flags and filters classes with none.
+
+// The gate `every-class-has-a-class-teacher` still passed after the reversal,
+// because every property it actually tested survived. Its HEADER did not: it
+// claimed to close "a class created with no class teacher at all". Prose that
+// outlives the rule it describes is the defect this log records as "a comment
+// asserting agreement is not agreement", so the header records the new decision
+// and a case was added for it.
+
+ALSO BUILT, both asked for and neither present: `POST /classes/arms` creates a
+whole stream's arms in one action (idempotent on the composed name, partial
+success reported per arm with the reason), and `Class.homeRoomId` gives a class
+a BASE room — distinct from `ClassSubjectOffering.preferredRoomId`, which pins
+one SUBJECT to a specialist room. One class per room via a partial unique index
+(`WHERE homeRoomId IS NOT NULL`, so any number may have none), and the refusal
+NAMES the class that already has it rather than reporting a constraint. Verified
+live: three arms submitted, two created, the third skipped with "Hall A is
+already the base room for SS1 Science H".
+
+// GOTCHA in my own bulk endpoint: the first version caught every error and
+// reported it as a skipped arm, which dressed a genuine fault up as a business
+// rule and would have left an operator re-pressing a button that could never
+// work. Only an HttpException — a guard's refusal — may skip an arm now; a fault
+// propagates. Making that change immediately surfaced two real faults my test
+// double had been hiding.
+
+### A scheme of work written three times, and notes copied one at a time
+
+`SubjectSyllabus` is keyed `(classId, subjectId, termId)` and `LmsContent.classId`
+is required, so SS1 Science A, B and C each need their own plan and their own copy
+of every note. Subjects already had `copy-to-arms` — "one action instead of one
+configuration per arm" — and the plan that says WHAT TO TEACH IN WHICH WEEK did
+not. The only copy path for content was `clone`: one item to one class, so three
+arms of twelve notes is twenty-four operations.
+
+CBT, checked at the same time, is keyed correctly and needed nothing:
+`CbtQuestionBank` hangs off `subjectId`, `CbtQuestion` carries a `level`
+(null = any), and only `CbtExam` names a class — so every arm draws from one bank
+and an unlevelled class draws from the whole of it rather than nothing.
+
+BOTH DECISIONS WERE ALREADY TAKEN BY THIS CODEBASE; neither was invented here.
+
+SKIP, NEVER OVERWRITE — `copySubjectsToArms` uses `skipDuplicates` and says why:
+it must be safe to press twice, and it must protect an arm that has adjusted its
+own copy. The person who loses that work is not the person pressing the button.
+So an arm with a plan for that (subject, term) is skipped and NAMED, as is an arm
+that does not offer the subject at all — a Physics plan on an arm teaching no
+Physics is reachable from nowhere and confusing when found.
+
+LAND AS DRAFT — `cloneContent` already sets `status: "DRAFT"` unconditionally.
+Carrying approval would let one approval in SS1A publish into three arms nobody
+reviewed, which is a control with a way round it.
+
+ONE DELIBERATE DEPARTURE FROM `clone`, and it is why this is a separate action:
+clone drops `subjectId`/`termId` whenever the target is a different class. That
+is right for an arbitrary cross-class target, which may teach neither — and wrong
+for a sibling arm, where both are the same by construction. They are the GRADEBOOK
+TAG (the schema: a quiz tagged `(subjectId, termId)` "can be pulled into the
+SubjectResult assignment CA component"; both null means not counted), so dropping
+them turns one copy into twelve retagging jobs whose omission is invisible until a
+report card is short a component. `moduleId` and `syllabusItemId` ARE dropped —
+`LmsModule` is class-scoped and a syllabus item belongs to that arm's own plan.
+Re-pointing the week is deliberately not attempted: nothing guarantees the plans
+correspond, and attaching notes to the wrong week is worse than leaving them
+untagged.
+
+The plan's OWNER is the arm's own subject teacher, not whoever pressed the button
+— they are the person who will teach it and adjust week 6, and a principal
+copying to three arms would otherwise own plans they do not teach. Weeks copy as
+PLANNED: `status`/`taughtAt` record what an arm actually taught, and carrying
+"taught" asserts a lesson that never happened in that room.
+
+// GOTCHA, caught before it shipped: I registered both routes in the surface
+// registry as "reached from" screens that did not exist yet. Two endpoints
+// nobody could call — the exact "a route no screen calls is a door missing from
+// the outside" rule I had been citing three messages earlier. The controls exist
+// now, so the registry entries are true rather than aspirational.
+
+// GOTCHA: I wrote a `canAuthorIn` wrapper before noticing `canAuthor` already
+// answers exactly that question as a boolean. A second definition of "may author
+// here" is one more thing to drift; deleted.
+
+// FIXTURE TRAP of a shape worth naming: one `class.findMany` stub answered TWO
+// different questions — "which are the sibling arms" (by stage/level/stream) and
+// "which classes does this user SUPERVISE" (by supervisorId, via
+// classIdsTaughtBy). Returning the arms to both made the caller look like the
+// supervisor of every arm, so the authoring check passed and the test failed for
+// entirely the wrong reason. A double must answer by the WHERE it is given.
+
+// FOLLOW-UP: the week re-pointing I had argued AGAINST is now built, because
+// the reason against it stopped being true. I had said nothing guarantees two
+// arms' plans correspond week for week — right in general, and wrong
+// immediately after `syllabus/copy-to-arms`, which creates an arm's weeks FROM
+// THE SAME SOURCE. After that they correspond by construction.
+//
+// So a copied note attaches to the ARM'S OWN week when the match can be PROVEN:
+// same week number AND same topic, in that arm's plan for the same (subject,
+// term). The topic check is the whole safeguard — it distinguishes "this plan
+// came from the same place" from "this arm happens to have a week 3 about
+// something else". Where it cannot prove it, the note lands untagged, which a
+// teacher can fix; the wrong week is not recoverable, because nothing would say
+// it was wrong.
+//
+// RESOLVED FROM THE ITEM'S OWN PLAN, not from the content's `subjectId`/`termId`
+// — those are the gradebook tag and may be null while the week is set.
+//
+// TWO QUERIES FOR EVERY ARM, taken before the loop: the arms' plans by
+// `classId: { in: [...] }`, then the matching weeks by `syllabusId: { in: [...] }`.
+// A lookup per arm is the shape that degrades quietly — correct at two arms and
+// ten queries at ten — so the count is asserted, along with the fact that a note
+// carrying no week costs nothing extra.
+//
+// The response says which arms got a week and which did not, because a copy
+// attached to the plan shows up in that arm's weekly view and one that is not is
+// a draft somebody has to place by hand.
+
+### Whole-application simulation: 5,000 schools, five years
+
+Seeded a 5,000-school fleet, one school with five years of staff attendance
+(130,500 rows / 261,000 scan events) and one with five years of pupil registers
+(1,291,951 records across 52 monthly partitions), and measured as the app role
+under RLS with bound parameters.
+
+WHAT HELD. Index coverage is complete: of 203 tenant-scoped tables, exactly TWO
+lack a `schoolId`-leading index — `ultimate_participant` (the documented
+RLS-exempt arena) and `school_group_member` (operator-managed, deny-all). Reads
+measured fine at volume: the scan projection 0.17 ms, a person's whole five-year
+compiled history 3.47 ms on an Index Only Scan, the fleet scan across 5,000
+schools 5.53 ms. Retention is broader than it looks — `integrity_signal`,
+`submission_draft`, `submission_telemetry`, `xapi_statement`, `scan_event`,
+`gateway_event` and READ notifications are all purged, and `attendance_record`
+and `audit_log` are partitioned.
+
+**THE FINDING: PLANNING TIME, NOT EXECUTION.** An aggregate over a partitioned
+table with NO date predicate must plan every partition:
+
+    unbounded (all months), 52 partitions   planning 88.6 ms   execution 9.4 ms
+    bounded to one school year              planning  0.58 ms  execution 1.3 ms
+
+Planning was NINETY PER CENT of the cost, and it scales with PARTITION COUNT —
+8.9 ms at 5, 88.6 ms at 52 — which tracks the PLATFORM's age, not the pupil's
+record. So the pupil compiled history I had just built would get slower every
+month for every school, including schools that joined yesterday, and nothing in
+their own data would explain it. This is the O(lifetime) class arriving by a
+route the log had not recorded: not more rows, more PARTITIONS.
+
+FIX: the page IS a date window for months, so page 5 costs what page 1 does, and
+the in-memory slice is gone. The one pass that must stay unbounded is the
+lifetime total — an audit figure that stopped at a page would be the very thing
+it must not be — so it now also returns the SPAN, which gives the month total
+without a second scan over every partition. Two unbounded passes became one:
+~196 ms -> ~93 ms, of which 76 ms is the remaining unavoidable plan. Bounding
+that by the pupil's first enrolment is the next step if the screen proves slow;
+it was not measured, so it is not claimed.
+
+// GOTCHA found while seeding, and it is a REAL operational trap rather than a
+// fixture artifact: Postgres REFUSES to create a partition for a month that
+// already has rows in the DEFAULT partition ("updated partition constraint for
+// default partition would be violated"). So once the extender falls behind — or
+// a school onboards with history — that month can never be partitioned until
+// the rows are migrated out. `AuditPartitionService` already DETECTS this,
+// counts `defaultRows` into `failed` so the console flags it, and its comment
+// says "they must be moved before a partition can be added for their month, and
+// that gets harder the longer nobody looks". The detection is right; there is no
+// remedy in the product, and at 5,000 schools "manual attention" has no tool.
+
+// The day-close write path found in the same run is written up above.
+
+### A window anchored on today lands after a leaver's final register
+
+// Found reviewing my own fix from #347 before committing it, which is the only
+// reason it is here rather than in a school's incident report.
+//
+// Turning the compiled-attendance month page from a SLICE into a date WINDOW
+// fixed the partition-planning cost, and introduced a correctness defect in the
+// same edit. The window was counted back from TODAY:
+//
+//     monthsBack = page * pageSize
+//     from = firstOfMonth(today - monthsBack + 1)
+//
+// which is right for a pupil still on roll and wrong for everyone else. A pupil
+// who left in July 2023 has no register after that date, so with a 36-month page
+// every month of their record fell outside page 1 from August 2026 onwards: an
+// EMPTY page under a `total` correctly reporting thirty months of history, with
+// paging controls that work and a screen that shows nothing.
+//
+// The reader this hurts is the only reader the screen was built for. Nobody
+// compiles three years of a current pupil's attendance per month; the request
+// that produced this surface was "viewable for many years for audit and
+// investigation", and an investigation is overwhelmingly opened on somebody who
+// has gone. So the defect was aimed precisely at the use case.
+//
+// This is the silent-partial-success class again (the totals agree, the list is
+// empty, nothing says why), arriving through the door of a performance fix —
+// which is the recurring shape: the careful half is reasoned out and the edit
+// changes what the numbers MEAN as a side effect.
+//
+// FIX: anchor on `last_day`, which the lifetime pass already returns for the
+// span, falling back to the school's today when there is no record at all. Costs
+// nothing — the value is in hand.
+//
+// TESTS (mutation-validated, each failing naming its own property):
+//   - anchor on today instead of last_day -> the LEAVER test fails
+//   - drop the `AND "date" >= … AND "date" <` predicate -> the SQL-window test
+//     fails (and the month double now HONOURS the window, so it cannot vouch for
+//     an unwindowed query — the fixture trap this repo keeps recording)
+//   - total from `all.length` -> Expected 30, Received 1
+
+### The largest table on the platform had no purge path
+
+`staff_attendance_event` is append-only by design — INSERT and SELECT only for
+the app role, so an amendment can never reach back and rewrite the scan it
+contradicts. That also means the privileged retention sweep is the ONLY thing
+that can ever make it smaller, and it was not in the sweep.
+
+Projected at 5,000 schools over five years: ~1.3B rows / ~305 GB, carried
+through every backup and every restore drill. Both of its siblings were already
+handled — `scan_event` is purged on the school's privacy window,
+`attendance_record` is partitioned by month — which is what made this one easy
+to miss: the class had been thought about, twice, and this table was written
+after both.
+
+WHAT IS KEPT AND WHAT GOES. The DAY ROW (`staff_attendance`) is the employment
+record and is never purged at any age. It is a PROJECTION of these scans — first
+IN, last OUT — so the summary outlives the evidence it was drawn from, which is
+the same shape as keeping payments rather than a balance. What ages out is the
+raw scan stream, whose value is bounded: the amendment window is seven days, a
+disciplinary case citing lateness looks back months, and device/clock-drift
+forensics are a matter of days.
+
+THE WINDOW IS ITS OWN DIAL, and this is the decision the rest turns on.
+`integrityRetentionDays` governs surveillance data about MINORS; a school
+setting it to ninety days is behaving well and the product should encourage it.
+These scans are employment evidence about ADULTS. Coupling them would mean a
+privacy-conservative decision about children silently destroying a school's own
+lateness and pay-dispute evidence — and the first draft did exactly that, by
+running the staff purge inside the telemetry window's early return. Both
+directions now hold: a school with telemetry purging OFF still has its scans
+purged, and a school with scan purging OFF still has its telemetry purged, and
+the result says WHICH half did nothing rather than one flag reading as "this
+school was skipped".
+
+Default 730 days. `School.staffAttendanceEventRetentionDays`, nullable-free with
+a default so nothing moves for a school already live, surfaced on
+/admin/compliance beside the telemetry window — a dial nobody can see is a dial
+nobody sets. // The same card was asserting "days, then purged automatically"
+under a window of 0, which disables purging: it told a DPO the opposite of what
+was configured. Both cards now read "Never" and say so.
+
+BATCHED, AND OUTSIDE THE TELEMETRY TRANSACTION. These windows are new, so the
+first sweep on a mature database has years of rows to remove at once on the
+biggest table there is. Inside that transaction it would be one enormous
+long-held delete — locks, a WAL burst, and a rollback that retries the same
+delete every night for ever. It reuses `deleteInBatches`, the helper written for
+the platform-wide streams for this exact reason.
+
+// GOTCHA: the sweep's own reported total is what an operator reads, and this is
+// the largest stream in it by a wide margin. Omitting it is how that same figure
+// once under-reported millions. It is in the total, and asserted on the figure
+// the SERVICE computes rather than one the test adds up itself.
+
+// GOTCHA found in the same file: the PROCESSOR dropped `failed`. The service
+// counts a school whose purge threw and carries on, which is right — but a catch
+// that does not rethrow leaves `lastOk` true, so the job summary's `failed` field
+// is the operator console's only sight of it. It returned `{schools, purged}`.
+// A sweep skipping four schools every night looked exactly like a healthy one,
+// on the job whose whole purpose is that minors' telemetry does not sit past its
+// window. The existing gate walks the SERVICES for a `failed++` and never asked
+// whether the processor carried it through.
+
+LIVE, through the real endpoint on the rebuilt stack, 1,240 probe scans seeded
+over 300 days:
+  - 730-day window, telemetry DISABLED -> staffEventsDeleted 680,
+    skipped "DISABLED", day rows 18 -> 18. Oldest scan left is exactly
+    today-730: the boundary day is inside the window, as `< cutoff` should mean.
+  - second run -> 0. Idempotent.
+  - window 0 -> 0 purged, staffEventsSkipped "DISABLED".
+  - window 1 -> 559 purged, 3 left dated today and yesterday. Day rows 18.
+  - EXPLAIN on the purge predicate: Index Scan using
+    staff_attendance_event_schoolId_date_idx. No new index — an index nothing
+    selects is write amplification, and this table takes two writes per member
+    of staff per day.
+
+Nine mutations, each failing naming its own property: couple the windows; drop
+the schoolId bound; skip the midnight normalisation; one statement instead of
+batching; purge inside the transaction; omit the stream from the total; lose the
+window snapshot; purge the day row; drop `failed` in the processor.
+
+// GOTCHA on the module gate: the MANUAL route is `@RequireModule(INTEGRITY)`,
+// so a school without that module gets 404 on it. Left as it is — the nightly
+// fleet sweep is not module-gated and is what actually purges these rows;
+// widening a module gate is a product decision, not a defect fix.
+
+### A promise the product made on the screen and broke on the click
+
+Attaching a PDF to a weekly material says, in three places, that pupils can open
+it in the browser — the picker's refusal, the helper text, and the presign's own
+400. The download then presigned `attachment` + `application/octet-stream`, so
+every pupil got a file saved to disk and nothing rendered.
+
+Serving it inline is only safe if the server knows what the bytes ARE, and it
+did not: `confirmUpload` set `fileUploaded: true` on the caller's word alone.
+Three things were wrong there and all three were invisible to the teacher —
+the bytes may never have arrived (a failed PUT still ended with "Attached.");
+the size was a number the CALLER sent, checked against nothing; and the type was
+a claim, the browser-side check beside it being friction rather than a control.
+The Vault's own provider carries the note for the first of these, written for
+this exact failure, and this module was built without it. Sibling asymmetry
+again.
+
+So the fix is a pair, and neither half is safe alone: validate the bytes on
+confirm (exists / size / `%PDF-` magic bytes, refusing in a way that leaves the
+material unattached so the same upload can be retried), and only then serve the
+file as what it was validated to be.
+
+`inline` stopped being a BOOLEAN and became the TYPE the server vouches for.
+That is what keeps the check and the serving joined: there is no way to ask for
+inline serving without naming what was established. It also lets the S3 branch
+pin `ResponseContentType` instead of letting S3 return the object's stored type
+— which came off a presigned PUT and is therefore the uploader's claim, i.e.
+an inline response carrying an attacker-chosen Content-Type, which is the
+stored-XSS this module already has a write-up for. On the local path the type
+rides the SIGNED OP (`get-inline-pdf`), never a query parameter.
+
+// GOTCHA, and the reason to drive it rather than read it: the feature could not
+// have worked locally AT ALL. `KEY_SHAPE` in the local storage controller
+// admits `schools/` and `careers/` — the only prefixes that existed when it was
+// written — and four more have been added since: `lms/`, `discipline/`,
+// `submissions/`, `tasks/`. On the stub provider, which is what the documented
+// local stack runs, every presigned PUT under those four answered 400 "Not
+// available", with a refusal deliberately worded to be indistinguishable from a
+// bad signature. Four upload features that failed at the FIRST step. The
+// allowlist is derived from a named constant now and
+// `a-key-no-upload-could-use.spec.ts` computes the minted set from source, so
+// the seventh prefix cannot be added without one.
+
+// GOTCHA, found while verifying the first: the school LOGO is presigned in FIVE
+// places and rendered in an <img> in all of them; three asked for inline and two
+// did not — and the two were the PUBLIC ones, the login page by slug and the
+// member shell. A browser was handed attachment + octet-stream for an image it
+// was being asked to display, so the custom logo, which is a PAID perk gated on
+// the subscription being in good standing, did not appear on the page it was
+// bought for. Collapsed to one private `logoUrl()`; the gate asserts there is
+// exactly ONE presign site, because any number above one can drift again.
+
+LIVE, end to end on the rebuilt stack:
+  - confirm with nothing uploaded -> 400 "No file has arrived yet", fileUploaded
+    still false.
+  - HTML uploaded as `notes.pdf` claiming `application/pdf` -> PUT 200 (a bucket
+    takes what it is given), confirm 400 "That file is not a PDF", fileUploaded
+    still false.
+  - a real PDF -> PUT 200, confirm 201, fileUploaded true.
+  - GET the download URL, then fetch it: `Content-Type: application/pdf`,
+    `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`.
+  - the URL's HMAC recomputes against op `get-inline-pdf` and against no other,
+    so the grant cannot be edited on.
+  - one character changed in the signature -> 400.
+
+Nine mutations across the three files, each naming its own property.
+
+### A template a school could fill in completely and still be chased for
+
+`SIS_REQUIRED_PROFILE_FIELDS` decides when a pupil's profile counts as COMPLETE.
+The bulk-import template had no column for two of them. Measured by running the
+real template through the real rule:
+
+    template columns        : name, email, admissionNumber, dateOfBirth, gender,
+                              phone, address, class
+    required to be COMPLETE : dateOfBirth, gender, phone, addressLine1, city, state
+    STILL MISSING           : [ 'city', 'state' ]
+
+So a school that imported an accurate, complete register had EVERY pupil land
+INCOMPLETE, and the nightly sweep nudged every one of them — and their guardians
+— for two facts it had never been offered anywhere to type. A nudge is supposed
+to mean "we genuinely do not know this". It meant "the template is two columns
+short", and nothing in the product could tell the difference. The
+silent-partial-success class again, pointed at families rather than at an
+operator, and at the scale of a whole roll.
+
+THE RULE THAT DECIDES WHAT BELONGS IN THE TEMPLATE, written down because it is
+the durable part: a column exists for every fact THE SCHOOL is the authority on,
+plus every field the platform requires before a profile counts as complete.
+Anything else is asked of the family, who are the authority on it and who will
+keep it current. Medical details and emergency contacts are deliberately absent
+and must stay absent — they are encrypted, separately audited and staff-owned,
+and a spreadsheet passed around an office is the wrong custody for them.
+
+The template is now `name, admissionNumber, class, dateOfBirth, gender, email,
+phone, addressLine1, addressLine2, city, state`, all optional but the name, and
+WHAT YOU LEAVE BLANK IS EXACTLY WHAT THE PUPIL IS ASKED FOR. One definition in
+`@sms/types` — it existed TWICE, as `TEMPLATE_HEADERS` in the service and `COLS`
+in the web component, hand-kept, with the file matched BY HEADER NAME, so drift
+between them was never a crash: it was a column a school filled in and the
+platform dropped.
+
+Gate `a-template-that-can-finish-a-profile` takes the file the product actually
+hands a school, parses its worked example, and fails unless a pupil created from
+it needs no chasing at all. Asserting on the column list alone would pass with an
+example that leaves the new columns blank. The SECOND example is deliberately
+sparse and the gate checks that too — a file whose every example is complete
+teaches a school nothing about which blanks cost it a reminder.
+
+// GOTCHA: the export beside it, `/admin/export/students.csv`, was
+// `#, Name, Class, Status` — four display columns no path could read back. So
+// there was no export→correct→re-upload loop either, and combined with a
+// create-only import (below) a school that got its first import slightly wrong
+// faced fixing it one pupil at a time for ever. It round-trips the template
+// now, off the same `SIS_IMPORT_COLUMNS` table, so a column appears at both
+// ends or at neither. A GENERATED sign-in identifier is exported BLANK on
+// purpose: handing the platform's own invention back as though it were the
+// pupil's address would, on re-upload, turn it into a supplied email and change
+// how the account is treated.
+
+### The address that took the class column with it
+
+The import parsed with `line.split(",")`. The address is the field most likely to
+contain a comma and a spreadsheet quotes such a cell. Measured on the real parser:
+
+    input   : ...,"12 Main St, Ikeja",SS3 Science A
+    address : "12 Main St
+    class   : Ikeja"
+
+The address was silently truncated AND every later column shifted by one, so the
+pupil enrolled in NO class — `Ikeja"` matched nothing and the row then looked
+like any other pupil awaiting placement. Two corrupt records from one comma, on
+the one path a school uses to load its entire roll.
+
+`parseCsv` in `@sms/types` is quote-aware and handles what a spreadsheet actually
+emits: quoted fields, embedded commas, embedded newlines, `""` as an escaped
+quote, CRLF, and a UTF-8 BOM — which Excel writes and which would otherwise land
+inside the FIRST HEADER, so `name` arrives as `﻿name`, every row has no name,
+and the whole file is rejected as empty with nothing on the screen able to
+explain why. `csvCellOf` is the writing half, and a test round-trips the awkward
+cells through both.
+
+### The columns the door threw away
+
+The template gained `city`, `state` and `addressLine2`. Driving a real import end
+to end against the live stack, they did not arrive:
+
+    PROBE Ada Complete | PRB-001 | 2012-05-01 | F | 08000000001 |  |  |  | INCOMPLETE
+
+Address, city and state all blank, on a row that supplied every one of them —
+and the pupil still INCOMPLETE, which is the exact symptom the whole change was
+meant to remove. Every status along the way was a success: 201 staged, 201
+approved, `created: 2`.
+
+The cause was a THIRD hand-kept copy of the column list — the Zod schema at the
+controller, which nobody had mentioned because it is not called a template. A
+`z.object` STRIPS what it does not declare, so the school's work was discarded
+between the file and the database in silence.
+
+EVERY UNIT TEST PASSED, and would have gone on passing: they drive the service
+directly and never cross the boundary that was dropping the columns. This is the
+"guard on one door" shape inverted — not a check missing from one path, but a
+DECLARATION missing from one path — and the only thing that found it was running
+the feature.
+
+The durable fix is the type system, not a fourth careful copy.
+`SIS_IMPORT_COLUMNS` is `as const` so its keys form a union, and the controller
+carries
+
+    type ColumnWithNoValidator = Exclude<SisImportColumnKey, keyof typeof sisRowShape>;
+    const _everyColumnValidated: [ColumnWithNoValidator] extends [never]
+      ? true
+      : ["a template column has no validator:", ColumnWithNoValidator] = true;
+
+so the next column added without a validator fails to COMPILE, naming itself:
+
+    error TS2322: Type 'boolean' is not assignable to type
+      ["a template column has no validator:", "postalCode"]
+
+An assignment rather than a test, deliberately: the failure has to land on
+whoever adds the column, in the file they are already editing.
+
+// GOTCHA: the FIRST version of that check ended in
+// `as Record<SisImportColumnKey, true>`, and a cast defeats the check entirely
+// — it compiled happily with a column missing. Verified by adding `postalCode`
+// and watching it pass, which is the only reason it is not still there. A
+// compile-time gate needs the same mutation validation a runtime one does.
+
+// GOTCHA: `as const` drops an OMITTED property from that member's type, so the
+// union loses it and `col.profileField` stops compiling for the whole array.
+// Every entry states all four properties, nulls included; the literal keys are
+// worth more than the brevity.
+
+### An import that could only ever be done once
+
+A row matching a pupil already on roll was counted as a "duplicate" and dropped.
+The file was a one-shot: no bulk route to correct a typo, fill in the columns a
+school did not have on the day, or load the addresses it gathered later.
+
+It is an upsert now, keyed on the ADMISSION NUMBER — the school's own identifier,
+the key the guardian upload already matches on, and unlike a generated sign-in
+identifier it does not change when a name is corrected.
+
+ONE RULE MAKES IT SAFE: **a blank cell never clears a stored value.** A school
+re-uploading its roll with only the address columns filled must not wipe every
+date of birth it loaded last term. The other reading destroys data nobody asked
+to destroy and nothing would report it — a cleared field looks exactly like one
+that was never supplied. Written as `COALESCE(v.col, p.col)`, asserted on the
+STATEMENT rather than on the bound values, because a test that checked only the
+payload would pass against an UPDATE setting every column to the row's nulls.
+
+An update rewrites a child's record, so it goes through the same maker-checker
+approval a creation does — and the approver is shown the FIELDS that would
+change, per pupil, before deciding. A count alone asks somebody to sign for
+something they cannot see. The preview is capped at 25 and the COUNT is the true
+total; a field the file repeats unchanged is not counted at all, or every
+re-upload would read as if it would rewrite the whole school and a reviewer would
+learn to approve without looking.
+
+SCALE, and both halves matter:
+  - WHICH ROWS ARE UPDATES is asked BEFORE the hashing, not after. bcrypt is the
+    dominant cost of an import at roughly 100 ms a row, and an update needs no
+    account and therefore no password. Hashing first would burn a minute and a
+    half of CPU on a 1,000-pupil correction that creates nobody, and would do it
+    again every time a school made one.
+  - THE UPDATE IS ONE STATEMENT PER CHUNK, an `UPDATE … FROM (VALUES …)`. Prisma
+    has no bulk update with per-row values, and a loop of `update()` calls inside
+    an interactive transaction is exactly the trap this method already carries a
+    comment about: Prisma caps one at FIVE SECONDS, so a school correcting 400
+    records would get "Internal server error" and whether it worked would depend
+    on how busy the task was.
+
+// GOTCHA: `total` was `prepared.length`, and `prepared` no longer holds the
+// update rows — so a 400-row correction would have reported itself as a 0-row
+// import. Counted across both.
+
+Six mutations, each failing naming its own property: drop COALESCE (data loss);
+hash every row; one UPDATE per pupil; remove the `city` column from the template;
+empty the preview; report the total off `prepared`.
+
+// GOTCHA in the test double, made and then fixed here: `$executeRaw` is a
+// TAGGED TEMPLATE, so the first argument IS the TemplateStringsArray — and
+// reading `.values` off an array returns `Array.prototype.values`, a FUNCTION,
+// not the bound parameters. A double built that way captures nothing and vouches
+// for any statement. The bound values are the rest args, and a `Prisma.sql`
+// fragment among them carries its own, so they have to be flattened.
+
+// An existing test read `header.endsWith(",class")` and went red when the
+// template gained its missing columns — a change that STRENGTHENED what the file
+// can carry. Where a column SITS was never the property; that it is the one
+// offered is. Re-anchored.
+
+Live, end to end on the rebuilt stack, after the boundary fix:
+  - import a complete row (address containing a comma) and a sparse one ->
+    `12 Main St, Ikeja` / Lagos / Lagos all land; the sparse pupil's blanks stay
+    blank. `missingProfileFields` is now [] for the complete pupil, so the sweep
+    says "looks complete, press Submit" instead of naming two columns that had
+    nowhere to be typed; the sparse one is chased for exactly the four it lacks.
+  - export the roll -> headers identical to the template, and the file re-parses
+    through the shipped parser with the comma-bearing address intact.
+  - correct it: Bolu's four blanks filled, and Ada's row sent carrying ONLY
+    `city`. The dry run named both pupils and the exact fields, `city: Lagos ->
+    Ibadan` among them. After approval: city changed, and date of birth, gender,
+    phone, address and state all UNTOUCHED — the COALESCE property holding on
+    real data. `updated: 2, created: 0`, no new accounts, no credentials issued.
+  - a school admin can submit on a pupil's behalf (`submitProfile` is scoped by
+    `assertCanAccessStudent`), so "the school completes it for them" is a real
+    path and the supervisor/admin review still needs two other people.
+
+### Six reports from the field, and what each one actually was
+
+All six were real. Four were defects, one was a missing feature, one was sound.
+
+**1. THE ONE BUTTON THAT EXISTS TO TAKE A MISSING REGISTER ANSWERED "PAGE NOT
+FOUND".** `RegisterBoard`'s "take →" linked to `/classes/<id>`, which is not a
+route — the class pages are `/info`, `/roster`, `/content`, `/analytics`. The
+board is rendered FIRST on /attendance, deliberately, because an outstanding
+register is the only time-critical thing on the page; so it is also the
+likeliest click, and it 404'd. Two more sites had the same link: a pupil's
+current class on their profile, and an unstaffed lesson on the timetable. And
+`ClassAttendanceBoard` already carried a COMMENT saying `/classes/<id>` is not a
+route — a comment asserting a rule three other files were breaking, which is the
+shape this repo keeps recording.
+
+Gate `a-link-to-a-page-that-is-not-there`: every LITERAL href in the web,
+`${…}` normalised to one segment, matched against the routes the app actually
+declares. It found a FOURTH on its first run — `ArchivePanel` told a school to
+"set up the year on the calendar" and linked `/admin/calendar`, which has never
+existed; the academic year is set up on /classes. A link to a page that is not
+there is worse than no link, and that one sat on the screen where somebody has
+just been told they cannot proceed without it.
+
+**2. THE PUPIL YOU JUST PICKED, WHOSE NAME THEN DISAPPEARED.** `StudentPicker`
+and `UserPicker` showed the choice as the input's PLACEHOLDER, resolved by
+looking the id up in `[...seed, ...results]` on every render. Choosing clears the
+query, which clears `results` — so anybody found by SEARCHING the server (that
+is, anyone outside the page's small seed) vanished from the control the instant
+they were chosen. The form looked empty while `value` held a good id, which on
+/classes means enrolling a pupil whose name you can no longer see, and in
+meetings means the "names selected do not show steady" the report describes.
+
+Even when it resolved, a placeholder is grey, reads as "nothing here yet", and
+disappears as soon as somebody types. The choice is now REMEMBERED in state and
+rendered as text above the box. // The sibling `PeoplePicker` had it right all
+along — it keeps its chosen people and renders them first, with a comment
+explaining that is the answer to "who have I got so far". These two were never
+swept.
+
+**3. THE PAGE JUMPED TO THE TOP.** Next's App Router scrolls to the top of the
+document on every navigation, and the attendance pupil-picker sits near the
+BOTTOM of a long page — under the register board, the reminder button, the class
+board and the register card. Clicking a pupil threw the viewport to the top while
+the history that click asked for rendered off-screen. `{ scroll: false }` on both
+pushes and on the history pagination. On a page whose whole task is checking
+several pupils in a row, that scroll IS the work.
+
+**4. A DUEL YOU COULD NOT SEE AND COULD NOT WITHDRAW.** `listOpenGames` dropped
+the caller's own lobby — correct for a list titled "games you can JOIN", and it
+left a player's own open duel visible on NO screen at all. One opened by mistake,
+or one nobody ever joined, sat in every other pupil's list indefinitely, and the
+only way to close it was `POST /games/:id/end`, gated on `game.match.moderate` —
+a teacher. A create with no undo, on a list that only grows.
+
+`POST /games/:id/cancel` (`game.play`): the HOST withdraws their own, and the
+narrowing is the point — LOBBY only, one seat only. The moment somebody joins
+there is an opponent with a stake in it and closing it is a moderation decision
+again; the refusal says so rather than only saying no. 404-not-403 for a caller
+with no seat. // The same read was N+1 TWICE — a seats query and a name lookup
+inside the loop, so a page of 100 lobbies meant 200 extra round trips on the
+games hub, which is a child's first screen. Both batched.
+
+**5. THE LMS PDF IS SOUND** — verified end to end rather than read. Teacher
+creates a MATERIAL and attaches a PDF; before approval the student gets 404 on
+the download and the material is absent from their class list. Two-stage approval
+(head teacher, then principal, each a different person, engine-enforced) →
+PUBLISHED. The student then sees it in the class list WITH its filename, on
+their own /learning feed, and the download serves
+`Content-Type: application/pdf`, `Content-Disposition: inline`,
+`X-Content-Type-Options: nosniff`, with `%PDF-1.7` as the first bytes.
+
+// FOUND WHILE FINISHING: `StaffAttendanceHistory` — committed EARLIER IN THIS
+// SAME SESSION — formatted its dates with the bare `shortDate`/`timeOfDay`
+// exports (pinned to the PLATFORM's locale and timezone) and its month names
+// with `toLocaleDateString(undefined, …)`, which is the BROWSER's locale. A
+// school's own attendance record labelled by whichever laptop was looking at it.
+// The region gate caught it; I had not run that gate when I shipped the
+// component. `monthLabel` now lives in `lib/format.ts` behind `useFormat()`,
+// where every locale-aware formatter belongs — the gate bans
+// `toLocaleDateString` everywhere else precisely so a component cannot format
+// its own dates on the wrong clock.
+
+### Eight signed-in sections the middleware had never heard of
+
+Found while doing a final per-role pass over the pages fixed above: the demo
+student was redirected to the forced-password-reset page on every surface EXCEPT
+`/meetings`, which answered 200. Chasing the one odd row found eight.
+
+`middleware.ts` gated on a hand-kept `PROTECTED_PREFIXES` list of ~45 sections.
+Walking the app router against it:
+
+    NOT protected: /cbt /exams /feedback /group /kiosk /learning /meetings
+                   /reportcards /suspended
+
+Measured against the running app, each answered **200 with no session at all**,
+while `/dashboard`, `/attendance` and `/classes` redirected to `/login` as they
+should.
+
+THAT GATE IS THREE CONTROLS AT ONCE, and all three were skipped on those eight:
+
+  1. **The 30-day FORCED PASSWORD RESET.** Verified live: the demo student was
+     redirected from /dashboard and /attendance to `/account/password?expired=1`
+     and served **200 on /cbt and /reportcards** — the exam hall, and a child's
+     marks.
+  2. **The per-school MFA MANDATE**, identically. A member of staff the school
+     had required to enrol could work on those eight without enrolling.
+  3. **The unauthenticated redirect to /login.**
+
+NOT A DATA LEAK, and worth stating precisely rather than overselling: the
+anonymous 200 is the loading shell. The page streams `loading.tsx`, the server
+component then calls `auth()` and throws on `session!.user`, and the stream ends
+— 18 KB of shell carrying no school name, no pupil, nothing. Checked by
+extracting the visible text: "MAESTRO-SMS — School Management System Loading".
+What a visitor gets is a page stuck on Loading with no way in and no explanation,
+and what a signed-in user gets is the two holds above silently not applying.
+
+THE FIX IS THE DEFAULT, NOT A LONGER LIST. A hand-kept set only guards what
+somebody remembered, and this one is edited by nobody who is adding a page.
+Inverted to a PUBLIC allowlist in `lib/public-routes.ts`: everything needs a
+session unless named, so a new section under `app/(app)` is protected by
+EXISTING and opening a page to the public is a deliberate line (Golden Rule #7).
+Public is the bounded set it should be: the marketing site, sign-in and recovery,
+the public intake forms, and the certificate verifier — which is public BY DESIGN
+so somebody holding a printed card can check it. `/manual` and `/runbooks` stay
+signed-in.
+
+// GOTCHA: `/icon.png`. Next serves `app/icon.png` through the same matcher, so
+// a naive default-deny redirects the FAVICON to /login and breaks it on the
+// public marketing site. Anything ending in an extension is an asset, not a
+// page.
+
+// GOTCHA: the rule lives in its own module rather than inside `middleware.ts`
+// so the test can drive the REAL function. The first draft of the test
+// reimplemented `isPublic` locally — and immediately disagreed with the real one
+// about `/icon.png`, which is the whole objection to a test that carries its own
+// copy of the logic: it proves the test agrees with itself.
+
+Gate `every-signed-in-page-needs-a-session` walks the router and asserts no
+section under `app/(app)` is public, that the public ones still are, and that the
+middleware gates on the allowlist rather than a protect-list. Three mutations:
+open /cbt (fails naming it), close /login, drop the asset exemption.
+
+### A failed migrate deploy blocks every later one, and resolving it blindly diverges the schema
+
+The local test database (`sms-test-pg`) had a migration history out of step with
+its own schema: 243 recorded applied, ONE recorded as failed-and-unfinished
+(`20270115000000_report_card_attestation`), and NINE folders on disk never
+recorded at all. Prisma refuses to apply anything while a failed migration
+stands, so `migrate deploy` had been dead there — and CI builds its database with
+`migrate deploy`, so this is exactly the parity the repo's own workflow note
+exists to protect.
+
+// The failed row was mine: a `migrate deploy` I ran two days earlier hit
+// "relation report_card_attestation already exists" and left the marker behind.
+// A failed attempt is not a no-op — it is a lock on the whole history.
+
+THE TEMPTING REPAIR IS THE WRONG ONE. `prisma migrate resolve --applied` on each
+unrecorded folder clears the error immediately, and would have been a silent
+schema divergence: checking the nine folders' objects against the database found
+SIX genuinely ABSENT — `scholarship_question_bank`, `school_archive_termId_idx`,
+`payment_invoiceId_reference_key`, the promo in-flight index,
+`scholarship_application.disbursementIssue` and
+`cbt_question_bank.scholarshipProgramId`. Marking those "applied" produces a
+database that reports a clean history while missing real schema, which is the
+same failure mode as the `plan_price` replay trio already recorded here: a
+SUCCESS that diverges is strictly worse than the loud error it replaced.
+
+THE RECIPE, and the order matters:
+  1. Check the FAILED migration's objects are ALL present — every table, index
+     AND constraint it declares, not just the table whose name was in the error.
+     Here all six objects of 20270115000000 were there, so it was genuinely
+     applied and only the record was wrong.
+  2. `prisma migrate resolve --applied <that one>`. It marks the failed row
+     `rolled_back_at` and inserts a fresh applied row, so 254 rows / 253 distinct
+     names is the healthy shape afterwards, not a second problem.
+  3. `prisma migrate deploy` — which then applies the other nine for real. They
+     are `IF NOT EXISTS` throughout, so the present ones no-op and the absent
+     ones are created.
+  4. `pnpm --filter @sms/db rls`. The migrations bring TABLES; the policies live
+     in `prisma/rls/*.sql` and are applied separately. `scholarship_question_bank`
+     landed with RLS OFF and no policies, and it is a GLOBAL table (no
+     `schoolId`), so the RLS coverage meta-test — which keys on tables that HAVE
+     one — would never have flagged it. "Global" is not "unprotected": rls/50
+     wants a deny-all on it, and the app role had reach it should not have.
+
+// GOTCHA: the RLS files use bare `CREATE POLICY`, so re-running the whole set
+// aborts on the first policy that already exists — and with ON_ERROR_STOP it
+// stops there, leaving everything after it unapplied. That is how a repair
+// half-lands: my first attempt died on `scholarship_question_deny_all` (already
+// present) and never reached the bank block two statements below.
+
+// GOTCHA on comparing two databases: `comm` on `pg_policies` output flagged
+// dozens of differences that were not differences — attendance_record and
+// audit_log PARTITION policies, which differ by month between any two databases
+// of different ages. Compare the parent tables, or read the noise for what it is.
+
+Verified after: `migrate deploy` is a clean no-op, the six absent objects exist,
+the app role cannot SELECT either scholarship-question table, the RLS e2e passes
+205/205, and the full DB-gated suite runs 646 suites / 6,371 tests with no
+failures.
+
+### Whole-application simulation: 5,000 schools, five years — what it actually found
+
+The fixture: 5,004 tenants, 200,000 pupils with profiles, 868,000 attendance
+records across 63 monthly partitions (a five-year platform), a pupil with 965
+records spanning 2021–2026. Everything measured as the APP ROLE under RLS with
+bound parameters, and at the ENDPOINT as well as in EXPLAIN — the two disagree,
+which is the first finding.
+
+**PROJECTION FIRST.** Five tenant tables are unbounded and large at 5,000 x 5y —
+`subject_result` and `lms_submission` (675M each), `message` (300M),
+`staff_attendance` (292M), `invoice_line_item` (135M). None is a problem on its
+own: every one has a `schoolId`-leading composite index and every read filters
+the tenant first, so the per-tenant slice is ~135k rows. `attendance_record` and
+`audit_log` are partitioned; ten more tables are purged by the retention sweep.
+The risk is never table size — it is a query that is not bounded by tenant AND
+by date.
+
+**1. THE PARTITION-PLANNING CONCERN DOES NOT SURVIVE CONTACT WITH THE ENDPOINT,
+and this CORRECTS an earlier entry.** A lifetime `groupBy` on a partitioned table
+costs 64.8 ms planning against 3.5 ms execution — planning is 95%. But:
+
+    prepared statement, first EXECUTE   18.4 ms planning
+    every EXECUTE after                  0.8 ms planning
+    /family/overview, 63 partitions      median 24 ms
+    /family/overview, 15 partitions      median 26 ms
+
+Postgres caches the plan per prepared statement per connection and Prisma pools
+connections, so the cost is paid ONCE PER CONNECTION, not per request — and the
+endpoint cannot tell 63 partitions from 15. EXPLAIN forces a fresh plan every
+time, which is exactly what production does not do.
+
+So the three unbounded reads this sweep found (`parent.service` overview,
+`scholarship` signals, `lms` class analytics) were NOT changed. Measuring at the
+level a user experiences said there was nothing to fix, and acting on the EXPLAIN
+number would have been changing code on the strength of a measurement that does
+not hold. // The compiled-attendance entry above attributes its gain primarily to
+planning; on this evidence the larger part was not fetching every month to show
+36. The endpoint improvement it records was real; the cause was over-attributed.
+
+**2. THE PLATFORM ANALYTICS HYDRATED EVERY PUPIL ON THE PLATFORM.** `overview()`
+fetched `{ gender, dateOfBirth }` for EVERY `student_profile` in EVERY school and
+tallied them in a JS loop, for two small histograms.
+
+    0 pupils          0.5 s
+    200,000 pupils    3.2 s        (~15 ms per thousand, all hydration)
+    Postgres, same question as an aggregate:  64 ms
+
+A real fleet is 4.5M profiles: ~70 seconds and 4.5M live objects in the API task,
+on the platform owner's own dashboard. It would take the task's memory, not merely
+time out. THE CORRECT SIBLING WAS ALREADY THERE — `analytics.service.ts` does this
+in SQL for ONE school, with a comment saying why; the half left behind was the one
+running over five thousand times as many rows. Fixed with the same shape (gender
+grouped by RAW value and folded through `normalizeGender` over the grouped rows;
+age bands as FILTER counts), scoped by `school."isPlatform" = false` rather than a
+5,000-element `IN`. Output byte-identical, 3.2s -> 1.5s.
+
+**3. THE PUBLIC FRONT DOOR SHIPPED THE WHOLE PLATFORM.** `GET /public/schools`
+returned every active school — unpaged, unsearchable, unauthenticated — and
+`/schools` rendered all of them:
+
+    678,197 bytes   5,003 rows   631 ms median render (the slowest page in the
+                                 application by an order of magnitude)
+
+The route's own comment CONCEDED the shape and answered it with a rate limit,
+which bounds how OFTEN the cost is paid, not the cost: 60 calls/min x 678 KB is
+40 MB/min per IP, from the internet. It was also the wrong product at that size —
+nobody finds their child's school by scrolling five thousand names. Paged and
+searched in SQL with a total; `/enroll` gets a searchable chooser and resolves a
+preselected school BY SLUG so a school's own link still works off page 101.
+
+    678 KB -> 6.8 KB      /schools 631 ms -> 42 ms      /enroll 242 ms -> 33 ms
+
+// GOTCHA, made and caught within the hour: the new `schools/by-slug` route was
+// added WITHOUT `@Public()`, so the guard answered 401 and the only symptom was
+// that a school's own enrolment link silently stopped preselecting it. Gated now
+// — every route on the PUBLIC controller must be marked public.
+
+**4. THE PURGE RECIPE WORKS, BUT ITS RECORDED FIGURE DOES NOT GENERALISE.**
+Removing the fixture hit the documented unindexed-FK wall: the delete ran 12
+minutes without finishing and `pg_stat_activity` named the cause exactly — the FK
+check from `audit_log."actorId"`, and `audit_log` is PARTITIONED with no index on
+it, so every user delete scans every partition. Applying the documented remedy:
+
+    71 temporary indexes on the referencing columns   0.9 s
+    410,000 rows deleted and committed                8 m 36 s
+
+The recipe is right and the indexes are what made it finish at all. But the entry
+above records "1,370,900 rows in 3 m 6 s" — my delete was a THIRD the size and
+took nearly THREE TIMES as long, because these users had audit rows spread across
+partitions. Read that number as one measurement of one fixture, not a rate.
+
+**WHAT PASSED.** 111 routes x 17 roles all rendered at fleet scale; page timings
+median 18 ms, p95 103 ms, zero 5xx; the operator console paged and searched in
+36–52 ms at 5,004 tenants; largest session cookie 1,139 bytes against a 3,072
+budget.
+
+**WHAT IS STILL OPEN**, stated rather than left implied:
+  - `customerIds` is materialised into 5,000-element `ARRAY[...]` literals in
+    several platform queries — a 195 KB SQL string, measured at 2x the cost of
+    the equivalent subquery (12.7/33.3 ms vs 4.2/20.6). Fine at 5,000, a problem
+    at 50,000. Not changed: several call sites, each scoped differently.
+  - `/operator/analytics` is ~1.5 s at 200k pupils after the fix. The 4.5M-row
+    hydration is gone; what remains scales with the fleet, not the pupils.
+  - The heaviest tables were seeded to ONE school's depth, not 5,000 schools'.
+    Per-tenant reads are index-bound and were measured; whole-fleet SWEEPS over
+    those tables at true volume were not.
+
+### A register a principal could fill in and could not save
+
+Asked whether a class teacher, principal and school admin can each take a
+register. Verified live rather than read: teacher (the class's SUPERVISOR) 201,
+school_admin 201, principal 403, head_teacher 403, another teacher 404. So two of
+the three can, and the principal cannot — deliberately.
+
+But the principal HOLDS `attendance.write`, and the page gated the register FORM
+on that permission while the SERVICE refuses them at row scope. So a principal
+could open /attendance, pick a class, mark every pupil, press Save — and be told
+"Only History 101's class teacher takes its register". The whole job done, then
+refused. That is the dead-grant shape this repo records (a permission has TWO
+halves and they drift), showing up as a form that fails on submit rather than a
+control that is simply absent.
+
+THE RULE WAS ALSO WRITTEN TWICE — `assertCanTakeRegister` (what the API enforces)
+and an inline copy in the by-class board's `canTake` (what the UI offers) — while
+the outstanding-register board had NO such field and drew a "take" control on
+every row for everybody. One exported `canTakeRegister(p, supervisorId)` now,
+called by the enforcement and by both boards.
+
+WHY THE RULE IS RIGHT, and the measurement that settled it. The rule is not
+"principals may not take registers" — it is "the NAMED SUPERVISOR takes it, plus
+school_admin as cover". Verified by making the principal a class's supervisor:
+
+    principal, not the supervisor   403
+    principal, named as supervisor  201
+
+So a teaching head — the whole case for widening the role — is already served by
+naming them, and the record then says WHO took it, which is the point of the
+register. Two further reasons, both checked rather than assumed:
+
+  - `attendance.amend.review` is held by head_teacher, principal, school_admin.
+    Past seven days a register can only be corrected through a maker-checker
+    chain those three decide. Principals authoring registers routinely would
+    make the approver of a correction the author of the original — the engine
+    still enforces requester != approver, so it does not COLLAPSE, but it thins
+    the independence the chain exists for.
+  - A register attests "I looked at this room and these children were there", and
+    an unrecorded absence is indistinguishable from a child who is present. If
+    seniority can close a gap, gaps get closed administratively rather than by
+    somebody checking whether the child is in the building. A gap that is VISIBLE
+    is safer than one filled in by somebody who was not there.
+
+WHAT CHANGED: `canTake` added to the outstanding-register board (the button is
+now offered only to somebody who may use it, and says "ask their class teacher"
+or "no class teacher" otherwise); the register form is built from the server's
+own takeable list rather than `/classes/mine`; and the page HEADING follows what
+the reader can do — it said "Take a class register" to anyone holding
+`attendance.write`, promising an action it does not offer.
+
+Live after: principal — form absent, 31 registers visible, heading reads "Every
+class's register, and which are still outstanding… a school administrator can
+cover one"; school_admin — form present, take on all 31; teacher — form present,
+take on their 1.
+
+Three mutations, each failing naming its own property: add `principal` to the
+cover set (option (b), which the rule tests reject); re-inline the rule in the
+board; drop the supervisor check.
+
+// The principal keeps everything the role needs: sight of every register, the
+// outstanding board, the school-scoped chase button, and approval of stale
+// corrections. What they lose is the ability to sign for a room unseen.
+
+### The flaky test that was right, and the gate that could not see it
+
+CI went red on a commit that touched neither package:
+
+    FAIL packages/game-transport/src/race-service.spec.ts
+      ● reveals to each racer ONLY their own guesses; never the target
+        Expected substring: not "1234"
+        Received string: {"type":"joined","raceId":"e6fe344e-7e57-4f1b-925d-312341a1dd8c",...}
+
+Read the raceId: `925d-312341a1dd8c`. A randomly generated UUID happened to
+contain the four-digit secret. The assertion —
+`expect(JSON.stringify(msg)).not.toContain(TARGET)` — matched by ACCIDENT, on a
+test whose PROPERTY held perfectly. It presents as a flaky suite and is actually
+a wrong assertion, which is the whole reason this class has a gate.
+
+THE GATE EXISTS AND DID NOT FIRE. `assertions-that-match-by-accident` already
+follows the subject back to its `JSON.stringify` assignment, understands
+sanitising `.replace()`, and states the rule exactly right in its own comment:
+"searching a whole serialised OBJECT is the risky act, HOWEVER LONG the needle".
+But its detector matched only a NUMERIC LITERAL —
+`/\.not\.toContain\((["'`])([0-9][0-9.,]*)\1\)/` — and this needle is a VARIABLE.
+The rule was correct and the reach was short, which is the "hand-kept set only
+guards what somebody remembered" shape wearing a regex.
+
+Widened to flag `not.toContain(<identifier>)` when the haystack is a whole
+serialised object and unsanitised. A variable's value is unknown statically, so
+it is judged by the HAYSTACK alone — which is the rule as already written.
+
+IT FOUND A SECOND ONE ON ITS FIRST RUN: `packages/game-engine/src/arena.spec.ts`
+searched `JSON.stringify(a.viewFor(viewer))` for the same kind of secret. Same
+shape, same latent flakiness, never yet unlucky.
+
+BOTH FIXED BY ASSERTING THE PROPERTY: walk the parsed object and collect any
+field whose VALUE equals the target, plus any field NAMED target/secret. An id
+never equals the secret, so equality is simultaneously stricter about what is
+being proved and immune to the collision. Mutation-validated both ways — leaking
+the target into a frame fails the new assertion naming the path, and restoring
+the substring form fails the widened gate naming the file.
+
+// This is the THIRD time a short needle in a long haystack has bitten here (a
+// digit in a timestamp, twice). The durable lesson is not "use a longer needle":
+// it is that proving an ABSENCE by searching a serialised document is the wrong
+// instrument, because the document carries ids, timestamps and counts that
+// nobody chose.
+
+### The fleet, spelled out five thousand times
+
+Recorded as open by the 5,000-school simulation and closed here. Several
+cross-tenant operator reads mean "every customer school" and said so by fetching
+the ids once and interpolating them back:
+
+    WHERE "schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+
+At the target fleet that is a **195 KB SQL string per call**, measured on that
+fixture at twice the cost of the equivalent subquery — **12.7 ms planning /
+33.3 ms execution against 4.2 / 20.6**. The planning half is the one that grows
+with the fleet, so it gets worse at 50,000 exactly where it is least affordable.
+
+Six sites, in two different fleets: `platform-analytics` sweeps EVERY customer
+school, `operator-attention` only the ACTIVE ones — a distinction that had been
+written out by hand at each site and could drift. `operator-fleet.ts` is now the
+one definition of both (`ALL_CUSTOMER_SCHOOLS` / `ACTIVE_CUSTOMER_SCHOOLS`) plus
+`inSchoolScope`, which takes either an explicit list (a PAGE of schools, where
+the caller has already decided which) or a predicate, so a paged call site and a
+fleet one cannot disagree about what "in scope" means.
+
+The id list is still fetched — it keys the per-school roll-ups. What stopped is
+spelling it out to the server a second time for each aggregate.
+
+VERIFIED BY OUTPUT, not by reading: `/operator/analytics` and
+`/operator/attention` were captured against the running stack before the change
+and again after, and both responses are **byte-identical** (sha256
+`65adac032173b797…` / `314c2a63d93bad68…`). Analytics 386 ms -> 206 ms on a
+three-school database, where the array literal is three uuids long — the gain
+measured above belongs to the fleet, not to this box.
+
+// GOTCHA, and the reason the fixture asserts its own inserts: the first draft
+// gave the platform org a person on the `super_admin` role, and the TEST
+// database has only six roles seeded. `INSERT … SELECT … WHERE r.name = $4`
+// matching nothing inserts nothing and REPORTS SUCCESS, so the platform org had
+// no rows at all — and the suite then passed against a deliberately broken
+// predicate, proving only that the fixture was empty. It checks `rowCount` now.
+// This is the fixture trap the log already records, in its quietest form: not a
+// double that models the wrong contract, but a seed that silently did nothing.
+// GOTCHA: `Prisma.Sql` exposes the statement TWICE — `.sql` carries `?`
+// placeholders and `.text` carries `$1…`. Handing `.sql` to pg fails as a
+// syntax error pointing at a comma, which reads as a malformed query rather
+// than as the wrong accessor.
+
+Mutation-validated three ways, each failing the right test by name: dropping
+`isPlatform = false` (the platform org's own staff fold into a customer
+headcount), dropping `status = 'ACTIVE'` (the attention queue starts chasing
+switched-off tenants), and inlining the ids as text instead of binding them.
+
+### The retention sweep that ran every night and never got past the first 500
+
+The declined-applicant purge exists for one obligation: a family sends a child's
+birth certificate before anyone has decided anything, and when the school says
+no, the platform must let the file go. It is scheduled nightly, capped at 500,
+and reports a `backlog` so an operator can see it falling behind.
+
+**It could not reach anything past the first 500, ever.** The page was drawn
+from declined APPLICATIONS; the sweep's only write is to `document_submission`.
+Nothing about an application changes when its files go, so the identical 500
+rows matched again the next night, and the night after that.
+
+Driven against a real database — 2,000,000 applications, 600 of them declined
+and holding a file:
+
+    run 1   applications 500   filesPurged 409   backlog 475,036
+    run 2   applications 500   filesPurged   0   backlog 475,036
+    run 3   applications 500   filesPurged   0   backlog 475,036
+    run 4   applications 500   filesPurged   0   backlog 475,036
+    still held: 191 birth certificates, permanently
+
+The jobs console showed a healthy run every night: no `failed`, no error, an
+`applications: 500` that reads like work. `backlog` was the one honest signal
+and it said the wrong thing — frozen at exactly 475,036 reads as "behind and
+catching up", never as "stuck". It was not even measuring work: it counted
+declined applications past the window whether or not any file was still held,
+so the number had no relationship to what remained to be done.
+
+**A capped sweep only advances if taking a row REMOVES it from the predicate the
+page is drawn from.** So the unit is now the FILE: every row selected is a file
+still held, clearing it drops it out, and the backlog counted over the same
+predicate genuinely falls. Same fixture, after:
+
+    run 1   applications 191   filesPurged 191   backlog 0
+    run 2   applications   0   filesPurged   0   backlog 0   (31 ms)
+
+// WHY THE TESTS COULD NOT SEE IT: the double's `findMany` ignored `take`, so
+// one run cleared the whole fixture and every assertion passed. That is the
+// fixture trap this repo already records, in its quietest form — not a double
+// modelling the wrong contract, but one silently dropping the single parameter
+// the defect lives in. The double now applies the service's own
+// `RETENTION_BATCH`, and the new case runs the sweep TWICE.
+
+Two indexes, and the reason they were missing is worth keeping. Every index on
+both tables led with `schoolId` — right for every screen a school opens, and
+useless to a fleet sweep, which has no tenant to lead with. The old inner lookup
+filtered `document_submission` on `("subjectKind", "subjectId")` with no
+`schoolId`, so each of the 500 lookups in a run scanned the whole table.
+
+    document_submission ("subjectId") WHERE subjectKind = 'ADMISSION_APPLICATION'
+                                        AND "storageKey" IS NOT NULL
+    admission_application (status, "updatedAt")
+
+// GOTCHA: a PARTIAL index is only usable where the planner can PROVE its
+// predicate from the query's own. Here both halves are constants in the SQL, so
+// it can. It could not have been made partial on `status = 'REJECTED'` instead,
+// because Prisma sends that as `CAST($1::text AS "AdmissionStatus")` — a
+// parameter, which no partial predicate can be proven from. That is why the
+// application-side index is a plain composite.
+// GOTCHA: the page takes NO `ORDER BY`, deliberately. Every row selected is
+// work and leaves the predicate once done, so which 500 come first changes
+// nothing about whether the rest are reached — and asking for an order makes
+// the planner join the whole candidate set before it can take a page: 180 ms
+// ordered against 14.8 ms unordered on 40,000 held files, for the same work.
+
+// AND THE GATE FOR THIS DEFECT CLASS WENT BLIND ON THE FIX. `hasLiteralTake`
+// matched `take:` only, so moving the read to a raw `LIMIT ${RETENTION_BATCH}`
+// — necessary, since it joins two tables Prisma has no relation between —
+// dropped `purgeRejected` out of `a-sweep-that-was-behind-and-said-nothing`
+// entirely, taking its backlog requirement with it. A gate that COMPUTES its
+// set is no help if the predicate filtering that set knows one spelling. It
+// reads both now, and the discovery test names `purgeRejected()` so the
+// coverage cannot be lost again quietly.
+
+Mutation-validated: dropping `storageKey IS NOT NULL` from the predicate (the
+defect's exact shape) fails the progress case; a double that ignores the cap
+fails it too; narrowing the detector back to `take:` fails the discovery test.
+
+### The weekly reminder that chased the same 2,000 families for ever
+
+Found by asking the question the previous entry had just answered, of every
+other capped sweep: does taking a row REMOVE it from the predicate the page is
+drawn from? For the overdue fee reminder it does not. The sweep sends a
+notification; an unpaid invoice stays unpaid and stays overdue.
+
+Worse, the remedy already applied here had made it deterministic. A previous fix
+found the sweep reading `take: 2000` with **no `orderBy` at all**, reasoned —
+correctly — that this meant "plausibly the SAME 2,000 each week, which makes the
+other 3,001 families never chased rather than chased late", and answered it by
+ordering oldest-debt-first. That guarantees the very outcome the comment
+objected to: with a total order and an unchanging predicate, it is not
+*plausibly* the same 2,000, it is *certainly* the same 2,000.
+
+Driven live against the running stack — 2,100 overdue invoices, cap 2,000, every
+one reachable:
+
+    run 1   reminded 2000   backlog 105
+    run 2   reminded 2000   backlog 105
+    distinct invoices ever reminded: 2000 of 2100
+    never reminded: 100 — and they are FEEFIX-000001..000100, the NEWEST arrears
+
+The newest arrears are the most collectable end of the book, so the families
+never asked are the ones most likely to have paid. `backlog: 105` on both runs
+is the same false comfort the declined-document purge gave: it reads as behind,
+never as stuck.
+
+`invoice.lastRemindedAt` (migration `20270321000000`) is the thing the sweep
+changes, so the page is ordered by it, NULLS FIRST, with due date breaking the
+tie. Never-chased first, then least-recently-chased: a school with more arrears
+than the cap now works through the whole book over a few runs instead of chasing
+2,000 families weekly and the rest never. Same fixture, after:
+
+    run 3 (first with the fix)   reminded 2000   100 still unstamped
+    run 4                        reminded 1995   never reminded: 0
+
+// It is stamped only for invoices a family was actually TOLD about. Stamping an
+// `unreachable` one — a pupil with no guardian linked — would push it to the
+// back of the rotation for ever and hide the very gap `unreachable` exists to
+// report. One `updateMany` for the page, not one per invoice, which is the rule
+// the sibling spec on this sweep already pins.
+
+// WHY NEITHER SPEC COULD SEE IT, again: both doubles returned the whole fixture
+// whatever `take` and `orderBy` asked for. With no cap in the double, one run
+// always cleared everything, so no test in this repo could distinguish a sweep
+// that rotates from one that spins. The double now sorts by the clauses it is
+// given — modelling NULLS FIRST, since a comparator putting nulls last passes
+// every other case in the file — and slices to the cap. The other double was
+// missing `updateMany` entirely and failed as a code fault, which is the third
+// fixture trap this log records by name.
+
+Mutation-validated: restoring due-date ordering fails both rotation cases;
+stamping unreachable invoices fails the third; a double that ignores `take`
+fails the first. 105 suites, 1,253 tests green.
+
+**AND THEN THE SAME QUESTION OF ALL SIX.** The two fixed above were found by
+asking one thing of a capped sweep — *does taking a row remove it from the
+predicate the page is drawn from?* — so it was worth asking of every one. The
+set is the same one the backlog gate computes from the BullMQ processors:
+
+    purgeRejected      documents/submission-retention   FIXED this session
+    sendFeeReminders   fees/fees.service                FIXED this session
+    lateFeeSweep       fees/fee-ops                     sound — the marker line
+                                                        item is excluded IN the
+                                                        WHERE, not skipped after
+    recoverPending     payments/mobile-money            sound — status moves
+    archiveEndedTerms  privacy/archive                  sound — anti-join against
+                                                        archives already written
+    sweep              sis/sis-nudge                    sound — `lastNudgedAt` is
+                                                        in the predicate and
+                                                        stamped by `updateMany`
+
+Sibling asymmetry again, and this time in the reader's favour: `sis-nudge` had
+the exact pattern the fee reminder needed — a `lastNudgedAt` in the predicate,
+stamped in one `updateMany` — one module away, with a comment calling it "the
+idempotence". The fee reminder is the message that asks a family for money and
+was the one left.
+
+NO GATE ADDED, deliberately. The property is "the sweep writes something its own
+predicate reads", and every static approximation of that flags `lateFeeSweep`,
+which pages `invoice` and writes a LINE ITEM — correct, and the predicate
+excludes it through a relation. A gate that wrong would be answered with an
+exemption, and an exemption granted for a false positive is a hole with a note
+on it. The rule is in CLAUDE.md beside the backlog rule it qualifies, and the
+two sweeps that had it wrong now each have a two-run test.

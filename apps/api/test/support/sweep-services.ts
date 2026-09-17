@@ -81,7 +81,19 @@ export function sweepServicesWithCallees(): SweepService[] {
 
 /** A literal `take:` bound — the thing that makes a read partial. */
 export function hasLiteralTake(src: string): boolean {
-  return /take:\s*\d{2,}/.test(src) || /take:\s*[A-Z_]{4,}/.test(src);
+  // A CAP HAS MORE THAN ONE SPELLING, and a detector that knows one of them
+  // silently stops covering a sweep the day it is rewritten. The declined-
+  // applicant purge moved from `take: 500` to a raw `LIMIT ${RETENTION_BATCH}`
+  // — for a good reason, it had to join across two tables — and dropped out of
+  // this gate's set entirely, taking its backlog requirement with it. The gate
+  // one file over was rewritten to COMPUTE its set for exactly this reason;
+  // computing the set is no help if the predicate that filters it is blind.
+  return (
+    /take:\s*\d{2,}/.test(src) ||
+    /take:\s*[A-Z_]{4,}/.test(src) ||
+    /\bLIMIT\s+\$\{[A-Za-z_][\w.]*\}/.test(src) ||
+    /\bLIMIT\s+\d{2,}/.test(src)
+  );
 }
 
 /**

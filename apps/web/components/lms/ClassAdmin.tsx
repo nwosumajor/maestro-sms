@@ -13,6 +13,7 @@ import { StudentPicker } from "@/components/people/StudentPicker";
 import { UserPicker } from "@/components/people/UserPicker";
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,14 +24,22 @@ import { personLabel } from "@/lib/people";
 type Named = Serialized<IdNameDto>;
 type User = Serialized<UserSummaryDto>;
 
+/** One definition of the select styling, shared by both forms on this card. */
+const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
+
 export function ClassAdmin({
   classes,
   students = [],
   users,
+  rooms = [],
 }: {
   classes: Named[];
   students?: Named[];
   users: User[];
+  /** Rooms the school has defined. Empty when the caller cannot read them, in
+   *  which case the base-room control simply is not offered — an empty picker
+   *  that always fails would be worse than no picker. */
+  rooms?: Named[];
 }) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -39,7 +48,6 @@ export function ClassAdmin({
   // so the class cannot be created without naming one — the API refuses, and a
   // form that let you try would just produce a 400.
   const [classTeacherId, setClassTeacherId] = React.useState("");
-  const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
   const post = async (path: string, body: unknown, ok: string) => {
     const res = await fetch(`/api/sms${path}`, {
@@ -73,6 +81,7 @@ export function ClassAdmin({
 
   // The class roster already carries its teachers, so this needs no new
   // endpoint — null means "still loading", [] means genuinely nobody.
+  const [homeRoomId, setHomeRoomId] = React.useState("");
   const [assigned, setAssigned] = React.useState<Array<{ id: string; name: string }> | null>(null);
   const loadAssigned = React.useCallback(async (classId: string) => {
     if (!classId) { setAssigned([]); return; }
@@ -102,11 +111,12 @@ export function ClassAdmin({
               "/classes",
               {
                 name: composed,
-                supervisorId: classTeacherId,
+                supervisorId: classTeacherId || null,
                 stage: shape.stage || null,
                 level: shape.level ? Number(shape.level) : null,
                 stream: shape.stream || null,
                 arm: shape.arm || null,
+                homeRoomId: homeRoomId || null,
               },
               "Class created.",
             );
@@ -144,16 +154,32 @@ export function ClassAdmin({
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="cl-teacher">Class teacher</Label>
+            <Label htmlFor="cl-teacher">Class teacher (optional)</Label>
             <select
               id="cl-teacher"
               value={classTeacherId}
               onChange={(e) => setClassTeacherId(e.target.value)}
               className={sel}
-              required
             >
-              <option value="">— choose —</option>
+              {/* SET LATER IS ALLOWED. Laying out next year's classes before the
+                  staffing is settled is how schools actually work, and a required
+                  field people satisfy by naming whoever is in the dropdown is
+                  worse than an empty one: a wrong name is acted on, an empty one
+                  is chased. The classes list flags every class without one and
+                  can filter to exactly those. */}
+              <option value="">— assign later —</option>
               {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cl-room">Base room</Label>
+            <select id="cl-room" value={homeRoomId} onChange={(e) => setHomeRoomId(e.target.value)} className={sel}>
+              {/* OPTIONAL, and it says so: plenty of schools rotate rooms, and an
+                  invented default would be a lie about where a child can be
+                  found. One class per room — the refusal names the class that
+                  already has it. */}
+              <option value="">— none —</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
@@ -162,8 +188,10 @@ export function ClassAdmin({
               {composed || "—"}
             </p>
           </div>
-          <Button type="submit" size="sm" disabled={!composed || !classTeacherId}>Create class</Button>
+          <Button type="submit" size="sm" disabled={!composed}>Create class</Button>
         </form>
+
+        <ArmsBuilder teachers={teachers} rooms={rooms} shape={shape} onDone={(m) => { setMsg(m); router.refresh(); }} />
 
         <form
           onSubmit={async (e) => {
@@ -247,5 +275,133 @@ export function ClassAdmin({
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * SS1A, SS1B, SS1C in one action.
+ *
+ * The single form above already makes the NAME consistent — Section, Year,
+ * Stream and Arm are chosen, never typed. What it did not make consistent was
+ * the WORK: three year groups of three arms meant nine passes, re-picking the
+ * same Section, Year and Stream eight times, with nothing stopping the ninth
+ * from differing from the first.
+ *
+ * It reuses the shape already chosen above rather than asking for it twice, so
+ * the two cannot disagree about what is being created.
+ */
+function ArmsBuilder({
+  teachers,
+  rooms,
+  shape,
+  onDone,
+}: {
+  teachers: User[];
+  rooms: Named[];
+  shape: { stage: string; level: string; stream: string; arm: string };
+  onDone: (msg: string) => void;
+}) {
+  const [rows, setRows] = React.useState<Array<{ arm: string; supervisorId: string; homeRoomId: string }>>([
+    { arm: "A", supervisorId: "", homeRoomId: "" },
+    { arm: "B", supervisorId: "", homeRoomId: "" },
+  ]);
+  const [busy, setBusy] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+
+  // EVERY arm needs its own class teacher — the same rule the single form
+  // enforces, stated here so the button is disabled rather than the request
+  // refused.
+  // A class teacher may be set later, so only the arm letter is required here.
+  const ready = rows.length > 0 && rows.every((r) => r.arm);
+  const preview = rows
+    .map((r) => composeClassName({ stage: shape.stage as never, level: shape.level ? Number(shape.level) : null, stream: shape.stream as never, arm: r.arm || null }))
+    .filter(Boolean);
+
+  async function submit() {
+    setBusy(true);
+    const res = await postSms<{ created: Array<{ name: string }>; skipped: Array<{ name: string; reason: string }> }>(
+      "/classes/arms",
+      {
+        stage: shape.stage || null,
+        level: shape.level ? Number(shape.level) : null,
+        stream: shape.stream || null,
+        arms: rows.map((r) => ({ arm: r.arm, supervisorId: r.supervisorId || null, homeRoomId: r.homeRoomId || null })),
+      },
+    );
+    setBusy(false);
+    if (!res.ok) { onDone(res.error ?? "Could not create the classes."); return; }
+    const { created = [], skipped = [] } = res.data ?? {};
+    // REPORTS WHAT IT DID NOT DO. "3 created" with three silently skipped is the
+    // failure this codebase keeps recording; each skip names the class and why.
+    onDone(
+      `${created.length} class${created.length === 1 ? "" : "es"} created.` +
+        (skipped.length ? ` Skipped: ${skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}` : ""),
+    );
+  }
+
+  if (!open) {
+    return (
+      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+        Add several arms at once
+      </Button>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border p-3">
+      <p className="text-sm text-muted-foreground">
+        Creates one class per arm using the Section, Year and Stream chosen above. A class teacher can be set now or later —
+        the classes list below flags every class that still has none.
+      </p>
+      {rows.map((r, i) => (
+        <div key={i} className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`arm-${i}`}>Arm</Label>
+            <select id={`arm-${i}`} value={r.arm} className={sel}
+              onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, arm: e.target.value } : x)))}>
+              {CLASS_ARMS.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`sup-${i}`}>Class teacher</Label>
+            <select id={`sup-${i}`} value={r.supervisorId} className={sel}
+              onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, supervisorId: e.target.value } : x)))}>
+              <option value="">— assign later —</option>
+              {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`room-${i}`}>Base room</Label>
+            <select id={`room-${i}`} value={r.homeRoomId} className={sel}
+              onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, homeRoomId: e.target.value } : x)))}>
+              <option value="">— none —</option>
+              {rooms.map((rm) => <option key={rm.id} value={rm.id}>{rm.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Will be called</Label>
+            <p className="flex h-9 items-center rounded-md border border-dashed border-border px-3 text-sm font-medium">
+              {preview[i] || "—"}
+            </p>
+          </div>
+          {rows.length > 1 && (
+            <Button type="button" size="sm" variant="ghost" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
+              Remove
+            </Button>
+          )}
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant="outline"
+          disabled={rows.length >= CLASS_ARMS.length}
+          onClick={() => setRows([...rows, { arm: CLASS_ARMS[rows.length] ?? "A", supervisorId: "", homeRoomId: "" }])}>
+          Add another arm
+        </Button>
+        <Button type="button" size="sm" disabled={busy || !ready} onClick={() => void submit()}>
+          {busy ? "Creating…" : `Create ${rows.length} classes`}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
+    </div>
   );
 }

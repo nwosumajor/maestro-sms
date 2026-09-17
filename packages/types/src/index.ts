@@ -137,3 +137,4 @@ export * from "./dto/group";
 export * from "./dto/cbt";
 export * from "./demographics";
 export * from "./sis-limits";
+export * from "./dto/student-import-template";

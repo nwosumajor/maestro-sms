@@ -169,6 +169,12 @@ export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boo
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    {/* THE BASE ROOM, beside the person — the two facts somebody
+                        looking up a class actually wants: who is responsible for
+                        it and where it is. */}
+                    {c.homeRoomName && (
+                      <span className="text-muted-foreground">Room: {c.homeRoomName} · </span>
+                    )}
                     {c.supervisorName ? (
                       <span className="text-muted-foreground">Form teacher: {c.supervisorName}</span>
                     ) : (

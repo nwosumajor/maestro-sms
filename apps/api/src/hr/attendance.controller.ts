@@ -7,6 +7,7 @@ import { hhmm } from "../common/time-of-day";
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, RawBodyRequest, Req } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
+import { pageNumber } from "../common/status-filter";
 import { HR_PERMISSIONS, MODULES } from "@sms/types";
 import type {
   AttendanceRegisterDto,
@@ -14,6 +15,7 @@ import type {
   KioskCodeDto,
   KioskConfigDto,
   StaffAttendanceDto,
+  StaffAttendanceHistoryDto,
 } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { Public } from "../auth/public.decorator";
@@ -21,6 +23,8 @@ import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
+import { StaffDayCloseService } from "./staff-day-close.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 import { StaffAttendanceService } from "./attendance.service";
 import { boundedInt } from "../common/status-filter";
 
@@ -56,26 +60,30 @@ function clientIp(req: Request): string | null {
 @RequireModule(MODULES.HR)
 @Controller("hr/attendance")
 export class StaffAttendanceController {
-  constructor(private readonly attendance: StaffAttendanceService) {}
+  constructor(
+    private readonly attendance: StaffAttendanceService,
+    private readonly dayCloseService: StaffDayCloseService,
+    private readonly jobRuns: JobRunsService,
+  ) {}
 
   // --- register (Mode A) -------------------------------------------------------
   @Post("mark")
-  @RequirePermission(HR_PERMISSIONS.HR_WRITE)
+  @RequirePermission(HR_PERMISSIONS.HR_ATTENDANCE_AMEND)
   mark(
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(markSchema)) b: z.infer<typeof markSchema>,
-  ): Promise<StaffAttendanceDto> {
+  ): Promise<StaffAttendanceDto | { pendingApproval: true; requestId: string; date: string }> {
     return this.attendance.mark(p, b);
   }
 
   @Get("register/:date")
-  @RequirePermission(HR_PERMISSIONS.HR_READ)
+  @RequirePermission(HR_PERMISSIONS.HR_ATTENDANCE_READ)
   register(@CurrentPrincipal() p: Principal, @Param("date") date: string): Promise<AttendanceRegisterDto> {
     return this.attendance.register(p, date);
   }
 
   @Get("summary")
-  @RequirePermission(HR_PERMISSIONS.HR_READ)
+  @RequirePermission(HR_PERMISSIONS.HR_ATTENDANCE_READ)
   /** Both optional — omitted means the school's current month. */
   summary(
     @CurrentPrincipal() p: Principal,
@@ -116,9 +124,39 @@ export class StaffAttendanceController {
     return this.attendance.updateKiosk(p, b);
   }
 
-  /** The rotating gate-display code (staff-operated screen; hr.read). */
+  /**
+   * ONE member of staff's record, compiled per month.
+   *
+   * `hr.attendance.read` — the same gate as the register, because this is the
+   * same data about the same people, narrowed to one of them. There was no such
+   * read at all: the register showed today, the roll-up showed this month across
+   * everybody, and the only per-person view was a person's own.
+   */
+  @Get("staff/:userId")
+  @RequirePermission(HR_PERMISSIONS.HR_ATTENDANCE_READ)
+  staffHistory(
+    @CurrentPrincipal() p: Principal,
+    @Param("userId") userId: string,
+    @Query("month") month?: string,
+    @Query("page") page?: string,
+  ): Promise<StaffAttendanceHistoryDto> {
+    // PARSED THROUGH THE SHARED HELPER, not `Number(page)`: a bare Number()
+    // turns "abc" into NaN and "-3" into a negative offset, and every other
+    // paged read in this API goes through one definition of what a page is.
+    return this.attendance.staffHistory(p, userId, { month, page: pageNumber(page) });
+  }
+
+
+  /**
+   * The rotating gate-display code — on its OWN narrow permission.
+   *
+   * It was gated on `hr.read`, so the screen at the gate had to be signed in as
+   * somebody who could also read every member of staff's attendance and the
+   * month's roll-up. A display in a corridor should open one number and nothing
+   * else.
+   */
   @Get("kiosk/code")
-  @RequirePermission(HR_PERMISSIONS.HR_READ)
+  @RequirePermission(HR_PERMISSIONS.HR_KIOSK_DISPLAY)
   kioskCode(@CurrentPrincipal() p: Principal): Promise<KioskCodeDto> {
     return this.attendance.kioskCode(p);
   }
@@ -167,6 +205,28 @@ export class StaffAttendanceController {
     return this.attendance.unenroll(p, id);
   }
 
+  /**
+   * Close today's register by hand — SCHOOL-SCOPED.
+   *
+   * Passes the caller's OWN schoolId, so a press here can never reach the fleet.
+   * The catalogue declares `scope: "SCHOOL"` and this is the half that enforces
+   * it: a declared scope the handler ignores is exactly the defect
+   * `a-fleet-sweep-one-school-could-fire` exists for.
+   *
+   * `force` because the hourly sweep acts only on the school's evening tick, and
+   * somebody pressing the button means now.
+   */
+  @Post("day-close/run")
+  @RequirePermission(HR_PERMISSIONS.HR_ATTENDANCE_AMEND)
+  dayClose(@CurrentPrincipal() p: Principal) {
+    // RECORDED like the scheduled run. A manual press that files no job run is
+    // invisible to the operator console, so nobody can tell afterwards whether
+    // the day was closed by the timer, by a person, or not at all.
+    return this.jobRuns.record("hr.staffDayClose", "MANUAL", () =>
+      this.dayCloseService.run({ onlySchoolId: p.schoolId, force: true }),
+    );
+  }
+
   /** Staff clock-in with the current display code (hr.self). */
   @Post("clock-in")
   @RequirePermission(HR_PERMISSIONS.HR_SELF)
@@ -176,6 +236,22 @@ export class StaffAttendanceController {
     @Req() req: Request,
   ): Promise<StaffAttendanceDto> {
     return this.attendance.clockIn(p, b.code, clientIp(req));
+  }
+
+  /**
+   * Staff clock-OUT with the current display code (hr.self).
+   *
+   * Same permission and same proof-of-presence as clocking in — a departure is
+   * the other half of the same act, not a privileged one.
+   */
+  @Post("clock-out")
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
+  clockOut(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(clockInSchema)) b: z.infer<typeof clockInSchema>,
+    @Req() req: Request,
+  ): Promise<StaffAttendanceDto> {
+    return this.attendance.clockOut(p, b.code, clientIp(req));
   }
 }
 

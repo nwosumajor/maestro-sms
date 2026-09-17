@@ -92,6 +92,11 @@ model Invoice {
   totalMinor  Int           @default(0)
   dueDate     DateTime      @db.Date
   issuedAt    DateTime?
+  /// When a fee reminder was last SENT for this invoice. The reminder sweep
+  /// orders by it (nulls first), because an unpaid invoice never leaves the
+  /// sweep's predicate: ordering by due date alone chased the same capped page
+  /// every week and the rest never at all.
+  lastRemindedAt DateTime?
   notes       String?
   /// Staff who created it (DB FK to user; audit field, no Prisma relation).
   createdById String        @db.Uuid

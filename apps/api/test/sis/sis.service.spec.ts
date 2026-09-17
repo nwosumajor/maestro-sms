@@ -70,7 +70,11 @@ const principal = (roles: string[], userId = "u-1"): Principal => ({
 describe("SisService relationship scoping", () => {
   it("school_admin can read any student's profile", async () => {
     const { service } = makeService({ profile: { id: "prof-1" } });
-    await expect(service.getProfile(principal(["school_admin"]), "stu-9")).resolves.toEqual({
+    // toMatchObject, not toEqual: these cases assert WHO MAY READ a profile,
+    // and pinning the exact column set made an ADDITIVE change (the pupil's
+    // current class and supervisor) read as a scoping failure. The properties
+    // those fields carry have their own tests.
+    await expect(service.getProfile(principal(["school_admin"]), "stu-9")).resolves.toMatchObject({
       id: "prof-1",
     });
   });
@@ -79,12 +83,12 @@ describe("SisService relationship scoping", () => {
     const { service } = makeService({ profile: { id: "prof-self" } });
     await expect(
       service.getProfile(principal(["student"], "stu-self"), "stu-self"),
-    ).resolves.toEqual({ id: "prof-self" });
+    ).resolves.toMatchObject({ id: "prof-self" });
   });
 
   it("a parent can read their child's profile", async () => {
     const { service } = makeService({ parentChild: [{ id: "link-1" }], profile: { id: "p" } });
-    await expect(service.getProfile(principal(["parent"]), "child-1")).resolves.toEqual({ id: "p" });
+    await expect(service.getProfile(principal(["parent"]), "child-1")).resolves.toMatchObject({ id: "p" });
   });
 
   it("a teacher can read a student in a class they teach", async () => {
@@ -93,7 +97,7 @@ describe("SisService relationship scoping", () => {
       enrollment: { id: "e-1" },
       profile: { id: "p" },
     });
-    await expect(service.getProfile(principal(["teacher"]), "stu-x")).resolves.toEqual({ id: "p" });
+    await expect(service.getProfile(principal(["teacher"]), "stu-x")).resolves.toMatchObject({ id: "p" });
   });
 
   it("a teacher canNOT read a student they don't teach (404)", async () => {
@@ -111,7 +115,7 @@ describe("SisService relationship scoping", () => {
     // No parent/teacher relationship supplied: only the school-wide short-circuit
     // can let junior_admin through. Regression for the dead-grant conflict where
     // junior_admin held student.profile.* but was 404'd on every student.
-    await expect(service.getProfile(principal(["junior_admin"]), "stu-9")).resolves.toEqual({ id: "prof-1" });
+    await expect(service.getProfile(principal(["junior_admin"]), "stu-9")).resolves.toMatchObject({ id: "prof-1" });
   });
 
   it("junior_admin can add an emergency contact for any student", async () => {

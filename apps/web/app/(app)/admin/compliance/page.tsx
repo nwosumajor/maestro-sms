@@ -140,8 +140,33 @@ export default async function CompliancePage() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardDescription>Telemetry retention</CardDescription>
-                  <CardTitle className="tnum text-2xl">{posture.integrityRetentionDays}</CardTitle>
-                  <CardDescription>days, then purged automatically</CardDescription>
+                  {/* Behavioural telemetry on PUPILS. A window of 0 disables the
+                      purge — saying "purged automatically" under a nought told a
+                      DPO the opposite of what is configured. */}
+                  <CardTitle className="tnum text-2xl">
+                    {posture.integrityRetentionDays > 0 ? posture.integrityRetentionDays : "Never"}
+                  </CardTitle>
+                  <CardDescription>
+                    {posture.integrityRetentionDays > 0
+                      ? "days, then purged automatically"
+                      : "purging is off — telemetry on pupils is kept indefinitely"}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Staff clock-scan retention</CardDescription>
+                  {/* A DIFFERENT window from the one above, and the screen says
+                      so: this is employment evidence about adults, not
+                      surveillance of children, and the two are set separately. */}
+                  <CardTitle className="tnum text-2xl">
+                    {posture.staffEventRetentionDays > 0 ? posture.staffEventRetentionDays : "Never"}
+                  </CardTitle>
+                  <CardDescription>
+                    {posture.staffEventRetentionDays > 0
+                      ? "days of raw scans; the daily attendance record is kept"
+                      : "purging is off — every raw scan is kept indefinitely"}
+                  </CardDescription>
                 </CardHeader>
               </Card>
               <Card>
