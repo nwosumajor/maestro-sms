@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **357 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **358 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -525,54 +525,31 @@ evidence live beside it, and are worth opening rather than re-deriving:
   PAST_DUE→effective-BASIC) + an RLS cross-tenant case on the new payment table.
 
 ## Revenue program (July 2026) — BUILT
-Eight monetization levers on the billing/gateway rails (branch feat/revenue-program):
-(1) **Fee-collection TAKE-RATE**: operator-set convenience fee (flat+bp+cap, ZERO
-fail-safe default) via the Paystack split's `transaction_charge` — global
-`platform_fee_config` (rls/71, plan_price posture), per-school bearer choice
-(PARENT adds to the charge / SCHOOL nets less; `school.paymentFeeBearer`,
-fee.manage+step-up), webhook credits the ledger with the INVOICE amount only
-(`payment.platformFeeMinor` records the cut). Operator GET/PUT
-`/operator/platform-fees`. (2) **Admission-form fees**: `school.admissionFormFeeMinor`
-snapshot per application; public checkout at intake + retry init; webhook stamps
-`formFeePaidAt` idempotently; PAID/UNPAID chips + fee setting on /admin/admissions;
-fee shown on the public directory. (3) **Saved-card AUTO-RENEW**: reusable Paystack
-authorization captured from the school's own charge (field-encrypted,
-`school_subscription.paystackAuthorizationEnc`/`cardLast4`/`autoRenew`); dunning
-sweep charges ~2 days pre-lapse at CURRENT seats (≤1 attempt/20h via AUTO-
-references; declines → notice + normal dunning). (4) **Proration + TRUE-UP**:
-`platform_subscription_payment.kind` (RENEWAL extends / UPGRADE restarts from now,
-unused time credited at checkout via pure `prorationCreditMinor` / TRUEUP updates
-seats only, never priceMinor); overview quotes `planChangeCreditMinor` + a seat
-top-up (`computeTrueUpMinor`, MIN_CHARGE_MINOR floor) with one-click checkout.
-(5) **Promos + AGENTS**: global `promo_code` (percent off FIRST charge, validated at
-checkout, usedCount++ on settle) + `agent`/`agent_commission` (rls/72; commission
-ledger DENY-ALL to the app role, unique schoolId = once-only) accrued on the first
-paid sub of an attributed school (onboarding `agentCode` → provisioning stamps
-`subscription.agentId`); operator Growth console manages both + payouts.
-(6) **MESSAGE CREDITS**: append-only `message_credit_entry` (rls/73); bundles
-(`MESSAGE_CREDIT_BUNDLES`) bought via checkout (webhook credits, idempotent);
-each SMS/WHATSAPP delivery debits 1 ONLY after the gateway CONFIRMS the send
-(a per-job ALLOWANCE from `balanceInTx` gates the attempt — read once and shared
-out, so two metered channels can't both spend the school's last credit — and
-`debitInTx` fires post-send, so a failed delivery never spends a paid credit),
-empty balance fails those channels soft;
-WHATSAPP channel added (enum+types+Twilio `whatsapp:`); `user.phone`
-self-service on /account. **Operator oversight** (`/operator/message-credits`,
-`OperatorCreditsService`): cross-tenant balance list (search + paginate, one
-grouped aggregate over the privileged client, reason-split into purchased/
-sent/adjusted) + a per-school ledger drill-down + a comp/debit lever
-(`platform.subscription.manage`, step-up, audited — writes a normal ADJUST
-ledger row via the ordinary tenant client with the GUC set to the target
-school, same pattern as the subscription comp). (7) **GROUP console** (MODULES.GROUP add-on): global
-`school_group(+member,director)` registry (rls/74 deny-all; operator-managed,
-step-up) — DIRECTORSHIP is the authorization; /group renders cross-campus
-aggregates (never PII) via privileged reads, audited. (8) **CBT exam hall**
-(MODULES.CBT add-on): banks→questions (answerIndex SERVER-ONLY until a sitting
-closes)→timed exams (server-sampled per sitting)→sittings (clock is server law,
-auto-expire on read, auto-marks are staff-reviewed numbers — Golden Rule #8);
-`cbt.manage`/`cbt.take` seeded; rls/75 (sittings never hard-deleted). Migrations
-20260829–20260905, RLS 71–75, RLS-e2e cases for every new tenant table. Verified:
-494 API tests, web build 78 routes.
+Eight monetization levers on the billing/gateway rails. (1) **Fee-collection
+TAKE-RATE** — operator-set convenience fee (flat+bp+cap, ZERO fail-safe default)
+via the Paystack split's `transaction_charge`; global `platform_fee_config`
+(rls/71), per-school bearer choice (`school.paymentFeeBearer`), webhook credits
+the ledger with the INVOICE amount only (`payment.platformFeeMinor` records the
+cut). (2) **Admission-form fees** — `school.admissionFormFeeMinor` snapshot per
+application, public checkout at intake, webhook stamps `formFeePaidAt`
+idempotently. (3) **Saved-card AUTO-RENEW** — reusable Paystack authorization
+field-encrypted on `school_subscription`; dunning charges ~2 days pre-lapse at
+CURRENT seats (<=1 attempt/20h). (4) **Proration + TRUE-UP** —
+`platform_subscription_payment.kind` (RENEWAL extends / UPGRADE restarts, unused
+time credited / TRUEUP updates seats only, never `priceMinor`). (5) **Promos +
+AGENTS** — global `promo_code` (percent off FIRST charge) + `agent`/
+`agent_commission` (rls/72, ledger DENY-ALL to the app role, unique schoolId =
+once-only). (6) **MESSAGE CREDITS** — append-only `message_credit_entry` (rls/73);
+each SMS/WHATSAPP delivery debits 1 ONLY after the gateway CONFIRMS, gated by a
+per-job ALLOWANCE from `balanceInTx` so two metered channels cannot both spend the
+last credit; empty balance fails those channels soft. Operator oversight at
+`/operator/message-credits`. (7) **GROUP console** (MODULES.GROUP) — global
+`school_group` registry (rls/74 deny-all); DIRECTORSHIP is the authorization,
+`/group` renders cross-campus aggregates, never PII. (8) **CBT exam hall**
+(MODULES.CBT) — banks -> questions (answerIndex SERVER-ONLY until a sitting
+closes) -> timed exams -> sittings (clock is server law, auto-marks are
+staff-reviewed numbers, Golden Rule #8); rls/75. Migrations 20260829–20260905,
+RLS 71–75, an RLS-e2e case for every new tenant table.
 
 ## Project structure
 - Monorepo (Turborepo + pnpm workspaces).
@@ -925,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **357 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **358 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2331,22 +2308,41 @@ BASE room (one per class, refusal names the holder), distinct from the
 per-SUBJECT `preferredRoomId`. Syllabus and notes copy to arms too: SKIP never
 overwrite, notes land DRAFT keeping the (subject, term) gradebook tag.
 
-## O(lifetime) ALSO ARRIVES AS PARTITION COUNT — costing PLANNING, not execution
-An aggregate over `attendance_record` with no date predicate PLANS every
-partition. On 1.29M rows: unbounded 88.6ms planning / 9.4ms execution; bounded to
-a year 0.58 / 1.3. Planning was 90%, and scales with partition count (8.9ms at 5,
-88.6ms at 52) — which tracks the PLATFORM's age, so a school that joined
-yesterday slows every month with nothing in its data to explain it. **Bound every
-aggregate over a partitioned table by date; make the PAGE a window, not a slice.**
-Keep at most ONE unbounded pass (the lifetime audit total) and have it return the
-SPAN, so the total needs no second scan. // GOTCHA: **a window is anchored on the
-RECORD, not on today** — counted back from today it lands after a LEAVER's final
-register, so page 1 is empty under a total saying thirty months exist, and an
-investigation opening a leaver is this screen's likeliest reader. Anchor on the
-`last_day` the lifetime pass already returned. // GOTCHA: Postgres REFUSES a partition
-for a month with rows already in DEFAULT — once the extender falls behind, that
-month cannot be partitioned until they are migrated. `AuditPartitionService`
-detects it and counts `failed`; no remedy tool exists.
+## MEASURE AT THE LEVEL A USER MEETS, NOT ONLY IN EXPLAIN
+A lifetime `groupBy` on a partitioned table is 64.8ms planning / 3.5ms execution —
+and the ENDPOINT cannot tell 63 partitions from 15 (24ms vs 26ms). Postgres caches
+the plan PER PREPARED STATEMENT PER CONNECTION (first EXECUTE 18.4ms, then 0.8ms)
+and Prisma pools connections, so it is paid once per connection, not per request.
+EXPLAIN forces a fresh plan; production does not. **Three unbounded reads found by
+a sweep were therefore LEFT ALONE.**
+// **What DOES degrade is HYDRATION.** `/operator/analytics` fetched every
+`student_profile` on the platform for two histograms: 0.5s at 0 pupils, 3.2s at
+200,000, against 64ms for the same question as an aggregate — 4.5M rows and ~70s
+at the 5,000-school target. The per-school sibling already did it in SQL.
+// **The PUBLIC front door shipped the fleet**: `/public/schools` returned every
+school unpaged and unsearchable (678 KB, 631ms, the slowest page in the app), its
+own comment conceding the shape and answering with a rate limit — which bounds how
+OFTEN the cost is paid, not the cost. Paged + searched in SQL: 6.8 KB, 42ms.
+// GOTCHA: a route on the PUBLIC controller without `@Public()` answers 401, and
+the only symptom was a school's own enrol link silently not preselecting it.
+
+## O(lifetime) ALSO ARRIVES AS PARTITION COUNT — the SLICING pays, not the planning
+An aggregate over `attendance_record` with no date predicate PLANS every partition
+(unbounded 88.6ms planning / 9.4ms execution; bounded to a year 0.58 / 1.3), and
+planning tracks the PLATFORM's age. **Bound every aggregate over a partitioned
+table by date; make the PAGE a window, not a slice** — and keep at most ONE
+unbounded pass (the lifetime audit total), returning the SPAN so the total needs
+no second scan.
+// GOTCHA: **a window is anchored on the RECORD, not on today** — counted back
+from today it lands after a LEAVER's final register: an empty page 1 under a total
+saying thirty months exist, and a leaver is this screen's likeliest reader.
+// GOTCHA: Postgres REFUSES a partition for a month with rows already in DEFAULT;
+`AuditPartitionService` detects it and counts `failed`, and there is no remedy tool.
+// GOTCHA: **an unindexed FK is harmless until somebody PURGES.** A user delete is
+checked by `audit_log."actorId"` on a PARTITIONED table with no index on it, so it
+scans every partition: 12 minutes without finishing. The remedy works — 71
+temporary indexes in 0.9s, then 410k rows in 8m36s — but the recorded
+"1,370,900 rows in 3m6s" is ONE fixture, not a rate.
 
 ## A pupil's attendance compiles at THREE grains, and says which are settled
 `GET /students/:id/attendance/compiled?grain=month|term|session`. Scoping is

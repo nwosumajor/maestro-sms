@@ -11,7 +11,14 @@
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { Prisma, prisma } from "@sms/db";
-import { LEGAL_DOCS_VERSION, isModuleKey, isPlan, type PublicSchoolDto } from "@sms/types";
+import {
+  LEGAL_DOCS_VERSION,
+  PUBLIC_SCHOOL_PAGE_SIZE,
+  isModuleKey,
+  isPlan,
+  type PublicSchoolDto,
+  type PublicSchoolPageDto,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -88,16 +95,67 @@ export class PublicService {
     await this.audit.record({ actorId: userId, action, entity: "user", entityId: userId, schoolId }, tx);
   }
 
-  /** PUBLIC: list onboarded (ACTIVE) schools for the parent directory. The
-   *  admission-form fee is deliberately public — applicants must see the cost
-   *  before they fill a five-minute form. */
-  async listSchools(): Promise<PublicSchoolDto[]> {
+  /**
+   * PUBLIC: a PAGE of onboarded (ACTIVE) schools for the parent directory,
+   * searched in SQL. The admission-form fee is deliberately public — applicants
+   * must see the cost before they fill a five-minute form.
+   *
+   * IT USED TO RETURN EVERY SCHOOL. Unpaged, unsearchable, on an endpoint
+   * anybody on the internet can call, and the directory page rendered all of
+   * them. Measured at 5,003 schools: 678 KB and a 631 ms render — the slowest
+   * page in the application by an order of magnitude, growing linearly with the
+   * fleet, on the public front door. The route's own comment conceded the shape
+   * and answered it with a rate limit, which bounds how OFTEN the cost is paid
+   * rather than the cost.
+   *
+   * It was also the wrong product at that size: nobody finds their child's
+   * school by scrolling five thousand names. So the reader gets a SEARCH that
+   * runs in the database, and the total says what is not shown — widening the
+   * reach without widening what is public, which is unchanged: name, slug,
+   * admission fee, currency.
+   */
+  async listSchools(opts: { q?: string; page?: number } = {}): Promise<PublicSchoolPageDto> {
+    const pageSize = PUBLIC_SCHOOL_PAGE_SIZE;
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const q = (opts.q ?? "").trim().slice(0, 80);
+    // The search is a plain prefix/contains on the school's own name — the only
+    // field a family knows. `mode: insensitive` because "St Andrews" is how
+    // somebody types it.
+    const where = {
+      status: "ACTIVE",
+      isPlatform: false,
+      ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
+    };
+    return this.db.runAsTenant({ schoolId: ZERO, userId: ZERO }, async (tx) => {
+      // COUNTED in the database, and counted over the SAME predicate the page is
+      // drawn from — a total the caller cannot reconcile with the list is worse
+      // than no total.
+      const [items, total] = await Promise.all([
+        tx.school.findMany({
+          where,
+          select: { id: true, name: true, slug: true, admissionFormFeeMinor: true, currency: true },
+          orderBy: { name: "asc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        tx.school.count({ where }),
+      ]);
+      return { items: items as PublicSchoolDto[], total, page, pageSize };
+    });
+  }
+
+  /** The schools behind a set of slugs — what an enrolment form needs once a
+   *  family has CHOSEN, which is a different question from browsing. Bounded by
+   *  the number a family may apply to, so it cannot be used to walk the fleet. */
+  async schoolsBySlugs(slugs: string[]): Promise<PublicSchoolDto[]> {
+    const wanted = [...new Set(slugs.map((s) => s.trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+    if (wanted.length === 0) return [];
     return this.db.runAsTenant({ schoolId: ZERO, userId: ZERO }, (tx) =>
       tx.school.findMany({
-        where: { status: "ACTIVE", isPlatform: false },
+        where: { status: "ACTIVE", isPlatform: false, slug: { in: wanted } },
         select: { id: true, name: true, slug: true, admissionFormFeeMinor: true, currency: true },
         orderBy: { name: "asc" },
-      }),
+      }) as Promise<PublicSchoolDto[]>,
     );
   }
 

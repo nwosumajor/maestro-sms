@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **914 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **915 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -45,6 +45,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **914 routes across 90
 | POST | `/public/password-reset/request` | 🌐 public | PUBLIC: request a forgot-password reset email. |
 | GET | `/public/plan-pricing` | 🌐 public | Effective per-tier pricing (operator overrides merged over defaults) — the landing page derives its prices from this |
 | GET | `/public/schools` | 🌐 public | Public list of onboarded schools (parent directory; excludes the platform org) |
+| GET | `/public/schools/by-slug` | 🌐 public | PUBLIC: resolve the schools a family has CHOSEN, by slug. |
 
 ---
 

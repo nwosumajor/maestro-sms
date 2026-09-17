@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
 import { ONBOARDING_CONTACT_ROLES, ONBOARDING_SCHOOL_TYPES } from "@sms/types";
-import type { PlanPriceDto, PublicSchoolDto } from "@sms/types";
+import type { PlanPriceDto, PublicSchoolDto, PublicSchoolPageDto } from "@sms/types";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { RateLimitGuard } from "../common/rate-limit.guard";
+import { pageNumber } from "../common/status-filter";
 import { PlanPricingService } from "../billing/plan-pricing.service";
 import { PublicService } from "./public.service";
 
@@ -61,8 +62,25 @@ export class PublicController {
   // every request. Generous — a family browsing schools makes a handful.
   @UseGuards(new RateLimitGuard(60, 60_000))
   @Get("schools")
-  schools(): Promise<PublicSchoolDto[]> {
-    return this.publicSvc.listSchools();
+  schools(
+    @Query("q") q?: string,
+    @Query("page") page?: string,
+  ): Promise<PublicSchoolPageDto> {
+    // `pageNumber`, not `Number(page) || 1` — the shared parser REFUSES a
+    // nonsense page instead of silently treating it as 1, which is the whole
+    // point of `a-filter-nobody-validated`: a filter the caller believes is
+    // applied and is not.
+    return this.publicSvc.listSchools({ q, page: pageNumber(page) });
+  }
+
+  /** PUBLIC: resolve the schools a family has CHOSEN, by slug. Browsing and
+   *  having-chosen are different questions; this one is bounded by the number of
+   *  applications a family may make, so it cannot walk the fleet. */
+  @Public()
+  @UseGuards(new RateLimitGuard(60, 60_000))
+  @Get("schools/by-slug")
+  schoolsBySlug(@Query("slugs") slugs?: string): Promise<PublicSchoolDto[]> {
+    return this.publicSvc.schoolsBySlugs((slugs ?? "").split(",").filter(Boolean));
   }
 
   /** PUBLIC: effective plan-tier pricing for the landing page — the SAME

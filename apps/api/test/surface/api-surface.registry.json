@@ -1321,6 +1321,10 @@
       "kind": "system",
       "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
+    "GET /public/schools/by-slug": {
+      "kind": "ui",
+      "note": "EnrollForm on /enroll — resolves the schools a family has CHOSEN, by slug"
+    },
     "GET /quiz-sessions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

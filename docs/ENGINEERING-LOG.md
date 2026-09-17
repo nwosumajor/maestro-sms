@@ -17202,3 +17202,110 @@ Verified after: `migrate deploy` is a clean no-op, the six absent objects exist,
 the app role cannot SELECT either scholarship-question table, the RLS e2e passes
 205/205, and the full DB-gated suite runs 646 suites / 6,371 tests with no
 failures.
+
+### Whole-application simulation: 5,000 schools, five years — what it actually found
+
+The fixture: 5,004 tenants, 200,000 pupils with profiles, 868,000 attendance
+records across 63 monthly partitions (a five-year platform), a pupil with 965
+records spanning 2021–2026. Everything measured as the APP ROLE under RLS with
+bound parameters, and at the ENDPOINT as well as in EXPLAIN — the two disagree,
+which is the first finding.
+
+**PROJECTION FIRST.** Five tenant tables are unbounded and large at 5,000 x 5y —
+`subject_result` and `lms_submission` (675M each), `message` (300M),
+`staff_attendance` (292M), `invoice_line_item` (135M). None is a problem on its
+own: every one has a `schoolId`-leading composite index and every read filters
+the tenant first, so the per-tenant slice is ~135k rows. `attendance_record` and
+`audit_log` are partitioned; ten more tables are purged by the retention sweep.
+The risk is never table size — it is a query that is not bounded by tenant AND
+by date.
+
+**1. THE PARTITION-PLANNING CONCERN DOES NOT SURVIVE CONTACT WITH THE ENDPOINT,
+and this CORRECTS an earlier entry.** A lifetime `groupBy` on a partitioned table
+costs 64.8 ms planning against 3.5 ms execution — planning is 95%. But:
+
+    prepared statement, first EXECUTE   18.4 ms planning
+    every EXECUTE after                  0.8 ms planning
+    /family/overview, 63 partitions      median 24 ms
+    /family/overview, 15 partitions      median 26 ms
+
+Postgres caches the plan per prepared statement per connection and Prisma pools
+connections, so the cost is paid ONCE PER CONNECTION, not per request — and the
+endpoint cannot tell 63 partitions from 15. EXPLAIN forces a fresh plan every
+time, which is exactly what production does not do.
+
+So the three unbounded reads this sweep found (`parent.service` overview,
+`scholarship` signals, `lms` class analytics) were NOT changed. Measuring at the
+level a user experiences said there was nothing to fix, and acting on the EXPLAIN
+number would have been changing code on the strength of a measurement that does
+not hold. // The compiled-attendance entry above attributes its gain primarily to
+planning; on this evidence the larger part was not fetching every month to show
+36. The endpoint improvement it records was real; the cause was over-attributed.
+
+**2. THE PLATFORM ANALYTICS HYDRATED EVERY PUPIL ON THE PLATFORM.** `overview()`
+fetched `{ gender, dateOfBirth }` for EVERY `student_profile` in EVERY school and
+tallied them in a JS loop, for two small histograms.
+
+    0 pupils          0.5 s
+    200,000 pupils    3.2 s        (~15 ms per thousand, all hydration)
+    Postgres, same question as an aggregate:  64 ms
+
+A real fleet is 4.5M profiles: ~70 seconds and 4.5M live objects in the API task,
+on the platform owner's own dashboard. It would take the task's memory, not merely
+time out. THE CORRECT SIBLING WAS ALREADY THERE — `analytics.service.ts` does this
+in SQL for ONE school, with a comment saying why; the half left behind was the one
+running over five thousand times as many rows. Fixed with the same shape (gender
+grouped by RAW value and folded through `normalizeGender` over the grouped rows;
+age bands as FILTER counts), scoped by `school."isPlatform" = false` rather than a
+5,000-element `IN`. Output byte-identical, 3.2s -> 1.5s.
+
+**3. THE PUBLIC FRONT DOOR SHIPPED THE WHOLE PLATFORM.** `GET /public/schools`
+returned every active school — unpaged, unsearchable, unauthenticated — and
+`/schools` rendered all of them:
+
+    678,197 bytes   5,003 rows   631 ms median render (the slowest page in the
+                                 application by an order of magnitude)
+
+The route's own comment CONCEDED the shape and answered it with a rate limit,
+which bounds how OFTEN the cost is paid, not the cost: 60 calls/min x 678 KB is
+40 MB/min per IP, from the internet. It was also the wrong product at that size —
+nobody finds their child's school by scrolling five thousand names. Paged and
+searched in SQL with a total; `/enroll` gets a searchable chooser and resolves a
+preselected school BY SLUG so a school's own link still works off page 101.
+
+    678 KB -> 6.8 KB      /schools 631 ms -> 42 ms      /enroll 242 ms -> 33 ms
+
+// GOTCHA, made and caught within the hour: the new `schools/by-slug` route was
+// added WITHOUT `@Public()`, so the guard answered 401 and the only symptom was
+// that a school's own enrolment link silently stopped preselecting it. Gated now
+// — every route on the PUBLIC controller must be marked public.
+
+**4. THE PURGE RECIPE WORKS, BUT ITS RECORDED FIGURE DOES NOT GENERALISE.**
+Removing the fixture hit the documented unindexed-FK wall: the delete ran 12
+minutes without finishing and `pg_stat_activity` named the cause exactly — the FK
+check from `audit_log."actorId"`, and `audit_log` is PARTITIONED with no index on
+it, so every user delete scans every partition. Applying the documented remedy:
+
+    71 temporary indexes on the referencing columns   0.9 s
+    410,000 rows deleted and committed                8 m 36 s
+
+The recipe is right and the indexes are what made it finish at all. But the entry
+above records "1,370,900 rows in 3 m 6 s" — my delete was a THIRD the size and
+took nearly THREE TIMES as long, because these users had audit rows spread across
+partitions. Read that number as one measurement of one fixture, not a rate.
+
+**WHAT PASSED.** 111 routes x 17 roles all rendered at fleet scale; page timings
+median 18 ms, p95 103 ms, zero 5xx; the operator console paged and searched in
+36–52 ms at 5,004 tenants; largest session cookie 1,139 bytes against a 3,072
+budget.
+
+**WHAT IS STILL OPEN**, stated rather than left implied:
+  - `customerIds` is materialised into 5,000-element `ARRAY[...]` literals in
+    several platform queries — a 195 KB SQL string, measured at 2x the cost of
+    the equivalent subquery (12.7/33.3 ms vs 4.2/20.6). Fine at 5,000, a problem
+    at 50,000. Not changed: several call sites, each scoped differently.
+  - `/operator/analytics` is ~1.5 s at 200k pupils after the fix. The 4.5M-row
+    hydration is gone; what remains scales with the fleet, not the pupils.
+  - The heaviest tables were seeded to ONE school's depth, not 5,000 schools'.
+    Per-tenant reads are index-bound and were measured; whole-fleet SWEEPS over
+    those tables at true volume were not.

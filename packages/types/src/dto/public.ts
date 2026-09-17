@@ -1,6 +1,32 @@
 // Public (pre-auth) website DTOs: the school directory + onboarding intake.
 
 /** A school as shown in the public directory (no tenant data). */
+/**
+ * A PAGE of the public school directory.
+ *
+ * `listSchools` returned EVERY active school, unpaged and unsearchable, on an
+ * UNAUTHENTICATED endpoint — and the page rendered all of them. Measured at
+ * 5,003 schools: **678 KB and a 631 ms render**, the slowest page in the
+ * application by an order of magnitude, growing linearly with the fleet. The
+ * route's own comment conceded the shape ("an unlimited caller drives a findMany
+ * over every ACTIVE school on every request") and answered it with a rate limit,
+ * which bounds how OFTEN it can be paid, not what it costs.
+ *
+ * It is also the wrong product: a family looking for one school cannot scroll
+ * five thousand. The control a reader uses has to reach past the cap, so the
+ * search runs in SQL and the total says what is not shown.
+ */
+export interface PublicSchoolPageDto {
+  items: PublicSchoolDto[];
+  /** Every school matching the query — not the length of `items`. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Schools per page of the public directory. */
+export const PUBLIC_SCHOOL_PAGE_SIZE = 50;
+
 export interface PublicSchoolDto {
   id: string;
   name: string;

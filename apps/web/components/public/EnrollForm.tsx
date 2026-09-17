@@ -21,10 +21,68 @@ const MAX_SCHOOLS = 2;
  */
 const fee = (s: PublicSchoolDto) => formatMoney(s.admissionFormFeeMinor, s.currency || "NGN", "en");
 
-export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[]; preselect?: string }) {
+/**
+ * A SEARCHABLE chooser, not the whole fleet.
+ *
+ * This was handed EVERY active school and rendered a checkbox for each. At
+ * 5,003 schools that is 678 KB of markup and a form nobody can use — a family
+ * does not find their child's school by scrolling five thousand checkboxes.
+ *
+ * `seed` is the first page (the common case: a small platform, or a family that
+ * arrived from a school's own link). Typing searches the SAME paged endpoint the
+ * directory uses, so the reach is the whole fleet while the payload stays one
+ * page. A school chosen by search is REMEMBERED, so it survives the next query
+ * clearing the results — the picker defect this repo has already recorded twice.
+ */
+export function EnrollForm({
+  schools,
+  total,
+  preselect,
+}: {
+  schools: PublicSchoolDto[];
+  total: number;
+  preselect?: string;
+}) {
+  const [seed] = React.useState<PublicSchoolDto[]>(schools);
+  const [results, setResults] = React.useState<PublicSchoolDto[] | null>(null);
+  const [q, setQ] = React.useState("");
+  const [searching, setSearching] = React.useState(false);
+  /** Schools the family has actually chosen — held so a name never vanishes. */
+  const [picked, setPicked] = React.useState<PublicSchoolDto[]>(
+    preselect ? schools.filter((s) => s.slug === preselect) : [],
+  );
   const [selected, setSelected] = React.useState<string[]>(
     preselect && schools.some((s) => s.slug === preselect) ? [preselect] : [],
   );
+
+  React.useEffect(() => {
+    const needle = q.trim();
+    if (!needle) { setResults(null); return; }
+    let live = true;
+    // Debounced: typing a name is one request, not one per keystroke.
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(`/api/public/schools?q=${encodeURIComponent(needle)}`, { cache: "no-store" });
+        const body = res.ok ? ((await res.json()) as { items?: PublicSchoolDto[] }) : null;
+        if (live) setResults(body?.items ?? []);
+      } catch {
+        if (live) setResults([]);
+      } finally {
+        if (live) setSearching(false);
+      }
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [q]);
+
+  // What to show: the search results when searching, otherwise the seed — with
+  // anything already CHOSEN pinned on, so a selection made under a previous
+  // query is never silently dropped from the list it is ticked in.
+  const shown = React.useMemo(() => {
+    const base = results ?? seed;
+    const extra = picked.filter((p) => !base.some((b) => b.slug === p.slug));
+    return [...extra, ...base];
+  }, [results, seed, picked]);
   const [f, setF] = React.useState({
     parentName: "",
     parentEmail: "",
@@ -45,10 +103,15 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setF({ ...f, [k]: e.target.value });
 
-  const toggle = (slug: string) => {
+  const toggle = (school: PublicSchoolDto) => {
+    const slug = school.slug;
     setSelected((cur) => {
-      if (cur.includes(slug)) return cur.filter((s) => s !== slug);
+      if (cur.includes(slug)) {
+        setPicked((p) => p.filter((x) => x.slug !== slug));
+        return cur.filter((s) => s !== slug);
+      }
       if (cur.length >= MAX_SCHOOLS) return cur;
+      setPicked((p) => (p.some((x) => x.slug === slug) ? p : [...p, school]));
       return [...cur, slug];
     });
   };
@@ -113,7 +176,7 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
   };
 
   if (done) {
-    const names = schools.filter((s) => done.includes(s.slug)).map((s) => s.name);
+    const names = [...picked, ...seed].filter((s) => done.includes(s.slug)).map((s) => s.name);
     return (
       <div className="space-y-3 text-sm">
         <p>
@@ -152,7 +215,27 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
       <div>
         <Label>Choose up to two schools</Label>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {schools.map((s) => {
+          {/* THE CONTROL REACHES PAST THE PAGE. Without it the list is the
+              first fifty of however many schools the platform has, and a family
+              whose school sorts later simply cannot apply. */}
+          <div className="mb-2">
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search for your school by name…"
+              aria-label="Search for your school by name"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {searching
+                ? "Searching…"
+                : q.trim()
+                  ? `${(results ?? []).length} matching “${q.trim()}”`
+                  : `Showing ${seed.length} of ${total.toLocaleString()} schools — type to search them all.`}
+            </p>
+          </div>
+          {shown.map((s) => {
             const on = selected.includes(s.slug);
             const disabled = !on && selected.length >= MAX_SCHOOLS;
             return (
@@ -162,7 +245,7 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
                   on ? "border-primary bg-primary/5" : "border-border"
                 } ${disabled ? "opacity-50" : ""}`}
               >
-                <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(s.slug)} />
+                <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(s)} />
                 <span className="min-w-0">
                   {s.name}
                   {s.admissionFormFeeMinor > 0 && (

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { PublicSchoolDto } from "@sms/types";
+import type { PublicSchoolPageDto } from "@sms/types";
 import { EnrollForm } from "@/components/public/EnrollForm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
@@ -11,11 +11,28 @@ export const dynamic = "force-dynamic";
 // into [], a failed fetch rendered "No schools are available right now" — on an
 // application form, that reads as a closed admissions season rather than a
 // broken page, and the parent leaves instead of retrying.
-async function getSchools(): Promise<PublicSchoolDto[] | null> {
+// ONE PAGE, plus whichever school the link named. It used to fetch every active
+// school on the platform to draw a checkbox each — 678 KB at 5,003 schools, and
+// a form nobody could use at that size. The form searches the rest.
+async function getSchools(preselect?: string): Promise<PublicSchoolPageDto | null> {
   try {
-    const res = await fetch(`${apiBaseUrl()}/public/schools`, { cache: "no-store" });
-    if (!res.ok) return null;
-    return (await res.json()) as PublicSchoolDto[];
+    const [pageRes, oneRes] = await Promise.all([
+      fetch(`${apiBaseUrl()}/public/schools`, { cache: "no-store" }),
+      preselect
+        ? fetch(`${apiBaseUrl()}/public/schools/by-slug?slugs=${encodeURIComponent(preselect)}`, { cache: "no-store" })
+        : Promise.resolve(null),
+    ]);
+    if (!pageRes.ok) return null;
+    const page = (await pageRes.json()) as PublicSchoolPageDto;
+    // A school arrived at from its OWN link must be on the form even if it is
+    // not on the first page — otherwise the link silently loses the school.
+    if (oneRes?.ok) {
+      const one = (await oneRes.json()) as PublicSchoolPageDto["items"];
+      for (const s of one) {
+        if (!page.items.some((x) => x.slug === s.slug)) page.items = [s, ...page.items];
+      }
+    }
+    return page;
   } catch {
     return null;
   }
@@ -23,7 +40,8 @@ async function getSchools(): Promise<PublicSchoolDto[] | null> {
 
 // PUBLIC page — no authentication. A parent applies to enrol their child.
 export default async function EnrollPage({ searchParams }: { searchParams: { school?: string } }) {
-  const schools = await getSchools();
+  const result = await getSchools(searchParams.school);
+  const schools = result?.items ?? null;
 
   return (
     <main className="relative mx-auto min-h-screen max-w-2xl bg-background p-6">
@@ -55,7 +73,7 @@ export default async function EnrollPage({ searchParams }: { searchParams: { sch
           ) : schools.length === 0 ? (
             <p className="text-sm text-muted-foreground">No schools are available right now. Please check back soon.</p>
           ) : (
-            <EnrollForm schools={schools} preselect={searchParams.school} />
+            <EnrollForm schools={schools} total={result?.total ?? schools.length} preselect={searchParams.school} />
           )}
         </CardContent>
       </Card>
