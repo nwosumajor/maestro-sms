@@ -42,6 +42,7 @@ import {
 } from "@sms/types";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { PlanPricingService } from "../billing/plan-pricing.service";
+import { ACTIVE_CUSTOMER_SCHOOLS, inSchoolScope } from "./operator-fleet";
 import { headcountBySchool } from "./operator-people";
 import { toMinor } from "../common/money";
 import {
@@ -105,7 +106,7 @@ export class OperatorAttentionService {
           currency: true,
         },
       }),
-      headcountBySchool(client, ids),
+      headcountBySchool(client, ACTIVE_CUSTOMER_SCHOOLS),
       // Which schools have ANY audited activity recently. Asking the positive
       // question keeps the scan inside the recent audit-log partitions; asking
       // "when did each school last do something" would touch every partition.
@@ -125,7 +126,7 @@ export class OperatorAttentionService {
         FROM user_role ur
         JOIN role r ON r.id = ur."roleId"
         WHERE r.name IN ('school_admin', 'principal')
-          AND ur."schoolId" = ANY(ARRAY[${Prisma.join(ids)}]::uuid[])
+          AND ${inSchoolScope(Prisma.sql`ur."schoolId"`, ACTIVE_CUSTOMER_SCHOOLS)}
         GROUP BY ur."schoolId"
       `),
     ]);

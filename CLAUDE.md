@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **360 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **361 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **360 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **361 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1040,9 +1040,8 @@ These are the rules; the log is why each one exists.
   tells a family that notices exist which they may not read. **Widening the
   REACH must never widen the RULE.**
 - **A JUMP-TO BOX IS STILL A CAP.** The omnibox showed six per category with no
-  count: "Adebayo" matched 150 pupils and returned six arbitrary ones, so *not on
-  the roll* and *one of the 144 I did not show* read identically. Return
-  `shown`/`total`, order by a TOTAL order, and count only when the
+  count, so *not on the roll* and *one of the 144 I did not show* read alike.
+  Return `shown`/`total`, order by a TOTAL order, and count only when the
   `PER_CATEGORY + 1`-th row proves more.
 - **AND THE FILTER A TOTAL IS COMPUTED OVER CAN ITSELF BE TRUNCATED.** The
   operator revenue screen aggregates in SQL over the whole filter — while the
@@ -1054,6 +1053,9 @@ These are the rules; the log is why each one exists.
   `take: 500`: leadership saw **500 / 405 / 29** against a true
   **1,200 / 980 / 60**. A short list looks like a list; a wrong number looks
   like a fact. Count in SQL, independent of the filter and the page.
+- **A PREDICATE MATERIALISED AS IDS IS SENT TWICE.** "Every customer school"
+  spelled out as a 5,000-element `ARRAY[…]` is a 195 KB statement at 2x the cost
+  of the subquery, and the PLANNING half grows with the fleet (`operator-fleet`).
 - **A CAP WITH NO COUNT IS THE COMMONEST DEFECT IN THIS REPO** — a scan of every
   `findMany` with a literal `take` and no `skip` found **65**. When you cap,
   return the TOTAL; a newest-first cap eats the record.
@@ -1085,8 +1087,8 @@ These are the rules; the log is why each one exists.
   `/grades/mine` returned every mark ever, unpaged: 2,430 rows / 831 KB for a
   parent of three, to look at this week's work. Bound the read to the period the
   SCREEN claims — and keep the other periods reachable.
-- **ALUMNI ONLY EVER GROW**: the register capped at 500, newest-first, so the
-  OLDEST cohort vanished — backwards for the one list whose value is its age.
+- **ALUMNI ONLY EVER GROW**: a newest-first cap loses the OLDEST cohort, which
+  is backwards for the one list whose value is its age.
 - **Offset paging needs a TOTAL order.** `gradedAt` alone is not one — tied rows
   come back differently per page, silently skipping and repeating: 239 distinct
   of 270 across six pages. Add `id`. The test passed until the double SHUFFLED
@@ -1889,13 +1891,12 @@ ones arrived, so a card labelled **"Revenue · all time"** went DOWN over time.
 Measured at 6,508 payments: NGN 5,000,000 shown against NGN 30,846,756.64 true,
 **83.8% missing**, nothing saying a row was dropped; crossed in year four at 500
 schools. The same array fed the monthly revenue trend, so a growth chart erased
-its own history. Both are SQL aggregates now and the preview takes the 10 rows
-it needed; analytics got FASTER (267ms -> 227ms). // GOTCHA: `revenue.payments`
-was the length of that capped ALL-CURRENCY array while the money was
-home-currency only — a count and a total describing different populations under
-one heading. // GOTCHA: the spec's `$queryRaw` double filtered currency ITSELF,
-so dropping `AND currency = …` from the SQL passed the mutation. A double must
-honour the query's own predicate.
+its own history. Both are SQL aggregates now; analytics got FASTER (267 -> 227ms).
+// GOTCHA: `revenue.payments` was the length of that capped ALL-CURRENCY array
+while the money was home-currency only — a count and a total describing different
+populations under one heading. // GOTCHA: the spec's `$queryRaw` double filtered
+currency ITSELF, so dropping `AND currency = …` passed the mutation. A double
+must honour the query's own predicate.
 
 ## Correcting a school's region — where it lives, and what follows
 `/operator/tenants` (or the directory) -> a school -> **Profile & region** ->
@@ -2021,8 +2022,7 @@ the matching index (migration `20260909000000`). // GOTCHA: a cursor cut on a
 different column than the ordering does not mis-sort, it SKIPS whole runs of
 rows. // GOTCHA: paging on a MUTABLE key can show a bumped row twice or miss it
 — the accepted cost of a recency-ordered inbox, and far better than a message
-from today at position 400. // GOTCHA: `POST /messages/threads` takes
-`recipientId`, SINGULAR.
+from today at position 400. `POST /messages/threads` takes `recipientId`, SINGULAR.
 
 ## A gate whose SET is hand-kept only guards what somebody remembered
 `a-sweep-that-was-behind-and-said-nothing` checked a HAND-KEPT array of four

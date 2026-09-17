@@ -17418,3 +17418,52 @@ the substring form fails the widened gate naming the file.
 // it is that proving an ABSENCE by searching a serialised document is the wrong
 // instrument, because the document carries ids, timestamps and counts that
 // nobody chose.
+
+### The fleet, spelled out five thousand times
+
+Recorded as open by the 5,000-school simulation and closed here. Several
+cross-tenant operator reads mean "every customer school" and said so by fetching
+the ids once and interpolating them back:
+
+    WHERE "schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+
+At the target fleet that is a **195 KB SQL string per call**, measured on that
+fixture at twice the cost of the equivalent subquery — **12.7 ms planning /
+33.3 ms execution against 4.2 / 20.6**. The planning half is the one that grows
+with the fleet, so it gets worse at 50,000 exactly where it is least affordable.
+
+Six sites, in two different fleets: `platform-analytics` sweeps EVERY customer
+school, `operator-attention` only the ACTIVE ones — a distinction that had been
+written out by hand at each site and could drift. `operator-fleet.ts` is now the
+one definition of both (`ALL_CUSTOMER_SCHOOLS` / `ACTIVE_CUSTOMER_SCHOOLS`) plus
+`inSchoolScope`, which takes either an explicit list (a PAGE of schools, where
+the caller has already decided which) or a predicate, so a paged call site and a
+fleet one cannot disagree about what "in scope" means.
+
+The id list is still fetched — it keys the per-school roll-ups. What stopped is
+spelling it out to the server a second time for each aggregate.
+
+VERIFIED BY OUTPUT, not by reading: `/operator/analytics` and
+`/operator/attention` were captured against the running stack before the change
+and again after, and both responses are **byte-identical** (sha256
+`65adac032173b797…` / `314c2a63d93bad68…`). Analytics 386 ms -> 206 ms on a
+three-school database, where the array literal is three uuids long — the gain
+measured above belongs to the fleet, not to this box.
+
+// GOTCHA, and the reason the fixture asserts its own inserts: the first draft
+// gave the platform org a person on the `super_admin` role, and the TEST
+// database has only six roles seeded. `INSERT … SELECT … WHERE r.name = $4`
+// matching nothing inserts nothing and REPORTS SUCCESS, so the platform org had
+// no rows at all — and the suite then passed against a deliberately broken
+// predicate, proving only that the fixture was empty. It checks `rowCount` now.
+// This is the fixture trap the log already records, in its quietest form: not a
+// double that models the wrong contract, but a seed that silently did nothing.
+// GOTCHA: `Prisma.Sql` exposes the statement TWICE — `.sql` carries `?`
+// placeholders and `.text` carries `$1…`. Handing `.sql` to pg fails as a
+// syntax error pointing at a comma, which reads as a malformed query rather
+// than as the wrong accessor.
+
+Mutation-validated three ways, each failing the right test by name: dropping
+`isPlatform = false` (the platform org's own staff fold into a customer
+headcount), dropping `status = 'ACTIVE'` (the attention queue starts chasing
+switched-off tenants), and inlining the ids as text instead of binding them.

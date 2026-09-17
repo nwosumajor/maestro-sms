@@ -29,6 +29,7 @@
 
 import { Prisma } from "@sms/db";
 import { NON_SCHOOL_STAFF_ROLE_NAMES, NON_STAFF_ROLE_NAMES } from "@sms/types";
+import { inSchoolScope, isEmptyScope, type SchoolScope } from "./operator-fleet";
 
 /** One school's headcount, by category. Categories overlap only where a person
  *  genuinely holds two roles — each figure counts DISTINCT people. */
@@ -52,10 +53,10 @@ type Queryable = { $queryRaw<T = unknown>(q: TemplateStringsArray | Prisma.Sql, 
  */
 export async function headcountBySchool(
   client: Queryable,
-  schoolIds: string[],
+  scope: SchoolScope,
 ): Promise<Map<string, SchoolHeadcount>> {
   const out = new Map<string, SchoolHeadcount>();
-  if (schoolIds.length === 0) return out;
+  if (isEmptyScope(scope)) return out;
 
   const rows = await client.$queryRaw<
     Array<{ schoolId: string; students: number; staff: number; parents: number }>
@@ -79,7 +80,7 @@ export async function headcountBySchool(
     -- Applied to staff and parents too: a departed teacher is not headcount
     -- either, and three figures on one screen must answer the same question.
     JOIN "user" u ON u.id = ur."userId" AND u.status = 'ACTIVE'
-    WHERE ur."schoolId" = ANY(ARRAY[${Prisma.join(schoolIds)}]::uuid[])
+    WHERE ${inSchoolScope(Prisma.sql`ur."schoolId"`, scope)}
     GROUP BY ur."schoolId"
   `);
 

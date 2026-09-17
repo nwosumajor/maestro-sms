@@ -49,6 +49,7 @@ interface PlatformAgeBandRow {
 import { Prisma } from "@sms/db";
 import { PlanPricingService } from "../billing/plan-pricing.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { ALL_CUSTOMER_SCHOOLS, inSchoolScope } from "./operator-fleet";
 import { headcountBySchool } from "./operator-people";
 import {
   AUDIT_LOG_SERVICE,
@@ -104,7 +105,7 @@ export class PlatformAnalyticsService {
     // that omitted warden, driver, head_warden, head_driver, librarian and
     // junior_admin, so the fleet staff figure quietly under-reported every boarding
     // school. One grouped query, one shared definition (see operator-people.ts).
-    const headcounts = await headcountBySchool(client, customerIds);
+    const headcounts = await headcountBySchool(client, ALL_CUSTOMER_SCHOOLS);
     const studentsBySchool = new Map<string, number>();
     let studentTotal = 0;
     let staffTotal = 0;
@@ -121,7 +122,7 @@ export class PlatformAnalyticsService {
       JOIN user_role ur ON ur."userId" = u.id
       JOIN role r ON r.id = ur."roleId"
       WHERE r.name = 'student'
-        AND u."schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+        AND ${inSchoolScope(Prisma.sql`u."schoolId"`, ALL_CUSTOMER_SCHOOLS)}
       GROUP BY 1
     `);
 
@@ -220,7 +221,7 @@ export class PlatformAnalyticsService {
       FROM platform_subscription_payment
       WHERE status = 'PAID'
         AND currency = ${HOME_CURRENCY}
-        AND "schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+        AND ${inSchoolScope(Prisma.sql`"schoolId"`, ALL_CUSTOMER_SCHOOLS)}
     `);
     // SUM over int8 comes back as BigInt, which JSON.stringify THROWS on — the
     // same trap the school archive records. These are minor units of one
@@ -291,7 +292,7 @@ export class PlatformAnalyticsService {
       FROM platform_subscription_payment
       WHERE status = 'PAID'
         AND currency = ${HOME_CURRENCY}
-        AND "schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+        AND ${inSchoolScope(Prisma.sql`"schoolId"`, ALL_CUSTOMER_SCHOOLS)}
       GROUP BY 1
     `);
     for (const r of revenueByMonth) {
