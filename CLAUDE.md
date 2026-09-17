@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **359 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **360 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **359 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **360 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1180,44 +1180,44 @@ These are the rules; the log is why each one exists.
 - **Fixing where it hurts and leaving the siblings is how the class survives.**
 
 ### Tests, gates and probes
-- **Mutation-validate every gate** — including a COMPILE-TIME one: break the
-  fix, watch it fail *naming the right thing*. Gates have passed for the wrong
-  reason repeatedly: a fixed-size source window spanning two methods, a
-  same-named method on another service vouching for dead code, `not.toContain("5")`
-  matching a digit in a timestamp, an assertion satisfied by the COMMENT
-  explaining its own fix (strip comments), and an `as` cast defeating a
-  `Record<Key, true>` completeness check entirely.
+- **Mutation-validate every gate**, compile-time ones included: break the fix,
+  watch it fail *naming the right thing*. Gates have passed for the wrong reason
+  repeatedly — a fixed-size source window spanning two methods, a same-named
+  method vouching for dead code, `not.toContain("5")` matching a digit in a
+  timestamp, an assertion satisfied by the COMMENT explaining its own fix (strip
+  comments), an `as` cast defeating a `Record<Key,true>` check, and a detector
+  matching only LITERALS while the needle was a variable.
 - **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE proves
   nothing. Read `Test Suites:` as well as `Tests:`. A jest pattern passed where a
   FLAG belongs matches no tests and exits 1.
-- **A gate that walks must assert it scanned something** — a walk that finds no
-  files produces no offenders and passes green.
+- **A gate that walks must assert it scanned something**: no files, no offenders.
 - **A test on a helper proves nothing about its caller.** Drive the real thing.
-- **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY ON THE CLOCK.** The
-  report card prints "Generated DD/MM/YYYY, HH:MM:SS", so `not.toMatch(/\b33\b/)`
-  over the extracted PDF fails ~3.3% of runs — which presents as a flaky suite
-  and is actually a wrong assertion. The POSITIVE form is worse: `toMatch(/\b29\b/)`
-  passes with the cell wrong whenever the clock reads `:29:`. Read the CELL
-  (`cells[indexOf(row) + 1]`). And pin the collision as a test rather than hoping:
-  fake `Date` only (`doNotFake` the timer family, pdfkit needs real ones).
-- **Anchor a test to the PROPERTY, not the text** (nor a column's POSITION).
-  Fixed-text assertions have gone red on changes that STRENGTHENED what they
-  guard ten times.
+- **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY.** `not.toMatch(/\b33\b/)`
+  over a report-card PDF fails ~3.3% of runs on its "Generated … HH:MM:SS" line —
+  a flaky suite that is actually a wrong assertion, and the POSITIVE form passes
+  with the cell wrong whenever the clock reads `:29:`. Read the CELL, pin the
+  collision as a test, and fake `Date` only (pdfkit needs real timers).
+- **Anchor a test to the PROPERTY, not the text** (nor a column's POSITION) —
+  fixed-text assertions have gone red ten times on changes that STRENGTHENED what
+  they guard. **And never prove an ABSENCE by searching a serialised document**:
+  it carries ids, timestamps and counts nobody chose, and a uuid containing the
+  secret ("…925d-**31234**1a1dd8c") failed CI on a test whose property held.
+  Walk the parsed object and compare VALUES.
 - **An over-wide gate is the same failure as a blind one** — it teaches its next
-  reader to add an exemption, and an exemption granted for a false positive is a
-  hole with a note on it. Delete the rule rather than exempt what it wrongly
-  catches.
+  reader to add an exemption, and one granted for a false positive is a hole with
+  a note on it. Delete the rule rather than exempt what it wrongly catches.
 - **FIXTURE TRAPS, over and over:** a stub whose `findMany` ignores the `where`
-  (or `take`/`skip`) passes against a service that stopped filtering; a stub
-  missing a method every real client has (`createMany`, `groupBy`, `$queryRaw`,
-  `$transaction`) fails in a way that reads as a code fault; a stub returning the
-  live object a later `update` mutates makes an audit read the NEW value. **A
-  double must model the CONTRACT, not just the signature.**
+  (or `take`/`skip`) passes against a service that stopped filtering; one missing
+  a method every real client has (`createMany`, `groupBy`, `$queryRaw`) fails in
+  a way that reads as a code fault; one returning the live object a later
+  `update` mutates makes an audit read the NEW value; and `$executeRaw` is a
+  TAGGED TEMPLATE, so `q.values` is `Array.prototype.values` — a function, not
+  the parameters. **A double must model the CONTRACT, not the signature.**
 - **A probe that guesses a field name reports a fact about itself.** Read the
-  STATUS before the body; scope a probe's own queries to the tenant under test;
-  prove the session took (401 to everything reads as "refused" for every route).
+  STATUS before the body; scope a probe's queries to the tenant under test; prove
+  the session took (401 everywhere reads as "refused" for every route).
 - **Drive it, do not read it.** Almost every entry in the log was found by
-  exercising a path — several of them paths that had never once executed.
+  exercising a path — several never once executed.
 
 ### Operational safety
 - **Fail closed at BOOT** where a mis-set value is unrecoverable afterwards

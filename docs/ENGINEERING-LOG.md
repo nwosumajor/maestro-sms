@@ -17373,3 +17373,48 @@ board; drop the supervisor check.
 // The principal keeps everything the role needs: sight of every register, the
 // outstanding board, the school-scoped chase button, and approval of stale
 // corrections. What they lose is the ability to sign for a room unseen.
+
+### The flaky test that was right, and the gate that could not see it
+
+CI went red on a commit that touched neither package:
+
+    FAIL packages/game-transport/src/race-service.spec.ts
+      ● reveals to each racer ONLY their own guesses; never the target
+        Expected substring: not "1234"
+        Received string: {"type":"joined","raceId":"e6fe344e-7e57-4f1b-925d-312341a1dd8c",...}
+
+Read the raceId: `925d-312341a1dd8c`. A randomly generated UUID happened to
+contain the four-digit secret. The assertion —
+`expect(JSON.stringify(msg)).not.toContain(TARGET)` — matched by ACCIDENT, on a
+test whose PROPERTY held perfectly. It presents as a flaky suite and is actually
+a wrong assertion, which is the whole reason this class has a gate.
+
+THE GATE EXISTS AND DID NOT FIRE. `assertions-that-match-by-accident` already
+follows the subject back to its `JSON.stringify` assignment, understands
+sanitising `.replace()`, and states the rule exactly right in its own comment:
+"searching a whole serialised OBJECT is the risky act, HOWEVER LONG the needle".
+But its detector matched only a NUMERIC LITERAL —
+`/\.not\.toContain\((["'`])([0-9][0-9.,]*)\1\)/` — and this needle is a VARIABLE.
+The rule was correct and the reach was short, which is the "hand-kept set only
+guards what somebody remembered" shape wearing a regex.
+
+Widened to flag `not.toContain(<identifier>)` when the haystack is a whole
+serialised object and unsanitised. A variable's value is unknown statically, so
+it is judged by the HAYSTACK alone — which is the rule as already written.
+
+IT FOUND A SECOND ONE ON ITS FIRST RUN: `packages/game-engine/src/arena.spec.ts`
+searched `JSON.stringify(a.viewFor(viewer))` for the same kind of secret. Same
+shape, same latent flakiness, never yet unlucky.
+
+BOTH FIXED BY ASSERTING THE PROPERTY: walk the parsed object and collect any
+field whose VALUE equals the target, plus any field NAMED target/secret. An id
+never equals the secret, so equality is simultaneously stricter about what is
+being proved and immune to the collision. Mutation-validated both ways — leaking
+the target into a frame fails the new assertion naming the path, and restoring
+the substring form fails the widened gate naming the file.
+
+// This is the THIRD time a short needle in a long haystack has bitten here (a
+// digit in a timestamp, twice). The durable lesson is not "use a longer needle":
+// it is that proving an ABSENCE by searching a serialised document is the wrong
+// instrument, because the document carries ids, timestamps and counts that
+// nobody chose.

@@ -95,11 +95,34 @@ describe("RaceService — server-authoritative race orchestration (spec §5 / §
     a.send({ type: "guess", value: WRONG });
     expect(b!.latestState()?.race.yourGuesses ?? []).toHaveLength(0);
     // The un-cracked target appears in no frame, and no target/secret field exists.
+    //
+    // ASSERTED ON THE VALUES, not by searching the serialised frame for a
+    // substring. `JSON.stringify(msg)` contains freshly generated UUIDs, and a
+    // four-digit secret turns up inside one about once in a couple of hundred
+    // runs: CI failed on
+    //   raceId "e6fe344e-7e57-4f1b-925d-312341a1dd8c"  <- contains "1234"
+    // which is the assertion matching by ACCIDENT, on a test that was right. It
+    // is the third time this repo has been bitten by a short needle in a long
+    // haystack (a digit in a timestamp, twice before), and it presents as a
+    // flaky suite rather than as a wrong assertion.
+    //
+    // A uuid never EQUALS the target, so equality is both stricter about the
+    // property and immune to the collision.
+    const leaks = (value: unknown, path = ""): string[] => {
+      if (typeof value === "string") return value === TARGET ? [path || "(root)"] : [];
+      if (Array.isArray(value)) return value.flatMap((v, i) => leaks(v, `${path}[${i}]`));
+      if (value && typeof value === "object") {
+        return Object.entries(value).flatMap(([k, v]) =>
+          // A FIELD NAMED for the secret is a leak whatever it holds.
+          /^(target|secret)$/i.test(k) ? [`${path}.${k}`] : leaks(v, `${path}.${k}`),
+        );
+      }
+      return [];
+    };
     for (const client of [a, b!]) {
       for (const msg of client.received) {
-        const json = JSON.stringify(msg);
-        expect(json).not.toContain(TARGET);
-        expect(json).not.toMatch(/"target"|"secret"/);
+        expect({ type: (msg as { type?: string }).type, leaks: leaks(msg) })
+          .toEqual({ type: (msg as { type?: string }).type, leaks: [] });
       }
     }
   });

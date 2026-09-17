@@ -93,9 +93,24 @@ describe("an absence is asserted on the field, not by searching for a number", (
         // Only the NEGATIVE form, and only a numeric needle: a positive
         // `toContain("5")` fails loudly when it is wrong, and a word needle
         // does not collide with a timestamp.
-        const m = /\.not\.toContain\((["'`])([0-9][0-9.,]*)\1\)/.exec(line);
-        if (!m) return;
-        const needle = m[2];
+        // TWO SHAPES OF NEEDLE, and the second is how this rule was evaded.
+        //
+        // A numeric LITERAL is the obvious one. But `not.toContain(TARGET)` —
+        // the needle in a VARIABLE — is invisible to that pattern, and that is
+        // exactly the form that failed CI in the RACE spec: a four-digit secret
+        // searched for inside a serialised frame carrying randomUUID() ids, one
+        // of which read "...925d-312341a1dd8c". The rule this file already
+        // states — "searching a whole serialised OBJECT is the risky act,
+        // HOWEVER LONG the needle" — applies with no change; only the detector
+        // was short-sighted.
+        //
+        // A variable's value is unknown statically, so it is judged by the
+        // HAYSTACK alone: a whole serialised object, unsanitised. That is the
+        // dangerous act whatever it is searched for.
+        const literal = /\.not\.toContain\((["'`])([0-9][0-9.,]*)\1\)/.exec(line);
+        const variable = /\.not\.toContain\(\s*([A-Z][A-Z0-9_]*|[a-z][\w$]*)\s*\)/.exec(line);
+        if (!literal && !variable) return;
+        const needle = literal ? literal[2] : variable![1];
         // LENGTH IS NOT THE WHOLE RISK — the HAYSTACK is.
         //
         // Four characters was treated as specific enough, and
@@ -124,10 +139,17 @@ describe("an absence is asserted on the field, not by searching for a number", (
         // that keeps the rule from forcing an allowance onto every correct fix.
         const sanitised = /\.replace\(/.test(assignment ?? (wholeObject ? line : ""));
         if (sanitised) return;
-        if (!wholeObject && needle.length >= MIN_NEEDLE) return;
-        if (wholeObject && needle.length > 8) return;
+        // A VARIABLE needle is only ever judged by the haystack: unknown value,
+        // so "long enough to be specific" cannot be argued. Off a whole
+        // serialised object it is fine — that is an ordinary field assertion.
+        if (!literal) {
+          if (!wholeObject) return;
+        } else {
+          if (!wholeObject && needle.length >= MIN_NEEDLE) return;
+          if (wholeObject && needle.length > 8) return;
+        }
         const key = `${rel}:${i + 1}`;
-        if (!(key in ALLOWED)) offenders.push(`${key}  not.toContain("${needle}")`);
+        if (!(key in ALLOWED)) offenders.push(`${key}  not.toContain(${literal ? JSON.stringify(needle) : needle})`);
       });
   }
 

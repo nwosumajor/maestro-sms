@@ -92,10 +92,26 @@ describe("Arena — Ultimate cross-school arena engine (spec §7 / §11.8)", () 
       a.enter("p1", "Alice");
       a.begin("p1", 1000);
       a.guess("p1", WRONG, 1050);
+      // ASSERTED ON THE VALUES, not by searching the serialised view for a
+      // substring. The view carries generated ids, and a short secret turns up
+      // inside one often enough to fail CI by coincidence — which is what
+      // happened to the identical assertion in the race spec (a raceId reading
+      // "...925d-312341a1dd8c" contains "1234"). An id never EQUALS the target,
+      // so equality is both stricter about the property and immune to the
+      // collision. Third time this repo has been bitten by a short needle in a
+      // long haystack.
+      const leaks = (value: unknown, path = ""): string[] => {
+        if (typeof value === "string") return value === TARGET ? [path || "(root)"] : [];
+        if (Array.isArray(value)) return value.flatMap((v, i) => leaks(v, `${path}[${i}]`));
+        if (value && typeof value === "object") {
+          return Object.entries(value).flatMap(([k, v]) =>
+            /^(target|secret)$/i.test(k) ? [`${path}.${k}`] : leaks(v, `${path}.${k}`),
+          );
+        }
+        return [];
+      };
       for (const viewer of [null, "p1"]) {
-        const json = JSON.stringify(a.viewFor(viewer));
-        expect(json).not.toContain(TARGET);
-        expect(json).not.toMatch(/"secret"/);
+        expect({ viewer, leaks: leaks(a.viewFor(viewer)) }).toEqual({ viewer, leaks: [] });
       }
     });
 
