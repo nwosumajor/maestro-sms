@@ -17601,3 +17601,34 @@ than the cap now works through the whole book over a few runs instead of chasing
 Mutation-validated: restoring due-date ordering fails both rotation cases;
 stamping unreachable invoices fails the third; a double that ignores `take`
 fails the first. 105 suites, 1,253 tests green.
+
+**AND THEN THE SAME QUESTION OF ALL SIX.** The two fixed above were found by
+asking one thing of a capped sweep — *does taking a row remove it from the
+predicate the page is drawn from?* — so it was worth asking of every one. The
+set is the same one the backlog gate computes from the BullMQ processors:
+
+    purgeRejected      documents/submission-retention   FIXED this session
+    sendFeeReminders   fees/fees.service                FIXED this session
+    lateFeeSweep       fees/fee-ops                     sound — the marker line
+                                                        item is excluded IN the
+                                                        WHERE, not skipped after
+    recoverPending     payments/mobile-money            sound — status moves
+    archiveEndedTerms  privacy/archive                  sound — anti-join against
+                                                        archives already written
+    sweep              sis/sis-nudge                    sound — `lastNudgedAt` is
+                                                        in the predicate and
+                                                        stamped by `updateMany`
+
+Sibling asymmetry again, and this time in the reader's favour: `sis-nudge` had
+the exact pattern the fee reminder needed — a `lastNudgedAt` in the predicate,
+stamped in one `updateMany` — one module away, with a comment calling it "the
+idempotence". The fee reminder is the message that asks a family for money and
+was the one left.
+
+NO GATE ADDED, deliberately. The property is "the sweep writes something its own
+predicate reads", and every static approximation of that flags `lateFeeSweep`,
+which pages `invoice` and writes a LINE ITEM — correct, and the predicate
+excludes it through a relation. A gate that wrong would be answered with an
+exemption, and an exemption granted for a false positive is a hole with a note
+on it. The rule is in CLAUDE.md beside the backlog rule it qualifies, and the
+two sweeps that had it wrong now each have a two-run test.
