@@ -36,7 +36,10 @@ const bursar: Principal = {
   permissions: ["fee.manage", "fee.read"],
 };
 
-type Inv = { id: string; studentId: string; reference: string; totalMinor: number; dueDate: Date; currency: string };
+type Inv = {
+  id: string; studentId: string; reference: string; totalMinor: number;
+  dueDate: Date; currency: string; lastRemindedAt: Date | null;
+};
 
 const overdue = (n: number): Inv[] =>
   Array.from({ length: n }, (_, i) => ({
@@ -44,21 +47,61 @@ const overdue = (n: number): Inv[] =>
     studentId: `stu-${i}`,
     reference: `REF-${i}`,
     totalMinor: 15_000_00,
-    dueDate: new Date(Date.now() - 30 * 86_400_000),
+    // Staggered, so a double that ignores `orderBy` cannot be mistaken for one
+    // that honours it: every invoice has a distinct due date.
+    dueDate: new Date(Date.now() - (30 + n - i) * 86_400_000),
     currency: "NGN",
+    lastRemindedAt: null,
   }));
+
+
+/** Prisma's ordering, as the service asks for it: a list of one-key clauses,
+ *  each either `"asc"` or `{ sort, nulls }`. Modelled rather than assumed —
+ *  NULLS FIRST is the whole point of the ordering under test, and a comparator
+ *  that put nulls last would pass every other case in this file. */
+function compareBy(orderBy: unknown) {
+  const clauses = (Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : []) as Array<Record<string, unknown>>;
+  return (a: Inv, b: Inv) => {
+    for (const clause of clauses) {
+      const [key, spec] = Object.entries(clause)[0] as [keyof Inv, unknown];
+      const nullsFirst = typeof spec === "object" && spec !== null && (spec as { nulls?: string }).nulls === "first";
+      const av = a[key] ?? null;
+      const bv = b[key] ?? null;
+      if (av === null && bv === null) continue;
+      if (av === null) return nullsFirst ? -1 : 1;
+      if (bv === null) return nullsFirst ? 1 : -1;
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      if (cmp !== 0) return cmp;
+    }
+    return 0;
+  };
+}
 
 /** @param linkedFor studentIds that actually have a guardian on file. */
 function makeService(invoices: Inv[], linkedFor: string[] = []) {
   const enqueued: Array<{ recipients: string[]; type: string }> = [];
   const tx = {
     invoice: {
-      findMany: jest.fn(async () => invoices),
+      // HONOURS `orderBy` AND `take`. The previous double returned the whole
+      // fixture whatever was asked for, which is why nothing here could see
+      // that a capped sweep chased the same page every week for ever: with no
+      // cap, one run always cleared everything.
+      findMany: jest.fn(async ({ orderBy, take }: { orderBy?: unknown; take?: number }) => {
+        const ordered = [...invoices].sort(compareBy(orderBy));
+        return typeof take === "number" ? ordered.slice(0, take) : ordered;
+      }),
       // The sweep counts what is DUE before taking its page, so `backlog` is
       // work left behind the cap rather than an estimate. A double missing
       // `count` fails as a code fault; one answering a fixed number would vouch
       // for a backlog drawn from a different predicate than the page.
       count: jest.fn(async () => invoices.length),
+      // Where the sweep records that it chased somebody — the only write it
+      // makes to an invoice, and the thing that makes the next run advance.
+      updateMany: jest.fn(async ({ where, data }: { where: { id: { in: string[] } }; data: { lastRemindedAt: Date } }) => {
+        const ids = new Set(where.id.in);
+        for (const inv of invoices) if (ids.has(inv.id)) inv.lastRemindedAt = data.lastRemindedAt;
+        return { count: ids.size };
+      }),
     },
     payment: { findMany: jest.fn(async () => []) },
     parentChild: {
@@ -128,5 +171,63 @@ describe("the fee reminder sweep", () => {
     const { svc, enqueued } = makeService(overdue(5), ["stu-1"]);
     await svc.sendFeeReminders(bursar, { overdueOnly: true });
     expect(enqueued.every((e) => e.recipients.length > 0)).toBe(true);
+  });
+});
+
+describe("a sweep whose predicate it never changes", () => {
+  // THE DEFECT. An unpaid invoice does not leave this sweep's predicate — the
+  // sweep sends a notification, it does not touch the invoice — so a capped
+  // page ordered by DUE DATE took the identical rows every week. Measured live
+  // on 2,100 overdue invoices against a cap of 2,000: two full runs sent 2,000
+  // reminders each about the SAME 2,000 invoices, and the 100 NEWEST arrears —
+  // the most collectable end of the book — were never chased once. `backlog`
+  // read 105 on both runs, which says "behind", not "stuck".
+  //
+  // Ordering by what the sweep DOES change rotates the book instead.
+  const CAP = 2000;
+
+  it("reaches, over two runs, everybody a single capped run left out", async () => {
+    const invoices = overdue(CAP + 100);
+    const students = invoices.map((i) => i.studentId);
+    const { svc, enqueued } = makeService(invoices, students);
+
+    await svc.sendFeeReminders(bursar, { overdueOnly: true });
+    const first = new Set(enqueued.flatMap((e) => e.recipients));
+    await svc.sendFeeReminders(bursar, { overdueOnly: true });
+    const everybody = new Set(enqueued.flatMap((e) => e.recipients));
+
+    expect(first.size).toBe(CAP);
+    expect(everybody.size).toBe(CAP + 100);
+    // Nothing is left never-chased. Under the old ordering this was 100.
+    expect(invoices.filter((i) => i.lastRemindedAt === null)).toHaveLength(0);
+  });
+
+  it("puts the never-chased ahead of the recently-chased", async () => {
+    // Which is what makes the rotation a rotation rather than a reshuffle.
+    // `overdue()` makes inv-0 the OLDEST debt, so the two already chased here
+    // are exactly the two due-date ordering would take first — which is what
+    // starved the rest, week after week.
+    const invoices = overdue(4);
+    invoices[0].lastRemindedAt = new Date(Date.now() - 86_400_000);
+    invoices[1].lastRemindedAt = new Date(Date.now() - 2 * 86_400_000);
+    const { svc, enqueued } = makeService(invoices, invoices.map((i) => i.studentId));
+
+    await svc.sendFeeReminders(bursar, { overdueOnly: true });
+    const orderTold = enqueued.flatMap((e) => e.recipients);
+    // The two nobody has chased come first; then the least recently chased.
+    expect(orderTold).toEqual([
+      "parent-of-stu-2", "parent-of-stu-3", "parent-of-stu-1", "parent-of-stu-0",
+    ]);
+  });
+
+  it("does not stamp an invoice nobody could be told about", async () => {
+    // An `unreachable` invoice has not been chased. Stamping it would push a
+    // pupil with no guardian to the back of the rotation for ever, and hide the
+    // very gap `unreachable` exists to report.
+    const invoices = overdue(3);
+    const { svc } = makeService(invoices, ["stu-0"]);
+    await svc.sendFeeReminders(bursar, { overdueOnly: true });
+    expect(invoices.find((i) => i.studentId === "stu-0")!.lastRemindedAt).toBeInstanceOf(Date);
+    expect(invoices.filter((i) => i.lastRemindedAt === null)).toHaveLength(2);
   });
 });

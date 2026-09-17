@@ -17545,3 +17545,59 @@ filtered `document_submission` on `("subjectKind", "subjectId")` with no
 Mutation-validated: dropping `storageKey IS NOT NULL` from the predicate (the
 defect's exact shape) fails the progress case; a double that ignores the cap
 fails it too; narrowing the detector back to `take:` fails the discovery test.
+
+### The weekly reminder that chased the same 2,000 families for ever
+
+Found by asking the question the previous entry had just answered, of every
+other capped sweep: does taking a row REMOVE it from the predicate the page is
+drawn from? For the overdue fee reminder it does not. The sweep sends a
+notification; an unpaid invoice stays unpaid and stays overdue.
+
+Worse, the remedy already applied here had made it deterministic. A previous fix
+found the sweep reading `take: 2000` with **no `orderBy` at all**, reasoned —
+correctly — that this meant "plausibly the SAME 2,000 each week, which makes the
+other 3,001 families never chased rather than chased late", and answered it by
+ordering oldest-debt-first. That guarantees the very outcome the comment
+objected to: with a total order and an unchanging predicate, it is not
+*plausibly* the same 2,000, it is *certainly* the same 2,000.
+
+Driven live against the running stack — 2,100 overdue invoices, cap 2,000, every
+one reachable:
+
+    run 1   reminded 2000   backlog 105
+    run 2   reminded 2000   backlog 105
+    distinct invoices ever reminded: 2000 of 2100
+    never reminded: 100 — and they are FEEFIX-000001..000100, the NEWEST arrears
+
+The newest arrears are the most collectable end of the book, so the families
+never asked are the ones most likely to have paid. `backlog: 105` on both runs
+is the same false comfort the declined-document purge gave: it reads as behind,
+never as stuck.
+
+`invoice.lastRemindedAt` (migration `20270321000000`) is the thing the sweep
+changes, so the page is ordered by it, NULLS FIRST, with due date breaking the
+tie. Never-chased first, then least-recently-chased: a school with more arrears
+than the cap now works through the whole book over a few runs instead of chasing
+2,000 families weekly and the rest never. Same fixture, after:
+
+    run 3 (first with the fix)   reminded 2000   100 still unstamped
+    run 4                        reminded 1995   never reminded: 0
+
+// It is stamped only for invoices a family was actually TOLD about. Stamping an
+// `unreachable` one — a pupil with no guardian linked — would push it to the
+// back of the rotation for ever and hide the very gap `unreachable` exists to
+// report. One `updateMany` for the page, not one per invoice, which is the rule
+// the sibling spec on this sweep already pins.
+
+// WHY NEITHER SPEC COULD SEE IT, again: both doubles returned the whole fixture
+// whatever `take` and `orderBy` asked for. With no cap in the double, one run
+// always cleared everything, so no test in this repo could distinguish a sweep
+// that rotates from one that spins. The double now sorts by the clauses it is
+// given — modelling NULLS FIRST, since a comparator putting nulls last passes
+// every other case in the file — and slices to the cap. The other double was
+// missing `updateMany` entirely and failed as a code fault, which is the third
+// fixture trap this log records by name.
+
+Mutation-validated: restoring due-date ordering fails both rotation cases;
+stamping unreachable invoices fails the third; a double that ignores `take`
+fails the first. 105 suites, 1,253 tests green.

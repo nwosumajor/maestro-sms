@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **362 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **363 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **362 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **363 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1010,8 +1010,8 @@ These are the rules; the log is why each one exists.
   comment about this exact failure, and was never swept to the other two.
 - **A capped list is worse when it is the only route to something else.** The
   billing history was the 50 most recent with no page, and a payment's id
-  appears NOWHERE else, so its receipt went with it — unreachable while the
-  route serving it works. Ask what a dropped row was the key to.
+  appears NOWHERE else, so its receipt went too. Ask what a dropped row was the
+  key to.
 - **"Live work is bounded" is an assumption, not a fact.** The approvals queue
   read the newest 500 PENDING rows and narrowed in memory — but live work is
   bounded by what the school never got round to DECIDING, and that grows: at
@@ -1029,42 +1029,37 @@ These are the rules; the log is why each one exists.
   `scheduleId` all along. A count is half the fix; the filter running in SQL is
   the other.
 - **A PICKER IS THE ONLY ROUTE TO THE THING IT NAMES.** `/discipline/file-targets`
-  returned the first 500 by name with no search and no count: on a 1,200-pupil
-  roll that was A to K, so **690 pupils could not be named in a complaint at
-  all**. Search inside the SCOPED set, return a total, and trust a seed only
-  when `seed.length >= total`.
+  returned the first 500 by name, no search, no count: on a 1,200-pupil roll
+  that was A to K, so **690 pupils could not be named in a complaint at all**.
+  Search inside the SCOPED set and return a total.
 - **A TOTAL MUST COUNT ONLY WHAT THE CALLER MAY READ.** A capped list's count
-  and search must inherit the list's own scoping. The notice board is
-  audience-filtered, so its `count` and `q` carry the same filter — the
-  principal is shown 501 and the parent 400. A total the caller cannot open
-  tells a family that notices exist which they may not read. **Widening the
-  REACH must never widen the RULE.**
+  and search inherit the list's own scoping: the notice board is
+  audience-filtered, so `count` and `q` carry the same filter — 501 for the
+  principal, 400 for the parent. **Widening the REACH must never widen the
+  RULE.**
 - **A JUMP-TO BOX IS STILL A CAP.** The omnibox showed six per category with no
   count, so *not on the roll* and *one of the 144 I did not show* read alike.
   Return `shown`/`total`, order by a TOTAL order, and count only when the
   `PER_CATEGORY + 1`-th row proves more.
 - **AND THE FILTER A TOTAL IS COMPUTED OVER CAN ITSELF BE TRUNCATED.** The
-  operator revenue screen aggregates in SQL over the whole filter — while the
-  filter was the first 500 name-matching schools in a `schoolId IN`: at 800 it
-  reported NGN 262,500,000 of 420,000,000. A MATERIALISED predicate's cap belongs
-  to the fleet, not a page.
+  operator revenue screen aggregated in SQL over the whole filter — while that
+  filter was the first 500 name-matching schools: at 800 it reported NGN
+  262,500,000 of 420,000,000.
 - **A FIGURE COMPUTED FROM A CAPPED PAGE IS WORSE THAN A SHORT LIST.** The
-  scholarship panel derived its headlines from the fetched array over a
-  `take: 500`: leadership saw **500 / 405 / 29** against a true
-  **1,200 / 980 / 60**. A short list looks like a list; a wrong number looks
-  like a fact. Count in SQL, independent of the filter and the page.
+  scholarship panel derived headlines from its fetched `take: 500` array:
+  leadership saw **500 / 405 / 29** against a true **1,200 / 980 / 60**. A short
+  list looks like a list; a wrong number looks like a fact.
 - **A PREDICATE MATERIALISED AS IDS IS SENT TWICE.** "Every customer school"
   spelled out as a 5,000-element `ARRAY[…]` is a 195 KB statement at 2x the cost
   of the subquery, and the PLANNING half grows with the fleet (`operator-fleet`).
 - **A CAP WITH NO COUNT IS THE COMMONEST DEFECT IN THIS REPO** — a scan of every
   `findMany` with a literal `take` and no `skip` found **65**. When you cap,
   return the TOTAL; a newest-first cap eats the record.
-- **A MAKER-CHECKER QUEUE IS MONEY IN LIMBO, AND MUST BE WORKED OLDEST-FIRST.**
+- **A MAKER-CHECKER QUEUE IS MONEY IN LIMBO, WORKED OLDEST-FIRST.**
   `listPendingPayments` was `createdAt DESC, take: 200` with no count, and a
-  payment sitting there has NOT moved the invoice balance: at a 901 backlog,
-  **78% of the money awaiting a second signature was invisible**. Nor is the
-  queue small by default — `effectivePaymentApprovalThresholdMinor` returns 0 off
-  the platform's currency. Oldest-first, count in SQL, WAIT on the row.
+  payment there has NOT moved the balance: at a 901 backlog **78% of the money
+  awaiting a second signature was invisible**. Nor is it small by default — the
+  threshold resolver returns 0 off the platform's currency.
 - **A register is not a queue.** A capped newest-first list DROPS the oldest —
   exactly the row a review queue exists to surface. Page and count **in SQL**;
   filtering in memory only sees rows that survived the cap. Work a queue
@@ -2059,8 +2054,13 @@ wrote only to `document_submission`, so the same 500 matched every night for
 ever: run 1 cleared 409 files, runs 2-4 cleared NONE, 191 birth certificates
 held permanently while `backlog` sat frozen at 475,036 — which reads as
 "behind", never as "stuck". Page the WORK, count the backlog on that predicate.
-The double that hid it ignored `take`; the gate went blind on the fix because
-`hasLiteralTake` knew `take:` and not a raw `LIMIT`.
+// **WHERE THE ROW CANNOT LEAVE, MARK IT** — an unpaid invoice stays overdue, so
+the fee reminder's oldest-first cap chased the SAME 2,000 families weekly and
+the 100 newest arrears never, and ordering by due date is what made that
+certain rather than merely likely. Order by what the sweep CHANGES
+(`lastRemindedAt`, NULLS FIRST), and never mark work nobody was told about.
+// Both hid behind doubles ignoring `take`/`orderBy`; the backlog GATE went
+blind on the first fix because `hasLiteralTake` knew `take:` and not `LIMIT`.
 
 ## PURGING A TENANT: index the referencing columns first
 The 73 unindexed FKs into `user` are harmless until somebody hard-deletes a
