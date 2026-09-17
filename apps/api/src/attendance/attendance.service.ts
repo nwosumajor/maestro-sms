@@ -240,8 +240,21 @@ export class AttendanceService {
 
     // MAKER-CHECKER on a STALE register (>7 days old): a plain teacher's edit is
     // not applied directly — it raises an ATTENDANCE_AMENDMENT a head teacher /
-    // school admin / principal must approve. Leadership (holders of
-    // attendance.amend.review) edit stale registers directly.
+    // school admin / principal must approve.
+    //
+    // WHAT THIS DOES NOT MEAN, because the comment here used to say it and it
+    // was false for two of the three roles that hold the permission: an
+    // approver does NOT get to author. `isApprover` only chooses the BRANCH —
+    // both branches then call `assertCanTakeRegister`, so a correction is
+    // gated exactly like a fresh register, by the class's own supervisor or
+    // school_admin as cover. Measured at day 10: teacher 201 pendingApproval,
+    // school_admin 201 direct, principal AND head_teacher 403.
+    //
+    // That is deliberate. A register attests "I looked at this room", and a
+    // correction is a claim about the same room; amend.review exists so a
+    // senior can APPROVE a teacher's account of it, not replace it. The
+    // principal holds attendance.write and is refused at row scope — the dead
+    // grant this codebase records elsewhere, here on purpose.
     if (stale && !isApprover) {
       await this.db.runAsTenant(this.ctx(p), async (tx) => {
         // Write intent, so the WRITE guard — raising an amendment for a class you

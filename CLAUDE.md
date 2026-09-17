@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **363 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **364 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **363 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **364 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1001,11 +1001,10 @@ These are the rules; the log is why each one exists.
 
 ### Lists, queues and scale
 - **A DIARY IS THE MIRROR OF A REGISTER, AND AN ASCENDING CAP EATS THE FUTURE.**
-  A register is read oldest-first; a diary is read for what is NEXT, so an
-  ascending cap drops it. Meetings had `mySlots`/`myBookings` on `startsAt ASC`
-  capped with NO date filter: a school-wide reader got 200 rows spanning **a
-  single day three years earlier** and zero upcoming. Order so the cap keeps what
-  the screen is FOR, count the rest in SQL, keep the other end reachable.
+  A register is read oldest-first; a diary is read for what is NEXT. Meetings had
+  `mySlots`/`myBookings` on `startsAt ASC` capped with NO date filter: a
+  school-wide reader got 200 rows spanning **a single day three years earlier**
+  and zero upcoming. Order so the cap keeps what the screen is FOR.
   // GOTCHA: `listOpenSlots` one method away filtered `startsAt >= now`, with a
   comment about this exact failure, and was never swept to the other two.
 - **A capped list is worse when it is the only route to something else.** The
@@ -1061,9 +1060,9 @@ These are the rules; the log is why each one exists.
   awaiting a second signature was invisible**. Nor is it small by default — the
   threshold resolver returns 0 off the platform's currency.
 - **A register is not a queue.** A capped newest-first list DROPS the oldest —
-  exactly the row a review queue exists to surface. Page and count **in SQL**;
-  filtering in memory only sees rows that survived the cap. Work a queue
-  **oldest-first**; never narrow the count by the filter.
+  the row a review queue exists to surface. Page and count **in SQL**; filtering
+  in memory only sees rows that survived the cap. Never narrow a count by the
+  filter.
 - **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** With no lower
   bound on recurring events, 600 dead series filled a 500 cap and each expanded
   to zero: **a blank calendar**. Filter on what makes a row USEFUL
@@ -1074,8 +1073,8 @@ These are the rules; the log is why each one exists.
 - **Measure as the APP ROLE under RLS, with a BOUND PARAMETER, on volume, with a
   realistic distribution.** All four have produced a wrong answer: `postgres`
   bypasses RLS and plans differently; a literal picks an index a pooled app will
-  not get; a dev-sized table picks the other plan; one pupil holding all 5,000
-  invoices measures nothing.
+  not get; a dev-sized table picks the other plan; one pupil holding every
+  invoice measures nothing.
 - **O(lifetime), not O(size)** is the shape that degrades invisibly — it tracks
   how long a school, or a PUPIL, has been here. `/grades/mine` returned every
   mark ever, unpaged: 2,430 rows / 831 KB for a parent of three, to see this
@@ -1104,17 +1103,15 @@ These are the rules; the log is why each one exists.
   scope refuses it is dead, and renders as an empty screen rather than a 403.
 - **`super_admin` holds no standing role scope over a tenant's data.** The
   supported route to it is impersonation: step-up gated, time limited, audited.
-- **Work and approvals go only to somebody STILL HERE** (`assertStillHere`,
-  `holdersOf`). Addressing a leaver is addressing nobody.
+- **Work and approvals go only to somebody STILL HERE** (`assertStillHere`/`holdersOf`) — addressing a leaver is addressing nobody.
 - **A stage-holder must open its own door**, and an approver must SEE what the
   decision turns on. Both have their own gates.
 - **A chain resolved at SUBMIT goes stale when somebody LEAVES.** Admissions
   drops an unstaffable stage at submit and refuses an approval that would strand
   the rest — both look FORWARD, and neither reaches the approver who exits while
   the item waits. Measured: 252 of 5,000 schools' applications sat at a stage
-  with no ACTIVE holder, undecidable in BOTH directions and shown as ordinary
-  pending work. There is no reassign, so the fix is to SAY it — on the row, in a
-  count no filter can hide, and in the refusal, which names the vacancy.
+  with no ACTIVE holder, undecidable in BOTH directions. There is no reassign,
+  so SAY it — on the row, in a count no filter can hide, and in the refusal.
 - **Never trust an id from the body.** Check the KIND (a pupil made a subject
   teacher, a guardian attached to staff), not merely that it exists. "MAY I reach
   this pupil" is not "IS this a pupil of ours", and for a school-wide caller the
@@ -1146,30 +1143,26 @@ These are the rules; the log is why each one exists.
   `app/icon.png` through the same matcher, so default-deny must exempt ASSETS.
   // GOTCHA: the rule lives in its OWN module so the test drives the REAL
   function — the first draft reimplemented it and disagreed about `/icon.png`.
-- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below, and the
-  one a user meets. `/attendance`'s "take →", the ONE control for taking a
-  missing register, pointed at `/classes/<id>`, not a route. Gate
-  `a-link-to-a-page-that-is-not-there` matches every literal href against the
-  declared routes; it found a fourth on its first run.
-- **A PICKER MUST REMEMBER WHAT WAS PICKED.** The choice was a PLACEHOLDER
-  re-derived from `[...seed, ...results]`; choosing clears the query, which
-  clears `results`, so anybody found by SEARCH vanished on being chosen. Hold it
-  in state, render it as TEXT. (`PeoplePicker` was right and was never swept.)
+- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below, and
+  the one a user meets. `/attendance`'s "take →" pointed at `/classes/<id>`, not
+  a route. Gate `a-link-to-a-page-that-is-not-there` matches every literal href
+  against the declared routes; it found a fourth on its first run.
+- **A PICKER MUST REMEMBER WHAT WAS PICKED.** The choice was re-derived from
+  `[...seed, ...results]`; choosing clears the query, which clears `results`, so
+  anybody found by SEARCH vanished on being chosen. Hold it in state.
 - **`{ scroll: false }` WHEN A NAVIGATION UPDATES A SECTION IN PLACE.** Next
   scrolls to the top on every push; the attendance pupil-picker sits at the FOOT
   of a long page, so clicking a pupil hid the history it asked for.
 - **A ROUTE NO SCREEN CALLS IS A DOOR MISSING FROM THE OUTSIDE.** `GET
-  /members/scan/today` was reached from nowhere — one level out from the gates
-  that catch a service method no CONTROLLER reaches.
+  /members/scan/today` was reached from nowhere — one level out from the gate
+  that catches a service method no CONTROLLER reaches.
 - **A SUMMARY MUST NOT NARROW WITH THE FILTER BELOW IT.** The desk's day counts
-  are a `groupBy` over the whole day, independent of `?purpose=` and the page —
-  otherwise filtering to check-ins reports that nobody has left.
+  are a `groupBy` over the whole day, independent of `?purpose=` and the page.
 - **A field the API accepts that no screen sends** is a feature nobody has
   (`a-field-no-screen-can-fill-in`); **a method no controller reaches** shipped
   with no door (`service-methods-nobody-calls`); **a page nothing links to** is
   not delivered (`every-page-can-be-reached`). *Present is not findable.*
-- **A duty given with a notice is taken away with one** — retract only what was
-  actually SENT.
+- **A duty given with a notice is taken away with one**; retract only what was SENT.
 - **Fixing where it hurts and leaving the siblings is how the class survives.**
 
 ### Tests, gates and probes
@@ -2376,9 +2369,16 @@ Three tiers gate a register write (`AttendanceService.markAttendance`):
   `ATTENDANCE_AMENDMENT` workflow (systemOnly; single-stage
   `ATTENDANCE_AMENDMENT_CHAIN`, perm `attendance.amend.review` held by
   head_teacher/school_admin/principal) — a DIFFERENT senior approves (SoD,
-  engine-enforced) and a WorkflowHooks reactor applies the marks in-tx. Holders
-  of `attendance.amend.review` edit stale registers DIRECTLY (they're the
-  approvers). Scan CHECK_IN is always today → never stale.
+  engine-enforced) and a WorkflowHooks reactor applies the marks in-tx. Scan
+  CHECK_IN is always today → never stale.
+  // GOTCHA: this said amend.review holders edit stale registers DIRECTLY —
+  **false for two of the three roles holding it**. BOTH branches call
+  `assertCanTakeRegister`, so a correction is gated like a fresh register.
+  Measured at day 10: teacher 201 pendingApproval, school_admin 201 direct,
+  principal AND head_teacher **403**. amend.review APPROVES an amendment, never
+  authors one (`who-corrects-a-stale-register.spec.ts`). KNOWN, NOT FIXED: a
+  school may run with a principal and NO school_admin, so if the supervisor has
+  LEFT, that class's stale register can be corrected by nobody.
 - **Past/ended term**: fully LOCKED (409), no edit even with approval — boundary
   is the `isCurrent` term's startDate (fail-open when unconfigured);
   `GET /attendance/term-lock` exposes it. `STALE_REGISTER_DAYS = 7`.

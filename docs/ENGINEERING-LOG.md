@@ -17632,3 +17632,56 @@ excludes it through a relation. A gate that wrong would be answered with an
 exemption, and an exemption granted for a false positive is a hole with a note
 on it. The rule is in CLAUDE.md beside the backlog rule it qualifies, and the
 two sweeps that had it wrong now each have a two-run test.
+
+### The approver who was documented as able to correct, and could not
+
+Asked whether a teacher can take a register and whether the school admin and
+principal can adjust it inside the allowed window. Driven against the running
+stack rather than read, on a class whose supervisor is the demo teacher:
+
+    TAKING TODAY            teacher 201 | school_admin 201 | principal 403 | head_teacher 403
+    CORRECTING AT DAY 10    teacher 201 pendingApproval
+                            school_admin 201 applied directly
+                            principal   403  "Only History 101's class teacher takes
+                                              its register — ask a school administrator"
+                            head_teacher 403
+    TOMORROW                400        ENDED TERM  409 (locked for everyone)
+
+The taking half is exactly as designed. The CORRECTING half is not what either
+the code comment or CLAUDE.md said. Both stated that "holders of
+`attendance.amend.review` edit stale registers DIRECTLY (they're the
+approvers)". Three roles hold that permission and it was true of ONE.
+
+`markAttendance` reads the permission into `isApprover` and branches on it —
+but BOTH branches then call `assertCanTakeRegister`, so `isApprover` chooses the
+branch and never whether the gate applies. A correction is therefore gated
+exactly like a fresh register: the class's own supervisor, or `school_admin` as
+cover. The principal holds `attendance.write`, passes the route gate and fails
+at ROW scope; the head teacher does not hold it at all and is stopped earlier,
+which is why one of them gets a helpful refusal and the other a bare
+"Forbidden".
+
+DECIDED: keep the code, correct the claim. A register attests "I looked at this
+room", a correction is a claim about the same room, and `amend.review` exists so
+a senior can APPROVE a teacher's account of it rather than replace it. The
+alternative — letting an approver author — would have let one person rewrite any
+class's historic register with nobody else involved, which is the control this
+window exists to impose.
+
+// WHY IT COULD BE WRONG FOR SO LONG: `a-form-that-refuses-on-save` covers this
+// rule thoroughly for TAKING a register and drives the real `canTakeRegister`.
+// Nothing covered it for CORRECTING one. The claim that was false was about the
+// case with no test, which is the ordinary shape of this: the careful half is
+// written first and the other is left.
+// `who-corrects-a-stale-register.spec.ts` drives `markAttendance` itself for
+// all four roles at a stale date, with the term deliberately still open so a
+// pass cannot come from the term lock. Mutation-validated: making the old claim
+// TRUE (`if (!isApprover) await this.assertCanTakeRegister(...)`) fails four of
+// its six cases by name.
+
+KNOWN AND NOT FIXED, recorded rather than left implied: `RBAC_MANAGING_ROLES`
+treats school_admin and principal as interchangeable, so a school may run with a
+principal and no school_admin. If such a class's supervisor has LEFT, its stale
+register can be corrected by nobody — the principal cannot author it and there
+is no teacher left to raise the amendment. Narrow (it needs all three at once),
+and deliberately out of scope for this change.
