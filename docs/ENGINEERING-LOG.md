@@ -17309,3 +17309,67 @@ budget.
   - The heaviest tables were seeded to ONE school's depth, not 5,000 schools'.
     Per-tenant reads are index-bound and were measured; whole-fleet SWEEPS over
     those tables at true volume were not.
+
+### A register a principal could fill in and could not save
+
+Asked whether a class teacher, principal and school admin can each take a
+register. Verified live rather than read: teacher (the class's SUPERVISOR) 201,
+school_admin 201, principal 403, head_teacher 403, another teacher 404. So two of
+the three can, and the principal cannot — deliberately.
+
+But the principal HOLDS `attendance.write`, and the page gated the register FORM
+on that permission while the SERVICE refuses them at row scope. So a principal
+could open /attendance, pick a class, mark every pupil, press Save — and be told
+"Only History 101's class teacher takes its register". The whole job done, then
+refused. That is the dead-grant shape this repo records (a permission has TWO
+halves and they drift), showing up as a form that fails on submit rather than a
+control that is simply absent.
+
+THE RULE WAS ALSO WRITTEN TWICE — `assertCanTakeRegister` (what the API enforces)
+and an inline copy in the by-class board's `canTake` (what the UI offers) — while
+the outstanding-register board had NO such field and drew a "take" control on
+every row for everybody. One exported `canTakeRegister(p, supervisorId)` now,
+called by the enforcement and by both boards.
+
+WHY THE RULE IS RIGHT, and the measurement that settled it. The rule is not
+"principals may not take registers" — it is "the NAMED SUPERVISOR takes it, plus
+school_admin as cover". Verified by making the principal a class's supervisor:
+
+    principal, not the supervisor   403
+    principal, named as supervisor  201
+
+So a teaching head — the whole case for widening the role — is already served by
+naming them, and the record then says WHO took it, which is the point of the
+register. Two further reasons, both checked rather than assumed:
+
+  - `attendance.amend.review` is held by head_teacher, principal, school_admin.
+    Past seven days a register can only be corrected through a maker-checker
+    chain those three decide. Principals authoring registers routinely would
+    make the approver of a correction the author of the original — the engine
+    still enforces requester != approver, so it does not COLLAPSE, but it thins
+    the independence the chain exists for.
+  - A register attests "I looked at this room and these children were there", and
+    an unrecorded absence is indistinguishable from a child who is present. If
+    seniority can close a gap, gaps get closed administratively rather than by
+    somebody checking whether the child is in the building. A gap that is VISIBLE
+    is safer than one filled in by somebody who was not there.
+
+WHAT CHANGED: `canTake` added to the outstanding-register board (the button is
+now offered only to somebody who may use it, and says "ask their class teacher"
+or "no class teacher" otherwise); the register form is built from the server's
+own takeable list rather than `/classes/mine`; and the page HEADING follows what
+the reader can do — it said "Take a class register" to anyone holding
+`attendance.write`, promising an action it does not offer.
+
+Live after: principal — form absent, 31 registers visible, heading reads "Every
+class's register, and which are still outstanding… a school administrator can
+cover one"; school_admin — form present, take on all 31; teacher — form present,
+take on their 1.
+
+Three mutations, each failing naming its own property: add `principal` to the
+cover set (option (b), which the rule tests reject); re-inline the rule in the
+board; drop the supervisor check.
+
+// The principal keeps everything the role needs: sight of every register, the
+// outstanding board, the school-scoped chase button, and approval of stale
+// corrections. What they lose is the ability to sign for a room unseen.

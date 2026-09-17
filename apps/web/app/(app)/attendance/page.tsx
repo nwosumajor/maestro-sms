@@ -1,4 +1,10 @@
-import type { AttendanceCompiledDto, AttendanceRecordDto, IdNameDto, Serialized } from "@sms/types";
+import type {
+  AttendanceCompiledDto,
+  AttendanceRecordDto,
+  IdNameDto,
+  RegisterStatusDto,
+  Serialized,
+} from "@sms/types";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { hasPermission } from "@/lib/permissions";
@@ -22,6 +28,7 @@ export const dynamic = "force-dynamic";
 
 type Student = Serialized<IdNameDto>;
 type ClassRow = Serialized<IdNameDto>;
+type RegisterStatus = Serialized<RegisterStatusDto>;
 type Record_ = Serialized<AttendanceRecordDto>;
 /** A page of history plus the TRUE total — the total is what makes five years of
  *  records navigable instead of silently ending after the first. */
@@ -84,16 +91,36 @@ export default async function AttendancePage({
       apiGet<Serialized<AttendanceCompiledDto>>(`/students/${id}/attendance/compiled?grain=month`),
     ]);
 
-  const [students, count, classes, termLock, preloaded] = await Promise.all([
+  const [students, count, registerStatus, termLock, preloaded] = await Promise.all([
     // A PAGE of the register (bounded), plus the true total so the picker can say
     // what it is not showing and search the server for the rest.
     apiGet<Student[]>("/students"),
     apiGet<{ students: number }>("/students/count"),
-    canWrite ? apiGet<ClassRow[]>("/classes/mine") : Promise.resolve(null),
+    // THE CLASSES THIS PERSON MAY ACTUALLY TAKE A REGISTER FOR — the server's
+    // own decision, not a re-derivation of it.
+    //
+    // This was `/classes/mine`, gated on the `attendance.write` PERMISSION. A
+    // principal holds that permission and `/classes/mine` returns all 31, so the
+    // register form rendered for them; the row-scope then refused every class on
+    // SAVE. They could pick a class, mark every pupil, press Save and be told
+    // "Only History 101's class teacher takes its register" — the whole job
+    // done, then refused. That is the dead-grant shape: a permission whose row
+    // scope denies it, showing up as a form that fails rather than a control
+    // that is absent.
+    //
+    // `canTake` is the same function the API enforces with, so the form can no
+    // longer offer what the server will refuse.
+    canWrite ? apiGet<RegisterStatus>("/attendance/registers") : Promise.resolve(null),
     canWrite ? apiGet<{ lockBeforeDate: string | null }>("/attendance/term-lock") : Promise.resolve(null),
     known ? historyFor(known) : Promise.resolve(null),
   ]);
 
+  // Only the classes the server says this person may take. A principal keeps
+  // every register in SIGHT — the board above, the history below — and is asked
+  // to CHASE an outstanding one rather than sign for a room they did not see.
+  const takeable: ClassRow[] = (registerStatus?.classes ?? [])
+    .filter((c) => c.canTake)
+    .map((c) => ({ id: c.classId, name: c.className }) as ClassRow);
   const list = students ?? [];
   const selectedId = known ?? list[0]?.id;
   const [history, summary, compiled] = preloaded ?? (selectedId ? await historyFor(selectedId) : [null, null, null]);
@@ -104,9 +131,23 @@ export default async function AttendancePage({
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="attendance" permissions={user.permissions}>
       <div className="space-y-6">
-        <PageHeader title={<>Attendance</>} subtitle={<>{canWrite
-              ? "Take a class register, and review a student's attendance history."
-              : "Your attendance history. Guardians are alerted automatically on an absence."}</>} />
+        {/* THE HEADING FOLLOWS WHAT THIS READER CAN ACTUALLY DO. It said "Take a
+            class register" to anyone holding `attendance.write` — including a
+            principal, who holds it and may take none, so the page promised an
+            action it does not offer. Three readings, because there are three
+            jobs: take one, chase one, or read your own. */}
+        <PageHeader
+          title={<>Attendance</>}
+          subtitle={
+            <>
+              {takeable.length > 0
+                ? "Take a class register, and review a student's attendance history."
+                : canChase
+                  ? "Every class's register, and which are still outstanding. A register is taken by the class teacher — a school administrator can cover one."
+                  : "Your attendance history. Guardians are alerted automatically on an absence."}
+            </>
+          }
+        />
 
         {/* Missing registers first: it is the only thing on this page that is
             time-critical, and the 7-day correction window is why. */}
@@ -128,14 +169,14 @@ export default async function AttendancePage({
             their class and an administrator sees one everywhere. */}
         {canWrite && <ClassAttendanceBoard />}
 
-        {canWrite && classes && classes.length > 0 && (
+        {canWrite && takeable.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Register</CardTitle>
               <CardDescription>Pick a class and date. Today defaults everyone Present — mark the exceptions and save. Pick a past date (or a register below) to view or correct any day&apos;s register.</CardDescription>
             </CardHeader>
             <CardContent>
-              <TakeRegister classes={classes} lockBeforeDate={termLock?.lockBeforeDate ?? null} initialClassId={searchParams.classId} />
+              <TakeRegister classes={takeable} lockBeforeDate={termLock?.lockBeforeDate ?? null} initialClassId={searchParams.classId} />
             </CardContent>
           </Card>
         )}

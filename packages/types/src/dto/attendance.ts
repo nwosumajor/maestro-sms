@@ -34,6 +34,19 @@ export interface RegisterStatusRowDto {
    * this class" is a different problem from "the teacher has not taken it".
    */
   teacherActive: boolean;
+  /**
+   * May the READER of this board take this register?
+   *
+   * The server's own rule, so the UI never re-derives it. The board had no such
+   * field and drew a "take" control on every row — including for a principal,
+   * who may SEE every register and write none, and who was therefore offered the
+   * button on all of them and refused only on SAVE, after marking the class.
+   *
+   * The rule is the class's NAMED supervisor, plus school_admin as cover; a head
+   * who genuinely runs a class takes its register the moment they are named its
+   * supervisor.
+   */
+  canTake: boolean;
 }
 
 /**

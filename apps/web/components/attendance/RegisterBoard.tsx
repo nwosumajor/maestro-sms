@@ -183,10 +183,22 @@ export function RegisterBoard({ canConfigure = false }: { canConfigure?: boolean
                               missing register taken answered "404: This page
                               could not be found." The board is rendered FIRST on
                               /attendance because it is the time-critical thing
-                              on the page, so it is also the likeliest click. */}
-                          <Link href={`/attendance?classId=${r.classId}`}>
-                            <Button size="sm" variant="outline">take →</Button>
-                          </Link>
+                              on the page, so it is also the likeliest click.
+
+                              AND IT IS OFFERED ONLY TO SOMEBODY WHO MAY TAKE IT.
+                              `canTake` is the SERVER's decision, so this cannot
+                              drift from what the API allows: a principal sees
+                              every outstanding register and is asked to CHASE
+                              it, not to sign for a room they did not look at. */}
+                          {r.canTake ? (
+                            <Link href={`/attendance?classId=${r.classId}`}>
+                              <Button size="sm" variant="outline">take →</Button>
+                            </Link>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              {r.teacherActive ? "ask their class teacher" : "no class teacher"}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}

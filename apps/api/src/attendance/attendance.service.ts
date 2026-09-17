@@ -91,6 +91,27 @@ const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin", 
  * See test/security/no-standing-superadmin.spec.ts.
  */
 const REGISTER_COVER_ROLES = new Set(["school_admin"]);
+
+/**
+ * MAY THIS PERSON TAKE THIS CLASS'S REGISTER — the one definition.
+ *
+ * It was written twice: once in `assertCanTakeRegister` (what the API enforces)
+ * and once inline in the by-class board's `canTake` (what the UI offers). Two
+ * copies of one rule is how a screen comes to offer a button the server refuses,
+ * which is the shape this repo keeps recording. Both now call this, and so does
+ * the outstanding-register board, which carried no such field at all and drew a
+ * "take" control for everybody.
+ *
+ * The rule is RESPONSIBILITY, not rank: the class's NAMED supervisor, plus
+ * school_admin as cover. A principal or head teacher who genuinely runs a class
+ * takes its register the moment they are named its supervisor — verified live,
+ * 403 before and 201 after — so a teaching head needs no exception. What
+ * seniority does NOT confer is signing for a room you did not look at.
+ */
+export function canTakeRegister(p: Principal, supervisorId: string | null): boolean {
+  if (p.roles.some((r) => REGISTER_COVER_ROLES.has(r))) return true;
+  return !!supervisorId && supervisorId === p.userId;
+}
 /** Edits to a register older than this (days) need maker-checker approval. */
 const STALE_REGISTER_DAYS = 7;
 /** Statuses that notify the student's guardians. */
@@ -856,7 +877,6 @@ export class AttendanceService {
       const statBy = new Map(stats.map((s) => [s.classId, s]));
       const regBy = new Map(registers.map((r) => [r.classId, r._count._all]));
       const supBy = new Map(supervisors.map((u) => [u.id, u.name]));
-      const cover = p.roles.some((r) => REGISTER_COVER_ROLES.has(r));
 
       return {
         ...base,
@@ -875,8 +895,8 @@ export class AttendanceService {
             supervisorId: c.supervisorId,
             supervisorName: c.supervisorId ? supBy.get(c.supervisorId) ?? null : null,
             // Exactly the server's own rule, so the UI cannot offer a button the
-            // API will refuse.
-            canTake: cover || (!!c.supervisorId && c.supervisorId === p.userId),
+            // API will refuse — the SAME function the enforcement calls.
+            canTake: canTakeRegister(p, c.supervisorId),
             ...s,
             ratePct,
             registersTaken: regBy.get(c.id) ?? 0,
@@ -1002,6 +1022,12 @@ export class AttendanceService {
             // reminded. Naming that is the difference between a register
             // somebody forgot and one nobody is responsible for.
             teacherActive: teacher ? teacher.status === "ACTIVE" : false,
+            // WHETHER THIS READER MAY TAKE IT. This board had no such field and
+            // drew a "take" control on every row, so a principal — who may SEE
+            // every register and write none — was offered the button on all of
+            // them and refused on save, after marking the class. Same function
+            // the API enforces with.
+            canTake: canTakeRegister(p, c.supervisorId),
           };
         }),
       };
@@ -1112,8 +1138,7 @@ export class AttendanceService {
       select: { id: true, name: true, supervisorId: true },
     })) as { id: string; name: string; supervisorId: string | null } | null;
     if (!cls) throw new NotFoundException("Class not found");
-    if (p.roles.some((r) => REGISTER_COVER_ROLES.has(r))) return;
-    if (cls.supervisorId && cls.supervisorId === p.userId) return;
+    if (canTakeRegister(p, cls.supervisorId)) return;
 
     // Can they at least SEE it? If not, keep the 404 so nothing is disclosed.
     await this.assertTeacherOfClass(tx, p, classId);
