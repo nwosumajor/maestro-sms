@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **356 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **357 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -925,7 +925,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **356 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **357 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1293,27 +1293,34 @@ These are the rules; the log is why each one exists.
   `db push` gave CI 287 FKs against production's 318 — tests passing on
   referential integrity production lacks. It also means a broken migration now
   fails CI instead of failing on deploy.
+- **A FAILED `migrate deploy` LOCKS THE WHOLE HISTORY**, and the tempting repair
+  diverges the schema: `resolve --applied` on every unrecorded folder clears the
+  error and lies — six of nine were genuinely ABSENT on the test DB, i.e. a clean
+  history over missing schema, the `plan_price` failure again. RECIPE: verify the
+  FAILED one's objects are ALL present (table, indexes AND constraints),
+  `resolve --applied` just that one, `migrate deploy`, then **`pnpm --filter
+  @sms/db rls`** — migrations bring TABLES, policies are separate, and a GLOBAL
+  table landing with RLS off is invisible to the coverage meta-test, which keys
+  on tables that HAVE a `schoolId`.
 - RLS files use bare `CREATE POLICY` (Postgres has no IF NOT EXISTS for it), so
   they are order-sensitive, not idempotent — the entrypoint applies them per-file
   against a sentinel. `02_foundation_rls.sql` is the ONE exception: its two
   `audit_log` policies DROP-then-CREATE, because `20260824000000_audit_log_
   partition` re-declares those same names. Without that, 02 aborted partway on
   any migrate-deploy DB and silently left the rest of the file unapplied.
-- New tenant table: add an `prisma/rls/NN_*.sql` file and a cross-tenant case to
+- New tenant table: add `prisma/rls/NN_*.sql` and a cross-tenant case to
   `apps/api/test/rls.e2e-spec.ts` (and its afterAll cleanup, child rows BEFORE
-  parents — FK order matters). Register the new rls file in
-  `apps/api/docker-entrypoint.sh` (`apply_rls <file> <last-policy-name>`) — the
+  parents — FK order matters). Register the file in
+  `apps/api/docker-entrypoint.sh` (`apply_rls <file> <last-policy-name>`): the
   entrypoint applies RLS per-file idempotently, keyed on each file's LAST policy
-  as a sentinel, so a new file applies onto an already-initialised DB without
-  re-running the others. NOTE: you NO LONGER hand-edit `TenantTx` — it is
-  `Prisma.TransactionClient` (see below), so new models are typed automatically.
+  as a sentinel, so a new file lands on an initialised DB without re-running the
+  others. Do NOT hand-edit `TenantTx` — it is `Prisma.TransactionClient`.
 - Integrity retention: telemetry on minors (integrity_signal / submission_draft /
-  submission_telemetry) is purged past each school's `School.integrityRetentionDays`
-  window by a privileged BullMQ daily sweep + a per-school manual endpoint
-  (`POST /integrity/retention/run`, perm `integrity.retention.run`). The app role
-  has NO DELETE on those tables; the purge connects via `DATABASE_RETENTION_URL`
-  (falls back to `DATABASE_MIGRATE_URL`); unset → retention DISABLED. See
-  `apps/api/src/integrity/retention` and `prisma/rls/06_*`.
+  submission_telemetry) is purged past `School.integrityRetentionDays` by a
+  privileged daily sweep + `POST /integrity/retention/run`
+  (`integrity.retention.run`). The app role has NO DELETE there; the purge uses
+  `DATABASE_RETENTION_URL` (falls back to `DATABASE_MIGRATE_URL`); unset →
+  retention DISABLED. See `apps/api/src/integrity/retention`, `prisma/rls/06_*`.
 - Tests: **`pnpm --filter @sms/api test:db` runs ALL of it.** A bare `jest`
   SKIPS every DB-gated suite (the RLS e2e among them) because each
   `describe.skip`s without `TEST_DATABASE_URL`, so **a green local run says
@@ -1373,15 +1380,13 @@ These are the rules; the log is why each one exists.
   the shared process closes it for everyone), so a suite can look fine locally
   and still hang CI. Cleanup ordering: `audit_log` rows reference users
   (`audit_log_actorId_fkey`), so delete them BEFORE the suite's `"user"` rows.
-- Seed permission registry: `seed.ts` upserts the UNION of its hand-listed
-  `PERMS` and every key `ROLE_PERMISSIONS` references (`ALL_PERMS`) — a
-  permission added to the role map in `@sms/types` can no longer crash the
-  seed or silently miss the DB. A LIVE DB only gets new permissions when the
-  seed RE-RUNS (compose seeds on first provision only) — after adding a
-  permission, run the seed against the live DB or the new endpoint 403s
-  even for super_admin.
-- Raw SQL in tests must supply `updatedAt` (Prisma `@updatedAt` has no DB
-  default) and quote `"user"` (reserved word).
+- Seed permission registry: `seed.ts` upserts the UNION of its hand-listed `PERMS`
+  and every key `ROLE_PERMISSIONS` references (`ALL_PERMS`), so a permission added
+  to the role map cannot crash the seed or silently miss the DB. A LIVE DB gets
+  new permissions only when the seed RE-RUNS (compose seeds on first provision
+  only) — otherwise the new endpoint 403s even for super_admin.
+- Raw SQL in tests supplies `updatedAt` (Prisma `@updatedAt` has no DB default)
+  and quotes `"user"` (reserved word).
 - Time columns like `Game.turnStartedAt` are `timestamp without time zone`. The
   app round-trips them via Prisma (consistently UTC), but a test that BACK-DATES
   one with raw SQL `now() - interval '…'` stores the DB session's LOCAL wall-clock

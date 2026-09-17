@@ -17143,3 +17143,62 @@ Gate `every-signed-in-page-needs-a-session` walks the router and asserts no
 section under `app/(app)` is public, that the public ones still are, and that the
 middleware gates on the allowlist rather than a protect-list. Three mutations:
 open /cbt (fails naming it), close /login, drop the asset exemption.
+
+### A failed migrate deploy blocks every later one, and resolving it blindly diverges the schema
+
+The local test database (`sms-test-pg`) had a migration history out of step with
+its own schema: 243 recorded applied, ONE recorded as failed-and-unfinished
+(`20270115000000_report_card_attestation`), and NINE folders on disk never
+recorded at all. Prisma refuses to apply anything while a failed migration
+stands, so `migrate deploy` had been dead there — and CI builds its database with
+`migrate deploy`, so this is exactly the parity the repo's own workflow note
+exists to protect.
+
+// The failed row was mine: a `migrate deploy` I ran two days earlier hit
+// "relation report_card_attestation already exists" and left the marker behind.
+// A failed attempt is not a no-op — it is a lock on the whole history.
+
+THE TEMPTING REPAIR IS THE WRONG ONE. `prisma migrate resolve --applied` on each
+unrecorded folder clears the error immediately, and would have been a silent
+schema divergence: checking the nine folders' objects against the database found
+SIX genuinely ABSENT — `scholarship_question_bank`, `school_archive_termId_idx`,
+`payment_invoiceId_reference_key`, the promo in-flight index,
+`scholarship_application.disbursementIssue` and
+`cbt_question_bank.scholarshipProgramId`. Marking those "applied" produces a
+database that reports a clean history while missing real schema, which is the
+same failure mode as the `plan_price` replay trio already recorded here: a
+SUCCESS that diverges is strictly worse than the loud error it replaced.
+
+THE RECIPE, and the order matters:
+  1. Check the FAILED migration's objects are ALL present — every table, index
+     AND constraint it declares, not just the table whose name was in the error.
+     Here all six objects of 20270115000000 were there, so it was genuinely
+     applied and only the record was wrong.
+  2. `prisma migrate resolve --applied <that one>`. It marks the failed row
+     `rolled_back_at` and inserts a fresh applied row, so 254 rows / 253 distinct
+     names is the healthy shape afterwards, not a second problem.
+  3. `prisma migrate deploy` — which then applies the other nine for real. They
+     are `IF NOT EXISTS` throughout, so the present ones no-op and the absent
+     ones are created.
+  4. `pnpm --filter @sms/db rls`. The migrations bring TABLES; the policies live
+     in `prisma/rls/*.sql` and are applied separately. `scholarship_question_bank`
+     landed with RLS OFF and no policies, and it is a GLOBAL table (no
+     `schoolId`), so the RLS coverage meta-test — which keys on tables that HAVE
+     one — would never have flagged it. "Global" is not "unprotected": rls/50
+     wants a deny-all on it, and the app role had reach it should not have.
+
+// GOTCHA: the RLS files use bare `CREATE POLICY`, so re-running the whole set
+// aborts on the first policy that already exists — and with ON_ERROR_STOP it
+// stops there, leaving everything after it unapplied. That is how a repair
+// half-lands: my first attempt died on `scholarship_question_deny_all` (already
+// present) and never reached the bank block two statements below.
+
+// GOTCHA on comparing two databases: `comm` on `pg_policies` output flagged
+// dozens of differences that were not differences — attendance_record and
+// audit_log PARTITION policies, which differ by month between any two databases
+// of different ages. Compare the parent tables, or read the noise for what it is.
+
+Verified after: `migrate deploy` is a clean no-op, the six absent objects exist,
+the app role cannot SELECT either scholarship-question table, the RLS e2e passes
+205/205, and the full DB-gated suite runs 646 suites / 6,371 tests with no
+failures.
