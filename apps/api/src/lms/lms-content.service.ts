@@ -55,6 +55,7 @@ import type {
 import { badgeMeta, gradeComponentMax, isBadgeKey, LMS_PERMISSIONS,
   LMS_CONTENT_PUBLISH_CHAIN,
   MAX_RECORDING_BYTES,
+  recordingTooLargeMessage,
 } from "@sms/types";
 import { isXapiVerb, normalizeXapiResult } from "./xapi.util";
 import {
@@ -2179,9 +2180,7 @@ export class LmsContentService {
         throw new BadRequestException("Recordings must be MP4, so every pupil can play it in the browser.");
       }
       if (input.sizeBytes > MAX_RECORDING_BYTES) {
-        throw new BadRequestException(
-          `That recording is ${(input.sizeBytes / 1024 / 1024 / 1024).toFixed(1)} GB. The limit is ${MAX_RECORDING_BYTES / 1024 / 1024 / 1024} GB.`,
-        );
+        throw new BadRequestException(recordingTooLargeMessage(input.sizeBytes));
       }
       const safe = (input.fileName ?? "recording.mp4").replace(/[^A-Za-z0-9._-]/g, "_");
       const key = `lms/${p.schoolId}/live-${sessionId}/${Date.now()}_${safe}`;
@@ -2218,9 +2217,7 @@ export class LmsContentService {
     const bytes = await this.storage.download(key);
     if (!bytes) throw new BadRequestException("No recording has arrived yet. Please choose the file again.");
     if (bytes.length > MAX_RECORDING_BYTES) {
-      throw new BadRequestException(
-        `That recording is ${(bytes.length / 1024 / 1024 / 1024).toFixed(1)} GB. The limit is ${MAX_RECORDING_BYTES / 1024 / 1024 / 1024} GB.`,
-      );
+      throw new BadRequestException(recordingTooLargeMessage(bytes.length));
     }
     if (sniffUploadType(bytes) !== "video/mp4") {
       throw new BadRequestException("That file is not an MP4. Pupils can only play an MP4 in the browser.");

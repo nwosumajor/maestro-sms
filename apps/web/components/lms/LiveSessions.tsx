@@ -10,6 +10,7 @@
 // =============================================================================
 
 import type { LmsLiveAttendanceDto, LmsLiveSessionDto, Serialized } from "@sms/types";
+import { MAX_RECORDING_BYTES } from "@sms/types";
 import { interpretApiError } from "@/lib/api-error";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -322,9 +323,21 @@ function RecordingControl({ session, onChanged }: { session: Session; onChanged:
           </Button>
         </>
       ) : (
-        <Button size="sm" variant="ghost" className="h-7" disabled={!!busy} onClick={() => fileRef.current?.click()}>
-          {busy ?? "Attach recording"}
-        </Button>
+        <>
+          <Button size="sm" variant="ghost" className="h-7" disabled={!!busy} onClick={() => fileRef.current?.click()}>
+            {busy ?? "Attach recording"}
+          </Button>
+          {/* SAID BEFORE THE FILE IS CHOSEN, and derived from the same constant
+              the server refuses on, so the screen cannot promise a size the API
+              rejects. The teacher has already recorded by the time they get
+              here, so the useful half of this is the RESOLUTION, not the
+              number. */}
+          {!busy && (
+            <span className="text-muted-foreground">
+              · MP4 up to {(MAX_RECORDING_BYTES / 1024 / 1024 / 1024).toFixed(1)} GB — record at 720p
+            </span>
+          )}
+        </>
       )}
       {err && <span className="text-destructive">{err}</span>}
     </>

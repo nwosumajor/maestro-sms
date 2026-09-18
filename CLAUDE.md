@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **370 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **372 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **370 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **372 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1079,7 +1079,14 @@ These are the rules; the log is why each one exists.
 - **Offset paging needs a TOTAL order.** `gradedAt` alone is not one: 239
   distinct rows of 270 across six pages. Add `id`. The test passed until the
   double SHUFFLED before sorting — `Array.sort` is stable in V8, Postgres is
-  not. And **an index nothing selects is write amplification**; measure first.
+  not. And **an index nothing selects is write amplification** — one added here
+  by reasoning was chosen NEVER, because **an ordering column behind a
+  NON-EQUALITY predicate is unreachable for ORDER BY** (`status IN (a,b)`
+  cannot be walked in `lastRemindedAt` order). Put the predicate in a PARTIAL
+  index and the ordering columns come to the front: 26.9ms Seq Scan + heapsort
+  -> 2.5ms Index Scan, the sort GONE. Prove an index dead by DROPPING THE OTHER
+  inside a transaction that ROLLS BACK — with both present the planner's choice
+  says nothing about the loser.
 - **THE ROW IS THE ROUTE.** The CBT console returned the 100 newest of 1,350
   exams — and an exam row is the only route to its RESULTS, PAPER, ANSWER KEY
   and grade RECORDING, so a cap strands four surfaces, not one.
@@ -1475,87 +1482,37 @@ typecheck (13/13 turbo tasks) and the 118 game-engine unit tests pass. The DB-ba
 e2e/RLS suites need a provisioned Postgres (TEST_DATABASE_URL app role +
 TEST_ADMIN_URL superuser) and run in CI / locally-with-creds, not the sandbox.
 
-BUILT (spec §11 steps 1–8):
-- **Step 1 — pure scoring engine** (`packages/game-engine/scoring.ts`): `score`/
-  `isWin`/`validate`/`generateSecret`, variable length N=4/5/6, exhaustively tested.
-- **Step 2 — standalone 2-player online game** (`apps/game-server`): native-ws,
-  server-authoritative match (`match.ts`) behind a swappable store seam.
-- **Step 3 — SMS integration of the duel** (`apps/api/src/game`, schema
-  `game.prisma`, RLS `18_game_rls.sql`): tenant-scoped Game/GamePlayer/Guess/
-  GameResult, relationship-scoped (participant-only, 404-not-403), audited,
-  secrets server-only + cleared on finish. `game.play`/`game.leaderboard.read`.
-- **Step 4 — Category 3 League/Knockout** (`competition.service.ts` +
-  `competition.controller.ts`, schema Competition/Standing, RLS
-  `19_competition_rls.sql`): pure round-robin/knockout-bracket/standings logic in
-  `game-engine/competition.ts` (byes never twice, 3/0 points, guess-count then
-  head-to-head tiebreak — all unit-tested); matches are normal duels played
-  through GameService; `GameService.finish` hooks `CompetitionService.afterMatchFinished`
-  (one-way dep, no cycle) to update standings / advance the bracket; an overdue
-  `sweep` forfeits no-shows (48h window). `game.league.create` (principal/
-  school_admin) + leaderboard read.
-- **Step 5 — Category 2 Class Race** (`race.service.ts` + `race.controller.ts`,
-  schema: `Game.classId` + server-only `Game.targetSecret`, migration
-  `20260625000000_race` — NO new RLS file, reuses the `game`/`competition`/
-  `standing` policies): teacher opens a race for THEIR class around one shared
-  server-only target; enrolled students join and race in PARALLEL (no turns,
-  routed through RaceService NOT GameService); first 3 to crack win (top-3 by
-  finish order). Per-student guess redaction (a racer sees only their own
-  guesses; target never serialized, cleared on finish), per-racer guess
-  rate-limit, own-start `elapsedMs`. Cross-class **tournament** = one RACE per
-  class (each its own target) under a `Competition(RACE_TOURNAMENT)`, with
-  per-class + combined standings via the pure `computeRaceStandings` (fewest
-  guesses → fastest own-start elapsed). `game.race.open` (teacher own-class /
-  principal / school_admin) + `game.race.tournament` (principal / school_admin).
-- **Step 6 — Category 1 Elimination Ring** (`ring.service.ts` + `ring.controller.ts`,
-  schema: `Game.turnStartedAt` + `GamePlayer.eliminatedById`, migration
-  `20260626000000_ring` — NO new RLS file, reuses the `game` policies): N players
-  in a ring, each targeting the next; a crack ELIMINATES the target, the ring
-  RE-CLOSES (cracker inherits the eliminated player's target), and the cracker
-  gains the eliminated player's session guess history (the §4 reward, scoped via
-  `eliminatedById` — nobody else sees it). One guess per turn, turn order enforced
-  server-side; the 60s limit is validated from `turnStartedAt` with the graduated
-  rule (skip ×2 → forfeit on 3rd consecutive timeout). Last standing wins;
-  placings recorded (reverse elimination order); secrets cleared on finish. A RING
-  is turn-based and owns its lifecycle (does NOT route through GameService). The
-  in-memory real-time transport (step 2) still owns the 15s countdown /
-  hard-disconnect; live *spectating* of a durable ring is now served by the
-  `/ws/watch` push bridge (see "Live push" below). `game.play` to play;
-  `game.match.moderate` (teacher/principal/school_admin) to force-end.
-- **Step 7 — Category 5 Administration / RBAC** (`game-settings.service.ts` +
-  `game-settings.controller.ts` + `game-settings.util.ts`, schema GameSettings,
-  migration `20260627000000_game_settings`, RLS `20_game_settings_rls.sql`):
-  finalizes the per-mode RBAC and makes `game.settings.manage` (school_admin)
-  REAL via per-school config — one tenant-scoped GameSettings row (gamesEnabled,
-  defaultDifficulty, guessRateLimitMs, ringTurnLimitSec, leagueMatchWindowHours,
-  crossSchoolEnabled). `effectiveGameSettings` merges the row over platform
-  defaults; the four game services CONSULT it via a tx helper (no constructor
-  churn): `gamesEnabled` gates open/create; `defaultDifficulty` fills an omitted
-  difficulty (difficulty is now optional on open/create); race guess rate-limit,
-  ring turn limit, and league match window all come from settings. GET is broad
-  (`game.leaderboard.read`); PUT is `game.settings.manage` (school_admin only —
-  principal does NOT get it, per §8 config-vs-operations split). `crossSchoolEnabled`
-  is consulted by step 8.
-- **Step 8 — Category 4 Ultimate (cross-school)** (`ultimate.service.ts` +
-  `ultimate.controller.ts`, schema `ultimate.prisma`, migration
-  `20260628000000_ultimate`, RLS `21_ultimate_rls.sql`): the ONE deliberate
-  tenant-boundary crossing, built as a SEPARATE surface with TWO opposite-posture
-  halves. (A) CROSS-TENANT, RLS-EXEMPT arena (`UltimateCompetition` /
-  `UltimateParticipant`) — explicitly listed in the RLS file like `school`/`role`;
-  safe because it carries NO PII (opaque participant id, handle, schoolId for
-  grouping, server-only per-entry secret never serialized, scores). (B)
-  TENANT-SCOPED governance/bridge (`UltimateEnrollment` tier-1 school opt-in,
-  `UltimateConsent` tier-2 per-student guardian consent, `UltimateEntryLink` the
-  ONLY userId↔participantId map) under standard RLS — so an arena row
-  de-anonymises only WITHIN its owning school. Entry requires BOTH consent tiers
-  PLUS the school's `crossSchoolEnabled` posture (step 7). What crosses the wire:
-  handle + school NAME + scores, nothing else. Each player guesses their OWN
-  per-entry target; the cross-school leaderboard ranks finishers via the pure
-  `computeRaceStandings` (fewest guesses → fastest own-start elapsed). Admin
-  (create/cancel) `game.ultimate.admin` (super_admin only); `game.ultimate.enroll`
-  (principal/school_admin); `game.ultimate.consent` (school_admin); enter/guess/me
-  `game.play`; list/leaderboard `game.leaderboard.read`. All mutations (incl. every
-  consent change + arena entry) audit-logged. RLS-e2e covers the tenant-scoped
-  bridge tables (arena tables excluded by design — cross-tenant, no PII).
+BUILT (spec §11 steps 1–8) — **the per-step detail is in the SPEC, which this
+file tells you to open; what follows is only what a change is taken against.**
+- **Where each mode lives**: pure scoring `packages/game-engine/scoring.ts`
+  (length is a PARAMETER, N=4/5/6); in-memory transport `apps/game-server`;
+  durable modes in `apps/api/src/game` — duel `game.service`, league/knockout
+  `competition.service` (+ pure `game-engine/competition.ts`), class race
+  `race.service`, elimination ring `ring.service`, per-school config
+  `game-settings.service`, cross-school arena `ultimate.service`. RLS 18–21;
+  race/ring add columns only and reuse the `game` policies.
+- **Server authority is absolute.** Secrets are server-only, never serialized,
+  cleared on finish; scoring, turn order, finish order and win detection are
+  computed server-side; every secret and guess is re-validated (N distinct
+  digits). A racer sees only their OWN guesses; a ring cracker inherits the
+  eliminated player's history via `eliminatedById` and nobody else does.
+- **Ring and race own their lifecycles** and do NOT route through GameService;
+  league matches DO (its `finish` hooks `afterMatchFinished`, one-way, no cycle).
+- **`effectiveGameSettings`** merges the school's row over platform defaults and
+  is what gates opening a game and supplies difficulty, race rate-limit, ring
+  turn limit and league window — consulted via a tx helper, not the constructor.
+- **The Ultimate arena is the one deliberate tenant crossing**, in two opposite
+  halves: an RLS-EXEMPT cross-school arena carrying NO PII (handle, school NAME,
+  scores — nothing else crosses), and TENANT-SCOPED governance
+  (`UltimateEnrollment` school opt-in, `UltimateConsent` guardian consent,
+  `UltimateEntryLink` the ONLY userId↔participantId map). Entry needs BOTH
+  consent tiers AND the school's `crossSchoolEnabled`.
+- **Permissions**: `game.play` / `game.leaderboard.read` broadly;
+  `game.league.create`, `game.race.open` (teacher own-class), `game.race.tournament`,
+  `game.match.moderate`, `game.settings.manage` (school_admin ONLY — principal is
+  operations, not configuration), `game.ultimate.admin` (super_admin,
+  NON_ELEVATABLE) / `.enroll` / `.consent`. Every mutation, consent change and
+  arena entry is audited.
 
 The full §11 build sequence is COMPLETE. `game.ultimate.*` perms are now seeded.
 
@@ -2470,6 +2427,16 @@ failed PUT still said "Attached", and pupils got a refusal from storage), they
 fit (the presign's `sizeBytes` is a number the caller SENT), and they are the
 type claimed (`sniffUploadType`, magic bytes). A refusal leaves it unattached so
 the upload can simply be retried.
+// **A SIZE CAP IS SIZED AGAINST WHAT THE TOOL PRODUCES, not a round number.**
+// A recording cap of 500 MB for two hours is 0.56 Mbps and refuses even 480p —
+// Zoom 720p slides is ~0.7 GB, with a camera ~1.4 GB, OBS at 1080p ~2.2 GB. So
+// `MAX_RECORDING_BYTES` is 1.5 GB: every 720p double lesson, not the 1080p dump
+// (which is an hour of uploading on a school line, i.e. mostly abandoned PUTs).
+// **A per-file cap does not control the storage bill** — the COUNT does, and
+// that is bounded by the RETENTION window. And the refusal names the way OUT
+// ("record at 720p"), from ONE shared message, because there are two doors:
+// presign (the caller's own `sizeBytes` claim, refused there to save the hour)
+// and confirm (the bytes themselves).
 **`inline` is the TYPE the server vouches for, never a boolean** — that is what
 keeps the check joined to the serving, and it lets S3 pin
 `ResponseContentType` rather than return the object's stored type, which came

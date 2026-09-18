@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and sixty-four write-ups, newest first. Each records a **real defect
+Three hundred and seventy-two write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,8 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [An index I added by reasoning, and what measuring it actually said](#an-index-i-added-by-reasoning-and-what-measuring-it-actually-said)
+- [A bucket cap sized against a round number, and what a teacher records](#a-bucket-cap-sized-against-a-round-number-and-what-a-teacher-records)
 - [A campus flagged on the group overview, and unflagged on its own page](#a-campus-flagged-on-the-group-overview-and-unflagged-on-its-own-page)
 - [The whole application at 500 schools, and the sweep that first passed on emptiness](#the-whole-application-at-500-schools-and-the-sweep-that-first-passed-on-emptiness)
 - [Five hundred schools, ten years, and a decade that costs nothing to carry](#five-hundred-schools-ten-years-and-a-decade-that-costs-nothing-to-carry)
@@ -295,6 +297,115 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### An index I added by reasoning, and what measuring it actually said
+Asked to make sure nothing shipped this session would lag or error in years to
+come. The LMS queries measured clean at ten years of a heavy-recording school
+(31,201 sessions): page 0.118 ms, recorded-only page 0.346 ms on the partial
+index, the retention sweep 1.36 ms over 2,000 due rows. Topic SEARCH did not —
+a case-insensitive contains no btree can serve, 19.6 ms reading 28,471 rows to
+return 93 — and a trigram GIN took it to 2.9 ms on 112 index rows, 1.2 MB of
+index against a 6.7 MB heap on a table that takes a few thousand INSERTs a YEAR.
+
+**The finding is the one I went looking for in my own work.** Earlier the same
+session I had added `invoice_schoolId_status_lastRemindedAt_idx` to serve the
+fee reminder's new rotation ordering, with a comment explaining why it was
+tenant-leading — and no measurement, which is precisely what this repo already
+records as write amplification waiting to happen. Measured as the app role under
+RLS, with a bound parameter, on 18,014 invoices (14,405 open):
+
+```
+Limit (actual time=26.144..26.463 rows=2000)
+  ->  Sort  Sort Key: "lastRemindedAt" NULLS FIRST, "dueDate", id
+        Sort Method: top-N heapsort  Memory: 547kB
+        ->  Seq Scan on invoice  (rows=14405, Rows Removed by Filter: 3609)
+Execution Time: 26.911 ms
+```
+
+It is never chosen. Not rarely — never, and not only for this query.
+
+**WHY, and this is the durable part: an ordering column behind a non-equality
+predicate is unreachable for ORDER BY.** The sweep filters
+`status IN ('ISSUED','PARTIALLY_PAID')`, two values, so a btree keyed
+`(schoolId, status, lastRemindedAt)` cannot walk `lastRemindedAt` in order — it
+would have to merge two status runs, and Postgres will sort instead. The index
+was also a strict prefix-superset of `invoice_schoolId_status_idx` (17,774
+scans), which already serves every read that only filters, so there was nothing
+left for it to win even in principle.
+
+Moving the predicate into a PARTIAL index removes status from the key entirely
+and brings the ordering columns to the front:
+
+```
+Limit (actual time=0.039..2.264 rows=2000)
+  ->  Index Scan using invoice_reminder_rotation_idx  Buffers: shared hit=2019
+Execution Time: 2.514 ms
+```
+
+26.9 ms -> 2.5 ms, and the SORT disappears rather than getting cheaper — the
+sweep reads 2,000 index entries instead of the school's whole open book, so the
+cost tracks the PAGE and not the school's lifetime. Migration
+`20270324000000_invoice_reminder_rotation_index` drops the dead one and creates
+this.
+
+// GOTCHA on the probe itself: `SET LOCAL` outside a transaction is a WARNING,
+// not an error, and the GUC then reads as the empty string — `invalid input
+// syntax for type uuid: ""`. The measurement has to run inside `BEGIN`, which
+// is also the only way it resembles what `runAsTenant` actually does.
+// GOTCHA: the proof that an index is dead is NOT "the other one is faster".
+// Both were present, so the planner picking the good one says nothing about the
+// bad one. `DROP INDEX` inside a transaction that ROLLS BACK is what answers
+// it — DDL is transactional in Postgres — and with the rotation index removed
+// the planner STILL seq-scanned, which is the actual evidence.
+// GOTCHA: Postgres is not host-exposed in this stack, so `prisma migrate
+// deploy` cannot reach it from the host. A throwaway `alpine/socat` container
+// on the compose network forwarding one port is enough, and is better than
+// hand-writing `_prisma_migrations` rows — which is the shape of the repair
+// this file already records as "a clean history over missing schema".
+
+### A bucket cap sized against a round number, and what a teacher records
+`MAX_RECORDING_BYTES` was 2 GB, chosen because an hour of 720p is roughly a
+gigabyte and two felt safe. Asked whether 500 MB for two hours would do instead.
+It works out at **0.56 Mbps**, which refuses every recording the tools a school
+already owns actually emit — measured against published encoder rates per two
+hours: Zoom 720p slides ~0.7 GB, Zoom 720p with a camera on a speaker ~1.4 GB,
+OBS at 1080p ~2.2 GB, and even Zoom **480p ~0.5 GB**. The commonest outcome of a
+500 MB ceiling is a teacher who cannot attach the lesson they have just
+recorded.
+
+Set to **1.5 GB**: it takes every 720p recording of a double lesson with
+headroom and refuses the 1080p screen-recorder dump — which is the right refusal
+for a second reason, since 2.2 GB is over an hour of uploading on a 5 Mbps line,
+so a cap admitting it would mostly produce abandoned PUTs.
+
+**A PER-FILE CAP DOES NOT CONTROL THE STORAGE BILL, and saying so is the point.**
+It bounds one upload; the bill is the COUNT — about 1,560 recordings a year for
+a 60-class secondary — and that is bounded by `recordingExpiresAt` and the
+retention sweep, which clears a session's footage at the end of the academic
+session. At 1.5 GB the steady state is ~2.3 TB held for one year, against
+~0.76 TB at 500 MB: real money, and the lever for it is the RETENTION WINDOW,
+not a cap that stops teachers attaching lessons. Both are one constant.
+
+**THE REFUSAL NOW NAMES THE WAY OUT.** It said "That recording is 2.4 GB. The
+limit is 2 GB." — true, and useless to somebody who has already recorded the
+lesson. It names the RESOLUTION ("record at 720p rather than 1080p"), which is
+the thing they can act on, and the split-into-two escape. One shared
+`recordingTooLargeMessage` rather than a second correct copy, because there are
+TWO doors: presign (where `sizeBytes` is the caller's own claim, and refusing
+here is what saves the hour of uploading) and confirm (where the server holds
+the bytes and the claim is checked against them). The screen states the figure
+too, derived from the same constant, so it cannot promise a size the API
+refuses.
+
+**MUTATION-VALIDATED, four ways**, because a cap with no test is a number: drop
+the presign guard -> 3 fail including the 1080p case; drop the confirm guard ->
+the "server actually holds the bytes" case fails; strip "720p" from the message
+-> only the way-out case fails, on both doors; set the cap to the proposed
+500 MB -> "takes a two-hour 720p double lesson" fails, which is the whole
+argument written as a test.
+// GOTCHA: the files under mutation were UNCOMMITTED, so `git checkout` would
+// have discarded the FIX and left the mutation. Copied aside first — the trap
+// this file already records, met again and avoided by having read it.
 
 ### A campus flagged on the group overview, and unflagged on its own page
 Asked to simulate the GROUP module and check the console captures the right
