@@ -283,6 +283,34 @@ DSN, Twilio (when ready).
 3. Watch: ECS console → services reach steady state; the migrate task exits 0.
 
 ### Step 6 — Smoke verification (~30 min) — do not skip
+
+**Run the rehearsal first; tick the rest by hand.**
+
+```bash
+export I_KNOW_THIS_IS_A_THROWAWAY_ACCOUNT=yes   # it writes probe objects and reads the DB
+export REHEARSAL_URL="https://<domain>"
+export DOCS_BUCKET="$(terraform -chdir=infrastructure/terraform output -raw documents_bucket)"
+export RDS_INSTANCE_ID="<instance id>"
+export DB_URL="postgresql://major_user:<pw>@<rds endpoint>/sms"   # the APP role, not the superuser
+./infrastructure/scripts/go-live-rehearsal.sh --phase all
+```
+
+It executes and verifies rather than instructing, and writes a dated gap log.
+Three outcomes, and **a SKIP is a finding**: it names something the run did not
+prove and why. Anything still on the SKIP list at go-live is being taken on
+trust — decide each one deliberately. A run where every phase degraded to SKIP
+exits non-zero, because a rehearsal that checked nothing must not read like a
+clean one.
+
+It covers the lifecycle rule that makes deletions real, the delete-marker
+mechanism, bucket and RDS posture, the public surface (including that an
+unsigned webhook is rejected, which is the proof signature verification is
+running in *this* deployment), RLS on every tenant table in the **deployed**
+schema, the least-privilege role, and demo-account hygiene. What it cannot
+reach — a browser session, a real mailbox, the inside of the VPC — it says so.
+
+The remaining manual checks:
+
 ```
 [ ] https://<domain>/            → homepage 200 over TLS (CloudFront header present)
 [ ] /api health + login          → sign in as the platform owner (owner@sms.platform
@@ -294,7 +322,16 @@ DSN, Twilio (when ready).
                                     smoke enforces a 3 KB session-cookie budget — keep it.
                                     (nginx exists ONLY in local compose; prod is CloudFront →
                                     ALB → ECS, whose header limits are higher but not infinite.)
-[ ] /metrics without token       → 401/403 (token is auto-generated; if 200, the task def lost its METRICS_TOKEN wiring — stop and fix)
+[ ] /metrics from the INTERNET    → must NOT be Prometheus output. <domain>/metrics
+                                    reaches the NEXT APP (the ALB forwards only /ws/*
+                                    to the API), so expect a redirect to /login — NOT
+                                    the 401/403 this line used to predict, and a 200
+                                    with `# HELP` would mean the API is internet-exposed.
+[ ] /metrics from INSIDE the VPC  → no token 403, correct token 200. This is the only
+                                    place the METRICS_TOKEN wiring is observable; from
+                                    outside you are not talking to the API at all, so
+                                    a green gate here has never proved it. Scrape via
+                                    Cloud Map or the API target group.
 [ ] WebSockets                   → open a game/live screen, LiveDot shows "Live" (proves /ws/* ALB routing)
 [ ] Document upload + download   → proves S3 presigner + KMS + bucket policy
 [ ] RDS: connect as major_user   → `SELECT` on a tenant table w/o GUC returns 0 rows (RLS live);
@@ -516,6 +553,10 @@ confirmation, not creation:
 
 ### Step 10 — Go-live gate
 ```
+[ ] go-live-rehearsal.sh --phase all exits 0, and every remaining SKIP in the
+    gap log has been read and consciously accepted (a SKIP is a finding)
+[ ] S3 lifecycle rule `expire-noncurrent-versions` present — without it every
+    deletion this platform reports is a delete marker over intact bytes
 [ ] Legal effective + acceptance flow live (LEGAL_ROLLOUT §7 checklist done)
 [ ] Owner account: strong password + TOTP; demo accounts neutralized
 [ ] All §6 smoke checks green, §7 payment tests settled, §8 alarms firing to a human

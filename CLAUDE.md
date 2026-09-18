@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **374 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **375 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **374 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **375 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2518,6 +2518,19 @@ correcting a roll is a download and an upload, not one pupil at a time for ever.
   API-backed read such as `/api/public/plan-pricing`.
 - When a fix changes operational behaviour, update the runbook in the SAME PR —
   a runbook that lags reality is worse than none, because it is trusted.
+- **A PROCEDURE NOBODY HAS RUN IS A HYPOTHESIS.** `deploy.yml` has failed 100 of
+  its last 100 runs (no AWS credentials), so the production path has never
+  executed, and `PRODUCTION_DEPLOYMENT.md` is gated only for EXISTENCE.
+  `infrastructure/scripts/go-live-rehearsal.sh` EXECUTES it instead:
+  **PASS / FAIL / SKIP, where a SKIP is a FINDING** — a check that could not run
+  is named with its reason, never counted as a pass, and an all-SKIP run exits
+  non-zero because a rehearsal that checked nothing must not read like a clean
+  one. // GOTCHA it found on its first run: the go-live gate's `/metrics` check
+  **could never see what it was for** — the ALB forwards only `/ws/*` to the API,
+  so `<domain>/metrics` hits the WEB tier and returns 307, and no METRICS_TOKEN
+  mis-wiring could ever show as the 200 it warned about. Aim a check at the path
+  that reaches the service, or assert the property the routing actually
+  promises.
 
 ## Demo fixtures are FAIL-CLOSED (never seed a demo account into production)
 The seed runs on EVERY cloud deploy (the one-off `migrate` ECS task calls
