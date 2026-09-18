@@ -28,6 +28,8 @@ import type {
   XapiStatementDto,
   XapiStatementPageDto,
   QuizAttemptGradeDto,
+  LmsLiveSessionPageDto,
+  LmsRecordingPresignDto,
   LmsPresignDto,
   QuizAttemptResultDto,
 } from "@sms/types";
@@ -35,6 +37,7 @@ import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { dateWindow, pageNumber } from "../common/status-filter";
+import { isoDay } from "../common/calendar-day";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LmsContentService } from "./lms-content.service";
@@ -87,6 +90,9 @@ const xapiSchema = z.object({
   result: z.record(z.unknown()).optional(),
 });
 const liveCreateSchema = z.object({
+  /** The COURSE. Optional: a form period or assembly has no subject, and
+   *  demanding one only makes a teacher pick a wrong answer to get past it. */
+  subjectId: z.string().uuid().optional(),
   title: z.string().min(1).max(200),
   provider: z.enum(["ZOOM", "MEET", "JITSI", "OTHER"]),
   joinUrl: z.string().min(1).max(2000),
@@ -94,6 +100,9 @@ const liveCreateSchema = z.object({
   durationMinutes: z.number().int().positive().max(1440).optional(),
 });
 const liveUpdateSchema = z.object({
+  /** `null` clears it — a session mis-filed under a subject must be correctable
+   *  back to none, or the only way out is deleting the register with it. */
+  subjectId: z.string().uuid().nullable().optional(),
   status: z.enum(["SCHEDULED", "LIVE", "ENDED", "CANCELLED"]).optional(),
   title: z.string().min(1).max(200).optional(),
   joinUrl: z.string().min(1).max(2000).optional(),
@@ -106,6 +115,26 @@ const uploadSchema = z.object({
   fileName: z.string().min(1).max(255),
   contentType: z.string().min(1).max(120),
   sizeBytes: z.number().int().positive(),
+});
+/** Confirm names the key the presign minted, and the service checks it belongs
+ *  to this school and this session rather than trusting it. */
+const recordingConfirmSchema = z.object({ key: z.string().min(1).max(500) });
+/** Everything the cross-course listing filters by. Dates are days, not
+ *  instants — `isoDay` round-trips them, because JS ROLLS an impossible date
+ *  rather than refusing it (2026-04-31 parses cleanly as 1 May). */
+const liveListSchema = z.object({
+  q: z.string().max(200).optional(),
+  // `isoDay`, not a shape regex: JavaScript ROLLS `2026-04-31` forward to 1 May
+  // rather than refusing it, so only the round trip tells a real day from a
+  // plausible-looking one. A filter that silently means a different date is
+  // worse than one that refuses.
+  from: isoDay.optional(),
+  to: isoDay.optional(),
+  recorded: z.enum(["1", "true"]).optional(),
+  classId: z.string().uuid().optional(),
+  subjectId: z.string().uuid().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().max(100).optional(),
 });
 const reviewSchema = z.object({
   action: z.enum(["APPROVE", "REJECT", "REQUEST_REVISION"]),
@@ -319,6 +348,56 @@ export class LmsContentController {
     @Body(new ZodValidationPipe(liveUpdateSchema)) b: z.infer<typeof liveUpdateSchema>,
   ): Promise<LmsLiveSessionDto> {
     return this.content.updateLiveSession(p, id, b);
+  }
+
+  /** Every live session this caller can see, across courses — paged, searched
+   *  and filtered IN SQL, with the matching total. */
+  @Get("live")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
+  listAllLive(
+    @CurrentPrincipal() p: Principal,
+    @Query(new ZodValidationPipe(liveListSchema)) q: z.infer<typeof liveListSchema>,
+  ): Promise<LmsLiveSessionPageDto> {
+    return this.content.listAllLiveSessions(p, { ...q, recorded: !!q.recorded });
+  }
+
+  // --- recordings: upload (teacher of the class), play (that class's pupils) --
+  @Post("live/:id/recording/presign")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
+  presignRecording(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(uploadSchema)) b: z.infer<typeof uploadSchema>,
+  ): Promise<LmsRecordingPresignDto> {
+    return this.content.presignRecording(p, id, b);
+  }
+
+  @Post("live/:id/recording/confirm")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
+  confirmRecording(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(recordingConfirmSchema)) b: z.infer<typeof recordingConfirmSchema>,
+  ): Promise<LmsLiveSessionDto> {
+    return this.content.confirmRecording(p, id, b.key);
+  }
+
+  /**
+   * A short-lived link that PLAYS the recording and can do nothing else.
+   *
+   * A POST, not a GET: it mints a credential and writes an audit row, and a GET
+   * that does both is a link a browser will prefetch.
+   */
+  @Post("live/:id/recording/play")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
+  playRecording(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<LmsPresignDto> {
+    return this.content.playRecording(p, id);
+  }
+
+  @Delete("live/:id/recording")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
+  deleteRecording(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<LmsLiveSessionDto> {
+    return this.content.deleteRecording(p, id);
   }
 
   @Get("live/:id/attendance")

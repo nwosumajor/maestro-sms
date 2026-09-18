@@ -31,6 +31,8 @@ import type {
   LmsGradeRowDto,
   LmsLiveAttendanceDto,
   LmsLiveSessionDto,
+  LmsLiveSessionPageDto,
+  LmsRecordingPresignDto,
   LmsModuleDto,
   LmsRevisionDto,
   LmsSubmissionDto,
@@ -52,6 +54,7 @@ import type {
 } from "@sms/types";
 import { badgeMeta, gradeComponentMax, isBadgeKey, LMS_PERMISSIONS,
   LMS_CONTENT_PUBLISH_CHAIN,
+  MAX_RECORDING_BYTES,
 } from "@sms/types";
 import { isXapiVerb, normalizeXapiResult } from "./xapi.util";
 import {
@@ -66,7 +69,9 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { NotificationService } from "../notifications/notification.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
-import { sniffUploadType } from "../documents/sniff-upload";
+import { isRecordingUploadType, sniffUploadType } from "../documents/sniff-upload";
+import { classIdsTaughtBy } from "../common/teaches";
+import { dateWindow } from "../common/status-filter";
 import {
   canonicalEmbedUrl,
   computeEngagementPercent,
@@ -1823,7 +1828,14 @@ export class LmsContentService {
   async createLiveSession(
     p: Principal,
     classId: string,
-    input: { title: string; provider: LiveProvider; joinUrl: string; startsAt: string; durationMinutes?: number },
+    input: {
+      title: string;
+      provider: LiveProvider;
+      joinUrl: string;
+      startsAt: string;
+      durationMinutes?: number;
+      subjectId?: string;
+    },
   ): Promise<LmsLiveSessionDto> {
     if (!["ZOOM", "MEET", "JITSI", "OTHER"].includes(input.provider)) throw new BadRequestException("invalid provider");
     const joinUrl = normalizeJoinUrl(input.provider, input.joinUrl);
@@ -1836,8 +1848,9 @@ export class LmsContentService {
       typeof input.durationMinutes === "number" && input.durationMinutes > 0 ? Math.floor(input.durationMinutes) : 60;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, classId);
+      const subjectId = await this.assertClassOffers(tx, classId, input.subjectId);
       const row = await tx.lmsLiveSession.create({
-        data: { schoolId: p.schoolId, classId, title, provider: input.provider, joinUrl, startsAt, durationMinutes, hostId: p.userId },
+        data: { schoolId: p.schoolId, classId, subjectId, title, provider: input.provider, joinUrl, startsAt, durationMinutes, hostId: p.userId },
       });
       await this.log(tx, p, "lms.live.create", row.id, { classId, provider: input.provider });
       return this.toLiveDto(row, await this.nameOf(tx, row.hostId), 0);
@@ -1904,7 +1917,14 @@ export class LmsContentService {
   async updateLiveSession(
     p: Principal,
     sessionId: string,
-    input: { status?: LiveStatus; title?: string; joinUrl?: string; startsAt?: string; durationMinutes?: number },
+    input: {
+      status?: LiveStatus;
+      title?: string;
+      joinUrl?: string;
+      startsAt?: string;
+      durationMinutes?: number;
+      subjectId?: string | null;
+    },
   ): Promise<LmsLiveSessionDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const s = await tx.lmsLiveSession.findFirst({ where: { id: sessionId } });
@@ -1912,6 +1932,11 @@ export class LmsContentService {
       const staff = await this.canAuthor(tx, p, s.classId);
       if (!staff && s.hostId !== p.userId) throw new NotFoundException("Session not found"); // 404, not 403
       const data: Prisma.LmsLiveSessionUpdateInput = {};
+      // `null` CLEARS it; `undefined` leaves it alone. Without the distinction a
+      // session mis-filed under a subject could never be put back to none.
+      if (input.subjectId !== undefined) {
+        data.subjectId = input.subjectId === null ? null : await this.assertClassOffers(tx, s.classId, input.subjectId);
+      }
       if (input.status && ["SCHEDULED", "LIVE", "ENDED", "CANCELLED"].includes(input.status)) data.status = input.status;
       if (input.title !== undefined) {
         const t = (input.title ?? "").trim();
@@ -1954,23 +1979,360 @@ export class LmsContentService {
     });
   }
 
+  /**
+   * Every live session the caller can see, ACROSS courses — the timetable of
+   * live classes and the library of recordings in one list.
+   *
+   * The per-class listing is still the right view from inside a class. This one
+   * answers a different question ("what is on, and what can I go back and
+   * watch") which no screen could ask, because it existed only per class.
+   *
+   * Filtered and counted IN SQL. The rule this repo keeps relearning is that a
+   * cap with no count lets a reader mistake a page for the record, and a filter
+   * applied in memory only ever sees the rows that survived the cap.
+   */
+  async listAllLiveSessions(
+    p: Principal,
+    opts: {
+      q?: string;
+      from?: string;
+      to?: string;
+      recorded?: boolean;
+      classId?: string;
+      subjectId?: string;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ): Promise<LmsLiveSessionPageDto> {
+    const pageSize = Math.min(Math.max(opts.pageSize ?? 25, 1), 100);
+    const page = Math.max(opts.page ?? 1, 1);
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // WHOSE sessions. School-wide staff see the school; a teacher sees the
+      // classes they teach; anyone else sees the classes they are enrolled in
+      // or are a guardian for. One shared definition of "classes I teach"
+      // (`classIdsTaughtBy`) rather than a fifth copy of the rule.
+      let classIds: string[] | null = null;
+      if (!this.isSchoolWide(p)) {
+        const taught = await classIdsTaughtBy(tx, p.userId);
+        const [enrolled, wards] = await Promise.all([
+          tx.enrollment.findMany({ where: { studentId: p.userId, status: "ACTIVE" }, select: { classId: true } }),
+          tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } }),
+        ]);
+        const ids = new Set<string>(taught);
+        for (const e of enrolled as Array<{ classId: string }>) ids.add(e.classId);
+        const wardIds = (wards as Array<{ studentId: string }>).map((w) => w.studentId);
+        if (wardIds.length) {
+          const wardClasses = (await tx.enrollment.findMany({
+            where: { studentId: { in: wardIds }, status: "ACTIVE" },
+            select: { classId: true },
+          })) as Array<{ classId: string }>;
+          for (const e of wardClasses) ids.add(e.classId);
+        }
+        classIds = [...ids];
+        // Nothing visible is an empty PAGE, not an unscoped read — a `null`
+        // here would have meant "every class in the school".
+        if (classIds.length === 0) return { rows: [], total: 0, page, pageSize };
+      }
+
+      const q = (opts.q ?? "").trim();
+      const window = dateWindow(opts.from, opts.to);
+      const where = {
+        ...(classIds ? { classId: { in: classIds } } : {}),
+        ...(opts.classId ? { classId: opts.classId } : {}),
+        ...(opts.subjectId ? { subjectId: opts.subjectId } : {}),
+        // A DATE WINDOW over the lesson's own date, so "what did we cover in
+        // March" is one question rather than a scroll.
+        // `dateWindow` is the shared definition — it round-trips each day, makes
+        // the `to` end inclusive to the last instant, and REFUSES a window that
+        // runs backwards. Building the two ends here by hand is how a filter
+        // comes to mean a different date at one end than the other.
+        ...(window.from || window.to
+          ? { startsAt: { ...(window.from ? { gte: window.from } : {}), ...(window.to ? { lte: window.to } : {}) } }
+          : {}),
+        // "Show me what I can watch back" — the recordings, not the diary.
+        ...(opts.recorded ? { recordingKey: { not: null } } : {}),
+        // Search the TOPIC. Case-insensitive, in SQL.
+        ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
+      };
+
+      const [rows, total] = await Promise.all([
+        tx.lmsLiveSession.findMany({
+          where,
+          // Newest first: a live-class list is read for what is next and what
+          // was most recently taught, and the date filter is what reaches back.
+          orderBy: [{ startsAt: "desc" }, { id: "desc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        tx.lmsLiveSession.count({ where }),
+      ]);
+      if (rows.length === 0) return { rows: [], total, page, pageSize };
+
+      // Named in ONE query each, never one per row.
+      const [hosts, classes, subjects] = await Promise.all([
+        this.nameMap(tx, rows.map((r) => r.hostId)),
+        tx.class.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.classId))] } }, select: { id: true, name: true } }),
+        tx.subject.findMany({
+          where: { id: { in: [...new Set(rows.map((r) => r.subjectId).filter((x): x is string => !!x))] } },
+          select: { id: true, name: true },
+        }),
+      ]);
+      const className = new Map((classes as Array<{ id: string; name: string }>).map((c) => [c.id, c.name]));
+      const subjectName = new Map((subjects as Array<{ id: string; name: string }>).map((c) => [c.id, c.name]));
+
+      // Attendee counts are a STAFF fact, and one grouped query for the page.
+      const counts = new Map<string, number>();
+      if (this.isSchoolWide(p) || (await classIdsTaughtBy(tx, p.userId)).length > 0) {
+        const grouped = await tx.lmsLiveAttendance.groupBy({
+          by: ["sessionId"],
+          where: { sessionId: { in: rows.map((r) => r.id) } },
+          _count: { _all: true },
+        });
+        for (const g of grouped as Array<{ sessionId: string; _count: { _all: number } }>) {
+          counts.set(g.sessionId, g._count._all);
+        }
+      }
+
+      return {
+        rows: rows.map((r) =>
+          this.toLiveDto(r, hosts.get(r.hostId) ?? "Host", counts.get(r.id) ?? 0, {
+            className: className.get(r.classId) ?? null,
+            subjectName: r.subjectId ? subjectName.get(r.subjectId) ?? null : null,
+          }),
+        ),
+        total,
+        page,
+        pageSize,
+      };
+    });
+  }
+
+  /**
+   * A subject a session may be filed under is one this CLASS actually offers.
+   *
+   * Never trust an id from the body: a uuid that exists is not a uuid that
+   * belongs here, and "is this a subject of ours" is a different question from
+   * "does this class teach it". Filing a Biology lesson under a class's
+   * Mathematics offering would put it in front of the wrong pupils on the one
+   * screen that lists recordings by course.
+   */
+  private async assertClassOffers(tx: TenantTx, classId: string, subjectId?: string | null): Promise<string | null> {
+    if (!subjectId) return null;
+    const offering = await tx.classSubjectTeacher.findFirst({
+      where: { classId, subjectId },
+      select: { id: true },
+    });
+    if (!offering) throw new BadRequestException("That class does not offer that subject.");
+    return subjectId;
+  }
+
+  // --- class recordings ------------------------------------------------------
+  //
+  // A recorded lesson is footage of named children, so the posture is narrower
+  // than the rest of the LMS: the teachers of that class and the pupils who
+  // were IN it. Guardians are deliberately not offered playback — a recording
+  // shows other people's children, and a parent watching it is a disclosure
+  // those families never agreed to (Golden Rule #5). That is a decision, not an
+  // oversight, and it is why this does not simply reuse
+  // `assertEnrolledOrGuardian` without `studentOnly`.
+
+  /** The end of the academic session the lesson was taught in — when its bytes
+   *  are due to be purged. */
+  private async recordingExpiryFor(tx: TenantTx, startsAt: Date): Promise<Date> {
+    const session = (await tx.academicSession.findFirst({
+      where: { startDate: { lte: startsAt }, endDate: { gte: startsAt } },
+      select: { endDate: true },
+    })) as { endDate: Date | null } | null;
+    // FALL BACK TO BOUNDED, NOT TO FOREVER. A school that has not dated its
+    // sessions yet would otherwise keep every recording indefinitely, and the
+    // fail-safe for STORING footage of minors points the same way Golden Rule #7
+    // does: the more restrictive option. A year is the shape of the thing being
+    // kept, and a school that wants longer dates its sessions.
+    return session?.endDate ?? new Date(startsAt.getTime() + 365 * 86_400_000);
+  }
+
+  /**
+   * A URL the teacher's browser can PUT the recording to.
+   *
+   * Everything checkable before the bytes exist is checked here, and nothing
+   * more is claimed: the size is what the caller SAYS, so it is re-checked on
+   * confirm against what actually arrived.
+   */
+  async presignRecording(
+    p: Principal,
+    sessionId: string,
+    input: { fileName: string; contentType: string; sizeBytes: number },
+  ): Promise<LmsRecordingPresignDto> {
+    const presign = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.lmsLiveSession.findFirst({ where: { id: sessionId } });
+      if (!row) throw new NotFoundException("Session not found");
+      await this.assertTeacherOfClass(tx, p, row.classId);
+      // MP4 only, checked HERE and not just in the browser — this presign hands
+      // out a URL that writes to our bucket. One format because every browser
+      // plays it; accepting `.mov` besides would store a lesson that silently
+      // does not play for the pupil it was recorded for.
+      if (!isRecordingUploadType(input.contentType)) {
+        throw new BadRequestException("Recordings must be MP4, so every pupil can play it in the browser.");
+      }
+      if (input.sizeBytes > MAX_RECORDING_BYTES) {
+        throw new BadRequestException(
+          `That recording is ${(input.sizeBytes / 1024 / 1024 / 1024).toFixed(1)} GB. The limit is ${MAX_RECORDING_BYTES / 1024 / 1024 / 1024} GB.`,
+        );
+      }
+      const safe = (input.fileName ?? "recording.mp4").replace(/[^A-Za-z0-9._-]/g, "_");
+      const key = `lms/${p.schoolId}/live-${sessionId}/${Date.now()}_${safe}`;
+      await this.log(tx, p, "lms.live.recording.presign", sessionId, { fileName: input.fileName });
+      return { key, contentType: input.contentType };
+    });
+    const signed = await this.storage.presignUpload({ key: presign.key, contentType: presign.contentType });
+    // The key travels back so `confirm` can name what it uploaded. It is not a
+    // capability: the confirm re-derives the prefix this school and session are
+    // allowed to attach from, so naming somebody else's object is refused.
+    return { ...signed, key: presign.key };
+  }
+
+  /**
+   * The upload says it finished. An upload is a CLAIM until the server looks at
+   * the bytes, and this is the only moment it can: they went browser→bucket.
+   *
+   * `recordingKey` is written HERE and never at presign, so a failed or
+   * abandoned PUT leaves the session with no recording rather than one that
+   * cannot be played.
+   */
+  async confirmRecording(p: Principal, sessionId: string, key: string): Promise<LmsLiveSessionDto> {
+    await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const row = await tx.lmsLiveSession.findFirst({ where: { id: sessionId } });
+      if (!row) throw new NotFoundException("Session not found");
+      await this.assertTeacherOfClass(tx, p, row.classId);
+    });
+    // The key is the one this school's own presign minted for this session —
+    // checked rather than trusted, or a teacher could attach any object in the
+    // bucket to their own lesson.
+    if (!key.startsWith(`lms/${p.schoolId}/live-${sessionId}/`)) {
+      throw new BadRequestException("That upload does not belong to this session.");
+    }
+    const bytes = await this.storage.download(key);
+    if (!bytes) throw new BadRequestException("No recording has arrived yet. Please choose the file again.");
+    if (bytes.length > MAX_RECORDING_BYTES) {
+      throw new BadRequestException(
+        `That recording is ${(bytes.length / 1024 / 1024 / 1024).toFixed(1)} GB. The limit is ${MAX_RECORDING_BYTES / 1024 / 1024 / 1024} GB.`,
+      );
+    }
+    if (sniffUploadType(bytes) !== "video/mp4") {
+      throw new BadRequestException("That file is not an MP4. Pupils can only play an MP4 in the browser.");
+    }
+
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.lmsLiveSession.findFirst({ where: { id: sessionId } });
+      if (!row) throw new NotFoundException("Session not found");
+      await this.assertTeacherOfClass(tx, p, row.classId);
+      const updated = await tx.lmsLiveSession.update({
+        where: { id: sessionId },
+        data: {
+          recordingKey: key,
+          recordingSizeBytes: bytes.length,
+          recordingUploadedAt: new Date(),
+          recordingExpiresAt: await this.recordingExpiryFor(tx, row.startsAt),
+          // A re-upload replaces a purged one: the row must stop saying it was
+          // removed, or the screen tells a pupil there is nothing to watch
+          // while offering them a Playback control.
+          recordingRemovedAt: null,
+        },
+      });
+      await this.log(tx, p, "lms.live.recording.confirm", sessionId, { sizeBytes: bytes.length });
+      return this.toLiveDto(updated, await this.nameOf(tx, updated.hostId), 0);
+    });
+  }
+
+  /**
+   * A short-lived link that PLAYS the recording, and can do nothing else.
+   *
+   * `inline: "video/mp4"` is not a flag — it is the type the server vouches
+   * for, and it selects the one signed operation that serves a video inline.
+   * No attachment op is ever minted for a recording, so the URL cannot be
+   * edited into a download: the download was never granted.
+   *
+   * This is not a claim that the video cannot be captured. Anything a browser
+   * can play can be recorded off the screen, and this module's own integrity
+   * principles say client-side measures are friction rather than enforcement.
+   * What it removes is every EASY path, and it makes each watch a recorded fact.
+   */
+  async playRecording(p: Principal, sessionId: string): Promise<LmsPresignDto> {
+    const file = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.lmsLiveSession.findFirst({ where: { id: sessionId } });
+      if (!row) throw new NotFoundException("Session not found");
+      const staff = await this.canAuthor(tx, p, row.classId);
+      // Pupils who were in the class — `studentOnly`, so a guardian is refused
+      // here even though they may see the session exists.
+      if (!staff) await this.assertEnrolledOrGuardian(tx, p, row.classId, { studentOnly: true });
+      if (!row.recordingKey) {
+        throw new NotFoundException(
+          row.recordingRemovedAt
+            ? "This recording has been removed at the end of the academic session it was taught in."
+            : "No recording available",
+        );
+      }
+      // AUDITED PER WATCH. A recording is footage of children; who opened it and
+      // when is exactly the fact an investigation would need, and it cannot be
+      // reconstructed from a signed URL after the event.
+      await this.log(tx, p, "lms.live.recording.play", sessionId);
+      return { key: row.recordingKey };
+    });
+    return this.storage.presignDownload({ key: file.key, inline: "video/mp4" });
+  }
+
+  /** Remove a recording early — the teacher's own undo, before retention. */
+  async deleteRecording(p: Principal, sessionId: string): Promise<LmsLiveSessionDto> {
+    const key = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const row = await tx.lmsLiveSession.findFirst({ where: { id: sessionId } });
+      if (!row) throw new NotFoundException("Session not found");
+      await this.assertTeacherOfClass(tx, p, row.classId);
+      return row.recordingKey;
+    });
+    if (key) await this.storage.delete(key).catch(() => undefined);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const updated = await tx.lmsLiveSession.update({
+        where: { id: sessionId },
+        data: {
+          recordingKey: null,
+          recordingSizeBytes: null,
+          recordingUploadedAt: null,
+          recordingExpiresAt: null,
+          recordingRemovedAt: new Date(),
+        },
+      });
+      await this.log(tx, p, "lms.live.recording.delete", sessionId);
+      return this.toLiveDto(updated, await this.nameOf(tx, updated.hostId), 0);
+    });
+  }
+
   private toLiveDto(
     row: {
       id: string;
       classId: string;
+      subjectId: string | null;
       title: string;
       provider: string;
       startsAt: Date;
       durationMinutes: number;
       status: string;
       createdAt: Date;
+      recordingKey: string | null;
+      recordingSizeBytes: number | null;
+      recordingUploadedAt: Date | null;
+      recordingExpiresAt: Date | null;
+      recordingRemovedAt: Date | null;
     },
     hostName: string,
     attendeeCount: number,
+    names: { className?: string | null; subjectName?: string | null } = {},
   ): LmsLiveSessionDto {
     return {
       id: row.id,
       classId: row.classId,
+      className: names.className ?? null,
+      subjectId: row.subjectId,
+      subjectName: names.subjectName ?? null,
       title: row.title,
       provider: row.provider as LiveProvider,
       startsAt: row.startsAt,
@@ -1980,8 +2342,17 @@ export class LmsContentService {
       joinable: isJoinable(row.status, row.startsAt, row.durationMinutes),
       attendeeCount,
       createdAt: row.createdAt,
+      // DERIVED, never the key. A storage key on the wire is half a link, and
+      // the other half is a signature anything can ask for — so the key stays
+      // server-side and playback is its own audited, short-lived grant.
+      hasRecording: !!row.recordingKey,
+      recordingSizeBytes: row.recordingSizeBytes,
+      recordingUploadedAt: row.recordingUploadedAt,
+      recordingExpiresAt: row.recordingExpiresAt,
+      recordingRemovedAt: row.recordingRemovedAt,
     };
   }
+
 
   // ---------------------------------------------------------------------------
   // Gradebook tagging + "pull LMS scores into the report card"

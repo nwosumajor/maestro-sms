@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **915 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **920 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -843,9 +843,14 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **915 routes across 90
 | POST | `/content/submissions/:id/grade` | 🔑 `lms.content.write` · 📦 `lms` | NAMESPACED UNDER `content/`, like every other route in this controller. |
 | POST | `/guardians` | 🔑 `guardian.write` · 📦 `lms` | Link a parent to a child |
 | DELETE | `/guardians/:parentId/:studentId` | 🔑 `guardian.write` · 📦 `lms` | Remove a guardian link. |
+| GET | `/live` | 🔑 `lms.content.read` · 📦 `lms` | Every live session this caller can see, across courses — paged, searched and filtered IN SQL, with the matching total. |
 | PUT | `/live/:id` | 🔑 `lms.content.write` · 📦 `lms` | Update Live |
 | GET | `/live/:id/attendance` | 🔑 `lms.content.write` · 📦 `lms` | Live Attendance |
 | POST | `/live/:id/join` | 🔑 `lms.content.read` · 📦 `lms` | Reveal the join URL + record attendance (server gates the join window). |
+| DELETE | `/live/:id/recording` | 🔑 `lms.content.write` · 📦 `lms` | Delete Recording |
+| POST | `/live/:id/recording/confirm` | 🔑 `lms.content.write` · 📦 `lms` | Confirm Recording |
+| POST | `/live/:id/recording/play` | 🔑 `lms.content.read` · 📦 `lms` | A short-lived link that PLAYS the recording and can do nothing else. |
+| POST | `/live/:id/recording/presign` | 🔑 `lms.content.write` · 📦 `lms` | Presign Recording |
 | PUT | `/modules/:id` | 🔑 `lms.content.write` · 📦 `lms` | Rename Module |
 | DELETE | `/modules/:id` | 🔑 `lms.content.write` · 📦 `lms` | Delete Module |
 | GET | `/my/learning` | 🔑 `lms.content.read` · 📦 `lms` | A student's learning across every class they are enrolled in, unfinished first. |

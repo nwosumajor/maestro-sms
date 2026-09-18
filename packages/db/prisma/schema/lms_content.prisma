@@ -206,6 +206,11 @@ model LmsLiveSession {
   id              String   @id @default(uuid()) @db.Uuid
   schoolId        String   @db.Uuid
   classId         String   @db.Uuid
+  /// The COURSE this session belongs to (a class's own offering). Nullable: a
+  /// form-period or assembly session is a real session and has no subject, and
+  /// requiring one would push a teacher into picking a wrong answer.
+  subjectId       String?  @db.Uuid
+  /// The TOPIC. "Photosynthesis", not "Biology" — the subject is the course.
   title           String
   /// ZOOM | MEET | JITSI | OTHER
   provider        String
@@ -215,6 +220,26 @@ model LmsLiveSession {
   /// SCHEDULED | LIVE | ENDED | CANCELLED
   status          String   @default("SCHEDULED")
   hostId          String   @db.Uuid
+
+  /// --- the recording -------------------------------------------------------
+  /// Storage key of the uploaded recording, or null when there is none. Set
+  /// only once the bytes have ARRIVED and been magic-byte checked — an upload
+  /// is a claim until the server looks at it.
+  recordingKey        String?
+  recordingSizeBytes  Int?
+  recordingUploadedAt DateTime?
+  /// When the bytes are due to be purged — the end of the academic session the
+  /// lesson was taught in. A recording is revision material for its own year,
+  /// and keeping it for ever makes storage grow with the school's LIFETIME,
+  /// which is the shape this codebase records as the one that degrades
+  /// invisibly.
+  recordingExpiresAt  DateTime?
+  /// When the sweep actually removed them. Kept so the row can say "removed
+  /// after the 2025/2026 session" rather than reading like a lesson that was
+  /// never recorded — a silent disappearance and a deliberate retention are
+  /// different facts, and only one of them needs explaining to a pupil.
+  recordingRemovedAt  DateTime?
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -222,6 +247,8 @@ model LmsLiveSession {
 
   @@index([schoolId])
   @@index([schoolId, classId])
+  /// The cross-course listing pages newest-first within a school.
+  @@index([schoolId, startsAt(sort: Desc)])
   @@map("lms_live_session")
 }
 
