@@ -349,10 +349,13 @@ describe("AttendanceService scoping", () => {
         id: "r",
         status: "PRESENT",
         note: null,
+        // The record's OWN stamps: when this pupil's mark was written and last
+        // changed. Equal here, which is an untouched mark.
+        createdAt: new Date("2026-03-12T08:05:00Z"),
+        updatedAt: new Date("2026-03-12T08:05:00Z"),
         session: {
           classId: "c-1",
           date: new Date("2026-03-12"),
-          updatedAt: new Date("2026-03-12"),
           class: { name: "SS1 Science A" },
           takenBy: { id: "u-teacher", name: "Akinlabi Alex" },
         },

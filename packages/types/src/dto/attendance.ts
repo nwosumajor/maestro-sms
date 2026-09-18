@@ -20,12 +20,30 @@ export interface AttendanceRecordDto {
    * was CORRECTED weeks later is visibly out of step with its own date; and
    * `className` saves the reader resolving a uuid by hand.
    */
+  /**
+   * When THIS PUPIL'S mark was first written — to the minute, in the school's
+   * own zone when it is displayed.
+   *
+   * Per RECORD, not per session, because the two genuinely differ: a register
+   * saved at 08:05 marks thirty pupils at once, and a gate scan at 08:41 marks
+   * one of them present on its own. An investigation asking "when was this
+   * child marked present" wants the second answer, and the session could only
+   * ever give the first.
+   */
+  markedAt: Date;
+  /**
+   * When it was last CHANGED, or null if it never was.
+   *
+   * Null rather than "same as markedAt" so a reader never has to compare two
+   * timestamps to work out whether they are looking at a correction — which is
+   * the one thing about an old mark that an investigation is looking for.
+   */
+  amendedAt: Date | null;
   session: {
     classId: string;
     className: string | null;
     date: Date;
     takenBy: { id: string; name: string } | null;
-    recordedAt: Date;
   };
 }
 

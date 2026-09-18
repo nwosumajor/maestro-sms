@@ -17916,3 +17916,51 @@ one. Pick the term or session from the list; the list is what bounds the export.
 // own markdown (`runbook-freshness` fails on the committed copy and passes on
 // the rebuild), so `pnpm --filter @sms/web build:manual` picked up a second
 // document nobody had regenerated.
+
+### The minute a child was marked, and the register nobody fills in for you
+
+Two questions from the same reading of the attendance record.
+
+**1. Does a register nobody took become absences?** No — verified rather than
+asserted. `attendance_record` has exactly three writers and all three are
+`applyRegister`: a person saving the register, the approved-amendment reactor,
+and a gate scan. `RegisterReminderService` writes nothing at all; it notifies.
+
+That is deliberate and worth stating where a school will read it, because a
+school WILL ask. An absence is a claim that a named child was not in a room and
+it reaches their guardian within minutes, so it has to come from somebody who
+looked. Fill it in automatically and an untaken register becomes
+indistinguishable from a day when everybody was present — which is the one thing
+an attendance record exists to tell apart. What the school gets instead: the
+register stays visibly outstanding with the responsible teacher named, and a
+reminder goes to that teacher each afternoon in the school's own timezone.
+Written into `/help` (leadership and teachers) and the manual.
+
+**2. Timestamps.** The previous entry added `session.updatedAt` as the moment a
+mark was written. That is the wrong grain: one register saves thirty marks at
+once, and a gate scan writes ONE. `attendance_record` carries its own
+`createdAt`/`updatedAt`, so the record can answer per pupil — which is what an
+investigation asks.
+
+    markedAt   when THIS pupil's mark was first written, to the minute
+    amendedAt  when it was last changed, or NULL if it never was
+
+Rendered in the school's own zone (`timeOfDay`/`dateTime`, which already handle
+the hydration trap this repo records). Verified end to end through the real
+path — saved PRESENT, corrected to LATE two seconds later:
+
+    { status: "LATE",
+      markedAt:  2026-09-18T08:07:22.553Z,
+      amendedAt: 2026-09-18T08:07:24.139Z,
+      takenBy: "Demo Teacher", className: "History 101" }
+
+// GOTCHA: `amendedAt` must be NULL when nothing moved, and the test for that is
+// not "is it present" — Prisma stamps `updatedAt` on CREATE as well, so every
+// untouched mark carries one. Equality against `createdAt` is the only thing
+// that distinguishes them, and returning `updatedAt` unconditionally makes
+// every row in the school read as a correction. Mutation-validated.
+// GOTCHA: a fixture broke for the THIRD time in two days on the same shape — a
+// double returning rows shaped to the columns its own assertion touched rather
+// than to what the query selects. Each time it failed as though the SERVICE
+// were broken. The return type is annotated now, which is what turns the next
+// one into a compile error instead.

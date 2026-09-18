@@ -15,7 +15,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { regionOf, shortDate, titleCase } from "@/lib/format";
+import { dateTime, regionOf, shortDate, timeOfDay, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
 import { TAKE_REGISTER_ANCHOR } from "@/components/attendance/register-anchor";
 import { RegisterBoard } from "@/components/attendance/RegisterBoard";
@@ -297,36 +297,36 @@ export default async function AttendancePage({
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Mark</th>
                       <th className="px-4 py-2 text-left font-medium">Class</th>
+                      <th className="px-4 py-2 text-left font-medium">Marked</th>
                       <th className="px-4 py-2 text-left font-medium">Taken by</th>
                       <th className="px-4 py-2 text-left font-medium">Note</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {records.map((r) => {
-                      // A mark RECORDED long after the day it is about was a
-                      // correction. Saying so is the difference between a record
-                      // and an audit record; the amendment itself is in
-                      // Approvals, and the trail in the audit log.
-                      const day = r.session.date.slice(0, 10);
-                      const written = r.session.recordedAt?.slice(0, 10);
-                      const amended = !!written && written > day;
-                      return (
-                        <tr key={r.id} className="border-b border-border last:border-0">
-                          <td className="px-4 py-2.5 text-muted-foreground">{shortDate(r.session.date, region)}</td>
-                          <td className="px-4 py-2.5">
-                            <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{titleCase(r.status)}</Badge>
-                          </td>
-                          <td className="px-4 py-2.5 text-muted-foreground">{r.session.className ?? "—"}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground">
-                            {r.session.takenBy?.name ?? "—"}
-                            {amended && (
-                              <span className="ml-1.5 text-xs">(recorded {shortDate(r.session.recordedAt, region)})</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2.5 text-muted-foreground">{r.note || ""}</td>
-                        </tr>
-                      );
-                    })}
+                    {records.map((r) => (
+                      <tr key={r.id} className="border-b border-border last:border-0">
+                        <td className="px-4 py-2.5 text-muted-foreground">{shortDate(r.session.date, region)}</td>
+                        <td className="px-4 py-2.5">
+                          <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{titleCase(r.status)}</Badge>
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{r.session.className ?? "—"}</td>
+                        {/* THE MINUTE, in the school's own zone. A register saved
+                            at 08:05 and a gate scan at 08:41 are different facts
+                            about a child, and "8 Aug" cannot tell them apart.
+                            An amendment is named rather than left for the reader
+                            to spot by comparing two timestamps. */}
+                        <td className="px-4 py-2.5 text-muted-foreground tabular-nums">
+                          {timeOfDay(r.markedAt, region)}
+                          {r.amendedAt && (
+                            <span className="ml-1.5 text-xs text-amber-700 dark:text-amber-500">
+                              amended {dateTime(r.amendedAt, region)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{r.session.takenBy?.name ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{r.note || ""}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
                 {/* The history used to stop at 200 rows — about one school year —

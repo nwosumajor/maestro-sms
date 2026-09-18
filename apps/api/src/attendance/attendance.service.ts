@@ -426,12 +426,16 @@ export class AttendanceService {
           // list of letters — and both are one join away on a read that already
           // makes it. `class` is selected for its NAME: a reader resolving a
           // uuid by hand is a reader who will resolve one of them wrongly.
+          // PROVENANCE, not just the mark. Who signed the register, and when
+          // THIS PUPIL's mark was written and last changed — the record carries
+          // its own `createdAt`/`updatedAt`, which is the per-pupil answer a
+          // session-level timestamp could never give (one register saves thirty
+          // marks at once; a gate scan writes one).
           include: {
             session: {
               select: {
                 classId: true,
                 date: true,
-                updatedAt: true,
                 class: { select: { name: true } },
                 takenBy: { select: { id: true, name: true } },
               },
@@ -451,10 +455,11 @@ export class AttendanceService {
         id: string;
         status: string;
         note: string | null;
+        createdAt: Date;
+        updatedAt: Date;
         session: {
           classId: string;
           date: Date;
-          updatedAt: Date;
           class: { name: string } | null;
           takenBy: { id: string; name: string } | null;
         };
@@ -462,12 +467,17 @@ export class AttendanceService {
         id: r.id,
         status: r.status,
         note: r.note,
+        markedAt: r.createdAt,
+        // NULL WHEN IT NEVER MOVED, so a reader never compares two timestamps to
+        // find out whether they are looking at a correction. Prisma sets
+        // `updatedAt` on create as well, so equality — not "is it present" — is
+        // what distinguishes an untouched mark from an amended one.
+        amendedAt: r.updatedAt.getTime() === r.createdAt.getTime() ? null : r.updatedAt,
         session: {
           classId: r.session.classId,
           className: r.session.class?.name ?? null,
           date: r.session.date,
           takenBy: r.session.takenBy,
-          recordedAt: r.session.updatedAt,
         },
       }));
       return { records: shaped, page, pageSize, total, from: opts.from ?? null, to: opts.to ?? null };
