@@ -17749,3 +17749,58 @@ Mutation-validated four ways, each failing the case named for it: drop the sync
 effect; add `classes` to its deps; make the reveal not scroll; and remove the
 reveal from ONE of the two boards — the sibling-asymmetry case, which is why the
 gate walks the components rather than naming them.
+
+### The register form with no pupils in it — a 200 with no body
+
+The actual fault behind "the take button isn't working", found only after
+signing in AS the teacher who reported it. The two faults fixed in the entry
+above were real and were not this one.
+
+`GET /classes/:id/attendance?date=` returns `null` when nobody has taken that
+day's register. **Nest sends `null` as a 200 with a ZERO-BYTE body and no
+content-type**, and the form called `.json()` on it:
+
+    GET /classes/<id>/attendance?date=2026-09-18
+      status=200  bytes=0  content-type=null
+      JSON.parse THROWS: Unexpected end of JSON input
+
+The throw lands in the middle of the loading effect, BEFORE `setRoster(students)`
+— so the three setState calls after it never run. The teacher opens the register
+and sees the form, the right class in the dropdown, **no pupils and no Save
+button**. The class, the permission, the roster and the API were all fine; the
+screen simply never received what it had successfully fetched.
+
+It is every class, every morning: "no register taken yet" is the normal state
+and the only state the form exists to change.
+
+// WHY EVERY TEST AND EVERY PROBE MISSED IT, including mine. The form works
+// perfectly on a class that ALREADY has a register for that date — the endpoint
+// then returns a real object. My own browser runs created that condition and
+// then passed: the button in them read "**Update** register", which is the
+// screen saying a register already existed. A fixture that makes the defect
+// impossible is worse than no fixture, because it reports success.
+// The decisive evidence was an absence: NO POST ever reached nginx. The page
+// loaded, the roster loaded, and nothing further happened for four minutes —
+// there was no failing request to find because the failure was a parse.
+
+THE RULE WAS ALREADY WRITTEN, ON THE OTHER SIDE. `apiGet` in `lib/api.ts` ends
+`const text = await res.text(); if (!text) return null;` — the server-side
+reader has handled this since it was written. The client half never was. Two
+client components had reached the same answer independently (`HostelOps` and
+`TransportOps` both use `.catch(() => null)`); `TakeRegister` was the one left.
+`lib/read-json.ts` is that rule written once, with the reason attached.
+
+// GOTCHA on the mutation: removing the EMPTY-BODY guard alone changes nothing,
+// because the `catch` already covers it — a mutation that does not alter
+// behaviour proves nothing about the test. Removing both (the original
+// spelling, `JSON.parse(await res.text())`) fails eight cases by name.
+// GOTCHA on doubles, twice in one file: the first modelled `json()` only and
+// broke when the code moved to `text()`; the second answered `null` to every
+// path under `/attendance`, including the register HISTORY, which is a LIST.
+// A double must model the CONTRACT — here, that a `null` handler really does
+// arrive as an EMPTY body.
+
+Verified on the reporting teacher's own account and class, in a real browser:
+class select "SS1 Science A", four pupils listed by name, Save present,
+"Take register" scrolling it into view, one pupil marked absent, POST 201,
+"Register saved." The register written by that check has been removed.

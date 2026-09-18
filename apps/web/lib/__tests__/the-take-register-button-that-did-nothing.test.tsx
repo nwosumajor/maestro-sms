@@ -31,6 +31,7 @@ import * as React from "react";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
 import { TAKE_REGISTER_ANCHOR, revealTakeRegister } from "@/components/attendance/register-anchor";
+import { readJson } from "@/lib/read-json";
 
 jest.mock("@/components/shell/RegionProvider", () => ({
   useFormat: () => ({ region: { timezone: "Africa/Lagos" }, shortDate: (d: string) => d }),
@@ -55,7 +56,12 @@ beforeEach(() => {
       : u.endsWith("/attendance")
         ? [] // the browsable history of past registers
         : { class: {}, teachers: [], students: [] }; // the roster
-    return { ok: true, json: async () => body };
+    // `text` as well as `json`, because the component reads the body through
+    // `readJson` — a double that models only the method the code used to call
+    // fails as though the code were broken. A `null` handler really does reach
+    // the browser as an EMPTY body, which is the whole defect.
+    const text = body === null ? "" : JSON.stringify(body);
+    return { ok: true, status: 200, text: async () => text, json: async () => JSON.parse(text) };
   }) as unknown as typeof fetch;
 });
 
@@ -165,5 +171,82 @@ describe("every board that sends you to the register reveals it", () => {
   it("the page renders the anchor they scroll to", () => {
     const page = readFileSync(join(__dirname, "..", "..", "app", "(app)", "attendance", "page.tsx"), "utf8");
     expect(page).toContain("id={TAKE_REGISTER_ANCHOR}");
+  });
+});
+
+/**
+ * AND THE ONE THAT ACTUALLY STOPPED THE TEACHER WORKING.
+ *
+ * `GET /classes/:id/attendance?date=` answers `null` when nobody has taken that
+ * day's register — so Nest sends a 200 with a ZERO-BYTE body and no
+ * content-type. The effect called `.json()` on it, which throws, and the throw
+ * landed BEFORE `setRoster(students)`: the class teacher opened the form and
+ * saw no pupils and no Save button. Measured on the real API:
+ *
+ *     GET /classes/<id>/attendance?date=2026-09-18
+ *       status=200  bytes=0  content-type=null
+ *       JSON.parse THROWS: Unexpected end of JSON input
+ *
+ * Every earlier test of this form passed because the class under test already
+ * HAD a register for that day — including my own browser runs, where the button
+ * read "Update register". The fixture hid the defect.
+ */
+describe("a class whose register has not been taken yet", () => {
+  const noRegisterYet = () => {
+    global.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/attendance?date=")) {
+        // Exactly what Nest sends for a handler that returned null.
+        return { ok: true, status: 200, text: async () => "", json: async () => { throw new SyntaxError("Unexpected end of JSON input"); } };
+      }
+      if (u.endsWith("/attendance")) return { ok: true, status: 200, text: async () => "[]", json: async () => [] };
+      const roster = { class: {}, teachers: [], students: [{ id: "p1", name: "Bimbo Kadiri" }, { id: "p2", name: "Poena John" }] };
+      return { ok: true, status: 200, text: async () => JSON.stringify(roster), json: async () => roster };
+    }) as unknown as typeof fetch;
+  };
+
+  it("still lists the pupils, and offers a way to save", async () => {
+    noRegisterYet();
+    render(<TakeRegister classes={[A]} lockBeforeDate={null} initialClassId={A.id} />);
+    await settle();
+    expect(screen.getByText("Bimbo Kadiri")).toBeInTheDocument();
+    expect(screen.getByText("Poena John")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save register/i })).toBeInTheDocument();
+  });
+
+  it("marks everyone PRESENT by default, so only the exceptions need touching", async () => {
+    noRegisterYet();
+    render(<TakeRegister classes={[A]} lockBeforeDate={null} initialClassId={A.id} />);
+    await settle();
+    expect(screen.getByText("2 present")).toBeInTheDocument();
+    expect(screen.getByText("0 absent")).toBeInTheDocument();
+  });
+
+  it("offers Absent and Late for every pupil", async () => {
+    noRegisterYet();
+    render(<TakeRegister classes={[A]} lockBeforeDate={null} initialClassId={A.id} />);
+    await settle();
+    expect(screen.getAllByRole("button", { name: "Absent" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Late" })).toHaveLength(2);
+  });
+});
+
+describe("readJson — the client half of a rule apiGet already had", () => {
+  const resp = (text: string, ok = true) => ({ ok, text: async () => text }) as unknown as Response;
+
+  it("treats an EMPTY 200 as 'there is no such thing', not as a failure", async () => {
+    await expect(readJson(resp(""))).resolves.toBeNull();
+  });
+
+  it("parses a real body", async () => {
+    await expect(readJson<{ a: number }>(resp('{"a":1}'))).resolves.toEqual({ a: 1 });
+  });
+
+  it("does not take the screen down when a 200 carries something that is not JSON", async () => {
+    await expect(readJson(resp("<html>oops"))).resolves.toBeNull();
+  });
+
+  it("answers null for a refused request rather than throwing", async () => {
+    await expect(readJson(resp("{}", false))).resolves.toBeNull();
   });
 });

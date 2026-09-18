@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { readApiError } from "@/lib/api-error";
+import { readJson } from "@/lib/read-json";
 
 import { useFormat } from "@/components/shell/RegionProvider";
 
@@ -117,8 +118,15 @@ export function TakeRegister({
           setLoading(false);
           return;
         }
-        const students = ((await clsRes.json()) as { students: Student[] }).students;
-        const session = (regRes.ok ? await regRes.json() : null) as Session;
+        // ORDER MATTERS HERE, and it used to be fatal. `regRes` is 200 with a
+        // ZERO-BYTE body whenever nobody has taken that day's register — the
+        // normal case every morning — and `.json()` threw on it, so the three
+        // setState calls below never ran: the teacher got the form with no
+        // pupils and no Save button. `readJson` is the client half of the rule
+        // `apiGet` already applies on the server.
+        const cls = await readJson<{ students: Student[] }>(clsRes);
+        const students = cls?.students ?? [];
+        const session = await readJson<NonNullable<Session>>(regRes);
         const existing = new Map((session?.records ?? []).map((r) => [r.studentId, r.status]));
         setRoster(students);
         setSavedSession(session);
@@ -140,7 +148,9 @@ export function TakeRegister({
     (async () => {
       const res = await fetch(`/api/sms/classes/${classId}/attendance`, { cache: "no-store" });
       if (cancelled || !res.ok) return;
-      setHistory((await res.json()) as SessionSummary[]);
+      // Same rule: a list endpoint answering nothing must not take the screen
+      // down with it.
+      setHistory((await readJson<SessionSummary[]>(res)) ?? []);
     })();
     return () => {
       cancelled = true;

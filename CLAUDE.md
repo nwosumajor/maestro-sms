@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **365 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **366 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **365 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **366 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -941,13 +941,10 @@ These are the rules; the log is why each one exists.
   other files linked to it.
 - **A CATEGORY NOBODY EMITS IS A FILTER THAT ANSWERS NOTHING, AND A SWITCH THAT
   GOVERNS NOTHING.** `NotificationInput.type` was `NotificationTypeValue |
-  string`, so the union gated nothing and four hand-kept lists grew beside it
-  (the union, the essential set, the mute screen, a `FILTERABLE_TYPES` array in
-  the web written to work around the union being incomplete). FIVE strings named
-  notifications that do not exist — one absent from the whole API, one an HR
-  checklist type, three workflow-request types, one a competition type. Measured:
-  67% of a parent's 3,320 notifications were unreachable through any menu option,
-  and four of eight mute checkboxes did nothing. **A control that appears to work
+  string`, so the union gated nothing and four hand-kept lists grew beside it.
+  FIVE strings named notifications that do not exist. Measured: 67% of a
+  parent's 3,320 notifications were unreachable through any menu option, and
+  four of eight mute checkboxes did nothing. **A control that appears to work
   and does not is worse than one that is missing**, because the reader stops
   looking for the real switch. The fix is the type system, not a fresher list:
   the union is enforced at every emitter and `NOTIFICATION_TYPE_LABELS` is a
@@ -957,13 +954,11 @@ These are the rules; the log is why each one exists.
   all source and passed a mutation, because the same string was a WORKFLOW type
   in the same file. That confusion IS the defect.
 - **A COUNTER MUST COUNT WHAT WAS DELIVERED, NOT WHAT WAS ITERATED.** The fee
-  reminder sweep counted `reminded` per INVOICE whether or not a guardian
-  existed: 30 billable invoices, no guardian links, "30 reminded" and nobody
-  told. Count recipients; name the shortfall.
+  reminder counted per INVOICE whether or not a guardian existed: 30 invoices,
+  no guardian links, "30 reminded", nobody told. Count recipients.
 - **REPORT WHAT YOU DID NOT DO.** Silent partial success is the commonest shape
-  here: a roll call naming nobody missing, a sweep marking every overdue boarder
-  handled including those it told nobody about, `notified: 2500` of 5,000. Count
-  what was WRITTEN, never the list in hand.
+  here: a sweep marking every overdue boarder handled including those it told
+  nobody about; `notified: 2500` of 5,000. Count what was WRITTEN.
 - **A refusal must not assert something untrue, and should name the way out.**
   "Not in this school" said of a classmate; "ask an administrator to reactivate
   it" where no such button exists. **404-not-403** so a refusal never confirms
@@ -1173,37 +1168,42 @@ These are the rules; the log is why each one exists.
   timestamp, an assertion satisfied by the COMMENT explaining its own fix (strip
   comments), an `as` cast defeating a `Record<Key,true>` check, and a detector
   matching only LITERALS while the needle was a variable.
-- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE proves
-  nothing. Read `Test Suites:` as well as `Tests:`. A jest pattern passed where a
-  FLAG belongs matches no tests and exits 1.
+- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE — or
+  that changes no behaviour — proves nothing. Read `Test Suites:` as well as
+  `Tests:`; a jest pattern passed where a FLAG belongs matches nothing.
 - **A gate that walks must assert it scanned something**: no files, no offenders.
 - **A test on a helper proves nothing about its caller** — drive the real thing.
+- **A 200 WITH NO BODY IS NOT JSON.** Nest sends a handler's `null` as a
+  zero-byte 200, so `res.json()` THROWS — and in an effect the throw lands
+  mid-way, so the state set after it never happens: the register form drew no
+  pupils and no Save button for every class not yet marked. `apiGet` had the
+  rule server-side; `lib/read-json.ts` is the client half. A fixture that
+  already holds the row makes it impossible and reports success.
 - **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY.** `not.toMatch(/\b33\b/)`
-  over a report-card PDF fails ~3.3% of runs on its "Generated … HH:MM:SS" line —
-  a flaky suite that is actually a wrong assertion, and the POSITIVE form passes
-  with the cell wrong whenever the clock reads `:29:`. Read the CELL, pin the
-  collision as a test, and fake `Date` only (pdfkit needs real timers).
+  over a report-card PDF fails ~3.3% of runs on its "Generated … HH:MM:SS" line,
+  and the POSITIVE form passes with the cell wrong whenever the clock reads
+  `:29:`. Read the CELL, and fake `Date` only (pdfkit needs real timers).
 - **Anchor a test to the PROPERTY, not the text** (nor a column's POSITION) —
   fixed-text assertions have gone red ten times on changes that STRENGTHENED what
   they guard. **And never prove an ABSENCE by searching a serialised document**:
-  it carries ids, timestamps and counts nobody chose, and a uuid containing the
-  secret ("…925d-**31234**1a1dd8c") failed CI on a test whose property held.
-  Walk the parsed object and compare VALUES.
-- **An over-wide gate is the same failure as a blind one** — it teaches its next
-  reader to add an exemption, and one granted for a false positive is a hole with
-  a note on it. Delete the rule rather than exempt what it wrongly catches.
+  a uuid containing the secret ("…925d-**31234**1a1dd8c") failed CI on a test
+  whose property held. Walk the parsed object and compare VALUES.
+- **An over-wide gate is the same failure as a blind one** — an exemption granted
+  for a false positive is a hole with a note on it. Delete the rule instead.
 - **FIXTURE TRAPS, over and over:** a stub whose `findMany` ignores the `where`
-  (or `take`/`skip`) passes against a service that stopped filtering; one missing
-  a method every real client has (`createMany`, `groupBy`, `$queryRaw`) fails in
-  a way that reads as a code fault; one returning the live object a later
-  `update` mutates makes an audit read the NEW value; and `$executeRaw` is a
-  TAGGED TEMPLATE, so `q.values` is `Array.prototype.values` — a function, not
-  the parameters. **A double must model the CONTRACT, not the signature.**
+  (or `take`/`orderBy`) passes against a service that stopped filtering; one
+  missing a method every real client has (`createMany`, `groupBy`, `$queryRaw`,
+  `text()`) fails in a way that reads as a code fault; one returning the live
+  object a later `update` mutates makes an audit read the NEW value; and
+  `$executeRaw` is a TAGGED TEMPLATE, so `q.values` is `Array.prototype.values`.
+  **A double must model the CONTRACT, not the signature** — including that a
+  `null` handler arrives as an EMPTY body.
 - **A probe that guesses a field name reports a fact about itself.** Read the
-  STATUS before the body; scope a probe's queries to the tenant under test; prove
-  the session took (401 everywhere reads as "refused" for every route).
-- **Drive it, do not read it.** Almost every entry in the log was found by
-  exercising a path — several never once executed.
+  STATUS before the body; scope a probe's queries to the tenant under test; and
+  prove the session took — 401 everywhere reads as "refused" for every route.
+- **Drive it, do not read it** — and where a SCREEN is the report, drive the
+  screen: the register form's real defect was a parse in the browser, invisible
+  to every API-level check, and the tell was an absence (no POST ever sent).
 
 ### Operational safety
 - **Fail closed at BOOT** where a mis-set value is unrecoverable afterwards
