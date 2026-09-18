@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Three hundred and seventy-two write-ups, newest first. Each records a **real defect
+Three hundred and seventy-four write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,8 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Every deletion this platform promises was a delete marker](#every-deletion-this-platform-promises-was-a-delete-marker)
+- [Two upload ceilings, and the door in the middle knew about one](#two-upload-ceilings-and-the-door-in-the-middle-knew-about-one)
 - [An index I added by reasoning, and what measuring it actually said](#an-index-i-added-by-reasoning-and-what-measuring-it-actually-said)
 - [A bucket cap sized against a round number, and what a teacher records](#a-bucket-cap-sized-against-a-round-number-and-what-a-teacher-records)
 - [A campus flagged on the group overview, and unflagged on its own page](#a-campus-flagged-on-the-group-overview-and-unflagged-on-its-own-page)
@@ -297,6 +299,114 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Every deletion this platform promises was a delete marker
+Asked whether the recording work was properly linked to the infrastructure and
+the production documents for S3. The application code was right; the BUCKET was
+not, and the finding is much larger than recordings.
+
+`aws_s3_bucket_versioning.documents` is **Enabled**, there is **no lifecycle
+configuration anywhere in terraform**, and every caller deletes with
+`DeleteObjectCommand({Bucket, Key})` — **no VersionId**. On a versioning-enabled
+bucket that writes a DELETE MARKER and retains the object. The task role does not
+even hold `s3:DeleteObjectVersion`, so nothing in the application *can* hard
+delete. Ten call sites depend on a delete deleting, and they are not
+housekeeping:
+
+```
+privacy.service.ts:610        NDPR right-to-erasure
+recording-retention.ts:110    lesson footage of named children
+submission-retention.ts:154   files held for a DECLINED application
+documents / supplied-documents / branding / recruitment / lms-content
+```
+
+Each one reports success, writes its audit row, and leaves the bytes in the
+bucket for ever. **Silent partial success on a privacy control** — the worst
+place in this codebase for it, because the school has already told the family.
+
+THE REMEDY BELONGS IN THE BUCKET, NOT THE APPLICATION. S3 expires noncurrent
+versions itself, so `aws_s3_bucket_lifecycle_configuration` with
+`noncurrent_version_expiration` needs no code change, no new IAM permission, and
+gives no future call site a way to forget: the guarantee becomes a property of
+the bucket rather than a discipline. `expired_object_delete_marker` clears the
+litter left behind, and `abort_incomplete_multipart_upload` stops paying for
+parts no listing shows.
+
+**The window is the whole design decision.** Versioning protects against an
+accidental overwrite or delete, and that protection is a WINDOW, not a promise to
+keep everything: `documents_noncurrent_retention_days` is both the time in which
+a mistake is recoverable AND the lag on every promised deletion. Defaulted to
+**7** — short, because these are minors' records and the fail-safe tightens, and
+long enough to notice an operator error inside a working week.
+
+// **THE PRODUCTION DOC HAD THE OPPOSITE INSTRUCTION WRITTEN DOWN.** Step 9.4
+// said to "add a lifecycle rule shifting non-current versions to Glacier after
+// 30 days (cost lever, zero user impact)". That makes the bill smaller and the
+// disclosure PERMANENT — precisely wrong for a bucket holding footage and
+// records of children, and it reads as a tidy-up rather than as the data
+// protection control it is. Corrected, and the runbook with it: 5.10 promised
+// "versioning means deletes are recoverable; retrieve the prior version" with
+// no window at all, so on-call would have gone looking for a version that no
+// longer exists — and it now carries the INVERSE incident too ("we were asked
+// to erase it and it is still there") with the two `aws s3api` commands that
+// answer it.
+// GOTCHA: recordings are served to pupils from PRESIGNED S3 URLS, which bypass
+// CloudFront entirely — so playback is billed at S3 internet egress, not CDN.
+// Written into the cost profile, because it is the line that grows with
+// watching rather than with storing.
+
+### Two upload ceilings, and the door in the middle knew about one
+A document is capped at 10 MB and a lesson recording at 1.5 GB. Both ceilings
+were already written down, and the presign and the confirm each enforced the
+right one — while the hop BETWEEN them, which is what actually receives the
+bytes on the documented local stack, applied the document cap to everything.
+So a recording was allowed, refused at 10 MB, and allowed again. THREE
+document-sized ceilings, in fact, and the first two were measured rather than
+read:
+
+```
+nginx  location /local-storage/  client_max_body_size 12m
+       -> PUT 20 MB through nginx answered 413      (measured)
+API    readBoundedBody(req, MAX_UPLOAD_BYTES)
+       -> the API's own door, at 10 MB
+API    the same reader collects the body into one Buffer
+       -> a latent OOM at 1.5 GB, not merely a refusal
+```
+
+**The recording upload could not work on the local stack at all** — the class
+this file already records for `KEY_SHAPE`, where four upload features 400'd at
+the first step behind a refusal worded like a bad signature. It is also textbook
+sibling asymmetry: somebody reasoned out a second ceiling, wrote it at the two
+doors in front of them, and did not sweep.
+
+THE FIX IS THE IDIOM THIS MODULE ALREADY USES FOR INLINE TYPES: put the fact in
+the signed OPERATION. `put-recording` is a different op from `put`, one table
+maps each to its ceiling, and the presign picks the op from the content type. A
+caller cannot widen its own ceiling by sending a bigger file or editing a URL,
+because the op is inside the HMAC; an unknown type gets the NARROWER ceiling
+(Golden Rule #7); and a third ceiling is a row rather than a fourth place to
+remember. The stub streams to disk and REMOVES a partial file when the cap is
+passed, since a half-written object `exists()` would vouch for is worse than
+none.
+
+**DRIVEN END TO END through nginx**, which is the only thing that would have
+shown it: presign 201 -> PUT 40 MB **200** (was 413) -> confirm 201, bytes
+sniffed, 41,943,040 stored, storage key not on the wire -> play 201 -> **Range
+206 `bytes 0-99/41943040`**, which is what `<video>` seeking needs.
+
+// GOTCHA, and the reason this cost a detour: the first probe hit `/api/sms/*`
+// and got 401 on every size, which reads as "refused" for every route. That is
+// the BFF, which mints its own bearer from the Auth.js session — a minted API
+// token is meaningless to it. Driving the API needs a container ON the compose
+// network, because the backend is deliberately not host-reachable.
+// GOTCHA: **two existing tests went red on a change that STRENGTHENED what they
+// guard**, for the tenth-or-so time in this repo. They pinned the literal
+// `readBoundedBody(req, MAX_UPLOAD_BYTES)` and `for await (const chunk of req)`
+// — both spellings gone, both properties better. Re-anchored to the properties
+// (the limit comes from the op that verified; no `MAX_UPLOAD_BYTES` at the call
+// site; no `Buffer.concat(chunks)`), and mutation-validated in both directions.
+// The second half of that lesson: the streaming write moved to the PROVIDER, so
+// the spec had to read both files or half the property was unguarded.
 
 ### An index I added by reasoning, and what measuring it actually said
 Asked to make sure nothing shipped this session would lag or error in years to

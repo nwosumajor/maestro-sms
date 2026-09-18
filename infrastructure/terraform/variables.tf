@@ -307,3 +307,35 @@ variable "backup_vault_lock_enabled" {
   type        = bool
   default     = false
 }
+
+# --- Documents bucket lifecycle ----------------------------------------------
+variable "documents_noncurrent_retention_days" {
+  description = <<-EOT
+    How long a superseded/deleted object version survives in the documents
+    bucket before S3 destroys it permanently.
+
+    This is the window in which an accidental delete is recoverable, and it is
+    ALSO the delay on every deletion the product promises — NDPR erasure, the
+    integrity-telemetry purge, the declined-applicant sweep and lesson-recording
+    retention all call DeleteObject, which on a VERSIONED bucket only writes a
+    delete marker. Without this rule the bytes are kept for ever.
+
+    Deliberately short: these are minors' records, so the fail-safe tightens.
+    One working week is long enough to notice and undo an operator's mistake.
+  EOT
+  type        = number
+  default     = 7
+}
+
+variable "documents_recording_tiering_days" {
+  description = <<-EOT
+    Days before a lesson RECORDING moves to S3 Intelligent-Tiering. Recordings
+    are watched during the term and then only by a pupil revising, so they cool
+    quickly; Intelligent-Tiering has no retrieval fee, which Standard-IA does,
+    and the objects are few and large so the per-object monitoring fee is
+    negligible. Scoped to the lms/ prefix for exactly that reason — the rest of
+    the bucket is many small documents, where the monitoring fee is not.
+  EOT
+  type        = number
+  default     = 30
+}

@@ -11,7 +11,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { inlineOp, signStorageUrl, type InlineType, type StorageOp } from "./local-storage-signing";
+import { inlineOp, signStorageUrl, uploadOp, type InlineType, type StorageOp } from "./local-storage-signing";
 
 /** Injection token for the storage backend (default: StubStorageProvider). */
 export const STORAGE_PROVIDER = Symbol("STORAGE_PROVIDER");
@@ -84,9 +84,53 @@ export class StubStorageProvider implements StorageProvider {
    * same origin. Behind the local nginx it is a same-origin path and needs no
    * setting at all.
    */
-  async presignUpload({ key }: { key: string; contentType: string }): Promise<PresignResult> {
+  async presignUpload({ key, contentType }: { key: string; contentType: string }): Promise<PresignResult> {
     this.logger.log(`[stub] presign PUT ${key}`);
-    return { url: this.signedUrl(key, "put"), expiresInSeconds: this.ttl };
+    // THE CEILING RIDES THE SIGNATURE, like the inline type on the way back.
+    // A lesson recording and a birth certificate are three orders of magnitude
+    // apart, and the door that receives the bytes used to know about one of
+    // them — so it refused every recording at the document cap. The op says
+    // which ceiling was granted and cannot be edited into the other.
+    return { url: this.signedUrl(key, uploadOp(contentType)), expiresInSeconds: this.ttl };
+  }
+
+  /**
+   * Write a request stream straight to disk, refusing past `limit`.
+   *
+   * A recording is up to 1.5 GB and the buffered path held the whole body in
+   * one `Buffer` before writing it — fine for a 10 MB document, an OOM waiting
+   * for the first teacher who attaches a double lesson. Only the local stub
+   * ever sees these bytes (in cloud the browser PUTs straight to the bucket),
+   * but a development stack that dies rather than refusing teaches the wrong
+   * thing about the feature.
+   *
+   * Returns the byte count, or null when the cap was passed — in which case the
+   * partial file is REMOVED, because a half-written object that `exists()` would
+   * vouch for is worse than none.
+   */
+  async uploadStream(key: string, stream: AsyncIterable<Buffer>, limit: number): Promise<number | null> {
+    const file = this.pathFor(key);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    const handle = await fs.open(file, "w");
+    let size = 0;
+    try {
+      for await (const chunk of stream) {
+        size += chunk.length;
+        if (size > limit) {
+          await handle.close();
+          await fs.rm(file, { force: true });
+          return null;
+        }
+        await handle.write(chunk);
+      }
+      await handle.close();
+    } catch (err) {
+      await handle.close().catch(() => undefined);
+      await fs.rm(file, { force: true });
+      throw err;
+    }
+    this.logger.log(`[stub] upload ${key} (${size} bytes, streamed)`);
+    return size;
   }
 
   async presignDownload({ key, filename, inline }: { key: string; filename?: string; inline?: InlineType }): Promise<PresignResult> {

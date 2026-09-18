@@ -565,7 +565,34 @@ pointer, not a substitute.
   weekly/monthly for **90/365 days**. Restore to a **new instance** and reconcile
   — never restore in place over a live database.
 - **Documents (S3):** bucket versioning means deletes and overwrites are
-  recoverable; retrieve the prior version.
+  recoverable — **for `documents_noncurrent_retention_days` (default 7), and not
+  a day longer.** That window is deliberate and is the same setting that makes
+  the product's DELETIONS real (see below), so it is short. List the versions
+  before promising a recovery:
+  ```bash
+  aws s3api list-object-versions --bucket "$DOCS_BUCKET" --prefix "<key>"
+  # restore: copy the VersionId you want back over the current key
+  aws s3api copy-object --bucket "$DOCS_BUCKET" --key "<key>" \
+    --copy-source "$DOCS_BUCKET/<key>?versionId=<id>"
+  ```
+  Past the window there is **nothing to retrieve** — the object is gone, by
+  design. Say so plainly rather than opening a case that cannot be closed.
+- **The opposite incident — "we were asked to erase it and it is still there":**
+  on a versioned bucket `DeleteObject` writes a delete marker and keeps the
+  bytes, so an erasure is only complete once the lifecycle rule has expired the
+  noncurrent version. Confirm the rule is actually applied before answering a
+  data-subject request or a regulator:
+  ```bash
+  aws s3api get-bucket-lifecycle-configuration --bucket "$DOCS_BUCKET"
+  # must contain the rule id `expire-noncurrent-versions`
+  aws s3api list-object-versions --bucket "$DOCS_BUCKET" --prefix "<key>" \
+    --query 'Versions[].{v:VersionId,when:LastModified}'
+  ```
+  No rule, or versions older than the window still listed, means **every
+  deletion this platform has reported is a delete marker over intact bytes** —
+  NDPR erasures, purged lesson recordings and declined-applicant files alike.
+  That is a SEV-2 data-protection finding, not a housekeeping task: apply the
+  rule, then verify the versions drain.
 - **Financial and academic records are append-only by design** — invoices,
   payments, audit entries and disciplinary entries are not hard-deleted. If one
   is "missing", it was almost certainly never written. Check the audit log before

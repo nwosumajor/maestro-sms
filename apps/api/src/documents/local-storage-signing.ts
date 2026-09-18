@@ -4,6 +4,11 @@
 // module initialisation order changes.
 import crypto from "node:crypto";
 import { signingSecret } from "../auth/secrets";
+// Read straight from the shared constants rather than through sniff-upload:
+// this module is deliberately import-light so the provider that MINTS a
+// signature and the controller that CHECKS one can both depend on it without
+// a cycle.
+import { MAX_RECORDING_BYTES, MAX_UPLOAD_BYTES, RECORDING_UPLOAD_TYPES } from "@sms/types";
 
 /**
  * "get-inline" is a DIFFERENT operation from "get", not a flag on it: serving a
@@ -19,7 +24,7 @@ import { signingSecret } from "../auth/secrets";
  * and covered by the HMAC.
  */
 export type InlineType = "image/png" | "application/pdf" | "video/mp4";
-export type StorageOp = "put" | "get" | "get-inline" | "get-inline-pdf" | "get-inline-video";
+export type StorageOp = "put" | "put-recording" | "get" | "get-inline" | "get-inline-pdf" | "get-inline-video";
 
 /** The op that serves this type inline, and the type an inline op serves. One
  *  table, so the two directions cannot disagree. */
@@ -52,3 +57,37 @@ export function signStorageUrl(key: string, op: StorageOp, ttlSeconds: number): 
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   return { sig: signStorage(key, op, exp), exp };
 }
+
+/**
+ * AND THE CEILING IS PART OF THE OPERATION, for the same reason the inline type
+ * is.
+ *
+ * There are two ceilings in this platform — a 10 MB document and a 1.5 GB
+ * lesson recording — and the local storage door enforced only the first, on
+ * every upload. So a recording was refused at 10 MB by the one hop between a
+ * presign that had allowed it and a confirm that would have accepted it: the
+ * feature could not be exercised locally at all, which is how a defect reaches
+ * production unseen. Sibling asymmetry, on a rule somebody had already written
+ * down twice.
+ *
+ * Deriving the limit from the SIGNED op is what stops that recurring. A caller
+ * cannot raise its own ceiling by sending a bigger file or editing a URL — the
+ * op is inside the HMAC — and a third ceiling is a row here rather than a
+ * fourth place to remember.
+ */
+const UPLOAD_LIMIT: Record<UploadOp, number> = {
+  put: MAX_UPLOAD_BYTES,
+  "put-recording": MAX_RECORDING_BYTES,
+};
+
+export type UploadOp = "put" | "put-recording";
+
+/** Every op that WRITES, derived from the one table. */
+export const UPLOAD_OPS: readonly UploadOp[] = Object.keys(UPLOAD_LIMIT) as UploadOp[];
+
+/** Which write op a presign should mint, from the type being uploaded. */
+export const uploadOp = (contentType: string): UploadOp =>
+  (RECORDING_UPLOAD_TYPES as readonly string[]).includes(contentType) ? "put-recording" : "put";
+
+/** The ceiling this signed op grants, and nothing wider. */
+export const uploadLimitOf = (op: UploadOp): number => UPLOAD_LIMIT[op];

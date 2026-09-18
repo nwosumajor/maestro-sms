@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **372 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **374 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **372 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **374 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2427,6 +2427,14 @@ failed PUT still said "Attached", and pupils got a refusal from storage), they
 fit (the presign's `sizeBytes` is a number the caller SENT), and they are the
 type claimed (`sniffUploadType`, magic bytes). A refusal leaves it unattached so
 the upload can simply be retried.
+// **A DELETE ON A VERSIONED BUCKET DELETES NOTHING.** `DeleteObject` with no
+// VersionId writes a DELETE MARKER and keeps the bytes, and ten call sites rely
+// on a delete deleting — NDPR erasure, recording retention, the declined-
+// applicant purge. Each reported success and left the object for ever. The
+// remedy is a LIFECYCLE RULE (`noncurrent_version_expiration`), not app code:
+// S3 expires them itself, so no new IAM and no way for a future caller to
+// forget. Versioning's protection is a WINDOW, and that window is also the lag
+// on every promised deletion — 7 days here, short because minors' records.
 // **A SIZE CAP IS SIZED AGAINST WHAT THE TOOL PRODUCES, not a round number.**
 // A recording cap of 500 MB for two hours is 0.56 Mbps and refuses even 480p —
 // Zoom 720p slides is ~0.7 GB, with a camera ~1.4 GB, OBS at 1080p ~2.2 GB. So
@@ -2447,7 +2455,14 @@ off the PUT and is the uploader's claim. Locally the type rides the SIGNED OP
 `lms/`, `discipline/`, `submissions/` and `tasks/` were added later: four upload
 features 400ing at the FIRST step, behind a refusal deliberately worded like a
 bad signature. Gate `a-key-no-upload-could-use` computes the minted set from
-source. // GOTCHA: the school LOGO was presigned in FIVE places, three inline
+source. // **AND A SECOND CEILING NEEDS SWEEPING LIKE ANY OTHER RULE.** Document 10 MB
+// vs recording 1.5 GB: the presign and confirm enforced the right one and the
+// door BETWEEN them applied the document cap to everything, so the local stack
+// could not upload a recording at all (nginx 413 at 12m, then the API at 10 MB,
+// then a Buffer that would have OOM'd). Put the ceiling in the SIGNED OP, the
+// way the inline TYPE already is — one table, unknown type gets the narrower
+// one, and it cannot be widened by editing a URL.
+// GOTCHA: the school LOGO was presigned in FIVE places, three inline
 and two not — the two being the PUBLIC ones, so a PAID logo never rendered on
 the login page. One `logoUrl()` now; the gate asserts exactly ONE presign site.
 

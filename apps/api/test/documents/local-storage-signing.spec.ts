@@ -50,9 +50,11 @@ describe("what the signature covers", () => {
 });
 
 describe("the endpoint that honours it", () => {
-  const src = stripComments(readFileSync(join(__dirname, "../../src/documents/local-storage.controller.ts"), "utf8"))
-    
-    ;
+  const src = stripComments(readFileSync(join(__dirname, "../../src/documents/local-storage.controller.ts"), "utf8"));
+  // The write itself lives in the STUB PROVIDER, because streaming a body to
+  // disk is the provider's job and the controller's only business is which
+  // ceiling was signed for. Read both, or half the property is unguarded.
+  const stubSrc = stripComments(readFileSync(join(__dirname, "../../src/documents/storage.provider.ts"), "utf8"));
 
   it("refuses a key that is not one this platform issues", () => {
     // Containment: nothing may climb out of the storage directory.
@@ -69,17 +71,43 @@ describe("the endpoint that honours it", () => {
     expect(src).toMatch(/expNum \* 1000 < Date\.now\(\)/);
   });
 
-  it("stops reading at the cap rather than buffering whatever is sent", () => {
+  it("stops at the cap rather than buffering whatever is sent", () => {
     // Checking the size AFTER reading means the whole thing is already in
     // memory — which is the wrong moment to object to it.
-    expect(src).toMatch(/readBoundedBody\(req, MAX_UPLOAD_BYTES\)/);
-    expect(src).toMatch(/if \(size > limit\) return null;/);
+    //
+    // RE-ANCHORED TO THE PROPERTY. This used to pin the literal
+    // `readBoundedBody(req, MAX_UPLOAD_BYTES)`, and went red on a change that
+    // STRENGTHENED what it guards: the cap is now chosen per signed operation
+    // (a document and a lesson recording are three orders of magnitude apart)
+    // and the bytes stream to disk instead of into one Buffer. Both the old
+    // spellings were gone and both properties were better. A fixed-text
+    // assertion has failed this way repeatedly in this repo.
+    //
+    // The properties, stated as properties: a limit is passed in and it comes
+    // from the op that verified, never a constant written at the call site.
+    expect(src).toMatch(/uploadLimitOf\(op\)/);
+    expect(src).not.toMatch(/MAX_UPLOAD_BYTES/); // a single hard-coded ceiling is the defect
+    // And the refusal happens on the way past, not afterwards.
+    expect(stubSrc).toMatch(/if \(size > limit\)/);
+  });
+
+  it("does not hold the whole upload in memory", () => {
+    // A 10 MB document buffered fine; a 1.5 GB recording is an OOM. The stub
+    // writes the stream out as it arrives and REMOVES a partial file when the
+    // cap is passed — a half-written object that `exists()` would vouch for is
+    // worse than none.
+    expect(stubSrc).toMatch(/async uploadStream\(/);
+    expect(stubSrc).toMatch(/await handle\.write\(chunk\)/);
+    expect(stubSrc).toMatch(/fs\.rm\(file, \{ force: true \}\)/);
+    // Not collected into an array and concatenated at the end.
+    expect(stubSrc).not.toMatch(/Buffer\.concat\(chunks\)/);
   });
 
   it("reads the raw stream, because Express does not parse a PDF body", () => {
     // @Body() on an application/pdf PUT is empty, so the upload arrives as
     // nothing and the failure looks like an empty file rather than a bug.
-    expect(src).toMatch(/for await \(const chunk of req\)/);
+    // The PROPERTY is that the request object itself is what is consumed.
+    expect(src).toMatch(/uploadStream\(key, req,/);
   });
 
   it("refuses outright unless the stub provider is the one bound", () => {
