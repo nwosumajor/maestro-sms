@@ -17685,3 +17685,67 @@ principal and no school_admin. If such a class's supervisor has LEFT, its stale
 register can be corrected by nobody — the principal cannot author it and there
 is no teacher left to raise the amendment. Narrow (it needs all three at once),
 and deliberately out of scope for this change.
+
+### The one control for taking a register, which did nothing
+
+Reported from the running app: "the take button for the class supervisor of SS1
+Science A isn't working." It was not authorisation — `/attendance/registers`
+answered `canTake: true` for that teacher and that class, and POSTing the
+register with a minted token returned 201 with four records.
+
+THE FIRST HALF WAS A STALE CONTAINER, and worth recording because it wasted the
+first pass: the web image was built at 12:22:16 and the register fix landed at
+12:28:20, so localhost had been serving the PRE-FIX page for seven hours. I had
+rebuilt `backend` twice while chasing sweep defects and never rebuilt
+`frontend`. The user's own audit trail showed it — they signed in and loaded the
+roster seven minutes before the rebuild.
+
+THE SECOND HALF WAS REAL, and needed a browser to find. Driven headless over CDP
+because the failure leaves no server-side trace at all — the decisive evidence
+was that **no POST ever reached nginx**: the page loaded, the roster loaded, and
+then four minutes of nothing.
+
+    /attendance?classId=X, clicking THAT class's "Take register"
+      requests triggered  0        (it is a Link to the URL you are already on,
+      scrollY   0 -> 0              so Next performs no navigation whatsoever)
+      Save button y=1094 in a 757px viewport — below the fold, the whole time
+
+So the teacher presses the only control the page offers and the product does not
+react. The form was there; it was a thousand pixels down.
+
+    as school_admin, clicking a DIFFERENT class's "Take register"
+      url        -> ?classId=d95ca30b…      (changed)
+      form reads -> History 101             (did NOT change)
+      Save button y=4318
+
+Worse than nothing happening: `classId` is `useState` with an INITIAL value, and
+a search-param change re-renders without remounting, so the initial value is
+never read again. An administrator would have scrolled down and saved a register
+**against the class they were previously on**.
+
+Fixed in two places, both of which had to be the same fix twice over: the boards
+call a shared `revealTakeRegister()` (with `scroll={false}`, so Next's
+scroll-to-top does not fight it), and the form follows `initialClassId` when it
+changes. Verified in the browser after: case one scrolled 0 -> 763 with the Save
+button at y=331 and `visible: true`; case two moved the form to VOL SS3 E and
+scrolled to 3987.
+
+// This is the recorded `{ scroll: false }` class in its MIRROR IMAGE. There, a
+// navigation that updated a section in place scrolled to the top and hid the
+// history the user had asked for, so the fix was to stop scrolling. Here the
+// same control needed the opposite — to bring the section INTO view — and, on
+// the same-URL click, to work when there is no navigation to hang behaviour off
+// at all. A rule learnt as "do not scroll" is not "scrolling is wrong".
+// GOTCHA: the sync is keyed on `initialClassId` ALONE. Including `classes` in
+// the deps re-runs it on every server render — the prop is a fresh array each
+// time — and resets the dropdown under somebody mid-task. That mutation fails
+// its own named case.
+// GOTCHA, mine: the test's fetch double answered `null` to everything under
+// `/attendance`, including the register HISTORY, which is a LIST — the
+// component died on `history.length`. A double must model the CONTRACT, not
+// the path prefix.
+
+Mutation-validated four ways, each failing the case named for it: drop the sync
+effect; add `classes` to its deps; make the reveal not scroll; and remove the
+reveal from ONE of the two boards — the sibling-asymmetry case, which is why the
+gate walks the components rather than naming them.

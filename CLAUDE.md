@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **364 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **365 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **364 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **365 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1132,27 +1132,27 @@ These are the rules; the log is why each one exists.
   own host could not even see.
 - **A ROUTE GATE MUST BE DEFAULT-DENY, NOT A LIST OF WHAT TO PROTECT.**
   `middleware.ts` held a hand-kept `PROTECTED_PREFIXES` and the app outgrew it:
-  `/cbt`, `/exams`, `/feedback`, `/group`, `/kiosk`, `/learning`, `/meetings`,
-  `/reportcards` answered **200 with no session**. That gate is THREE controls —
+  eight sections answered **200 with no session**. That gate is THREE controls —
   the /login redirect, the 30-day forced reset and the MFA mandate — so a user
-  with an expired password was held out of /dashboard and could open the exam
-  hall and a child's report cards. No data escaped (the page streams its loading
-  shell, then throws on `session!.user`) — a gap, not a leak, and worth stating
-  precisely. Inverted to a PUBLIC allowlist in `lib/public-routes.ts`; gate
-  `every-signed-in-page-needs-a-session` walks the router. // GOTCHA: Next serves
-  `app/icon.png` through the same matcher, so default-deny must exempt ASSETS.
-  // GOTCHA: the rule lives in its OWN module so the test drives the REAL
+  with an expired password could open the exam hall and a child's report cards.
+  No data escaped (the page streams its shell, then throws on `session!.user`) —
+  a gap, not a leak. Inverted to a PUBLIC allowlist in `lib/public-routes.ts`;
+  gate `every-signed-in-page-needs-a-session` walks the router. // GOTCHA: Next
+  serves `app/icon.png` through the same matcher, so default-deny must exempt
+  ASSETS. // GOTCHA: the rule lives in its OWN module so the test drives the REAL
   function — the first draft reimplemented it and disagreed about `/icon.png`.
-- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below, and
-  the one a user meets. `/attendance`'s "take →" pointed at `/classes/<id>`, not
-  a route. Gate `a-link-to-a-page-that-is-not-there` matches every literal href
-  against the declared routes; it found a fourth on its first run.
+- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below.
+  `/attendance`'s "take →" pointed at `/classes/<id>`, not a route. Gate
+  `a-link-to-a-page-that-is-not-there` matches every literal href against the
+  declared routes; it found a fourth on its first run.
 - **A PICKER MUST REMEMBER WHAT WAS PICKED.** The choice was re-derived from
   `[...seed, ...results]`; choosing clears the query, which clears `results`, so
   anybody found by SEARCH vanished on being chosen. Hold it in state.
-- **`{ scroll: false }` WHEN A NAVIGATION UPDATES A SECTION IN PLACE.** Next
-  scrolls to the top on every push; the attendance pupil-picker sits at the FOOT
-  of a long page, so clicking a pupil hid the history it asked for.
+- **SCROLL IS PART OF THE CONTROL, BOTH WAYS.** Next scrolls to the top on every
+  push, hiding the history the attendance pupil-picker asked for
+  (`{ scroll: false }`) — and its MIRROR: /attendance's Take-register button
+  links to the URL you are ALREADY on, so it navigated nowhere, made zero
+  requests and left the form 1,094px below the fold. Reveal the section yourself.
 - **A ROUTE NO SCREEN CALLS IS A DOOR MISSING FROM THE OUTSIDE.** `GET
   /members/scan/today` was reached from nowhere — one level out from the gate
   that catches a service method no CONTROLLER reaches.
@@ -1161,7 +1161,7 @@ These are the rules; the log is why each one exists.
 - **A field the API accepts that no screen sends** is a feature nobody has
   (`a-field-no-screen-can-fill-in`); **a method no controller reaches** shipped
   with no door (`service-methods-nobody-calls`); **a page nothing links to** is
-  not delivered (`every-page-can-be-reached`). *Present is not findable.*
+  not delivered (`every-page-can-be-reached`).
 - **A duty given with a notice is taken away with one**; retract only what was SENT.
 - **Fixing where it hurts and leaving the siblings is how the class survives.**
 
@@ -1177,7 +1177,7 @@ These are the rules; the log is why each one exists.
   nothing. Read `Test Suites:` as well as `Tests:`. A jest pattern passed where a
   FLAG belongs matches no tests and exits 1.
 - **A gate that walks must assert it scanned something**: no files, no offenders.
-- **A test on a helper proves nothing about its caller.** Drive the real thing.
+- **A test on a helper proves nothing about its caller** — drive the real thing.
 - **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY.** `not.toMatch(/\b33\b/)`
   over a report-card PDF fails ~3.3% of runs on its "Generated … HH:MM:SS" line —
   a flaky suite that is actually a wrong assertion, and the POSITIVE form passes

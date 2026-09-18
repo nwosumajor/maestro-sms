@@ -17,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { regionOf, shortDate, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
+import { TAKE_REGISTER_ANCHOR } from "@/components/attendance/register-anchor";
 import { RegisterBoard } from "@/components/attendance/RegisterBoard";
 import { SweepButton } from "@/components/maintenance/SweepButton";
 import { ClassAttendanceBoard } from "@/components/attendance/ClassAttendanceBoard";
@@ -170,7 +171,9 @@ export default async function AttendancePage({
         {canWrite && <ClassAttendanceBoard />}
 
         {canWrite && takeable.length > 0 && (
-          <Card>
+          // The id both boards' Take-register controls scroll to. Without it a
+          // click that only changes a search parameter looks like nothing.
+          <Card id={TAKE_REGISTER_ANCHOR}>
             <CardHeader>
               <CardTitle className="text-base">Register</CardTitle>
               <CardDescription>Pick a class and date. Today defaults everyone Present — mark the exceptions and save. Pick a past date (or a register below) to view or correct any day&apos;s register.</CardDescription>

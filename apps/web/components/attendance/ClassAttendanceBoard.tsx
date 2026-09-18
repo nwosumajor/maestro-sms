@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { revealTakeRegister } from "./register-anchor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -223,7 +224,7 @@ export function ClassAttendanceBoard() {
                   {r.canTake ? (
                     // Lands on the register form with THIS class already chosen —
                     // the point of clicking the row was that class.
-                    <Link href={`/attendance?classId=${r.classId}`}>
+                    <Link href={`/attendance?classId=${r.classId}`} scroll={false} onClick={revealTakeRegister}>
                       <Button size="sm" variant="outline">
                         Take register
                       </Button>

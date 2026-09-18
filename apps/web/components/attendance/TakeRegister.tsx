@@ -64,6 +64,24 @@ export function TakeRegister({
   const [classId, setClassId] = React.useState(
     (initialClassId && classes.some((c) => c.id === initialClassId) ? initialClassId : classes[0]?.id) ?? "",
   );
+  // FOLLOW THE LINK THAT BROUGHT YOU HERE.
+  //
+  // `classId` above is state with an INITIAL value, and the boards' Take-register
+  // control only changes a SEARCH PARAM — same route, so React keeps this
+  // component mounted and that initial value is never read again. Measured in a
+  // real browser: an administrator clicking "Take register" on VOL SS3 E got the
+  // URL for that class and a form still showing History 101. A control that
+  // points somewhere other than the class it names is worse than one that does
+  // nothing, because the register saves against the wrong class.
+  //
+  // Deliberately keyed on `initialClassId` ALONE. Including `classes` would
+  // re-run this whenever the server hands down a new array — which happens on
+  // any re-render — and clobber a class the user picked from the dropdown.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reason: see above
+  React.useEffect(() => {
+    if (initialClassId && classes.some((c) => c.id === initialClassId)) setClassId(initialClassId);
+  }, [initialClassId]);
+
   const { region, shortDate } = useFormat();
   // ONE value for "today", so the default, the max and the Today button cannot
   // disagree with each other or with the server.
