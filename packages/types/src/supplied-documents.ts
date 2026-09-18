@@ -84,8 +84,38 @@ export const SATISFYING_STATUSES: readonly SubmissionStatus[] = ["UPLOADED", "VE
 export const ACCEPTED_UPLOAD_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
 export type AcceptedUploadType = (typeof ACCEPTED_UPLOAD_TYPES)[number];
 
+/**
+ * What a TEACHER may upload as a recording of their own live class.
+ *
+ * Deliberately NOT added to `ACCEPTED_UPLOAD_TYPES`: that list is what a member
+ * of the PUBLIC may attach to an admission or a job application, and widening it
+ * would let a parent send a video where a birth certificate belongs. Identifying
+ * a file and ACCEPTING one are different questions, and each feature answers the
+ * second for itself.
+ *
+ * One type, not a family. Every browser plays H.264 MP4; accepting `.mov`,
+ * `.mkv` and `.webm` besides would mean a pupil whose recording simply does not
+ * play, with nothing on screen saying why.
+ */
+export const RECORDING_UPLOAD_TYPES = ["video/mp4"] as const;
+export type RecordingUploadType = (typeof RECORDING_UPLOAD_TYPES)[number];
+
+/**
+ * Every type the magic-byte sniffer can NAME — the union of what any feature
+ * accepts, which is not itself a permission to upload anything.
+ */
+export const SNIFFABLE_UPLOAD_TYPES = [...ACCEPTED_UPLOAD_TYPES, ...RECORDING_UPLOAD_TYPES] as const;
+export type SniffableUploadType = (typeof SNIFFABLE_UPLOAD_TYPES)[number];
+
 /** Per-file ceiling. A phone photo is 2–5 MB; a scanned multi-page PDF larger. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * A recording's own ceiling — an hour of 720p lecture is roughly 0.5–1 GB, so
+ * the document cap is three orders of magnitude too small to be the same number.
+ * Stated here so the presign, the confirm and the screen all read one figure.
+ */
+export const MAX_RECORDING_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** How long a family's upload link stays good. Admissions paperwork is slow —
  *  a birth certificate may need a trip to a registry office. */

@@ -18,15 +18,25 @@ import { signingSecret } from "../auth/secrets";
  * stored-XSS this module already has a write-up for. So it is spelt into the op
  * and covered by the HMAC.
  */
-export type InlineType = "image/png" | "application/pdf";
-export type StorageOp = "put" | "get" | "get-inline" | "get-inline-pdf";
+export type InlineType = "image/png" | "application/pdf" | "video/mp4";
+export type StorageOp = "put" | "get" | "get-inline" | "get-inline-pdf" | "get-inline-video";
 
 /** The op that serves this type inline, and the type an inline op serves. One
  *  table, so the two directions cannot disagree. */
 const INLINE_OP: Record<InlineType, StorageOp> = {
   "image/png": "get-inline",
   "application/pdf": "get-inline-pdf",
+  // A class recording. There is NO "get" (attachment) op minted for one
+  // anywhere — that is what "plays but is not offered for download" means here,
+  // and it is a property of which operation is ever SIGNED, not of the markup.
+  "video/mp4": "get-inline-video",
 };
+
+/** Every inline op there is, derived from the one table. The download route
+ *  used to try each by name in a hand-written `??` chain, which is a list that
+ *  goes stale the moment a type is added — exactly how the second inline type
+ *  would have been served as a byte stream. */
+export const INLINE_OPS: readonly StorageOp[] = Object.values(INLINE_OP);
 export const inlineOp = (type: InlineType): StorageOp => INLINE_OP[type];
 export const inlineTypeOf = (op: StorageOp): InlineType | null =>
   (Object.entries(INLINE_OP).find(([, o]) => o === op)?.[0] as InlineType | undefined) ?? null;

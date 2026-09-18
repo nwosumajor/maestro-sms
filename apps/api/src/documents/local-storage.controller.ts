@@ -32,7 +32,7 @@ import type { Request, Response } from "express";
 import crypto from "node:crypto";
 import { MAX_UPLOAD_BYTES } from "@sms/types";
 import { Public } from "../auth/public.decorator";
-import { inlineTypeOf, signStorage, type InlineType, type StorageOp } from "./local-storage-signing";
+import { INLINE_OPS, inlineTypeOf, signStorage, type InlineType, type StorageOp } from "./local-storage-signing";
 import { safeDownloadType, safeFilename } from "./safe-content-type";
 import { STORAGE_PROVIDER, StubStorageProvider } from "./storage.provider";
 import { Inject } from "@nestjs/common";
@@ -171,6 +171,7 @@ export class LocalStorageController {
   async get(
     @Param("0") key: string,
     @Res({ passthrough: true }) res: Response,
+    @Req() req?: Request,
     @Query("exp") exp?: string,
     @Query("sig") sig?: string,
     @Query("filename") filename?: string,
@@ -182,11 +183,51 @@ export class LocalStorageController {
     // one that was actually granted rather than assuming the only one there
     // used to be. Falling through to a plain `get` check keeps the refusal
     // identical for a bad signature and an unsigned inline attempt.
-    const inline =
-      this.allows(key, "get-inline", exp, sig) ?? this.allows(key, "get-inline-pdf", exp, sig);
+    // Every inline op, derived from the one table rather than listed here. The
+    // chain used to be written out by hand and a third type would simply not
+    // have been tried — it would have been signed correctly, refused as inline,
+    // and served as a byte stream.
+    let inline: { contentType: InlineType } | null = null;
+    for (const op of INLINE_OPS) {
+      inline = this.allows(key, op, exp, sig);
+      if (inline) break;
+    }
     if (!inline) this.check(key, "get", exp, sig);
     const bytes = await this.storage.download(key);
     if (!bytes) throw new BadRequestException("Not available");
+
+    // RANGE, for video only.
+    //
+    // A `<video>` cannot SEEK without it, and Safari will not begin playback at
+    // all against a response that does not advertise ranges — so a recording
+    // would look simply broken on an iPad, which is a device a pupil is likely
+    // to be holding. A real bucket answers ranges natively; this stub is the
+    // development stand-in and has to behave the same way or the feature is
+    // testable nowhere but production.
+    if (inline?.contentType === "video/mp4") {
+      res.set({ "Accept-Ranges": "bytes" });
+      const range = /^bytes=(\d*)-(\d*)$/.exec(String(req?.headers?.range ?? ""));
+      if (range) {
+        // An open-ended `bytes=500-` is the ordinary shape a player sends.
+        const start = range[1] ? Number(range[1]) : 0;
+        const end = range[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
+        if (!Number.isFinite(start) || start > end || start >= bytes.length) {
+          // 416 carries the true size, which is how a player recovers rather
+          // than retrying the same impossible request.
+          res.status(416).set({ "Content-Range": `bytes */${bytes.length}` });
+          return new StreamableFile(Buffer.alloc(0));
+        }
+        res.status(206).set({
+          "Content-Type": safeDownloadType(inline.contentType),
+          "Content-Disposition": "inline",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Range": `bytes ${start}-${end}/${bytes.length}`,
+          "Content-Length": String(end - start + 1),
+        });
+        return new StreamableFile(bytes.subarray(start, end + 1));
+      }
+    }
+
     res.set(
       inline
         ? {
