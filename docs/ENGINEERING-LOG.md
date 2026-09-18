@@ -18039,3 +18039,16 @@ controller is PREFIXLESS and I had written `lms/recordings/...` (the route is
 `live-recordings/...` now — `live/recordings/...` would have been one rename
 from being shadowed by `live/:id`); and a hidden file input a screen reader
 would announce as blank.
+
+// AND THE GATE I WIDENED EARLIER THIS SESSION CAUGHT MY OWN TEST. The recording
+// spec proved the storage key never reaches the wire with
+// `expect(JSON.stringify(dto)).not.toContain(KEY)` — the exact shape
+// `assertions-that-match-by-accident` exists for, and the rule I had added to
+// it hours before. Fixing it exposed a worse problem underneath: the assertion
+// ran on the DELETE response, where the key is already null, so it would have
+// passed whether or not the mapper leaked. Three mutations told that story —
+// adding `recordingKey` to the DTO did not COMPILE (the type is the gate, so it
+// proves nothing); leaking the key through `className`, which does compile,
+// PASSED against the old test; and the same leak fails the rewritten one by
+// name. A test committed before its mutation was checked, caught by the repo
+// rather than by me.

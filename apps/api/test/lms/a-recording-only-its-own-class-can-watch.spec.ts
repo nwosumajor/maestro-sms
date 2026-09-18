@@ -180,11 +180,28 @@ describe("what playback hands back", () => {
   it("never puts the storage key on the wire", async () => {
     // A key plus any signature is a link. The DTO carries whether a recording
     // EXISTS; getting one is a separate, audited, short-lived grant.
-    const { svc } = harness(recorded());
-    const dto = await svc.deleteRecording(TEACHER, SESSION);
-    expect(JSON.stringify(dto)).not.toContain(KEY);
+    //
+    // WALKED, NOT SEARCHED. `JSON.stringify(dto).not.toContain(KEY)` is the
+    // shape this repo has been bitten by three times — a serialised document
+    // carries ids and timestamps nobody chose, so the assertion can pass or
+    // fail for reasons that have nothing to do with the property. Compare
+    // VALUES, and name the fields that must not exist.
+    // On a DTO that HAS a recording. Asserting it on the DELETE response proves
+    // nothing — the key is already null by then, so the check passes whether or
+    // not the mapper would have leaked it.
+    const { svc } = harness(recorded({ recordingKey: null }), { bytes: MP4 });
+    const dto = await svc.confirmRecording(TEACHER, SESSION, KEY);
+    expect(dto.hasRecording).toBe(true);
+
+    const values: unknown[] = [];
+    const walk = (v: unknown) => {
+      if (v && typeof v === "object") Object.values(v as Record<string, unknown>).forEach(walk);
+      else values.push(v);
+    };
+    walk(dto);
+    expect(values).not.toContain(KEY);
+    // And no field NAMED for the key, whatever it happens to hold.
     expect(Object.keys(dto)).not.toContain("recordingKey");
-    expect(dto.hasRecording).toBe(false);
   });
 
   it("says a recording was REMOVED rather than reading as never recorded", async () => {
