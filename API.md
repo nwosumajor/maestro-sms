@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **920 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **921 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -844,6 +844,7 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **920 routes across 90
 | POST | `/guardians` | 🔑 `guardian.write` · 📦 `lms` | Link a parent to a child |
 | DELETE | `/guardians/:parentId/:studentId` | 🔑 `guardian.write` · 📦 `lms` | Remove a guardian link. |
 | GET | `/live` | 🔑 `lms.content.read` · 📦 `lms` | Every live session this caller can see, across courses — paged, searched and filtered IN SQL, with the matching total. |
+| POST | `/live-recordings/retention/run` | 🔑 `lms.content.write` · 🔑 `platform.operate` · 📦 `lms` | Run the class-recording purge now. |
 | PUT | `/live/:id` | 🔑 `lms.content.write` · 📦 `lms` | Update Live |
 | GET | `/live/:id/attendance` | 🔑 `lms.content.write` · 📦 `lms` | Live Attendance |
 | POST | `/live/:id/join` | 🔑 `lms.content.read` · 📦 `lms` | Reveal the join URL + record attendance (server gates the join window). |

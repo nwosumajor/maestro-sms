@@ -1,5 +1,13 @@
 import { Module } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
+import { MaintenanceModule } from "../maintenance/maintenance.module";
+import { PrivilegedDatabaseModule } from "../common/privileged-database.module";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { RETENTION_DATABASE } from "../integrity/integrity.constants";
+import { RECORDING_RETENTION_QUEUE } from "./recording-retention.constants";
+import { RecordingRetentionService } from "./recording-retention.service";
+import { RecordingRetentionScheduler } from "./recording-retention.scheduler";
+import { RecordingRetentionProcessor } from "./recording-retention.processor";
 import { LmsController } from "./lms.controller";
 import { StudentExitService } from './student-exit.service';
 import { LmsService } from "./lms.service";
@@ -32,6 +40,12 @@ import { usingS3 } from "../documents/storage-provider.config";
     NotificationModule,
     GradebookModule,
     BullModule.registerQueue({ name: ACADEMIC_PROGRESSION_QUEUE }),
+    BullModule.registerQueue({ name: RECORDING_RETENTION_QUEUE }),
+    // The recording purge crosses tenants and writes to a bucket, so it needs
+    // the privileged client and the job-runs recorder — the same two the other
+    // fleet sweeps take.
+    MaintenanceModule,
+    PrivilegedDatabaseModule,
   ],
   controllers: [LmsController, LmsContentController, AcademicProgressionController],
   providers: [StudentExitService, SyllabusService, 
@@ -42,6 +56,10 @@ import { usingS3 } from "../documents/storage-provider.config";
     AcademicProgressionService,
     AcademicProgressionScheduler,
     AcademicProgressionProcessor,
+    RecordingRetentionService,
+    RecordingRetentionScheduler,
+    RecordingRetentionProcessor,
+    { provide: RETENTION_DATABASE, useExisting: PrivilegedDatabaseService },
     {
       provide: STORAGE_PROVIDER,
       useClass:

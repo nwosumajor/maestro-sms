@@ -17964,3 +17964,78 @@ path — saved PRESENT, corrected to LATE two seconds later:
 // than to what the query selects. Each time it failed as though the SERVICE
 // were broken. The return type is annotated now, which is what turns the next
 // one into a compile error instead.
+
+### A recording that plays and is never handed over
+
+Asked for a video-meeting page: one table across courses — course and topic,
+start, join live, duration, playback, created — with search by name or date, a
+filter for past recordings, and playback that pupils cannot download.
+
+WHAT ALREADY EXISTED, and it was more than expected: `LmsLiveSession` with a
+provider, a join URL, a SERVER-GATED join window and an attendance register —
+as a panel on one class's page. No course, no recordings, no search, and no way
+to see across courses at all.
+
+THE HONEST ANSWER TO "NOT DOWNLOADABLE" is the part worth recording. Anything a
+browser can play can be captured off the screen; the Assessment Integrity
+principles in this repo already say client-side measures are friction and never
+enforcement, and a video is no different. What CAN be enforced is which
+OPERATION is ever signed. `inline` was already "the TYPE the server vouches
+for", one signed op per type, so `video/mp4` gets `get-inline-video` and nothing
+anywhere mints an attachment op for a recording:
+
+    GET the play url -> 200  content-type video/mp4  disposition inline
+                             accept-ranges bytes
+    with Range       -> 206  content-range bytes 8-15/524
+
+The URL cannot be edited into a download because the download was never granted,
+and the storage key never crosses the wire — playback is a POST that mints a
+short-lived grant and audits the watch. The S3 provider needed NO change: it
+already pins `ResponseContentType` from the inline type. That is the payoff of a
+design that made the type the parameter rather than a boolean.
+
+// NAMING A FILE AND ACCEPTING ONE ARE DIFFERENT QUESTIONS. The obvious move was
+// to add `video/mp4` to `ACCEPTED_UPLOAD_TYPES` — which is the list a PARENT
+// may attach to an admission, so that would have let a family send a video
+// where a birth certificate belongs. `sniffUploadType` now names every type any
+// feature takes; each feature checks its own allowlist.
+// GOTCHA: MP4 needs a BRAND check, not just `ftyp` at offset 4 — that signature
+// is ISO base media, which QuickTime `.mov` also writes, and a `.mov` served as
+// video/mp4 is a lesson that silently does not play for the pupil it was
+// recorded for. `qt  ` is the brand a Mac screen recording writes.
+// GOTCHA: the download route tried each inline op in a hand-written `??` chain.
+// A third type would have been signed correctly, refused as inline and served
+// as a byte stream — a download. Derived from the one table now.
+// GOTCHA: a `<video>` cannot SEEK without ranges and Safari will not begin
+// playback at all, so the local stub had to learn 206 or the feature would be
+// testable nowhere but production — on the device a pupil is likeliest to hold.
+
+WHO MAY WATCH: teaching staff and the pupils who were IN that class. Guardians
+are refused — a recording shows other people's children, and a parent watching
+it is a disclosure those families never agreed to. That is a decision, and
+`a-recording-only-its-own-class-can-watch.spec.ts` fails if somebody widens it.
+
+RETENTION. Bytes are dated to the end of the academic session the lesson was
+taught in; a nightly fleet sweep removes them and the row keeps
+`recordingRemovedAt`, because "removed at the end of 2025/2026" and "never
+recorded" are different facts and only one needs explaining to a pupil who came
+back to revise. A school with undated sessions falls back to a BOUNDED year, not
+to forever: for storing footage of minors the fail-safe tightens.
+
+// The sweep ADVANCES, which the declined-applicant purge did not for as long as
+// it existed: clearing `recordingKey` takes the row out of the predicate the
+// page is drawn from, so run two reaches what run one capped out of. Pinned by
+// a two-run case.
+// GOTCHA found by a double returning LIVE objects: `bytesReclaimed` was read
+// off the row AFTER the update that nulls it. Prisma hands back a fresh object
+// so it would have worked in production — a figure an operator reads should not
+// turn on object identity, and the size is captured before the write now.
+
+FOUR GATES CAUGHT REAL THINGS on the way, each of them the thing it exists for:
+a raw `new Date()` on a query value (JS rolls `2026-04-31` to 1 May — now
+`isoDay` plus the shared `dateWindow`); five routes with no answer to "how is
+this reached?"; a catalogue entry naming a route that did not exist, because the
+controller is PREFIXLESS and I had written `lms/recordings/...` (the route is
+`live-recordings/...` now — `live/recordings/...` would have been one rename
+from being shadowed by `live/:id`); and a hidden file input a screen reader
+would announce as blank.

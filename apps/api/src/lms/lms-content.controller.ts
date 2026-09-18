@@ -38,6 +38,9 @@ import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { dateWindow, pageNumber } from "../common/status-filter";
 import { isoDay } from "../common/calendar-day";
+import { JobRunsService } from "../maintenance/job-runs.service";
+import { OPERATOR_PERMISSIONS } from "@sms/types";
+import { RecordingRetentionService, type RecordingRetentionResult } from "./recording-retention.service";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LmsContentService } from "./lms-content.service";
@@ -151,7 +154,11 @@ const assignModuleSchema = z.object({ moduleId: z.string().uuid().nullable() });
 @RequireModule(MODULES.LMS)
 @Controller()
 export class LmsContentController {
-  constructor(private readonly content: LmsContentService) {}
+  constructor(
+    private readonly content: LmsContentService,
+    private readonly recordingRetention: RecordingRetentionService,
+    private readonly jobRuns: JobRunsService,
+  ) {}
 
   @Post("classes/:classId/content")
   @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
@@ -398,6 +405,29 @@ export class LmsContentController {
   @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
   deleteRecording(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<LmsLiveSessionDto> {
     return this.content.deleteRecording(p, id);
+  }
+
+  /**
+   * Run the class-recording purge now.
+   *
+   * The sweep is nightly; this is for the day somebody asks whether last year's
+   * recordings are actually gone and the answer has to be yes rather than
+   * "tonight". EITHER door — this school's own teaching staff, or a platform
+   * operator running the fleet from the jobs console.
+   */
+  // `live-recordings/...`, not `live/recordings/...`: this controller is
+  // prefixless and `live/:id/...` is already a route, so a literal second
+  // segment there is one rename away from being shadowed by the parameter.
+  @Post("live-recordings/retention/run")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE, OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  runRecordingRetention(@CurrentPrincipal() p: Principal): Promise<RecordingRetentionResult> {
+    // THE CALLER'S SCHOOL, unless the caller is a platform operator. Running the
+    // fleet off a per-school permission is how one teacher's press deletes
+    // another school's recordings.
+    const fleet = p.permissions.includes(OPERATOR_PERMISSIONS.PLATFORM_OPERATE);
+    return this.jobRuns.record("lms.recordingRetention", "MANUAL", () =>
+      this.recordingRetention.purgeExpired("MANUAL", fleet ? undefined : p.schoolId),
+    );
   }
 
   @Get("live/:id/attendance")

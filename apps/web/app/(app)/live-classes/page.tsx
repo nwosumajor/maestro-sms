@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { LiveClassTable } from "@/components/lms/LiveClassTable";
+import { SweepButton } from "@/components/maintenance/SweepButton";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,16 @@ export default async function LiveClassesPage({
             </>
           }
         />
+        {/* The nightly purge, on demand — for the day somebody asks whether
+            last year's recordings are actually gone and the answer has to be
+            yes rather than "tonight". School-scoped for school staff. */}
+        {hasPermission(user.permissions, "lms.content.write") && (
+          <SweepButton
+            path="live-recordings/retention/run"
+            label="Remove expired recordings now"
+            help="Recordings are removed at the end of the academic session they were taught in. This runs that clear-out for your school now."
+          />
+        )}
         <LiveClassTable
           initial={page ?? { rows: [], total: 0, page: 1, pageSize: 25 }}
           filters={{ q: sp.q ?? "", from: sp.from ?? "", to: sp.to ?? "", recorded: sp.recorded === "1" }}

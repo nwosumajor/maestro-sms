@@ -2625,6 +2625,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /live-recordings/retention/run": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/live-classes/page.tsx renders a SweepButton posting to it"
+    },
     "POST /live/:p/join": {
       "kind": "ui",
       "note": "reviewed: components/lms/LiveSessions.tsx builds this via its local req() helper"
