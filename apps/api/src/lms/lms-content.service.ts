@@ -2011,9 +2011,13 @@ export class LmsContentService {
       // classes they teach; anyone else sees the classes they are enrolled in
       // or are a guardian for. One shared definition of "classes I teach"
       // (`classIdsTaughtBy`) rather than a fifth copy of the rule.
+      // ASKED ONCE. "Which classes do I teach" is two queries, and it was asked
+      // again further down to decide whether attendee counts are this reader's
+      // business — four round trips for one answer, on every page.
+      const schoolWide = this.isSchoolWide(p);
+      const taught = schoolWide ? [] : await classIdsTaughtBy(tx, p.userId);
       let classIds: string[] | null = null;
-      if (!this.isSchoolWide(p)) {
-        const taught = await classIdsTaughtBy(tx, p.userId);
+      if (!schoolWide) {
         const [enrolled, wards] = await Promise.all([
           tx.enrollment.findMany({ where: { studentId: p.userId, status: "ACTIVE" }, select: { classId: true } }),
           tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } }),
@@ -2082,7 +2086,7 @@ export class LmsContentService {
 
       // Attendee counts are a STAFF fact, and one grouped query for the page.
       const counts = new Map<string, number>();
-      if (this.isSchoolWide(p) || (await classIdsTaughtBy(tx, p.userId)).length > 0) {
+      if (schoolWide || taught.length > 0) {
         const grouped = await tx.lmsLiveAttendance.groupBy({
           by: ["sessionId"],
           where: { sessionId: { in: rows.map((r) => r.id) } },
