@@ -190,6 +190,11 @@
   }
   .note.two-person { border-left-color: var(--caution); }
   .note.safe { border-left-color: var(--affirm); }
+  /* A caution about something the reader can get WRONG, as against
+     `two-person` (a control) and `safe` (a reassurance). Defined because it is
+     used: an undefined variant renders as an ordinary note and quietly loses
+     the emphasis it was written to carry. */
+  .note.warn { border-left-color: var(--caution); }
   .note p:last-child { margin-bottom: 0; }
   .note-tag {
     display: block; font-family: var(--mono); font-size: .68rem;
@@ -198,6 +203,7 @@
   }
   .note.two-person .note-tag { color: var(--caution); }
   .note.safe .note-tag { color: var(--affirm); }
+  .note.warn .note-tag { color: var(--caution); }
 
   /* ---- Step sequence (only used where order is genuinely load-bearing) ---- */
   .steps { list-style: none; margin: 1.4rem 0; padding: 0; display: flex; flex-direction: column; gap: 0; counter-reset: step; }
@@ -706,6 +712,15 @@
 
       <h3>Data protection requests</h3>
       <p><strong>Admin → Privacy</strong> handles the two rights families may exercise under NDPR: a full export of the data you hold on them, and a request for erasure. Erasure is reviewed rather than automatic, because some records — financial and statutory ones — you are legally required to keep. The system distinguishes the two for you.</p>
+
+      <h3>Archive each term and each session — and label it for the year it covers</h3>
+      <p><strong>Admin → Long-term archives</strong> takes a permanent, checksummed copy of a school year or a single term: enrolments, registers, subject results, invoices, approvals and the audit trail, as they stood. This is what answers a records request years after the child has left, long after the people who knew them have moved on.</p>
+      <p>Ended terms are archived automatically by a nightly sweep. Take one by hand at the <strong>close of each term</strong> if you want it before the sweep runs, and one for the <strong>whole session at the end of the year</strong>.</p>
+      <div class="note warn">
+        <span class="note-tag">The label does not decide what is inside</span>
+        <p>Always <strong>pick the term or session from the list</strong>. The picked item is what bounds the export; the label is only its name. An archive typed as &ldquo;2025/2026&rdquo; with nothing selected contains <em>every year your school has ever had</em> — and reads, to whoever opens it in ten years, as though it were one year. The list shows the period each archive actually covers beside its label, and an archive covering everything says so, so a mislabelled one is visible at a glance.</p>
+      </div>
+      <p>Name it so somebody who was not there can tell what is inside without opening it: the school year, the term, and why it was taken — <em>&ldquo;2025/2026 First Term — end of term&rdquo;</em>, not <em>&ldquo;backup&rdquo;</em> or today&rsquo;s date. Downloading an archive asks you to re-enter your password and returns a checksum, so the recipient can prove the bytes were never altered in the years between.</p>
     </section>
 
     <!-- ================================================================= -->
@@ -935,6 +950,7 @@
             <li><strong>Recertification</strong> — who still needs access</li>
             <li>Review the <strong>audit log</strong> for anything unfamiliar</li>
             <li>Confirm results were published and cards issued</li>
+            <li>Check the <strong>term archive</strong> exists and is labelled for that term</li>
             <li>Check the subscription against real student numbers</li>
           </ul>
         </div>
@@ -942,6 +958,7 @@
           <h4>Each year · half a day</h4>
           <ul>
             <li>Roll classes and the academic session forward</li>
+            <li>Take a <strong>session archive</strong>, named for the year it covers</li>
             <li>Archive leavers; add them to <strong>Alumni</strong></li>
             <li>Review your plan against what you actually use</li>
             <li>Confirm a restore from backup has been tested</li>

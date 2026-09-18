@@ -17865,3 +17865,54 @@ page has, not a second server-side definition of who teaches what.
 Guard: `a-register-that-cannot-mix-two-classes.spec.ts` drives the real rule for
 a teacher who supervises one class and teaches three. Mutation-validated:
 widening `canTakeRegister` to "any teacher" fails five cases across three specs.
+
+### A day in the record that could not say who signed for it
+
+Asked whether the attendance history serves audit and investigative review. Most
+of it does: `/students/:id/attendance` pages the day log with a date window, and
+`/students/:id/attendance/compiled` answers per month, per term and per session
+with lifetime totals, `source: ROLLUP|LIVE`, and `outsideAnyBucket` for registers
+falling in no configured term. Scoping is inherited from `assertCanAccessStudent`
+rather than restated.
+
+What it could not answer is the second half of every investigation. The day row
+carried `{ status, note, session: { classId, date } }` — so **who signed that
+register, and whether the mark was changed afterwards, were on another screen**
+(the class register for that day) and only reachable by a reader who knew to look
+and which class to look in. Both facts were one join away on a read that already
+made it.
+
+The record now carries the member of staff the register is signed by, the class
+by NAME, and when the session was last written. A mark RECORDED after the day it
+is about is a correction, and the row says so: "Demo Teacher (recorded 9 Aug
+2026)" against a 7 Aug register. That is the difference between a record and an
+audit record.
+
+// GOTCHA, and the reason the provenance could be added with nothing checking it
+// arrived: `getStudentAttendance` declared `records: unknown[]`. A service whose
+// return type is `unknown` is an unchecked wire — a field dropped on this path
+// reaches the page as `undefined` and renders as a blank cell, which on this
+// screen is a claim about a child. Annotated with a real
+// `AttendanceHistoryPageDto` now, so the next omission fails to COMPILE.
+// GOTCHA: the fixture that broke was a double returning `{ id: "r" }` × 100 —
+// shaped to the columns its own assertion touched, not to the row the query
+// returns. It passed until the service read one more field and then failed as
+// though the SERVICE were broken. Third time in two days.
+
+**And the documentation gap the same question exposed.** `/help` said nothing at
+all about archiving a term or a session, and the manual mentioned only
+"Archive leavers" — while `/admin/archives` has existed, with a nightly sweep for
+ended terms, a session/term PICKER, and checksummed downloads behind step-up.
+Leadership guidance added to both, and it leads with the trap this log already
+records: **the label bounds nothing**. An archive typed "2025/2026" with nothing
+selected holds every year the school has ever had and reads as though it were
+one. Pick the term or session from the list; the list is what bounds the export.
+
+// GOTCHA: the manual's stylesheet defines `.note.two-person` and `.note.safe`
+// and nothing else, so the `.note.warn` I reached for would have rendered as an
+// ordinary note — an undefined variant does not fail, it quietly loses the
+// emphasis it was written to carry. Defined it.
+// The regenerated `runbook-html.ts` turned out to be STALE on main against its
+// own markdown (`runbook-freshness` fails on the committed copy and passes on
+// the rebuild), so `pnpm --filter @sms/web build:manual` picked up a second
+// document nobody had regenerated.

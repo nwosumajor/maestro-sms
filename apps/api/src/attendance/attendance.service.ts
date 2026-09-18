@@ -18,7 +18,9 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue, RegisterStatusDto } from "@sms/types";
 import {
-  isSchoolDay, ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct } from "@sms/types";
+  isSchoolDay, ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct,
+  AttendanceHistoryPageDto,
+} from "@sms/types";
 import type { AttendanceBucketDto, AttendanceCompiledDto, AttendanceGrain } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -389,14 +391,11 @@ export class AttendanceService {
     p: Principal,
     studentId: string,
     opts: { page?: number; pageSize?: number; from?: string; to?: string } = {},
-  ): Promise<{
-    records: unknown[];
-    page: number;
-    pageSize: number;
-    total: number;
-    from: string | null;
-    to: string | null;
-  }> {
+    // ANNOTATED, so a field dropped from a record fails to COMPILE rather than
+    // reaching the page as `undefined` and rendering as a blank cell — which on
+    // this screen is a claim about a child. `records: unknown[]` is what let the
+    // provenance fields be added without anything checking they arrived.
+  ): Promise<AttendanceHistoryPageDto> {
     const pageSize = Math.min(Math.max(opts.pageSize ?? 100, 1), 200);
     const page = Math.max(opts.page ?? 1, 1);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -422,7 +421,22 @@ export class AttendanceService {
           // at the TOP of the history, above this week — so a parent reading down the
           // list saw an out-of-sequence date and no way to tell why.
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-          include: { session: { select: { classId: true, date: true } } },
+          // PROVENANCE, not just the mark. Who signed the register and when it
+          // was last written are what make this an audit record rather than a
+          // list of letters — and both are one join away on a read that already
+          // makes it. `class` is selected for its NAME: a reader resolving a
+          // uuid by hand is a reader who will resolve one of them wrongly.
+          include: {
+            session: {
+              select: {
+                classId: true,
+                date: true,
+                updatedAt: true,
+                class: { select: { name: true } },
+                takenBy: { select: { id: true, name: true } },
+              },
+            },
+          },
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),
@@ -430,7 +444,33 @@ export class AttendanceService {
         // this codebase came from taking `.length` of a capped list.
         tx.attendanceRecord.count({ where }),
       ]);
-      return { records, page, pageSize, total, from: opts.from ?? null, to: opts.to ?? null };
+      // Shaped to the DTO here rather than leaking Prisma's include tree: the
+      // web consumes `Serialized<AttendanceRecordDto>`, so a field renamed on
+      // one side has to fail to compile on the other.
+      const shaped = (records as Array<{
+        id: string;
+        status: string;
+        note: string | null;
+        session: {
+          classId: string;
+          date: Date;
+          updatedAt: Date;
+          class: { name: string } | null;
+          takenBy: { id: string; name: string } | null;
+        };
+      }>).map((r) => ({
+        id: r.id,
+        status: r.status,
+        note: r.note,
+        session: {
+          classId: r.session.classId,
+          className: r.session.class?.name ?? null,
+          date: r.session.date,
+          takenBy: r.session.takenBy,
+          recordedAt: r.session.updatedAt,
+        },
+      }));
+      return { records: shaped, page, pageSize, total, from: opts.from ?? null, to: opts.to ?? null };
     });
   }
 

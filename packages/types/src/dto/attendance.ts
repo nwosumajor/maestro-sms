@@ -4,9 +4,49 @@ export interface AttendanceRecordDto {
   id: string;
   status: string;
   note: string | null;
-  session: { classId: string; date: string };
+  /**
+   * WHO SAID SO, AND WHEN.
+   *
+   * A register is a legal record of where a child was, and the question an
+   * investigation actually asks is not only "was this child marked absent on
+   * the 12th" but "who recorded that, and has it been changed since". This
+   * carried the status and the date alone, so the answer to both was on another
+   * screen — the class register for that day — and only if the reader knew to
+   * go and look, and which class to look in.
+   *
+   * `takenBy` is the member of staff the register is signed by
+   * (`AttendanceSession.takenById`), null where that person has since been
+   * removed; `recordedAt` is when the session was last written, so a mark that
+   * was CORRECTED weeks later is visibly out of step with its own date; and
+   * `className` saves the reader resolving a uuid by hand.
+   */
+  session: {
+    classId: string;
+    className: string | null;
+    date: Date;
+    takenBy: { id: string; name: string } | null;
+    recordedAt: Date;
+  };
 }
 
+
+/**
+ * A page of one pupil's day-by-day record, with the TRUE total.
+ *
+ * Declared so the service can be annotated: without a return type the shape was
+ * inferred, so a field dropped here would have reached the page as `undefined`
+ * and rendered as a blank cell — which on this screen is a claim about a child.
+ */
+export interface AttendanceHistoryPageDto {
+  records: AttendanceRecordDto[];
+  page: number;
+  pageSize: number;
+  /** Days in the whole record, not the page — an audit that reports only what
+   *  fitted on a page is worse than one that says nothing. */
+  total: number;
+  from: string | null;
+  to: string | null;
+}
 
 /**
  * One class's register for a day, and WHO is responsible for it.

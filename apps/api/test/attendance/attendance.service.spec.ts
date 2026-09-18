@@ -340,7 +340,24 @@ describe("AttendanceService scoping", () => {
     // would report 100 here and look perfectly healthy.
     const { service, tx } = makeService({});
     (tx.attendanceRecord.count as jest.Mock).mockResolvedValue(940);
-    (tx.attendanceRecord.findMany as jest.Mock).mockResolvedValue(new Array(100).fill({ id: "r" }));
+    // A row as the QUERY returns it, including the session the read joins for
+    // provenance — who signed the register and when. A double shaped like the
+    // columns the assertion happens to touch passes until the service reads one
+    // more field, and then fails as though the service were broken.
+    (tx.attendanceRecord.findMany as jest.Mock).mockResolvedValue(
+      new Array(100).fill({
+        id: "r",
+        status: "PRESENT",
+        note: null,
+        session: {
+          classId: "c-1",
+          date: new Date("2026-03-12"),
+          updatedAt: new Date("2026-03-12"),
+          class: { name: "SS1 Science A" },
+          takenBy: { id: "u-teacher", name: "Akinlabi Alex" },
+        },
+      }),
+    );
 
     const out = await service.getStudentAttendance(principal(["student"], "stu-self"), "stu-self", { page: 3 });
     expect(out.total).toBe(940);
