@@ -953,7 +953,11 @@ export class AttendanceService {
             })) as Array<{ id: string; name: string; supervisorId: string | null }>;
           })();
       if (classes.length === 0) {
-        return { date: iso, classes: [], remindersActive: true, remindersOffReason: null };
+        // Still says WHOSE view this is. A head of school with no classes yet and
+        // a teacher attached to none are different readers, and the page shapes
+        // itself from this — an early return that omitted it would quietly give
+        // an administrator a class teacher's page.
+        return { date: iso, classes: [], remindersActive: true, remindersOffReason: null, schoolWide: this.isSchoolWide(p) };
       }
 
       const classIds = classes.map((c) => c.id);
@@ -1020,6 +1024,9 @@ export class AttendanceService {
         date: iso,
         remindersActive: remindersOffReason === null,
         remindersOffReason,
+        // The SAME predicate that chose the class list above, reported so the
+        // page can shape itself rather than re-deriving who sees the school.
+        schoolWide: this.isSchoolWide(p),
         classes: classes.map((c) => {
           const sessionId = sessionByClass.get(c.id);
           const teacher = c.supervisorId ? teacherById.get(c.supervisorId) : undefined;

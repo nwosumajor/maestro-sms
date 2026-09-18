@@ -17804,3 +17804,64 @@ Verified on the reporting teacher's own account and class, in a real browser:
 class select "SS1 Science A", four pupils listed by name, Save present,
 "Take register" scrolling it into view, one pupil marked absent, POST 201,
 "Register saved." The register written by that check has been removed.
+
+### The page that mixed nothing and looked like it did
+
+Asked whether the register for SS1 Science A could pick up pupils from the other
+classes its teacher takes Mathematics in. It could not, and never could:
+`canTakeRegister` decides both the offered list and the write, and the roster is
+read per CLASS. Verified against the real school — Akinlabi Alex supervises SS1
+Science A and teaches Maths in SS1 Science A, SS1 Science B and SS2 Art A:
+
+    canTake   SS1 Science A  true   |  SS1 Science B  false  |  SS2 Art A  false
+    roster    Bimbo Kadiri, Poena John, Shola Babatunde, Wisdom Babs
+              — Science A's four, not Science B's four
+
+THE COMPLAINT WAS STILL RIGHT. `/attendance` gave that teacher four stacked
+sections: an outstanding-register board, a board of EVERY class they teach (two
+rows reading "view only"), their own register, and a pupil picker spanning every
+pupil they teach across all three classes. Two of the four are oversight tools
+for heads and administrators. The data was never mixed; the page was, and this
+is the record of where a child was — a screen that has to be explained is a
+screen that will be misread.
+
+So the page takes the SHAPE of the reader's duty. `RegisterStatusDto.schoolWide`
+is the server's own answer (`SCHOOL_WIDE_ROLES`), carried for the same reason
+`canTake` is: so the page never re-derives who sees the school. A class teacher
+gets their own class, first and alone; oversight readers keep the boards. Driven
+in a browser, all three:
+
+    class teacher   "Register — SS1 Science A" + record   form at y=691, VISIBLE
+                    only SS1 Science A named on the page; his four pupils
+    head_teacher    "Registers" + record                  no form (takes none)
+    junior_admin    "Registers" + "Attendance by class"   all six classes
+
+The pupil picker follows the same rule: for a class teacher it is their class,
+not everyone they teach.
+
+// GOTCHA, caught by driving all THREE roles rather than the one that reported
+// it: shaping the page from `/attendance/registers` made it depend on a read
+// gated on `canWrite` — and the head teacher holds `attendance.amend.review`
+// and NOT `attendance.write`. First run after the change: head_teacher's page
+// rendered no boards at all, leaving the approver of a stale correction unable
+// to see the registers the decision turns on. That is the dead grant this
+// module has already met once, reintroduced from the other side. The read is
+// gated on `canChase` now; the endpoint only ever needed `attendance.read`.
+// GOTCHA: the existing spec pinned the literal JSX `{canChase && <RegisterBoard`
+// and went red on a change that STRENGTHENED it. Re-anchored to the gate
+// rather than its spelling — the eleventh time a fixed-text assertion in this
+// repo has failed on an improvement.
+// GOTCHA on my own guard: asserting the SOURCE contains
+// `schoolWide: this.isSchoolWide(p)` passed a mutation that hard-coded `true`
+// on the main return, because the empty-class early return still carried the
+// real call. It counts both sides now — every site that REPORTS it must
+// COMPUTE it.
+
+`/classes` labels each card with what the READER is to that class ("Your class ·
+you teach Mathematics" against "You teach Mathematics"), derived from
+`supervisorId` and `subjectTeachers` already on the row — a reading of data the
+page has, not a second server-side definition of who teaches what.
+
+Guard: `a-register-that-cannot-mix-two-classes.spec.ts` drives the real rule for
+a teacher who supervises one class and teaches three. Mutation-validated:
+widening `canTakeRegister` to "any teacher" fails five cases across three specs.

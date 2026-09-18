@@ -28,7 +28,30 @@ type Row = Serialized<ClassOverviewDto>;
 const STREAM_LABEL: Record<string, string> = CLASS_STREAM_LABELS;
 const STAGE_LABEL: Record<string, string> = SUBJECT_STAGE_LABELS;
 
-export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boolean }) {
+/**
+ * WHAT AM I TO THIS CLASS?
+ *
+ * A teacher is attached to a class in two quite different ways and the card said
+ * neither. Akinlabi Alex is the FORM TEACHER of SS1 Science A — he takes its
+ * register, and it is his name against where those children were — and he also
+ * teaches Mathematics to SS1 Science B and SS2 Art A, where he takes no register
+ * at all. The card named the form teacher and listed who teaches what, so the
+ * reader could work it out; nothing said it.
+ *
+ * Derived here rather than added to the DTO: `supervisorId` and `subjectTeachers`
+ * are already on every row, so this is a reading of data the page has, not a
+ * second server-side definition of who teaches what that could drift from the
+ * first.
+ */
+function yourRole(c: Row, viewerId: string | undefined): { form: boolean; subjects: string[] } {
+  if (!viewerId) return { form: false, subjects: [] };
+  return {
+    form: c.supervisorId === viewerId,
+    subjects: c.subjectTeachers.filter((st) => st.teacherId === viewerId).map((st) => st.subjectName),
+  };
+}
+
+export function ClassGrid({ classes, canEnrol, viewerId }: { classes: Row[]; canEnrol: boolean; viewerId?: string }) {
   const [q, setQ] = React.useState("");
   const [only, setOnly] = React.useState<"all" | "attention">("all");
 
@@ -175,6 +198,20 @@ export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boo
                     {c.homeRoomName && (
                       <span className="text-muted-foreground">Room: {c.homeRoomName} · </span>
                     )}
+                    {/* THE READER'S OWN STANDING, first and in their own terms.
+                        "Form teacher" is the class whose register is yours;
+                        a subject is a class you teach and do not mark. */}
+                    {(() => {
+                      const mine = yourRole(c, viewerId);
+                      if (!mine.form && mine.subjects.length === 0) return null;
+                      return (
+                        <Badge variant={mine.form ? "default" : "outline"}>
+                          {mine.form
+                            ? `Your class${mine.subjects.length ? ` · you teach ${mine.subjects.join(", ")}` : ""}`
+                            : `You teach ${mine.subjects.join(", ")}`}
+                        </Badge>
+                      );
+                    })()}
                     {c.supervisorName ? (
                       <span className="text-muted-foreground">Form teacher: {c.supervisorName}</span>
                     ) : (

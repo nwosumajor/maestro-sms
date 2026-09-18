@@ -70,6 +70,22 @@ export interface RegisterStatusDto {
   remindersActive: boolean;
   /** Why it would not. Null when it would. */
   remindersOffReason: RegisterReminderOffReason | null;
+  /**
+   * Does this reader see attendance for the WHOLE school, or only the classes
+   * they are attached to?
+   *
+   * The server's own answer (`SCHOOL_WIDE_ROLES`), carried so the page never
+   * re-derives it — the same reason `canTake` is on each row. It decides SHAPE,
+   * not access: a head or administrator gets the oversight boards, and a class
+   * teacher gets their own register and nothing about anybody else's class.
+   *
+   * A teacher who supervises one class and teaches three others sees all four
+   * on an oversight board, which reads as though the register might mix them.
+   * It never did — the roster is the CLASS's enrolment and `canTake` is false
+   * for the three — but a screen that has to be explained is a screen that will
+   * be misread.
+   */
+  schoolWide: boolean;
 }
 
 /**
