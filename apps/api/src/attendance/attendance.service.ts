@@ -18,7 +18,9 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue, RegisterStatusDto } from "@sms/types";
 import {
-  isSchoolDay, ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct } from "@sms/types";
+  isSchoolDay, ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct,
+  AttendanceHistoryPageDto,
+} from "@sms/types";
 import type { AttendanceBucketDto, AttendanceCompiledDto, AttendanceGrain } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -240,8 +242,21 @@ export class AttendanceService {
 
     // MAKER-CHECKER on a STALE register (>7 days old): a plain teacher's edit is
     // not applied directly — it raises an ATTENDANCE_AMENDMENT a head teacher /
-    // school admin / principal must approve. Leadership (holders of
-    // attendance.amend.review) edit stale registers directly.
+    // school admin / principal must approve.
+    //
+    // WHAT THIS DOES NOT MEAN, because the comment here used to say it and it
+    // was false for two of the three roles that hold the permission: an
+    // approver does NOT get to author. `isApprover` only chooses the BRANCH —
+    // both branches then call `assertCanTakeRegister`, so a correction is
+    // gated exactly like a fresh register, by the class's own supervisor or
+    // school_admin as cover. Measured at day 10: teacher 201 pendingApproval,
+    // school_admin 201 direct, principal AND head_teacher 403.
+    //
+    // That is deliberate. A register attests "I looked at this room", and a
+    // correction is a claim about the same room; amend.review exists so a
+    // senior can APPROVE a teacher's account of it, not replace it. The
+    // principal holds attendance.write and is refused at row scope — the dead
+    // grant this codebase records elsewhere, here on purpose.
     if (stale && !isApprover) {
       await this.db.runAsTenant(this.ctx(p), async (tx) => {
         // Write intent, so the WRITE guard — raising an amendment for a class you
@@ -376,14 +391,11 @@ export class AttendanceService {
     p: Principal,
     studentId: string,
     opts: { page?: number; pageSize?: number; from?: string; to?: string } = {},
-  ): Promise<{
-    records: unknown[];
-    page: number;
-    pageSize: number;
-    total: number;
-    from: string | null;
-    to: string | null;
-  }> {
+    // ANNOTATED, so a field dropped from a record fails to COMPILE rather than
+    // reaching the page as `undefined` and rendering as a blank cell — which on
+    // this screen is a claim about a child. `records: unknown[]` is what let the
+    // provenance fields be added without anything checking they arrived.
+  ): Promise<AttendanceHistoryPageDto> {
     const pageSize = Math.min(Math.max(opts.pageSize ?? 100, 1), 200);
     const page = Math.max(opts.page ?? 1, 1);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -409,7 +421,26 @@ export class AttendanceService {
           // at the TOP of the history, above this week — so a parent reading down the
           // list saw an out-of-sequence date and no way to tell why.
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-          include: { session: { select: { classId: true, date: true } } },
+          // PROVENANCE, not just the mark. Who signed the register and when it
+          // was last written are what make this an audit record rather than a
+          // list of letters — and both are one join away on a read that already
+          // makes it. `class` is selected for its NAME: a reader resolving a
+          // uuid by hand is a reader who will resolve one of them wrongly.
+          // PROVENANCE, not just the mark. Who signed the register, and when
+          // THIS PUPIL's mark was written and last changed — the record carries
+          // its own `createdAt`/`updatedAt`, which is the per-pupil answer a
+          // session-level timestamp could never give (one register saves thirty
+          // marks at once; a gate scan writes one).
+          include: {
+            session: {
+              select: {
+                classId: true,
+                date: true,
+                class: { select: { name: true } },
+                takenBy: { select: { id: true, name: true } },
+              },
+            },
+          },
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),
@@ -417,7 +448,39 @@ export class AttendanceService {
         // this codebase came from taking `.length` of a capped list.
         tx.attendanceRecord.count({ where }),
       ]);
-      return { records, page, pageSize, total, from: opts.from ?? null, to: opts.to ?? null };
+      // Shaped to the DTO here rather than leaking Prisma's include tree: the
+      // web consumes `Serialized<AttendanceRecordDto>`, so a field renamed on
+      // one side has to fail to compile on the other.
+      const shaped = (records as Array<{
+        id: string;
+        status: string;
+        note: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        session: {
+          classId: string;
+          date: Date;
+          class: { name: string } | null;
+          takenBy: { id: string; name: string } | null;
+        };
+      }>).map((r) => ({
+        id: r.id,
+        status: r.status,
+        note: r.note,
+        markedAt: r.createdAt,
+        // NULL WHEN IT NEVER MOVED, so a reader never compares two timestamps to
+        // find out whether they are looking at a correction. Prisma sets
+        // `updatedAt` on create as well, so equality — not "is it present" — is
+        // what distinguishes an untouched mark from an amended one.
+        amendedAt: r.updatedAt.getTime() === r.createdAt.getTime() ? null : r.updatedAt,
+        session: {
+          classId: r.session.classId,
+          className: r.session.class?.name ?? null,
+          date: r.session.date,
+          takenBy: r.session.takenBy,
+        },
+      }));
+      return { records: shaped, page, pageSize, total, from: opts.from ?? null, to: opts.to ?? null };
     });
   }
 
@@ -940,7 +1003,11 @@ export class AttendanceService {
             })) as Array<{ id: string; name: string; supervisorId: string | null }>;
           })();
       if (classes.length === 0) {
-        return { date: iso, classes: [], remindersActive: true, remindersOffReason: null };
+        // Still says WHOSE view this is. A head of school with no classes yet and
+        // a teacher attached to none are different readers, and the page shapes
+        // itself from this — an early return that omitted it would quietly give
+        // an administrator a class teacher's page.
+        return { date: iso, classes: [], remindersActive: true, remindersOffReason: null, schoolWide: this.isSchoolWide(p) };
       }
 
       const classIds = classes.map((c) => c.id);
@@ -1007,6 +1074,9 @@ export class AttendanceService {
         date: iso,
         remindersActive: remindersOffReason === null,
         remindersOffReason,
+        // The SAME predicate that chose the class list above, reported so the
+        // page can shape itself rather than re-deriving who sees the school.
+        schoolWide: this.isSchoolWide(p),
         classes: classes.map((c) => {
           const sessionId = sessionByClass.get(c.id);
           const teacher = c.supervisorId ? teacherById.get(c.supervisorId) : undefined;

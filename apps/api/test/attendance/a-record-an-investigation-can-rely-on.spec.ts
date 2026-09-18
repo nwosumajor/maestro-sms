@@ -375,3 +375,109 @@ describe("the month page is a DATE WINDOW, and it is anchored on the record", ()
     expect(r.total).toBe(30);
   });
 });
+
+
+/**
+ * WHO SAID SO, AND WHEN.
+ *
+ * The day list answered "what was this child marked" and stopped. An
+ * investigation asks two more things and the record could answer neither:
+ * WHO signed that register, and has the mark been changed since. Both facts
+ * were one join away on a read that already made it — and on another screen
+ * entirely for a reader who knew to go and look, and which class to look in.
+ *
+ * A mark RECORDED long after the day it is about is a correction. That is the
+ * difference between a record and an audit record.
+ */
+describe("a day in the record says who signed for it", () => {
+  const DAY = new Date("2026-03-12");
+
+  function harness(
+    sessionRow: Record<string, unknown>,
+    stamps: { createdAt: Date; updatedAt: Date } = { createdAt: new Date("2026-03-12T08:05:00Z"), updatedAt: new Date("2026-03-12T08:05:00Z") },
+  ) {
+    const tx = {
+      class: { findFirst: jest.fn().mockResolvedValue({ id: "c-1" }), findMany: jest.fn().mockResolvedValue([]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+      enrollment: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue({ id: "e-1" }) },
+      parentChild: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
+      attendanceRecord: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: "r-1", status: "ABSENT", note: "unwell", ...stamps, session: sessionRow },
+        ]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+    } as unknown as TenantTx;
+    const service = new AttendanceService(
+      {
+        runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+        runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+      } as never,
+      { record: jest.fn() } as never,
+      { enqueue: jest.fn(), enqueueMany: jest.fn() } as never,
+      { createRequest: jest.fn(), submit: jest.fn() } as never,
+      { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }), todayInTx: async () => new Date() } as never,
+      { onFinalized: jest.fn() } as never,
+    );
+    return { service, tx };
+  }
+
+  it("carries the member of staff the register is signed by", async () => {
+    const { service } = harness({
+      classId: "c-1", date: DAY,
+      class: { name: "SS1 Science A" },
+      takenBy: { id: "u-akinlabi", name: "Akinlabi Alex" },
+    });
+    const out = await service.getStudentAttendance(head, PUPIL, {});
+    expect(out.records[0].session).toMatchObject({
+      takenBy: { id: "u-akinlabi", name: "Akinlabi Alex" },
+      className: "SS1 Science A",
+    });
+  });
+
+  it("carries the MINUTE this pupil was marked, not just the day", async () => {
+    // "When was this child marked present" is a question about a moment. One
+    // register saves thirty marks at 08:05; a gate scan writes one at 08:41.
+    const { service } = harness(
+      { classId: "c-1", date: DAY, class: { name: "SS1 Science A" }, takenBy: { id: "u-akinlabi", name: "Akinlabi Alex" } },
+      { createdAt: new Date("2026-03-12T08:41:00Z"), updatedAt: new Date("2026-03-12T08:41:00Z") },
+    );
+    const out = await service.getStudentAttendance(head, PUPIL, {});
+    expect(new Date(out.records[0].markedAt).toISOString()).toBe("2026-03-12T08:41:00.000Z");
+  });
+
+  it("says NOTHING was amended when the mark never moved", async () => {
+    // Prisma stamps `updatedAt` on create too, so "is it present" cannot tell an
+    // untouched mark from a corrected one — only equality can. Null here is what
+    // stops a reader comparing two timestamps to find out.
+    const { service } = harness(
+      { classId: "c-1", date: DAY, class: { name: "SS1 Science A" }, takenBy: { id: "u-a", name: "A" } },
+      { createdAt: new Date("2026-03-12T08:05:00Z"), updatedAt: new Date("2026-03-12T08:05:00Z") },
+    );
+    const out = await service.getStudentAttendance(head, PUPIL, {});
+    expect(out.records[0].amendedAt).toBeNull();
+  });
+
+  it("names WHEN it was changed, so a late correction is visible against its own date", async () => {
+    // Marked for 12 March, changed on 2 April: a correction, and the only thing
+    // that distinguishes it from a mark made on the day.
+    const { service } = harness(
+      { classId: "c-1", date: DAY, class: { name: "SS1 Science A" }, takenBy: { id: "u-a", name: "A" } },
+      { createdAt: new Date("2026-03-12T08:05:00Z"), updatedAt: new Date("2026-04-02T14:30:00Z") },
+    );
+    const out = await service.getStudentAttendance(head, PUPIL, {});
+    expect(new Date(out.records[0].amendedAt!).toISOString()).toBe("2026-04-02T14:30:00.000Z");
+    expect(new Date(out.records[0].session.date).toISOString().slice(0, 10)).toBe("2026-03-12");
+  });
+
+  it("survives a register whose taker has since been removed", async () => {
+    // The person leaves; the record of the day does not. Null, not a crash and
+    // not a blank row — the rest of the fact is still evidence.
+    const { service } = harness({
+      classId: "c-1", date: DAY, class: null, takenBy: null,
+    });
+    const out = await service.getStudentAttendance(head, PUPIL, {});
+    expect(out.records[0].session).toMatchObject({ takenBy: null, className: null, classId: "c-1" });
+    expect(out.records[0].status).toBe("ABSENT");
+  });
+});

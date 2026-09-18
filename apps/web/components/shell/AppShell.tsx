@@ -47,6 +47,7 @@ import {
   NetworkIcon,
   type LucideIcon,
   Clock as ClockIcon,
+  Video as VideoIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -85,6 +86,7 @@ type NavKey =
   | "students"
   | "family"
   | "classes"
+  | "live-classes"
   | "learning"
   | "timetable"
   | "attendance"
@@ -193,6 +195,10 @@ const NAV: {
   { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", hideIf: { perm: "family.read", unless: "enrollment.read" }, module: MODULES.SIS },
   { key: "family", label: "My children", icon: UsersIcon, href: "/family", perm: "family.read", module: MODULES.SIS },
   { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
+  // Live classes across every course the reader can see — the diary of what is
+  // on, and the library of what can be played back. Gated on the same
+  // permission as the per-class panel it generalises.
+  { key: "live-classes", label: "Live classes", icon: VideoIcon, href: "/live-classes", perm: "lms.content.read", module: MODULES.LMS },
   // Gated on lms.quiz.attempt, which ONLY students hold: this is a personal to-do
   // list, and a teacher opening it would get an empty page (they are not enrolled).
   { key: "learning", label: "My learning", icon: BookOpenIcon, href: "/learning", perm: "lms.quiz.attempt", module: MODULES.LMS },
@@ -328,7 +334,7 @@ const NAV_GROUPS: { key: string; label: string }[] = [
 const NAV_GROUP: Record<NavKey, string> = {
   dashboard: "overview", analytics: "overview", reports: "overview", announcements: "overview",
   notifications: "overview", messages: "overview", calendar: "overview", meetings: "overview", exams: "overview", scan: "overview",
-  classes: "teaching", learning: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
+  classes: "teaching", "live-classes": "teaching", learning: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
   reportcards: "teaching",
   certificates: "teaching", documents: "teaching", library: "teaching",
   students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",

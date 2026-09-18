@@ -19,9 +19,27 @@
 // attack surface.
 // =============================================================================
 
-import { ACCEPTED_UPLOAD_TYPES, type AcceptedUploadType } from "@sms/types";
+import { ACCEPTED_UPLOAD_TYPES, RECORDING_UPLOAD_TYPES, type AcceptedUploadType, type RecordingUploadType, type SniffableUploadType } from "@sms/types";
 
-type Signature = { type: AcceptedUploadType; bytes: readonly number[]; offset?: number };
+type Signature = { type: SniffableUploadType; bytes: readonly number[]; offset?: number };
+
+/**
+ * MP4 is the one format here whose signature is not enough on its own.
+ *
+ * `ftyp` at offset 4 is ISO base media — which is ALSO QuickTime `.mov`, and a
+ * `.mov` served as `video/mp4` is a video that silently does not play for the
+ * pupil it was recorded for. The four bytes AFTER it are the major brand, so the
+ * check is "is this ISO BMFF, and is it an MP4 brand". `qt  ` is the brand that
+ * makes this worth doing: it is the one a Mac screen recording writes.
+ */
+const MP4_BRANDS: readonly string[] = ["isom", "iso2", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "mmp4", "M4V "];
+const FTYP = [0x66, 0x74, 0x79, 0x70] as const;
+
+function isMp4(buffer: Buffer): boolean {
+  if (buffer.length < 12) return false;
+  if (!FTYP.every((b, i) => buffer[4 + i] === b)) return false;
+  return MP4_BRANDS.includes(buffer.subarray(8, 12).toString("latin1"));
+}
 
 const SIGNATURES: readonly Signature[] = [
   // "%PDF-"
@@ -33,21 +51,35 @@ const SIGNATURES: readonly Signature[] = [
   { type: "image/png", bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
 ];
 
-/** The type these bytes actually are, or null if they are none we accept. */
-export function sniffUploadType(buffer: Buffer): AcceptedUploadType | null {
+/**
+ * The type these bytes actually are, or null if they are none we can name.
+ *
+ * NAMING is not ACCEPTING. This knows every type any feature takes; each caller
+ * then checks the answer against its OWN allowlist, so a video recognised here
+ * is still refused where a birth certificate belongs.
+ */
+export function sniffUploadType(buffer: Buffer): SniffableUploadType | null {
   for (const sig of SIGNATURES) {
     const at = sig.offset ?? 0;
     if (buffer.length < at + sig.bytes.length) continue;
     if (sig.bytes.every((b, i) => buffer[at + i] === b)) return sig.type;
   }
-  return null;
+  return isMp4(buffer) ? "video/mp4" : null;
 }
 
-/** Is this a type we let anyone upload at all? Checked at presign, when the
- *  claim is all we have, and again against the bytes on confirm. */
+/** Is this a type we let a member of the PUBLIC attach to an application or an
+ *  admission? Checked at presign, when the claim is all we have, and again
+ *  against the bytes on confirm. */
 export function isAcceptedUploadType(contentType: string | null | undefined): contentType is AcceptedUploadType {
   const base = (contentType ?? "").split(";")[0].trim().toLowerCase();
   return (ACCEPTED_UPLOAD_TYPES as readonly string[]).includes(base);
+}
+
+/** Is this a type a teacher may upload as a recording of their own class? A
+ *  SEPARATE allowlist, so neither feature widens the other. */
+export function isRecordingUploadType(contentType: string | null | undefined): contentType is RecordingUploadType {
+  const base = (contentType ?? "").split(";")[0].trim().toLowerCase();
+  return (RECORDING_UPLOAD_TYPES as readonly string[]).includes(base);
 }
 
 /** Normalise a claimed type to its bare form (`image/jpeg; charset=x` is still

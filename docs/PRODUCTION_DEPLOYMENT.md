@@ -136,6 +136,25 @@ user-facing difference. The free S3 gateway VPC endpoint is provisioned
 (cuts NAT data charges), and ECR keeps only the last 20 images per repo
 (lifecycle policy).
 
+**The one line that is not "early volumes" is S3, once schools record lessons.**
+Documents are small (a 10 MB per-file cap, mostly PDFs of a few hundred KB);
+LESSON RECORDINGS are capped at 1.5 GB each and a 60-class secondary that
+records every double period generates roughly **1,560 recordings a year, about
+2.3 TB**. Three things bound it, and they are the levers to reach for in order:
+
+| Lever | Where | Effect |
+|---|---|---|
+| Retention — footage is purged at the end of the academic session | `recordingExpiresAt` + the `lms.recordingRetention` sweep | Caps the steady state at ONE session's recordings rather than the platform's lifetime |
+| Intelligent-Tiering after 30 days | `documents_recording_tiering_days` | ~40% off the cold majority, no retrieval fee |
+| The per-file cap | `MAX_RECORDING_BYTES` | Bounds ONE upload; it is not the bill — the COUNT is |
+
+At 2.3 TB held, S3 Standard is ~$53/mo before tiering and ~$35 after, so a
+recording-heavy school moves this line from ~$8 to tens of dollars, not
+hundreds. Egress is the one to watch instead: playback is served from presigned
+S3 URLs, which **bypass CloudFront**, so every watch is billed at S3's internet
+egress rate. If recordings become a heavy feature, put them behind the
+distribution before buying more storage.
+
 ### 3.2 Profile B — GROWTH (~500 schools)
 Upsize: api 4× (1 vCPU/2 GB), web 3×, `db.m7g.large` Multi-AZ + 1 read
 replica, **RDS Proxy on** (`enable_rds_proxy=true`), `cache.t4g.small`,
@@ -476,9 +495,24 @@ confirmation, not creation:
    backup. Record time-to-restore — that's your real RTO (publish per
    LEGAL_ROLLOUT row 39).
 3. Enable RDS deletion protection (console toggle) on the production instance.
-4. S3: the documents bucket is versioned by the module; confirm, and add a
-   lifecycle rule shifting non-current versions to Glacier after 30 days
-   (cost lever, zero user impact).
+4. **S3: confirm the lifecycle rule is applied** (`aws s3api
+   get-bucket-lifecycle-configuration --bucket <documents bucket>` must return
+   `expire-noncurrent-versions`). **This is a data-protection control, not a
+   cost lever.** The bucket is versioned and the application deletes without a
+   version id, so a `DeleteObject` writes a DELETE MARKER and keeps the bytes —
+   every deletion the product promises (NDPR erasure, lesson-recording
+   retention, the declined-applicant purge) reports success and removes
+   nothing until this rule expires the noncurrent version.
+   `documents_noncurrent_retention_days` (default 7) is both the window in
+   which an accidental delete is recoverable AND the lag on every promised
+   deletion, so shortening it tightens the privacy guarantee and lengthening it
+   weakens it.
+   // This step used to say "shift non-current versions to Glacier after 30
+   // days (cost lever, zero user impact)". That keeps minors' records for ever
+   // at a lower price, which is the opposite of what an erasure request means.
+   Lesson recordings additionally move to Intelligent-Tiering after
+   `documents_recording_tiering_days` — that one IS a cost lever, and the only
+   part of the bucket big enough to be worth one.
 
 ### Step 10 — Go-live gate
 ```

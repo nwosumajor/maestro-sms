@@ -221,6 +221,25 @@ export const SCHEDULED_JOBS = [
     everyMinutes: 1440,
   },
   {
+    key: "lms.recordingRetention",
+    label: "Class recordings past their year",
+    // NIGHTLY, for the same reason as the declined-applicant purge beside it:
+    // this is the platform letting go of footage of named children once the
+    // year it was taught in has ended, and a sweep that stops running is a
+    // retention promise quietly going unkept.
+    everyMinutes: 1440,
+    manual: {
+      path: "live-recordings/retention/run",
+      permission: "lms.content.write",
+      // CALLER: the fleet for a platform operator, this school's own recordings
+      // for anyone else. A teacher's press must never reach another school's
+      // recordings — the fleet-sweep-one-school-could-fire defect this
+      // catalogue exists to make visible.
+      scope: "CALLER",
+      where: "Live classes",
+    },
+  },
+  {
     key: "documents.submissionRetention",
     label: "Declined-applicant documents",
     // NIGHTLY. This is the platform letting go of a minor's identity documents

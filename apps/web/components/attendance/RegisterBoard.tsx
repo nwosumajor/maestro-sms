@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRegion } from "@/components/shell/RegionProvider";
 import { todayIn } from "@/lib/format";
 import Link from "next/link";
+import { revealTakeRegister } from "./register-anchor";
 import { Badge } from "@/components/ui/badge";
 import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
@@ -191,7 +192,7 @@ export function RegisterBoard({ canConfigure = false }: { canConfigure?: boolean
                               every outstanding register and is asked to CHASE
                               it, not to sign for a room they did not look at. */}
                           {r.canTake ? (
-                            <Link href={`/attendance?classId=${r.classId}`}>
+                            <Link href={`/attendance?classId=${r.classId}`} scroll={false} onClick={revealTakeRegister}>
                               <Button size="sm" variant="outline">take →</Button>
                             </Link>
                           ) : (

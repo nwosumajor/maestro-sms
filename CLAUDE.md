@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **363 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **374 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -902,7 +902,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **363 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **374 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -941,13 +941,10 @@ These are the rules; the log is why each one exists.
   other files linked to it.
 - **A CATEGORY NOBODY EMITS IS A FILTER THAT ANSWERS NOTHING, AND A SWITCH THAT
   GOVERNS NOTHING.** `NotificationInput.type` was `NotificationTypeValue |
-  string`, so the union gated nothing and four hand-kept lists grew beside it
-  (the union, the essential set, the mute screen, a `FILTERABLE_TYPES` array in
-  the web written to work around the union being incomplete). FIVE strings named
-  notifications that do not exist — one absent from the whole API, one an HR
-  checklist type, three workflow-request types, one a competition type. Measured:
-  67% of a parent's 3,320 notifications were unreachable through any menu option,
-  and four of eight mute checkboxes did nothing. **A control that appears to work
+  string`, so the union gated nothing and four hand-kept lists grew beside it.
+  FIVE strings named notifications that do not exist. Measured: 67% of a
+  parent's 3,320 notifications were unreachable through any menu option, and
+  four of eight mute checkboxes did nothing. **A control that appears to work
   and does not is worse than one that is missing**, because the reader stops
   looking for the real switch. The fix is the type system, not a fresher list:
   the union is enforced at every emitter and `NOTIFICATION_TYPE_LABELS` is a
@@ -957,13 +954,11 @@ These are the rules; the log is why each one exists.
   all source and passed a mutation, because the same string was a WORKFLOW type
   in the same file. That confusion IS the defect.
 - **A COUNTER MUST COUNT WHAT WAS DELIVERED, NOT WHAT WAS ITERATED.** The fee
-  reminder sweep counted `reminded` per INVOICE whether or not a guardian
-  existed: 30 billable invoices, no guardian links, "30 reminded" and nobody
-  told. Count recipients; name the shortfall.
+  reminder counted per INVOICE whether or not a guardian existed: 30 invoices,
+  no guardian links, "30 reminded", nobody told. Count recipients.
 - **REPORT WHAT YOU DID NOT DO.** Silent partial success is the commonest shape
-  here: a roll call naming nobody missing, a sweep marking every overdue boarder
-  handled including those it told nobody about, `notified: 2500` of 5,000. Count
-  what was WRITTEN, never the list in hand.
+  here: a sweep marking every overdue boarder handled including those it told
+  nobody about; `notified: 2500` of 5,000. Count what was WRITTEN.
 - **A refusal must not assert something untrue, and should name the way out.**
   "Not in this school" said of a classmate; "ask an administrator to reactivate
   it" where no such button exists. **404-not-403** so a refusal never confirms
@@ -1001,11 +996,10 @@ These are the rules; the log is why each one exists.
 
 ### Lists, queues and scale
 - **A DIARY IS THE MIRROR OF A REGISTER, AND AN ASCENDING CAP EATS THE FUTURE.**
-  A register is read oldest-first; a diary is read for what is NEXT, so an
-  ascending cap drops it. Meetings had `mySlots`/`myBookings` on `startsAt ASC`
-  capped with NO date filter: a school-wide reader got 200 rows spanning **a
-  single day three years earlier** and zero upcoming. Order so the cap keeps what
-  the screen is FOR, count the rest in SQL, keep the other end reachable.
+  A register is read oldest-first; a diary is read for what is NEXT. Meetings had
+  `mySlots`/`myBookings` on `startsAt ASC` capped with NO date filter: a
+  school-wide reader got 200 rows spanning **a single day three years earlier**
+  and zero upcoming. Order so the cap keeps what the screen is FOR.
   // GOTCHA: `listOpenSlots` one method away filtered `startsAt >= now`, with a
   comment about this exact failure, and was never swept to the other two.
 - **A capped list is worse when it is the only route to something else.** The
@@ -1061,9 +1055,9 @@ These are the rules; the log is why each one exists.
   awaiting a second signature was invisible**. Nor is it small by default — the
   threshold resolver returns 0 off the platform's currency.
 - **A register is not a queue.** A capped newest-first list DROPS the oldest —
-  exactly the row a review queue exists to surface. Page and count **in SQL**;
-  filtering in memory only sees rows that survived the cap. Work a queue
-  **oldest-first**; never narrow the count by the filter.
+  the row a review queue exists to surface. Page and count **in SQL**; filtering
+  in memory only sees rows that survived the cap. Never narrow a count by the
+  filter.
 - **A ROW THAT CAN CONTRIBUTE NOTHING MUST NOT OCCUPY A SLOT.** With no lower
   bound on recurring events, 600 dead series filled a 500 cap and each expanded
   to zero: **a blank calendar**. Filter on what makes a row USEFUL
@@ -1074,8 +1068,8 @@ These are the rules; the log is why each one exists.
 - **Measure as the APP ROLE under RLS, with a BOUND PARAMETER, on volume, with a
   realistic distribution.** All four have produced a wrong answer: `postgres`
   bypasses RLS and plans differently; a literal picks an index a pooled app will
-  not get; a dev-sized table picks the other plan; one pupil holding all 5,000
-  invoices measures nothing.
+  not get; a dev-sized table picks the other plan; one pupil holding every
+  invoice measures nothing.
 - **O(lifetime), not O(size)** is the shape that degrades invisibly — it tracks
   how long a school, or a PUPIL, has been here. `/grades/mine` returned every
   mark ever, unpaged: 2,430 rows / 831 KB for a parent of three, to see this
@@ -1085,7 +1079,14 @@ These are the rules; the log is why each one exists.
 - **Offset paging needs a TOTAL order.** `gradedAt` alone is not one: 239
   distinct rows of 270 across six pages. Add `id`. The test passed until the
   double SHUFFLED before sorting — `Array.sort` is stable in V8, Postgres is
-  not. And **an index nothing selects is write amplification**; measure first.
+  not. And **an index nothing selects is write amplification** — one added here
+  by reasoning was chosen NEVER, because **an ordering column behind a
+  NON-EQUALITY predicate is unreachable for ORDER BY** (`status IN (a,b)`
+  cannot be walked in `lastRemindedAt` order). Put the predicate in a PARTIAL
+  index and the ordering columns come to the front: 26.9ms Seq Scan + heapsort
+  -> 2.5ms Index Scan, the sort GONE. Prove an index dead by DROPPING THE OTHER
+  inside a transaction that ROLLS BACK — with both present the planner's choice
+  says nothing about the loser.
 - **THE ROW IS THE ROUTE.** The CBT console returned the 100 newest of 1,350
   exams — and an exam row is the only route to its RESULTS, PAPER, ANSWER KEY
   and grade RECORDING, so a cap strands four surfaces, not one.
@@ -1104,17 +1105,15 @@ These are the rules; the log is why each one exists.
   scope refuses it is dead, and renders as an empty screen rather than a 403.
 - **`super_admin` holds no standing role scope over a tenant's data.** The
   supported route to it is impersonation: step-up gated, time limited, audited.
-- **Work and approvals go only to somebody STILL HERE** (`assertStillHere`,
-  `holdersOf`). Addressing a leaver is addressing nobody.
+- **Work and approvals go only to somebody STILL HERE** (`assertStillHere`/`holdersOf`) — addressing a leaver is addressing nobody.
 - **A stage-holder must open its own door**, and an approver must SEE what the
   decision turns on. Both have their own gates.
 - **A chain resolved at SUBMIT goes stale when somebody LEAVES.** Admissions
   drops an unstaffable stage at submit and refuses an approval that would strand
   the rest — both look FORWARD, and neither reaches the approver who exits while
   the item waits. Measured: 252 of 5,000 schools' applications sat at a stage
-  with no ACTIVE holder, undecidable in BOTH directions and shown as ordinary
-  pending work. There is no reassign, so the fix is to SAY it — on the row, in a
-  count no filter can hide, and in the refusal, which names the vacancy.
+  with no ACTIVE holder, undecidable in BOTH directions. There is no reassign,
+  so SAY it — on the row, in a count no filter can hide, and in the refusal.
 - **Never trust an id from the body.** Check the KIND (a pupil made a subject
   teacher, a guardian attached to staff), not merely that it exists. "MAY I reach
   this pupil" is not "IS this a pupil of ours", and for a school-wide caller the
@@ -1135,41 +1134,37 @@ These are the rules; the log is why each one exists.
   own host could not even see.
 - **A ROUTE GATE MUST BE DEFAULT-DENY, NOT A LIST OF WHAT TO PROTECT.**
   `middleware.ts` held a hand-kept `PROTECTED_PREFIXES` and the app outgrew it:
-  `/cbt`, `/exams`, `/feedback`, `/group`, `/kiosk`, `/learning`, `/meetings`,
-  `/reportcards` answered **200 with no session**. That gate is THREE controls —
+  eight sections answered **200 with no session**. That gate is THREE controls —
   the /login redirect, the 30-day forced reset and the MFA mandate — so a user
-  with an expired password was held out of /dashboard and could open the exam
-  hall and a child's report cards. No data escaped (the page streams its loading
-  shell, then throws on `session!.user`) — a gap, not a leak, and worth stating
-  precisely. Inverted to a PUBLIC allowlist in `lib/public-routes.ts`; gate
-  `every-signed-in-page-needs-a-session` walks the router. // GOTCHA: Next serves
-  `app/icon.png` through the same matcher, so default-deny must exempt ASSETS.
-  // GOTCHA: the rule lives in its OWN module so the test drives the REAL
+  with an expired password could open the exam hall and a child's report cards.
+  No data escaped (the page streams its shell, then throws on `session!.user`) —
+  a gap, not a leak. Inverted to a PUBLIC allowlist in `lib/public-routes.ts`;
+  gate `every-signed-in-page-needs-a-session` walks the router. // GOTCHA: Next
+  serves `app/icon.png` through the same matcher, so default-deny must exempt
+  ASSETS. // GOTCHA: the rule lives in its OWN module so the test drives the REAL
   function — the first draft reimplemented it and disagreed about `/icon.png`.
-- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below, and the
-  one a user meets. `/attendance`'s "take →", the ONE control for taking a
-  missing register, pointed at `/classes/<id>`, not a route. Gate
+- **A LINK TO A PAGE THAT IS NOT THERE** — the inverse of the rule below.
+  `/attendance`'s "take →" pointed at `/classes/<id>`, not a route. Gate
   `a-link-to-a-page-that-is-not-there` matches every literal href against the
   declared routes; it found a fourth on its first run.
-- **A PICKER MUST REMEMBER WHAT WAS PICKED.** The choice was a PLACEHOLDER
-  re-derived from `[...seed, ...results]`; choosing clears the query, which
-  clears `results`, so anybody found by SEARCH vanished on being chosen. Hold it
-  in state, render it as TEXT. (`PeoplePicker` was right and was never swept.)
-- **`{ scroll: false }` WHEN A NAVIGATION UPDATES A SECTION IN PLACE.** Next
-  scrolls to the top on every push; the attendance pupil-picker sits at the FOOT
-  of a long page, so clicking a pupil hid the history it asked for.
+- **A PICKER MUST REMEMBER WHAT WAS PICKED.** The choice was re-derived from
+  `[...seed, ...results]`; choosing clears the query, which clears `results`, so
+  anybody found by SEARCH vanished on being chosen. Hold it in state.
+- **SCROLL IS PART OF THE CONTROL, BOTH WAYS.** Next scrolls to the top on every
+  push, hiding the history the attendance pupil-picker asked for
+  (`{ scroll: false }`) — and its MIRROR: /attendance's Take-register button
+  links to the URL you are ALREADY on, so it navigated nowhere, made zero
+  requests and left the form 1,094px below the fold. Reveal the section yourself.
 - **A ROUTE NO SCREEN CALLS IS A DOOR MISSING FROM THE OUTSIDE.** `GET
-  /members/scan/today` was reached from nowhere — one level out from the gates
-  that catch a service method no CONTROLLER reaches.
+  /members/scan/today` was reached from nowhere — one level out from the gate
+  that catches a service method no CONTROLLER reaches.
 - **A SUMMARY MUST NOT NARROW WITH THE FILTER BELOW IT.** The desk's day counts
-  are a `groupBy` over the whole day, independent of `?purpose=` and the page —
-  otherwise filtering to check-ins reports that nobody has left.
+  are a `groupBy` over the whole day, independent of `?purpose=` and the page.
 - **A field the API accepts that no screen sends** is a feature nobody has
   (`a-field-no-screen-can-fill-in`); **a method no controller reaches** shipped
   with no door (`service-methods-nobody-calls`); **a page nothing links to** is
-  not delivered (`every-page-can-be-reached`). *Present is not findable.*
-- **A duty given with a notice is taken away with one** — retract only what was
-  actually SENT.
+  not delivered (`every-page-can-be-reached`).
+- **A duty given with a notice is taken away with one**; retract only what was SENT.
 - **Fixing where it hurts and leaving the siblings is how the class survives.**
 
 ### Tests, gates and probes
@@ -1180,37 +1175,42 @@ These are the rules; the log is why each one exists.
   timestamp, an assertion satisfied by the COMMENT explaining its own fix (strip
   comments), an `as` cast defeating a `Record<Key,true>` check, and a detector
   matching only LITERALS while the needle was a variable.
-- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE proves
-  nothing. Read `Test Suites:` as well as `Tests:`. A jest pattern passed where a
-  FLAG belongs matches no tests and exits 1.
+- **`Tests: 0 total` is not a pass**, and a mutation that does not COMPILE — or
+  that changes no behaviour — proves nothing. Read `Test Suites:` as well as
+  `Tests:`; a jest pattern passed where a FLAG belongs matches nothing.
 - **A gate that walks must assert it scanned something**: no files, no offenders.
-- **A test on a helper proves nothing about its caller.** Drive the real thing.
+- **A test on a helper proves nothing about its caller** — drive the real thing.
+- **A 200 WITH NO BODY IS NOT JSON.** Nest sends a handler's `null` as a
+  zero-byte 200, so `res.json()` THROWS — and in an effect the throw lands
+  mid-way, so the state set after it never happens: the register form drew no
+  pupils and no Save button for every class not yet marked. `apiGet` had the
+  rule server-side; `lib/read-json.ts` is the client half. A fixture that
+  already holds the row makes it impossible and reports success.
 - **A NUMBER ASSERTED OVER A WHOLE DOCUMENT IS A LOTTERY.** `not.toMatch(/\b33\b/)`
-  over a report-card PDF fails ~3.3% of runs on its "Generated … HH:MM:SS" line —
-  a flaky suite that is actually a wrong assertion, and the POSITIVE form passes
-  with the cell wrong whenever the clock reads `:29:`. Read the CELL, pin the
-  collision as a test, and fake `Date` only (pdfkit needs real timers).
+  over a report-card PDF fails ~3.3% of runs on its "Generated … HH:MM:SS" line,
+  and the POSITIVE form passes with the cell wrong whenever the clock reads
+  `:29:`. Read the CELL, and fake `Date` only (pdfkit needs real timers).
 - **Anchor a test to the PROPERTY, not the text** (nor a column's POSITION) —
   fixed-text assertions have gone red ten times on changes that STRENGTHENED what
   they guard. **And never prove an ABSENCE by searching a serialised document**:
-  it carries ids, timestamps and counts nobody chose, and a uuid containing the
-  secret ("…925d-**31234**1a1dd8c") failed CI on a test whose property held.
-  Walk the parsed object and compare VALUES.
-- **An over-wide gate is the same failure as a blind one** — it teaches its next
-  reader to add an exemption, and one granted for a false positive is a hole with
-  a note on it. Delete the rule rather than exempt what it wrongly catches.
+  a uuid containing the secret ("…925d-**31234**1a1dd8c") failed CI on a test
+  whose property held. Walk the parsed object and compare VALUES.
+- **An over-wide gate is the same failure as a blind one** — an exemption granted
+  for a false positive is a hole with a note on it. Delete the rule instead.
 - **FIXTURE TRAPS, over and over:** a stub whose `findMany` ignores the `where`
-  (or `take`/`skip`) passes against a service that stopped filtering; one missing
-  a method every real client has (`createMany`, `groupBy`, `$queryRaw`) fails in
-  a way that reads as a code fault; one returning the live object a later
-  `update` mutates makes an audit read the NEW value; and `$executeRaw` is a
-  TAGGED TEMPLATE, so `q.values` is `Array.prototype.values` — a function, not
-  the parameters. **A double must model the CONTRACT, not the signature.**
+  (or `take`/`orderBy`) passes against a service that stopped filtering; one
+  missing a method every real client has (`createMany`, `groupBy`, `$queryRaw`,
+  `text()`) fails in a way that reads as a code fault; one returning the live
+  object a later `update` mutates makes an audit read the NEW value; and
+  `$executeRaw` is a TAGGED TEMPLATE, so `q.values` is `Array.prototype.values`.
+  **A double must model the CONTRACT, not the signature** — including that a
+  `null` handler arrives as an EMPTY body.
 - **A probe that guesses a field name reports a fact about itself.** Read the
-  STATUS before the body; scope a probe's queries to the tenant under test; prove
-  the session took (401 everywhere reads as "refused" for every route).
-- **Drive it, do not read it.** Almost every entry in the log was found by
-  exercising a path — several never once executed.
+  STATUS before the body; scope a probe's queries to the tenant under test; and
+  prove the session took — 401 everywhere reads as "refused" for every route.
+- **Drive it, do not read it** — and where a SCREEN is the report, drive the
+  screen: the register form's real defect was a parse in the browser, invisible
+  to every API-level check, and the tell was an absence (no POST ever sent).
 
 ### Operational safety
 - **Fail closed at BOOT** where a mis-set value is unrecoverable afterwards
@@ -1482,87 +1482,37 @@ typecheck (13/13 turbo tasks) and the 118 game-engine unit tests pass. The DB-ba
 e2e/RLS suites need a provisioned Postgres (TEST_DATABASE_URL app role +
 TEST_ADMIN_URL superuser) and run in CI / locally-with-creds, not the sandbox.
 
-BUILT (spec §11 steps 1–8):
-- **Step 1 — pure scoring engine** (`packages/game-engine/scoring.ts`): `score`/
-  `isWin`/`validate`/`generateSecret`, variable length N=4/5/6, exhaustively tested.
-- **Step 2 — standalone 2-player online game** (`apps/game-server`): native-ws,
-  server-authoritative match (`match.ts`) behind a swappable store seam.
-- **Step 3 — SMS integration of the duel** (`apps/api/src/game`, schema
-  `game.prisma`, RLS `18_game_rls.sql`): tenant-scoped Game/GamePlayer/Guess/
-  GameResult, relationship-scoped (participant-only, 404-not-403), audited,
-  secrets server-only + cleared on finish. `game.play`/`game.leaderboard.read`.
-- **Step 4 — Category 3 League/Knockout** (`competition.service.ts` +
-  `competition.controller.ts`, schema Competition/Standing, RLS
-  `19_competition_rls.sql`): pure round-robin/knockout-bracket/standings logic in
-  `game-engine/competition.ts` (byes never twice, 3/0 points, guess-count then
-  head-to-head tiebreak — all unit-tested); matches are normal duels played
-  through GameService; `GameService.finish` hooks `CompetitionService.afterMatchFinished`
-  (one-way dep, no cycle) to update standings / advance the bracket; an overdue
-  `sweep` forfeits no-shows (48h window). `game.league.create` (principal/
-  school_admin) + leaderboard read.
-- **Step 5 — Category 2 Class Race** (`race.service.ts` + `race.controller.ts`,
-  schema: `Game.classId` + server-only `Game.targetSecret`, migration
-  `20260625000000_race` — NO new RLS file, reuses the `game`/`competition`/
-  `standing` policies): teacher opens a race for THEIR class around one shared
-  server-only target; enrolled students join and race in PARALLEL (no turns,
-  routed through RaceService NOT GameService); first 3 to crack win (top-3 by
-  finish order). Per-student guess redaction (a racer sees only their own
-  guesses; target never serialized, cleared on finish), per-racer guess
-  rate-limit, own-start `elapsedMs`. Cross-class **tournament** = one RACE per
-  class (each its own target) under a `Competition(RACE_TOURNAMENT)`, with
-  per-class + combined standings via the pure `computeRaceStandings` (fewest
-  guesses → fastest own-start elapsed). `game.race.open` (teacher own-class /
-  principal / school_admin) + `game.race.tournament` (principal / school_admin).
-- **Step 6 — Category 1 Elimination Ring** (`ring.service.ts` + `ring.controller.ts`,
-  schema: `Game.turnStartedAt` + `GamePlayer.eliminatedById`, migration
-  `20260626000000_ring` — NO new RLS file, reuses the `game` policies): N players
-  in a ring, each targeting the next; a crack ELIMINATES the target, the ring
-  RE-CLOSES (cracker inherits the eliminated player's target), and the cracker
-  gains the eliminated player's session guess history (the §4 reward, scoped via
-  `eliminatedById` — nobody else sees it). One guess per turn, turn order enforced
-  server-side; the 60s limit is validated from `turnStartedAt` with the graduated
-  rule (skip ×2 → forfeit on 3rd consecutive timeout). Last standing wins;
-  placings recorded (reverse elimination order); secrets cleared on finish. A RING
-  is turn-based and owns its lifecycle (does NOT route through GameService). The
-  in-memory real-time transport (step 2) still owns the 15s countdown /
-  hard-disconnect; live *spectating* of a durable ring is now served by the
-  `/ws/watch` push bridge (see "Live push" below). `game.play` to play;
-  `game.match.moderate` (teacher/principal/school_admin) to force-end.
-- **Step 7 — Category 5 Administration / RBAC** (`game-settings.service.ts` +
-  `game-settings.controller.ts` + `game-settings.util.ts`, schema GameSettings,
-  migration `20260627000000_game_settings`, RLS `20_game_settings_rls.sql`):
-  finalizes the per-mode RBAC and makes `game.settings.manage` (school_admin)
-  REAL via per-school config — one tenant-scoped GameSettings row (gamesEnabled,
-  defaultDifficulty, guessRateLimitMs, ringTurnLimitSec, leagueMatchWindowHours,
-  crossSchoolEnabled). `effectiveGameSettings` merges the row over platform
-  defaults; the four game services CONSULT it via a tx helper (no constructor
-  churn): `gamesEnabled` gates open/create; `defaultDifficulty` fills an omitted
-  difficulty (difficulty is now optional on open/create); race guess rate-limit,
-  ring turn limit, and league match window all come from settings. GET is broad
-  (`game.leaderboard.read`); PUT is `game.settings.manage` (school_admin only —
-  principal does NOT get it, per §8 config-vs-operations split). `crossSchoolEnabled`
-  is consulted by step 8.
-- **Step 8 — Category 4 Ultimate (cross-school)** (`ultimate.service.ts` +
-  `ultimate.controller.ts`, schema `ultimate.prisma`, migration
-  `20260628000000_ultimate`, RLS `21_ultimate_rls.sql`): the ONE deliberate
-  tenant-boundary crossing, built as a SEPARATE surface with TWO opposite-posture
-  halves. (A) CROSS-TENANT, RLS-EXEMPT arena (`UltimateCompetition` /
-  `UltimateParticipant`) — explicitly listed in the RLS file like `school`/`role`;
-  safe because it carries NO PII (opaque participant id, handle, schoolId for
-  grouping, server-only per-entry secret never serialized, scores). (B)
-  TENANT-SCOPED governance/bridge (`UltimateEnrollment` tier-1 school opt-in,
-  `UltimateConsent` tier-2 per-student guardian consent, `UltimateEntryLink` the
-  ONLY userId↔participantId map) under standard RLS — so an arena row
-  de-anonymises only WITHIN its owning school. Entry requires BOTH consent tiers
-  PLUS the school's `crossSchoolEnabled` posture (step 7). What crosses the wire:
-  handle + school NAME + scores, nothing else. Each player guesses their OWN
-  per-entry target; the cross-school leaderboard ranks finishers via the pure
-  `computeRaceStandings` (fewest guesses → fastest own-start elapsed). Admin
-  (create/cancel) `game.ultimate.admin` (super_admin only); `game.ultimate.enroll`
-  (principal/school_admin); `game.ultimate.consent` (school_admin); enter/guess/me
-  `game.play`; list/leaderboard `game.leaderboard.read`. All mutations (incl. every
-  consent change + arena entry) audit-logged. RLS-e2e covers the tenant-scoped
-  bridge tables (arena tables excluded by design — cross-tenant, no PII).
+BUILT (spec §11 steps 1–8) — **the per-step detail is in the SPEC, which this
+file tells you to open; what follows is only what a change is taken against.**
+- **Where each mode lives**: pure scoring `packages/game-engine/scoring.ts`
+  (length is a PARAMETER, N=4/5/6); in-memory transport `apps/game-server`;
+  durable modes in `apps/api/src/game` — duel `game.service`, league/knockout
+  `competition.service` (+ pure `game-engine/competition.ts`), class race
+  `race.service`, elimination ring `ring.service`, per-school config
+  `game-settings.service`, cross-school arena `ultimate.service`. RLS 18–21;
+  race/ring add columns only and reuse the `game` policies.
+- **Server authority is absolute.** Secrets are server-only, never serialized,
+  cleared on finish; scoring, turn order, finish order and win detection are
+  computed server-side; every secret and guess is re-validated (N distinct
+  digits). A racer sees only their OWN guesses; a ring cracker inherits the
+  eliminated player's history via `eliminatedById` and nobody else does.
+- **Ring and race own their lifecycles** and do NOT route through GameService;
+  league matches DO (its `finish` hooks `afterMatchFinished`, one-way, no cycle).
+- **`effectiveGameSettings`** merges the school's row over platform defaults and
+  is what gates opening a game and supplies difficulty, race rate-limit, ring
+  turn limit and league window — consulted via a tx helper, not the constructor.
+- **The Ultimate arena is the one deliberate tenant crossing**, in two opposite
+  halves: an RLS-EXEMPT cross-school arena carrying NO PII (handle, school NAME,
+  scores — nothing else crosses), and TENANT-SCOPED governance
+  (`UltimateEnrollment` school opt-in, `UltimateConsent` guardian consent,
+  `UltimateEntryLink` the ONLY userId↔participantId map). Entry needs BOTH
+  consent tiers AND the school's `crossSchoolEnabled`.
+- **Permissions**: `game.play` / `game.leaderboard.read` broadly;
+  `game.league.create`, `game.race.open` (teacher own-class), `game.race.tournament`,
+  `game.match.moderate`, `game.settings.manage` (school_admin ONLY — principal is
+  operations, not configuration), `game.ultimate.admin` (super_admin,
+  NON_ELEVATABLE) / `.enroll` / `.consent`. Every mutation, consent change and
+  arena entry is audited.
 
 The full §11 build sequence is COMPLETE. `game.ultimate.*` perms are now seeded.
 
@@ -2376,9 +2326,16 @@ Three tiers gate a register write (`AttendanceService.markAttendance`):
   `ATTENDANCE_AMENDMENT` workflow (systemOnly; single-stage
   `ATTENDANCE_AMENDMENT_CHAIN`, perm `attendance.amend.review` held by
   head_teacher/school_admin/principal) — a DIFFERENT senior approves (SoD,
-  engine-enforced) and a WorkflowHooks reactor applies the marks in-tx. Holders
-  of `attendance.amend.review` edit stale registers DIRECTLY (they're the
-  approvers). Scan CHECK_IN is always today → never stale.
+  engine-enforced) and a WorkflowHooks reactor applies the marks in-tx. Scan
+  CHECK_IN is always today → never stale.
+  // GOTCHA: this said amend.review holders edit stale registers DIRECTLY —
+  **false for two of the three roles holding it**. BOTH branches call
+  `assertCanTakeRegister`, so a correction is gated like a fresh register.
+  Measured at day 10: teacher 201 pendingApproval, school_admin 201 direct,
+  principal AND head_teacher **403**. amend.review APPROVES an amendment, never
+  authors one (`who-corrects-a-stale-register.spec.ts`). KNOWN, NOT FIXED: a
+  school may run with a principal and NO school_admin, so if the supervisor has
+  LEFT, that class's stale register can be corrected by nobody.
 - **Past/ended term**: fully LOCKED (409), no edit even with approval — boundary
   is the `isCurrent` term's startDate (fail-open when unconfigured);
   `GET /attendance/term-lock` exposes it. `STALE_REGISTER_DAYS = 7`.
@@ -2470,6 +2427,24 @@ failed PUT still said "Attached", and pupils got a refusal from storage), they
 fit (the presign's `sizeBytes` is a number the caller SENT), and they are the
 type claimed (`sniffUploadType`, magic bytes). A refusal leaves it unattached so
 the upload can simply be retried.
+// **A DELETE ON A VERSIONED BUCKET DELETES NOTHING.** `DeleteObject` with no
+// VersionId writes a DELETE MARKER and keeps the bytes, and ten call sites rely
+// on a delete deleting — NDPR erasure, recording retention, the declined-
+// applicant purge. Each reported success and left the object for ever. The
+// remedy is a LIFECYCLE RULE (`noncurrent_version_expiration`), not app code:
+// S3 expires them itself, so no new IAM and no way for a future caller to
+// forget. Versioning's protection is a WINDOW, and that window is also the lag
+// on every promised deletion — 7 days here, short because minors' records.
+// **A SIZE CAP IS SIZED AGAINST WHAT THE TOOL PRODUCES, not a round number.**
+// A recording cap of 500 MB for two hours is 0.56 Mbps and refuses even 480p —
+// Zoom 720p slides is ~0.7 GB, with a camera ~1.4 GB, OBS at 1080p ~2.2 GB. So
+// `MAX_RECORDING_BYTES` is 1.5 GB: every 720p double lesson, not the 1080p dump
+// (which is an hour of uploading on a school line, i.e. mostly abandoned PUTs).
+// **A per-file cap does not control the storage bill** — the COUNT does, and
+// that is bounded by the RETENTION window. And the refusal names the way OUT
+// ("record at 720p"), from ONE shared message, because there are two doors:
+// presign (the caller's own `sizeBytes` claim, refused there to save the hour)
+// and confirm (the bytes themselves).
 **`inline` is the TYPE the server vouches for, never a boolean** — that is what
 keeps the check joined to the serving, and it lets S3 pin
 `ResponseContentType` rather than return the object's stored type, which came
@@ -2480,7 +2455,14 @@ off the PUT and is the uploader's claim. Locally the type rides the SIGNED OP
 `lms/`, `discipline/`, `submissions/` and `tasks/` were added later: four upload
 features 400ing at the FIRST step, behind a refusal deliberately worded like a
 bad signature. Gate `a-key-no-upload-could-use` computes the minted set from
-source. // GOTCHA: the school LOGO was presigned in FIVE places, three inline
+source. // **AND A SECOND CEILING NEEDS SWEEPING LIKE ANY OTHER RULE.** Document 10 MB
+// vs recording 1.5 GB: the presign and confirm enforced the right one and the
+// door BETWEEN them applied the document cap to everything, so the local stack
+// could not upload a recording at all (nginx 413 at 12m, then the API at 10 MB,
+// then a Buffer that would have OOM'd). Put the ceiling in the SIGNED OP, the
+// way the inline TYPE already is — one table, unknown type gets the narrower
+// one, and it cannot be widened by editing a URL.
+// GOTCHA: the school LOGO was presigned in FIVE places, three inline
 and two not — the two being the PUBLIC ones, so a PAID logo never rendered on
 the login page. One `logoUrl()` now; the gate asserts exactly ONE presign site.
 

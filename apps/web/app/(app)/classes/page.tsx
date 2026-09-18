@@ -161,7 +161,13 @@ export default async function ClassesPage() {
             </AlertDescription>
           </Alert>
         ) : (
-          <ClassGrid classes={overview} canEnrol={hasPermission(user.permissions, "enrollment.read")} />
+          <ClassGrid
+            classes={overview}
+            canEnrol={hasPermission(user.permissions, "enrollment.read")}
+            // So each card can say what the READER is to that class: the
+            // register belongs to the form teacher, a subject does not.
+            viewerId={user.id}
+          />
         )}
       </div>
     </AppShell>

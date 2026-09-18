@@ -127,6 +127,7 @@ describe("the catalogue matches the cron the code actually uses", () => {
     ["DEFAULT_DUNNING_CRON", "billing/billing.constants.ts", "billing.dunning"],
     ["DEFAULT_FEEDBACK_DIGEST_CRON", "feedback/feedback.constants.ts", "operator.feedbackDigest"],
     ["DEFAULT_PROGRESSION_CRON", "lms/progression/academic-progression.constants.ts", "lms.progression"],
+    ["DEFAULT_RECORDING_RETENTION_CRON", "lms/recording-retention.constants.ts", "lms.recordingRetention"],
     ["DEFAULT_RECONCILE_CRON", "fees/reconciliation.service.ts", "fees.reconciliation"],
     ["DEFAULT_TERM_ARCHIVE_CRON", "privacy/archive.service.ts", "privacy.archive"],
     ["DEFAULT_AUDIT_PARTITION_CRON", "maintenance/maintenance.constants.ts", "maintenance.auditPartition"],

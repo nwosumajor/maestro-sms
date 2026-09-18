@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { readApiError } from "@/lib/api-error";
+import { readJson } from "@/lib/read-json";
 
 import { useFormat } from "@/components/shell/RegionProvider";
 
@@ -64,6 +65,24 @@ export function TakeRegister({
   const [classId, setClassId] = React.useState(
     (initialClassId && classes.some((c) => c.id === initialClassId) ? initialClassId : classes[0]?.id) ?? "",
   );
+  // FOLLOW THE LINK THAT BROUGHT YOU HERE.
+  //
+  // `classId` above is state with an INITIAL value, and the boards' Take-register
+  // control only changes a SEARCH PARAM — same route, so React keeps this
+  // component mounted and that initial value is never read again. Measured in a
+  // real browser: an administrator clicking "Take register" on VOL SS3 E got the
+  // URL for that class and a form still showing History 101. A control that
+  // points somewhere other than the class it names is worse than one that does
+  // nothing, because the register saves against the wrong class.
+  //
+  // Deliberately keyed on `initialClassId` ALONE. Including `classes` would
+  // re-run this whenever the server hands down a new array — which happens on
+  // any re-render — and clobber a class the user picked from the dropdown.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reason: see above
+  React.useEffect(() => {
+    if (initialClassId && classes.some((c) => c.id === initialClassId)) setClassId(initialClassId);
+  }, [initialClassId]);
+
   const { region, shortDate } = useFormat();
   // ONE value for "today", so the default, the max and the Today button cannot
   // disagree with each other or with the server.
@@ -99,8 +118,15 @@ export function TakeRegister({
           setLoading(false);
           return;
         }
-        const students = ((await clsRes.json()) as { students: Student[] }).students;
-        const session = (regRes.ok ? await regRes.json() : null) as Session;
+        // ORDER MATTERS HERE, and it used to be fatal. `regRes` is 200 with a
+        // ZERO-BYTE body whenever nobody has taken that day's register — the
+        // normal case every morning — and `.json()` threw on it, so the three
+        // setState calls below never ran: the teacher got the form with no
+        // pupils and no Save button. `readJson` is the client half of the rule
+        // `apiGet` already applies on the server.
+        const cls = await readJson<{ students: Student[] }>(clsRes);
+        const students = cls?.students ?? [];
+        const session = await readJson<NonNullable<Session>>(regRes);
         const existing = new Map((session?.records ?? []).map((r) => [r.studentId, r.status]));
         setRoster(students);
         setSavedSession(session);
@@ -122,7 +148,9 @@ export function TakeRegister({
     (async () => {
       const res = await fetch(`/api/sms/classes/${classId}/attendance`, { cache: "no-store" });
       if (cancelled || !res.ok) return;
-      setHistory((await res.json()) as SessionSummary[]);
+      // Same rule: a list endpoint answering nothing must not take the screen
+      // down with it.
+      setHistory((await readJson<SessionSummary[]>(res)) ?? []);
     })();
     return () => {
       cancelled = true;

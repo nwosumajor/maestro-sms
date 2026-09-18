@@ -237,6 +237,14 @@ export type LiveStatus = "SCHEDULED" | "LIVE" | "ENDED" | "CANCELLED";
 export interface LmsLiveSessionDto {
   id: string;
   classId: string;
+  /** The class this was taught to, named — the listing spans courses, so a row
+   *  carrying only an id tells the reader nothing. */
+  className: string | null;
+  /** The COURSE. Null for a form period or an assembly, which are real sessions
+   *  with no subject. */
+  subjectId: string | null;
+  subjectName: string | null;
+  /** The TOPIC — "Photosynthesis", where the subject is "Biology". */
   title: string;
   provider: LiveProvider;
   startsAt: Date;
@@ -248,6 +256,33 @@ export interface LmsLiveSessionDto {
   /** Host/staff only: number of students who have joined (0 for others). */
   attendeeCount: number;
   createdAt: Date;
+
+  /**
+   * Is there a recording to play?
+   *
+   * Derived, never the key: the storage key is the one thing that must not
+   * cross the wire, because a key plus any signature is a link. Playback is a
+   * separate POST that mints a short-lived inline URL and audits who watched.
+   */
+  hasRecording: boolean;
+  recordingSizeBytes: number | null;
+  recordingUploadedAt: Date | null;
+  /** When the bytes are due to be purged — shown so a pupil revising knows how
+   *  long they have, rather than finding it gone. */
+  recordingExpiresAt: Date | null;
+  /** Set once the sweep has removed them. A recording that was DELETED and one
+   *  that never existed are different facts, and only one needs explaining. */
+  recordingRemovedAt: Date | null;
+}
+
+/** A page of live sessions across every course the caller can see. */
+export interface LmsLiveSessionPageDto {
+  rows: LmsLiveSessionDto[];
+  /** Sessions matching the filter, not the page — a cap with no count is how a
+   *  reader mistakes a page for the record. */
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /** One student's join record for a live session (host/staff view). */
@@ -374,6 +409,21 @@ export interface ClassProgressDto {
 /** A presigned URL envelope (upload or download). */
 export interface LmsPresignDto {
   url: string;
+  expiresInSeconds: number;
+}
+
+/**
+ * A recording upload's presign — the shared one plus the KEY.
+ *
+ * Its own type rather than a field added to `LmsPresignDto`, which a dozen
+ * other callers consume and none of them need. The key comes back because
+ * `confirm` names it, and the server then checks it is one IT minted for THIS
+ * school and THIS session — so the client saying which object it uploaded is
+ * not the same as the client choosing which object to attach.
+ */
+export interface LmsRecordingPresignDto {
+  url: string;
+  key: string;
   expiresInSeconds: number;
 }
 

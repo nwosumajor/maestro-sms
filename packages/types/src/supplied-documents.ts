@@ -84,8 +84,77 @@ export const SATISFYING_STATUSES: readonly SubmissionStatus[] = ["UPLOADED", "VE
 export const ACCEPTED_UPLOAD_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
 export type AcceptedUploadType = (typeof ACCEPTED_UPLOAD_TYPES)[number];
 
+/**
+ * What a TEACHER may upload as a recording of their own live class.
+ *
+ * Deliberately NOT added to `ACCEPTED_UPLOAD_TYPES`: that list is what a member
+ * of the PUBLIC may attach to an admission or a job application, and widening it
+ * would let a parent send a video where a birth certificate belongs. Identifying
+ * a file and ACCEPTING one are different questions, and each feature answers the
+ * second for itself.
+ *
+ * One type, not a family. Every browser plays H.264 MP4; accepting `.mov`,
+ * `.mkv` and `.webm` besides would mean a pupil whose recording simply does not
+ * play, with nothing on screen saying why.
+ */
+export const RECORDING_UPLOAD_TYPES = ["video/mp4"] as const;
+export type RecordingUploadType = (typeof RECORDING_UPLOAD_TYPES)[number];
+
+/**
+ * Every type the magic-byte sniffer can NAME — the union of what any feature
+ * accepts, which is not itself a permission to upload anything.
+ */
+export const SNIFFABLE_UPLOAD_TYPES = [...ACCEPTED_UPLOAD_TYPES, ...RECORDING_UPLOAD_TYPES] as const;
+export type SniffableUploadType = (typeof SNIFFABLE_UPLOAD_TYPES)[number];
+
 /** Per-file ceiling. A phone photo is 2–5 MB; a scanned multi-page PDF larger. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * A recording's own ceiling. Stated here so the presign, the confirm and the
+ * screen all read one figure.
+ *
+ * SIZED AGAINST WHAT A TEACHER ACTUALLY PRODUCES, not against a round number.
+ * A double lesson is the worst realistic case, so the arithmetic is per two
+ * hours of what the tools a school already uses emit:
+ *
+ *   Zoom 720p, shared screen / slides   ~0.7 GB
+ *   Zoom 720p, camera on a speaker      ~1.4 GB
+ *   Zoom 480p                           ~0.5 GB
+ *   OBS / screen recorder at 1080p      ~2.2 GB
+ *
+ * 1.5 GB accepts every 720p recording of a double lesson with a little
+ * headroom, and refuses the 1080p screen-recorder dump — which is the right
+ * refusal for a second reason: 2.2 GB is over an hour of uploading on a 5 Mbps
+ * line, so a cap that admitted it would mostly produce abandoned PUTs.
+ *
+ * A 500 MB ceiling was considered and is too small to be usable: it works out
+ * at 0.56 Mbps for two hours and refuses even 480p, so the commonest outcome
+ * would be a teacher who cannot attach the lesson they just recorded.
+ *
+ * THIS IS NOT WHAT CONTROLS THE STORAGE BILL. A per-file cap bounds one
+ * upload; the bill is the COUNT — roughly 1,560 recordings a year for a
+ * 60-class secondary — and that is bounded by `recordingExpiresAt` and the
+ * retention sweep, which clears a session's recordings at the end of the
+ * academic session. Lower this figure to make uploads smaller; change the
+ * retention window to make the bill smaller.
+ */
+export const MAX_RECORDING_BYTES = 1536 * 1024 * 1024;
+
+/**
+ * The ONE wording for "that recording is too big", because the presign and the
+ * confirm both refuse and a refusal must name the way out — a teacher told
+ * only a number has no idea what to change. Written once so the two doors
+ * cannot drift apart.
+ */
+export function recordingTooLargeMessage(sizeBytes: number): string {
+  const gb = (n: number) => (n / 1024 / 1024 / 1024).toFixed(1);
+  return (
+    `That recording is ${gb(sizeBytes)} GB and the limit is ${gb(MAX_RECORDING_BYTES)} GB. ` +
+    `Record at 720p rather than 1080p — a two-hour lesson then comes to about a gigabyte — ` +
+    `or upload the lesson in two halves as separate sessions.`
+  );
+}
 
 /** How long a family's upload link stays good. Admissions paperwork is slow —
  *  a birth certificate may need a trip to a registry office. */

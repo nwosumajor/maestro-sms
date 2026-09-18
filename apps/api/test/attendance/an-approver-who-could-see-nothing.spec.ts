@@ -75,9 +75,20 @@ describe("and the board is on the screen for them", () => {
   it("renders for anyone who CHASES a register, not only who takes one", () => {
     // Gated on `attendance.write` alone, the board was invisible to the very
     // person who signs off the amendment when the window has closed.
+    //
+    // ANCHORED ON THE GATE, NOT ITS EXACT JSX. This read
+    // `/\{canChase && <RegisterBoard/` and went red when the board gained a
+    // second condition (`schoolWide`, so a class teacher is not shown five
+    // other classes on the page where they mark one) — a change that
+    // STRENGTHENED what this guards. What matters is that `canChase` is in the
+    // gate and `canWrite` is not the whole of it.
     expect(PAGE).toMatch(/canChase/);
     expect(PAGE).toMatch(/attendance\.amend\.review/);
-    expect(PAGE).toMatch(/\{canChase && <RegisterBoard/);
+    const gate = /\{\s*canChase\s*&&[^}]*<RegisterBoard/;
+    expect(PAGE).toMatch(gate);
+    // And the read the board's own shape depends on must not be gated on the
+    // WRITE permission either, or the approver gets an empty page instead.
+    expect(PAGE).toMatch(/canChase \? apiGet<RegisterStatus>\("\/attendance\/registers"\)/);
   });
 
   it("does not hand them the write-only controls", () => {

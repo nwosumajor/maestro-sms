@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Two hundred and sixty-four write-ups, newest first. Each records a **real defect
+Three hundred and seventy-four write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,10 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Every deletion this platform promises was a delete marker](#every-deletion-this-platform-promises-was-a-delete-marker)
+- [Two upload ceilings, and the door in the middle knew about one](#two-upload-ceilings-and-the-door-in-the-middle-knew-about-one)
+- [An index I added by reasoning, and what measuring it actually said](#an-index-i-added-by-reasoning-and-what-measuring-it-actually-said)
+- [A bucket cap sized against a round number, and what a teacher records](#a-bucket-cap-sized-against-a-round-number-and-what-a-teacher-records)
 - [A campus flagged on the group overview, and unflagged on its own page](#a-campus-flagged-on-the-group-overview-and-unflagged-on-its-own-page)
 - [The whole application at 500 schools, and the sweep that first passed on emptiness](#the-whole-application-at-500-schools-and-the-sweep-that-first-passed-on-emptiness)
 - [Five hundred schools, ten years, and a decade that costs nothing to carry](#five-hundred-schools-ten-years-and-a-decade-that-costs-nothing-to-carry)
@@ -295,6 +299,223 @@ instances live, in full, with nothing removed.
 - [Two surfaces the guard cannot reach, and both are now asked](#two-surfaces-the-guard-cannot-reach-and-both-are-now-asked)
 
 ---
+
+### Every deletion this platform promises was a delete marker
+Asked whether the recording work was properly linked to the infrastructure and
+the production documents for S3. The application code was right; the BUCKET was
+not, and the finding is much larger than recordings.
+
+`aws_s3_bucket_versioning.documents` is **Enabled**, there is **no lifecycle
+configuration anywhere in terraform**, and every caller deletes with
+`DeleteObjectCommand({Bucket, Key})` — **no VersionId**. On a versioning-enabled
+bucket that writes a DELETE MARKER and retains the object. The task role does not
+even hold `s3:DeleteObjectVersion`, so nothing in the application *can* hard
+delete. Ten call sites depend on a delete deleting, and they are not
+housekeeping:
+
+```
+privacy.service.ts:610        NDPR right-to-erasure
+recording-retention.ts:110    lesson footage of named children
+submission-retention.ts:154   files held for a DECLINED application
+documents / supplied-documents / branding / recruitment / lms-content
+```
+
+Each one reports success, writes its audit row, and leaves the bytes in the
+bucket for ever. **Silent partial success on a privacy control** — the worst
+place in this codebase for it, because the school has already told the family.
+
+THE REMEDY BELONGS IN THE BUCKET, NOT THE APPLICATION. S3 expires noncurrent
+versions itself, so `aws_s3_bucket_lifecycle_configuration` with
+`noncurrent_version_expiration` needs no code change, no new IAM permission, and
+gives no future call site a way to forget: the guarantee becomes a property of
+the bucket rather than a discipline. `expired_object_delete_marker` clears the
+litter left behind, and `abort_incomplete_multipart_upload` stops paying for
+parts no listing shows.
+
+**The window is the whole design decision.** Versioning protects against an
+accidental overwrite or delete, and that protection is a WINDOW, not a promise to
+keep everything: `documents_noncurrent_retention_days` is both the time in which
+a mistake is recoverable AND the lag on every promised deletion. Defaulted to
+**7** — short, because these are minors' records and the fail-safe tightens, and
+long enough to notice an operator error inside a working week.
+
+// **THE PRODUCTION DOC HAD THE OPPOSITE INSTRUCTION WRITTEN DOWN.** Step 9.4
+// said to "add a lifecycle rule shifting non-current versions to Glacier after
+// 30 days (cost lever, zero user impact)". That makes the bill smaller and the
+// disclosure PERMANENT — precisely wrong for a bucket holding footage and
+// records of children, and it reads as a tidy-up rather than as the data
+// protection control it is. Corrected, and the runbook with it: 5.10 promised
+// "versioning means deletes are recoverable; retrieve the prior version" with
+// no window at all, so on-call would have gone looking for a version that no
+// longer exists — and it now carries the INVERSE incident too ("we were asked
+// to erase it and it is still there") with the two `aws s3api` commands that
+// answer it.
+// GOTCHA: recordings are served to pupils from PRESIGNED S3 URLS, which bypass
+// CloudFront entirely — so playback is billed at S3 internet egress, not CDN.
+// Written into the cost profile, because it is the line that grows with
+// watching rather than with storing.
+
+### Two upload ceilings, and the door in the middle knew about one
+A document is capped at 10 MB and a lesson recording at 1.5 GB. Both ceilings
+were already written down, and the presign and the confirm each enforced the
+right one — while the hop BETWEEN them, which is what actually receives the
+bytes on the documented local stack, applied the document cap to everything.
+So a recording was allowed, refused at 10 MB, and allowed again. THREE
+document-sized ceilings, in fact, and the first two were measured rather than
+read:
+
+```
+nginx  location /local-storage/  client_max_body_size 12m
+       -> PUT 20 MB through nginx answered 413      (measured)
+API    readBoundedBody(req, MAX_UPLOAD_BYTES)
+       -> the API's own door, at 10 MB
+API    the same reader collects the body into one Buffer
+       -> a latent OOM at 1.5 GB, not merely a refusal
+```
+
+**The recording upload could not work on the local stack at all** — the class
+this file already records for `KEY_SHAPE`, where four upload features 400'd at
+the first step behind a refusal worded like a bad signature. It is also textbook
+sibling asymmetry: somebody reasoned out a second ceiling, wrote it at the two
+doors in front of them, and did not sweep.
+
+THE FIX IS THE IDIOM THIS MODULE ALREADY USES FOR INLINE TYPES: put the fact in
+the signed OPERATION. `put-recording` is a different op from `put`, one table
+maps each to its ceiling, and the presign picks the op from the content type. A
+caller cannot widen its own ceiling by sending a bigger file or editing a URL,
+because the op is inside the HMAC; an unknown type gets the NARROWER ceiling
+(Golden Rule #7); and a third ceiling is a row rather than a fourth place to
+remember. The stub streams to disk and REMOVES a partial file when the cap is
+passed, since a half-written object `exists()` would vouch for is worse than
+none.
+
+**DRIVEN END TO END through nginx**, which is the only thing that would have
+shown it: presign 201 -> PUT 40 MB **200** (was 413) -> confirm 201, bytes
+sniffed, 41,943,040 stored, storage key not on the wire -> play 201 -> **Range
+206 `bytes 0-99/41943040`**, which is what `<video>` seeking needs.
+
+// GOTCHA, and the reason this cost a detour: the first probe hit `/api/sms/*`
+// and got 401 on every size, which reads as "refused" for every route. That is
+// the BFF, which mints its own bearer from the Auth.js session — a minted API
+// token is meaningless to it. Driving the API needs a container ON the compose
+// network, because the backend is deliberately not host-reachable.
+// GOTCHA: **two existing tests went red on a change that STRENGTHENED what they
+// guard**, for the tenth-or-so time in this repo. They pinned the literal
+// `readBoundedBody(req, MAX_UPLOAD_BYTES)` and `for await (const chunk of req)`
+// — both spellings gone, both properties better. Re-anchored to the properties
+// (the limit comes from the op that verified; no `MAX_UPLOAD_BYTES` at the call
+// site; no `Buffer.concat(chunks)`), and mutation-validated in both directions.
+// The second half of that lesson: the streaming write moved to the PROVIDER, so
+// the spec had to read both files or half the property was unguarded.
+
+### An index I added by reasoning, and what measuring it actually said
+Asked to make sure nothing shipped this session would lag or error in years to
+come. The LMS queries measured clean at ten years of a heavy-recording school
+(31,201 sessions): page 0.118 ms, recorded-only page 0.346 ms on the partial
+index, the retention sweep 1.36 ms over 2,000 due rows. Topic SEARCH did not —
+a case-insensitive contains no btree can serve, 19.6 ms reading 28,471 rows to
+return 93 — and a trigram GIN took it to 2.9 ms on 112 index rows, 1.2 MB of
+index against a 6.7 MB heap on a table that takes a few thousand INSERTs a YEAR.
+
+**The finding is the one I went looking for in my own work.** Earlier the same
+session I had added `invoice_schoolId_status_lastRemindedAt_idx` to serve the
+fee reminder's new rotation ordering, with a comment explaining why it was
+tenant-leading — and no measurement, which is precisely what this repo already
+records as write amplification waiting to happen. Measured as the app role under
+RLS, with a bound parameter, on 18,014 invoices (14,405 open):
+
+```
+Limit (actual time=26.144..26.463 rows=2000)
+  ->  Sort  Sort Key: "lastRemindedAt" NULLS FIRST, "dueDate", id
+        Sort Method: top-N heapsort  Memory: 547kB
+        ->  Seq Scan on invoice  (rows=14405, Rows Removed by Filter: 3609)
+Execution Time: 26.911 ms
+```
+
+It is never chosen. Not rarely — never, and not only for this query.
+
+**WHY, and this is the durable part: an ordering column behind a non-equality
+predicate is unreachable for ORDER BY.** The sweep filters
+`status IN ('ISSUED','PARTIALLY_PAID')`, two values, so a btree keyed
+`(schoolId, status, lastRemindedAt)` cannot walk `lastRemindedAt` in order — it
+would have to merge two status runs, and Postgres will sort instead. The index
+was also a strict prefix-superset of `invoice_schoolId_status_idx` (17,774
+scans), which already serves every read that only filters, so there was nothing
+left for it to win even in principle.
+
+Moving the predicate into a PARTIAL index removes status from the key entirely
+and brings the ordering columns to the front:
+
+```
+Limit (actual time=0.039..2.264 rows=2000)
+  ->  Index Scan using invoice_reminder_rotation_idx  Buffers: shared hit=2019
+Execution Time: 2.514 ms
+```
+
+26.9 ms -> 2.5 ms, and the SORT disappears rather than getting cheaper — the
+sweep reads 2,000 index entries instead of the school's whole open book, so the
+cost tracks the PAGE and not the school's lifetime. Migration
+`20270324000000_invoice_reminder_rotation_index` drops the dead one and creates
+this.
+
+// GOTCHA on the probe itself: `SET LOCAL` outside a transaction is a WARNING,
+// not an error, and the GUC then reads as the empty string — `invalid input
+// syntax for type uuid: ""`. The measurement has to run inside `BEGIN`, which
+// is also the only way it resembles what `runAsTenant` actually does.
+// GOTCHA: the proof that an index is dead is NOT "the other one is faster".
+// Both were present, so the planner picking the good one says nothing about the
+// bad one. `DROP INDEX` inside a transaction that ROLLS BACK is what answers
+// it — DDL is transactional in Postgres — and with the rotation index removed
+// the planner STILL seq-scanned, which is the actual evidence.
+// GOTCHA: Postgres is not host-exposed in this stack, so `prisma migrate
+// deploy` cannot reach it from the host. A throwaway `alpine/socat` container
+// on the compose network forwarding one port is enough, and is better than
+// hand-writing `_prisma_migrations` rows — which is the shape of the repair
+// this file already records as "a clean history over missing schema".
+
+### A bucket cap sized against a round number, and what a teacher records
+`MAX_RECORDING_BYTES` was 2 GB, chosen because an hour of 720p is roughly a
+gigabyte and two felt safe. Asked whether 500 MB for two hours would do instead.
+It works out at **0.56 Mbps**, which refuses every recording the tools a school
+already owns actually emit — measured against published encoder rates per two
+hours: Zoom 720p slides ~0.7 GB, Zoom 720p with a camera on a speaker ~1.4 GB,
+OBS at 1080p ~2.2 GB, and even Zoom **480p ~0.5 GB**. The commonest outcome of a
+500 MB ceiling is a teacher who cannot attach the lesson they have just
+recorded.
+
+Set to **1.5 GB**: it takes every 720p recording of a double lesson with
+headroom and refuses the 1080p screen-recorder dump — which is the right refusal
+for a second reason, since 2.2 GB is over an hour of uploading on a 5 Mbps line,
+so a cap admitting it would mostly produce abandoned PUTs.
+
+**A PER-FILE CAP DOES NOT CONTROL THE STORAGE BILL, and saying so is the point.**
+It bounds one upload; the bill is the COUNT — about 1,560 recordings a year for
+a 60-class secondary — and that is bounded by `recordingExpiresAt` and the
+retention sweep, which clears a session's footage at the end of the academic
+session. At 1.5 GB the steady state is ~2.3 TB held for one year, against
+~0.76 TB at 500 MB: real money, and the lever for it is the RETENTION WINDOW,
+not a cap that stops teachers attaching lessons. Both are one constant.
+
+**THE REFUSAL NOW NAMES THE WAY OUT.** It said "That recording is 2.4 GB. The
+limit is 2 GB." — true, and useless to somebody who has already recorded the
+lesson. It names the RESOLUTION ("record at 720p rather than 1080p"), which is
+the thing they can act on, and the split-into-two escape. One shared
+`recordingTooLargeMessage` rather than a second correct copy, because there are
+TWO doors: presign (where `sizeBytes` is the caller's own claim, and refusing
+here is what saves the hour of uploading) and confirm (where the server holds
+the bytes and the claim is checked against them). The screen states the figure
+too, derived from the same constant, so it cannot promise a size the API
+refuses.
+
+**MUTATION-VALIDATED, four ways**, because a cap with no test is a number: drop
+the presign guard -> 3 fail including the 1080p case; drop the confirm guard ->
+the "server actually holds the bytes" case fails; strip "720p" from the message
+-> only the way-out case fails, on both doors; set the cap to the proposed
+500 MB -> "takes a two-hour 720p double lesson" fails, which is the whole
+argument written as a test.
+// GOTCHA: the files under mutation were UNCOMMITTED, so `git checkout` would
+// have discarded the FIX and left the mutation. Copied aside first — the trap
+// this file already records, met again and avoided by having read it.
 
 ### A campus flagged on the group overview, and unflagged on its own page
 Asked to simulate the GROUP module and check the console captures the right
@@ -17632,3 +17853,423 @@ excludes it through a relation. A gate that wrong would be answered with an
 exemption, and an exemption granted for a false positive is a hole with a note
 on it. The rule is in CLAUDE.md beside the backlog rule it qualifies, and the
 two sweeps that had it wrong now each have a two-run test.
+
+### The approver who was documented as able to correct, and could not
+
+Asked whether a teacher can take a register and whether the school admin and
+principal can adjust it inside the allowed window. Driven against the running
+stack rather than read, on a class whose supervisor is the demo teacher:
+
+    TAKING TODAY            teacher 201 | school_admin 201 | principal 403 | head_teacher 403
+    CORRECTING AT DAY 10    teacher 201 pendingApproval
+                            school_admin 201 applied directly
+                            principal   403  "Only History 101's class teacher takes
+                                              its register — ask a school administrator"
+                            head_teacher 403
+    TOMORROW                400        ENDED TERM  409 (locked for everyone)
+
+The taking half is exactly as designed. The CORRECTING half is not what either
+the code comment or CLAUDE.md said. Both stated that "holders of
+`attendance.amend.review` edit stale registers DIRECTLY (they're the
+approvers)". Three roles hold that permission and it was true of ONE.
+
+`markAttendance` reads the permission into `isApprover` and branches on it —
+but BOTH branches then call `assertCanTakeRegister`, so `isApprover` chooses the
+branch and never whether the gate applies. A correction is therefore gated
+exactly like a fresh register: the class's own supervisor, or `school_admin` as
+cover. The principal holds `attendance.write`, passes the route gate and fails
+at ROW scope; the head teacher does not hold it at all and is stopped earlier,
+which is why one of them gets a helpful refusal and the other a bare
+"Forbidden".
+
+DECIDED: keep the code, correct the claim. A register attests "I looked at this
+room", a correction is a claim about the same room, and `amend.review` exists so
+a senior can APPROVE a teacher's account of it rather than replace it. The
+alternative — letting an approver author — would have let one person rewrite any
+class's historic register with nobody else involved, which is the control this
+window exists to impose.
+
+// WHY IT COULD BE WRONG FOR SO LONG: `a-form-that-refuses-on-save` covers this
+// rule thoroughly for TAKING a register and drives the real `canTakeRegister`.
+// Nothing covered it for CORRECTING one. The claim that was false was about the
+// case with no test, which is the ordinary shape of this: the careful half is
+// written first and the other is left.
+// `who-corrects-a-stale-register.spec.ts` drives `markAttendance` itself for
+// all four roles at a stale date, with the term deliberately still open so a
+// pass cannot come from the term lock. Mutation-validated: making the old claim
+// TRUE (`if (!isApprover) await this.assertCanTakeRegister(...)`) fails four of
+// its six cases by name.
+
+KNOWN AND NOT FIXED, recorded rather than left implied: `RBAC_MANAGING_ROLES`
+treats school_admin and principal as interchangeable, so a school may run with a
+principal and no school_admin. If such a class's supervisor has LEFT, its stale
+register can be corrected by nobody — the principal cannot author it and there
+is no teacher left to raise the amendment. Narrow (it needs all three at once),
+and deliberately out of scope for this change.
+
+### The one control for taking a register, which did nothing
+
+Reported from the running app: "the take button for the class supervisor of SS1
+Science A isn't working." It was not authorisation — `/attendance/registers`
+answered `canTake: true` for that teacher and that class, and POSTing the
+register with a minted token returned 201 with four records.
+
+THE FIRST HALF WAS A STALE CONTAINER, and worth recording because it wasted the
+first pass: the web image was built at 12:22:16 and the register fix landed at
+12:28:20, so localhost had been serving the PRE-FIX page for seven hours. I had
+rebuilt `backend` twice while chasing sweep defects and never rebuilt
+`frontend`. The user's own audit trail showed it — they signed in and loaded the
+roster seven minutes before the rebuild.
+
+THE SECOND HALF WAS REAL, and needed a browser to find. Driven headless over CDP
+because the failure leaves no server-side trace at all — the decisive evidence
+was that **no POST ever reached nginx**: the page loaded, the roster loaded, and
+then four minutes of nothing.
+
+    /attendance?classId=X, clicking THAT class's "Take register"
+      requests triggered  0        (it is a Link to the URL you are already on,
+      scrollY   0 -> 0              so Next performs no navigation whatsoever)
+      Save button y=1094 in a 757px viewport — below the fold, the whole time
+
+So the teacher presses the only control the page offers and the product does not
+react. The form was there; it was a thousand pixels down.
+
+    as school_admin, clicking a DIFFERENT class's "Take register"
+      url        -> ?classId=d95ca30b…      (changed)
+      form reads -> History 101             (did NOT change)
+      Save button y=4318
+
+Worse than nothing happening: `classId` is `useState` with an INITIAL value, and
+a search-param change re-renders without remounting, so the initial value is
+never read again. An administrator would have scrolled down and saved a register
+**against the class they were previously on**.
+
+Fixed in two places, both of which had to be the same fix twice over: the boards
+call a shared `revealTakeRegister()` (with `scroll={false}`, so Next's
+scroll-to-top does not fight it), and the form follows `initialClassId` when it
+changes. Verified in the browser after: case one scrolled 0 -> 763 with the Save
+button at y=331 and `visible: true`; case two moved the form to VOL SS3 E and
+scrolled to 3987.
+
+// This is the recorded `{ scroll: false }` class in its MIRROR IMAGE. There, a
+// navigation that updated a section in place scrolled to the top and hid the
+// history the user had asked for, so the fix was to stop scrolling. Here the
+// same control needed the opposite — to bring the section INTO view — and, on
+// the same-URL click, to work when there is no navigation to hang behaviour off
+// at all. A rule learnt as "do not scroll" is not "scrolling is wrong".
+// GOTCHA: the sync is keyed on `initialClassId` ALONE. Including `classes` in
+// the deps re-runs it on every server render — the prop is a fresh array each
+// time — and resets the dropdown under somebody mid-task. That mutation fails
+// its own named case.
+// GOTCHA, mine: the test's fetch double answered `null` to everything under
+// `/attendance`, including the register HISTORY, which is a LIST — the
+// component died on `history.length`. A double must model the CONTRACT, not
+// the path prefix.
+
+Mutation-validated four ways, each failing the case named for it: drop the sync
+effect; add `classes` to its deps; make the reveal not scroll; and remove the
+reveal from ONE of the two boards — the sibling-asymmetry case, which is why the
+gate walks the components rather than naming them.
+
+### The register form with no pupils in it — a 200 with no body
+
+The actual fault behind "the take button isn't working", found only after
+signing in AS the teacher who reported it. The two faults fixed in the entry
+above were real and were not this one.
+
+`GET /classes/:id/attendance?date=` returns `null` when nobody has taken that
+day's register. **Nest sends `null` as a 200 with a ZERO-BYTE body and no
+content-type**, and the form called `.json()` on it:
+
+    GET /classes/<id>/attendance?date=2026-09-18
+      status=200  bytes=0  content-type=null
+      JSON.parse THROWS: Unexpected end of JSON input
+
+The throw lands in the middle of the loading effect, BEFORE `setRoster(students)`
+— so the three setState calls after it never run. The teacher opens the register
+and sees the form, the right class in the dropdown, **no pupils and no Save
+button**. The class, the permission, the roster and the API were all fine; the
+screen simply never received what it had successfully fetched.
+
+It is every class, every morning: "no register taken yet" is the normal state
+and the only state the form exists to change.
+
+// WHY EVERY TEST AND EVERY PROBE MISSED IT, including mine. The form works
+// perfectly on a class that ALREADY has a register for that date — the endpoint
+// then returns a real object. My own browser runs created that condition and
+// then passed: the button in them read "**Update** register", which is the
+// screen saying a register already existed. A fixture that makes the defect
+// impossible is worse than no fixture, because it reports success.
+// The decisive evidence was an absence: NO POST ever reached nginx. The page
+// loaded, the roster loaded, and nothing further happened for four minutes —
+// there was no failing request to find because the failure was a parse.
+
+THE RULE WAS ALREADY WRITTEN, ON THE OTHER SIDE. `apiGet` in `lib/api.ts` ends
+`const text = await res.text(); if (!text) return null;` — the server-side
+reader has handled this since it was written. The client half never was. Two
+client components had reached the same answer independently (`HostelOps` and
+`TransportOps` both use `.catch(() => null)`); `TakeRegister` was the one left.
+`lib/read-json.ts` is that rule written once, with the reason attached.
+
+// GOTCHA on the mutation: removing the EMPTY-BODY guard alone changes nothing,
+// because the `catch` already covers it — a mutation that does not alter
+// behaviour proves nothing about the test. Removing both (the original
+// spelling, `JSON.parse(await res.text())`) fails eight cases by name.
+// GOTCHA on doubles, twice in one file: the first modelled `json()` only and
+// broke when the code moved to `text()`; the second answered `null` to every
+// path under `/attendance`, including the register HISTORY, which is a LIST.
+// A double must model the CONTRACT — here, that a `null` handler really does
+// arrive as an EMPTY body.
+
+Verified on the reporting teacher's own account and class, in a real browser:
+class select "SS1 Science A", four pupils listed by name, Save present,
+"Take register" scrolling it into view, one pupil marked absent, POST 201,
+"Register saved." The register written by that check has been removed.
+
+### The page that mixed nothing and looked like it did
+
+Asked whether the register for SS1 Science A could pick up pupils from the other
+classes its teacher takes Mathematics in. It could not, and never could:
+`canTakeRegister` decides both the offered list and the write, and the roster is
+read per CLASS. Verified against the real school — Akinlabi Alex supervises SS1
+Science A and teaches Maths in SS1 Science A, SS1 Science B and SS2 Art A:
+
+    canTake   SS1 Science A  true   |  SS1 Science B  false  |  SS2 Art A  false
+    roster    Bimbo Kadiri, Poena John, Shola Babatunde, Wisdom Babs
+              — Science A's four, not Science B's four
+
+THE COMPLAINT WAS STILL RIGHT. `/attendance` gave that teacher four stacked
+sections: an outstanding-register board, a board of EVERY class they teach (two
+rows reading "view only"), their own register, and a pupil picker spanning every
+pupil they teach across all three classes. Two of the four are oversight tools
+for heads and administrators. The data was never mixed; the page was, and this
+is the record of where a child was — a screen that has to be explained is a
+screen that will be misread.
+
+So the page takes the SHAPE of the reader's duty. `RegisterStatusDto.schoolWide`
+is the server's own answer (`SCHOOL_WIDE_ROLES`), carried for the same reason
+`canTake` is: so the page never re-derives who sees the school. A class teacher
+gets their own class, first and alone; oversight readers keep the boards. Driven
+in a browser, all three:
+
+    class teacher   "Register — SS1 Science A" + record   form at y=691, VISIBLE
+                    only SS1 Science A named on the page; his four pupils
+    head_teacher    "Registers" + record                  no form (takes none)
+    junior_admin    "Registers" + "Attendance by class"   all six classes
+
+The pupil picker follows the same rule: for a class teacher it is their class,
+not everyone they teach.
+
+// GOTCHA, caught by driving all THREE roles rather than the one that reported
+// it: shaping the page from `/attendance/registers` made it depend on a read
+// gated on `canWrite` — and the head teacher holds `attendance.amend.review`
+// and NOT `attendance.write`. First run after the change: head_teacher's page
+// rendered no boards at all, leaving the approver of a stale correction unable
+// to see the registers the decision turns on. That is the dead grant this
+// module has already met once, reintroduced from the other side. The read is
+// gated on `canChase` now; the endpoint only ever needed `attendance.read`.
+// GOTCHA: the existing spec pinned the literal JSX `{canChase && <RegisterBoard`
+// and went red on a change that STRENGTHENED it. Re-anchored to the gate
+// rather than its spelling — the eleventh time a fixed-text assertion in this
+// repo has failed on an improvement.
+// GOTCHA on my own guard: asserting the SOURCE contains
+// `schoolWide: this.isSchoolWide(p)` passed a mutation that hard-coded `true`
+// on the main return, because the empty-class early return still carried the
+// real call. It counts both sides now — every site that REPORTS it must
+// COMPUTE it.
+
+`/classes` labels each card with what the READER is to that class ("Your class ·
+you teach Mathematics" against "You teach Mathematics"), derived from
+`supervisorId` and `subjectTeachers` already on the row — a reading of data the
+page has, not a second server-side definition of who teaches what.
+
+Guard: `a-register-that-cannot-mix-two-classes.spec.ts` drives the real rule for
+a teacher who supervises one class and teaches three. Mutation-validated:
+widening `canTakeRegister` to "any teacher" fails five cases across three specs.
+
+### A day in the record that could not say who signed for it
+
+Asked whether the attendance history serves audit and investigative review. Most
+of it does: `/students/:id/attendance` pages the day log with a date window, and
+`/students/:id/attendance/compiled` answers per month, per term and per session
+with lifetime totals, `source: ROLLUP|LIVE`, and `outsideAnyBucket` for registers
+falling in no configured term. Scoping is inherited from `assertCanAccessStudent`
+rather than restated.
+
+What it could not answer is the second half of every investigation. The day row
+carried `{ status, note, session: { classId, date } }` — so **who signed that
+register, and whether the mark was changed afterwards, were on another screen**
+(the class register for that day) and only reachable by a reader who knew to look
+and which class to look in. Both facts were one join away on a read that already
+made it.
+
+The record now carries the member of staff the register is signed by, the class
+by NAME, and when the session was last written. A mark RECORDED after the day it
+is about is a correction, and the row says so: "Demo Teacher (recorded 9 Aug
+2026)" against a 7 Aug register. That is the difference between a record and an
+audit record.
+
+// GOTCHA, and the reason the provenance could be added with nothing checking it
+// arrived: `getStudentAttendance` declared `records: unknown[]`. A service whose
+// return type is `unknown` is an unchecked wire — a field dropped on this path
+// reaches the page as `undefined` and renders as a blank cell, which on this
+// screen is a claim about a child. Annotated with a real
+// `AttendanceHistoryPageDto` now, so the next omission fails to COMPILE.
+// GOTCHA: the fixture that broke was a double returning `{ id: "r" }` × 100 —
+// shaped to the columns its own assertion touched, not to the row the query
+// returns. It passed until the service read one more field and then failed as
+// though the SERVICE were broken. Third time in two days.
+
+**And the documentation gap the same question exposed.** `/help` said nothing at
+all about archiving a term or a session, and the manual mentioned only
+"Archive leavers" — while `/admin/archives` has existed, with a nightly sweep for
+ended terms, a session/term PICKER, and checksummed downloads behind step-up.
+Leadership guidance added to both, and it leads with the trap this log already
+records: **the label bounds nothing**. An archive typed "2025/2026" with nothing
+selected holds every year the school has ever had and reads as though it were
+one. Pick the term or session from the list; the list is what bounds the export.
+
+// GOTCHA: the manual's stylesheet defines `.note.two-person` and `.note.safe`
+// and nothing else, so the `.note.warn` I reached for would have rendered as an
+// ordinary note — an undefined variant does not fail, it quietly loses the
+// emphasis it was written to carry. Defined it.
+// The regenerated `runbook-html.ts` turned out to be STALE on main against its
+// own markdown (`runbook-freshness` fails on the committed copy and passes on
+// the rebuild), so `pnpm --filter @sms/web build:manual` picked up a second
+// document nobody had regenerated.
+
+### The minute a child was marked, and the register nobody fills in for you
+
+Two questions from the same reading of the attendance record.
+
+**1. Does a register nobody took become absences?** No — verified rather than
+asserted. `attendance_record` has exactly three writers and all three are
+`applyRegister`: a person saving the register, the approved-amendment reactor,
+and a gate scan. `RegisterReminderService` writes nothing at all; it notifies.
+
+That is deliberate and worth stating where a school will read it, because a
+school WILL ask. An absence is a claim that a named child was not in a room and
+it reaches their guardian within minutes, so it has to come from somebody who
+looked. Fill it in automatically and an untaken register becomes
+indistinguishable from a day when everybody was present — which is the one thing
+an attendance record exists to tell apart. What the school gets instead: the
+register stays visibly outstanding with the responsible teacher named, and a
+reminder goes to that teacher each afternoon in the school's own timezone.
+Written into `/help` (leadership and teachers) and the manual.
+
+**2. Timestamps.** The previous entry added `session.updatedAt` as the moment a
+mark was written. That is the wrong grain: one register saves thirty marks at
+once, and a gate scan writes ONE. `attendance_record` carries its own
+`createdAt`/`updatedAt`, so the record can answer per pupil — which is what an
+investigation asks.
+
+    markedAt   when THIS pupil's mark was first written, to the minute
+    amendedAt  when it was last changed, or NULL if it never was
+
+Rendered in the school's own zone (`timeOfDay`/`dateTime`, which already handle
+the hydration trap this repo records). Verified end to end through the real
+path — saved PRESENT, corrected to LATE two seconds later:
+
+    { status: "LATE",
+      markedAt:  2026-09-18T08:07:22.553Z,
+      amendedAt: 2026-09-18T08:07:24.139Z,
+      takenBy: "Demo Teacher", className: "History 101" }
+
+// GOTCHA: `amendedAt` must be NULL when nothing moved, and the test for that is
+// not "is it present" — Prisma stamps `updatedAt` on CREATE as well, so every
+// untouched mark carries one. Equality against `createdAt` is the only thing
+// that distinguishes them, and returning `updatedAt` unconditionally makes
+// every row in the school read as a correction. Mutation-validated.
+// GOTCHA: a fixture broke for the THIRD time in two days on the same shape — a
+// double returning rows shaped to the columns its own assertion touched rather
+// than to what the query selects. Each time it failed as though the SERVICE
+// were broken. The return type is annotated now, which is what turns the next
+// one into a compile error instead.
+
+### A recording that plays and is never handed over
+
+Asked for a video-meeting page: one table across courses — course and topic,
+start, join live, duration, playback, created — with search by name or date, a
+filter for past recordings, and playback that pupils cannot download.
+
+WHAT ALREADY EXISTED, and it was more than expected: `LmsLiveSession` with a
+provider, a join URL, a SERVER-GATED join window and an attendance register —
+as a panel on one class's page. No course, no recordings, no search, and no way
+to see across courses at all.
+
+THE HONEST ANSWER TO "NOT DOWNLOADABLE" is the part worth recording. Anything a
+browser can play can be captured off the screen; the Assessment Integrity
+principles in this repo already say client-side measures are friction and never
+enforcement, and a video is no different. What CAN be enforced is which
+OPERATION is ever signed. `inline` was already "the TYPE the server vouches
+for", one signed op per type, so `video/mp4` gets `get-inline-video` and nothing
+anywhere mints an attachment op for a recording:
+
+    GET the play url -> 200  content-type video/mp4  disposition inline
+                             accept-ranges bytes
+    with Range       -> 206  content-range bytes 8-15/524
+
+The URL cannot be edited into a download because the download was never granted,
+and the storage key never crosses the wire — playback is a POST that mints a
+short-lived grant and audits the watch. The S3 provider needed NO change: it
+already pins `ResponseContentType` from the inline type. That is the payoff of a
+design that made the type the parameter rather than a boolean.
+
+// NAMING A FILE AND ACCEPTING ONE ARE DIFFERENT QUESTIONS. The obvious move was
+// to add `video/mp4` to `ACCEPTED_UPLOAD_TYPES` — which is the list a PARENT
+// may attach to an admission, so that would have let a family send a video
+// where a birth certificate belongs. `sniffUploadType` now names every type any
+// feature takes; each feature checks its own allowlist.
+// GOTCHA: MP4 needs a BRAND check, not just `ftyp` at offset 4 — that signature
+// is ISO base media, which QuickTime `.mov` also writes, and a `.mov` served as
+// video/mp4 is a lesson that silently does not play for the pupil it was
+// recorded for. `qt  ` is the brand a Mac screen recording writes.
+// GOTCHA: the download route tried each inline op in a hand-written `??` chain.
+// A third type would have been signed correctly, refused as inline and served
+// as a byte stream — a download. Derived from the one table now.
+// GOTCHA: a `<video>` cannot SEEK without ranges and Safari will not begin
+// playback at all, so the local stub had to learn 206 or the feature would be
+// testable nowhere but production — on the device a pupil is likeliest to hold.
+
+WHO MAY WATCH: teaching staff and the pupils who were IN that class. Guardians
+are refused — a recording shows other people's children, and a parent watching
+it is a disclosure those families never agreed to. That is a decision, and
+`a-recording-only-its-own-class-can-watch.spec.ts` fails if somebody widens it.
+
+RETENTION. Bytes are dated to the end of the academic session the lesson was
+taught in; a nightly fleet sweep removes them and the row keeps
+`recordingRemovedAt`, because "removed at the end of 2025/2026" and "never
+recorded" are different facts and only one needs explaining to a pupil who came
+back to revise. A school with undated sessions falls back to a BOUNDED year, not
+to forever: for storing footage of minors the fail-safe tightens.
+
+// The sweep ADVANCES, which the declined-applicant purge did not for as long as
+// it existed: clearing `recordingKey` takes the row out of the predicate the
+// page is drawn from, so run two reaches what run one capped out of. Pinned by
+// a two-run case.
+// GOTCHA found by a double returning LIVE objects: `bytesReclaimed` was read
+// off the row AFTER the update that nulls it. Prisma hands back a fresh object
+// so it would have worked in production — a figure an operator reads should not
+// turn on object identity, and the size is captured before the write now.
+
+FOUR GATES CAUGHT REAL THINGS on the way, each of them the thing it exists for:
+a raw `new Date()` on a query value (JS rolls `2026-04-31` to 1 May — now
+`isoDay` plus the shared `dateWindow`); five routes with no answer to "how is
+this reached?"; a catalogue entry naming a route that did not exist, because the
+controller is PREFIXLESS and I had written `lms/recordings/...` (the route is
+`live-recordings/...` now — `live/recordings/...` would have been one rename
+from being shadowed by `live/:id`); and a hidden file input a screen reader
+would announce as blank.
+
+// AND THE GATE I WIDENED EARLIER THIS SESSION CAUGHT MY OWN TEST. The recording
+// spec proved the storage key never reaches the wire with
+// `expect(JSON.stringify(dto)).not.toContain(KEY)` — the exact shape
+// `assertions-that-match-by-accident` exists for, and the rule I had added to
+// it hours before. Fixing it exposed a worse problem underneath: the assertion
+// ran on the DELETE response, where the key is already null, so it would have
+// passed whether or not the mapper leaked. Three mutations told that story —
+// adding `recordingKey` to the DTO did not COMPILE (the type is the gate, so it
+// proves nothing); leaking the key through `className`, which does compile,
+// PASSED against the old test; and the same leak fails the rewritten one by
+// name. A test committed before its mutation was checked, caught by the repo
+// rather than by me.

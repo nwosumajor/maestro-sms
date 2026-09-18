@@ -4,9 +4,67 @@ export interface AttendanceRecordDto {
   id: string;
   status: string;
   note: string | null;
-  session: { classId: string; date: string };
+  /**
+   * WHO SAID SO, AND WHEN.
+   *
+   * A register is a legal record of where a child was, and the question an
+   * investigation actually asks is not only "was this child marked absent on
+   * the 12th" but "who recorded that, and has it been changed since". This
+   * carried the status and the date alone, so the answer to both was on another
+   * screen — the class register for that day — and only if the reader knew to
+   * go and look, and which class to look in.
+   *
+   * `takenBy` is the member of staff the register is signed by
+   * (`AttendanceSession.takenById`), null where that person has since been
+   * removed; `recordedAt` is when the session was last written, so a mark that
+   * was CORRECTED weeks later is visibly out of step with its own date; and
+   * `className` saves the reader resolving a uuid by hand.
+   */
+  /**
+   * When THIS PUPIL'S mark was first written — to the minute, in the school's
+   * own zone when it is displayed.
+   *
+   * Per RECORD, not per session, because the two genuinely differ: a register
+   * saved at 08:05 marks thirty pupils at once, and a gate scan at 08:41 marks
+   * one of them present on its own. An investigation asking "when was this
+   * child marked present" wants the second answer, and the session could only
+   * ever give the first.
+   */
+  markedAt: Date;
+  /**
+   * When it was last CHANGED, or null if it never was.
+   *
+   * Null rather than "same as markedAt" so a reader never has to compare two
+   * timestamps to work out whether they are looking at a correction — which is
+   * the one thing about an old mark that an investigation is looking for.
+   */
+  amendedAt: Date | null;
+  session: {
+    classId: string;
+    className: string | null;
+    date: Date;
+    takenBy: { id: string; name: string } | null;
+  };
 }
 
+
+/**
+ * A page of one pupil's day-by-day record, with the TRUE total.
+ *
+ * Declared so the service can be annotated: without a return type the shape was
+ * inferred, so a field dropped here would have reached the page as `undefined`
+ * and rendered as a blank cell — which on this screen is a claim about a child.
+ */
+export interface AttendanceHistoryPageDto {
+  records: AttendanceRecordDto[];
+  page: number;
+  pageSize: number;
+  /** Days in the whole record, not the page — an audit that reports only what
+   *  fitted on a page is worse than one that says nothing. */
+  total: number;
+  from: string | null;
+  to: string | null;
+}
 
 /**
  * One class's register for a day, and WHO is responsible for it.
@@ -70,6 +128,22 @@ export interface RegisterStatusDto {
   remindersActive: boolean;
   /** Why it would not. Null when it would. */
   remindersOffReason: RegisterReminderOffReason | null;
+  /**
+   * Does this reader see attendance for the WHOLE school, or only the classes
+   * they are attached to?
+   *
+   * The server's own answer (`SCHOOL_WIDE_ROLES`), carried so the page never
+   * re-derives it — the same reason `canTake` is on each row. It decides SHAPE,
+   * not access: a head or administrator gets the oversight boards, and a class
+   * teacher gets their own register and nothing about anybody else's class.
+   *
+   * A teacher who supervises one class and teaches three others sees all four
+   * on an oversight board, which reads as though the register might mix them.
+   * It never did — the roster is the CLASS's enrolment and `canTake` is false
+   * for the three — but a screen that has to be explained is a screen that will
+   * be misread.
+   */
+  schoolWide: boolean;
 }
 
 /**

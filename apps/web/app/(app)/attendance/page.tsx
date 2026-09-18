@@ -15,8 +15,9 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { regionOf, shortDate, titleCase } from "@/lib/format";
+import { dateTime, regionOf, shortDate, timeOfDay, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
+import { TAKE_REGISTER_ANCHOR } from "@/components/attendance/register-anchor";
 import { RegisterBoard } from "@/components/attendance/RegisterBoard";
 import { SweepButton } from "@/components/maintenance/SweepButton";
 import { ClassAttendanceBoard } from "@/components/attendance/ClassAttendanceBoard";
@@ -110,7 +111,14 @@ export default async function AttendancePage({
     //
     // `canTake` is the same function the API enforces with, so the form can no
     // longer offer what the server will refuse.
-    canWrite ? apiGet<RegisterStatus>("/attendance/registers") : Promise.resolve(null),
+    // `canChase`, NOT `canWrite` — the head teacher holds `attendance.amend.review`
+    // and NOT `attendance.write`, so gating this read on the write permission
+    // left them with `schoolWide` false and no boards at all: the approver of a
+    // stale correction, unable to see the registers the decision turns on. That
+    // is the dead grant this module has already met once, reintroduced by the
+    // page shaping itself from a response it never asked for. The endpoint
+    // itself requires only `attendance.read`.
+    canChase ? apiGet<RegisterStatus>("/attendance/registers") : Promise.resolve(null),
     canWrite ? apiGet<{ lockBeforeDate: string | null }>("/attendance/term-lock") : Promise.resolve(null),
     known ? historyFor(known) : Promise.resolve(null),
   ]);
@@ -121,12 +129,64 @@ export default async function AttendancePage({
   const takeable: ClassRow[] = (registerStatus?.classes ?? [])
     .filter((c) => c.canTake)
     .map((c) => ({ id: c.classId, name: c.className }) as ClassRow);
-  const list = students ?? [];
+
+  // WHOSE PAGE IS THIS? The server's own answer, not a re-derivation.
+  //
+  // A class teacher who also teaches a subject elsewhere saw FOUR sections: the
+  // outstanding-register board, a board of every class they teach, their own
+  // register, and a pupil picker spanning every pupil they teach across all of
+  // those classes. Two of the four are oversight tools for heads and
+  // administrators, and together they made the page read as though the register
+  // might mix classes. It never did — `canTake` is false for a class you merely
+  // teach, and the roster is that CLASS's enrolment — but a screen that has to
+  // be explained is a screen that will be misread, and this one is the record of
+  // where a child was.
+  //
+  // So the page takes the shape of the reader's duty: school-wide readers keep
+  // the oversight boards, and a class teacher gets their own class, first, alone.
+  const schoolWide = registerStatus?.schoolWide ?? false;
+  const ownRegisterOnly = takeable.length > 0 && !schoolWide;
+
+  // The pupils this page is ABOUT. For a school-wide reader that is everyone
+  // they can see; for a class teacher it is their own class, because mixing in
+  // the pupils they teach elsewhere is the confusion this page is being shaped
+  // to remove. One request per class they are responsible for — in practice one.
+  const ownPupils = ownRegisterOnly
+    ? (
+        await Promise.all(
+          takeable.map((c) => apiGet<{ students: Student[] }>(`/classes/${c.id}`)),
+        )
+      ).flatMap((r) => r?.students ?? [])
+    : null;
+  const list = ownPupils ?? students ?? [];
   const selectedId = known ?? list[0]?.id;
   const [history, summary, compiled] = preloaded ?? (selectedId ? await historyFor(selectedId) : [null, null, null]);
   const records = history?.records ?? (history === null && selectedId ? null : []);
   const total = history?.total ?? 0;
   const pages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+
+  // Written once and placed twice, because WHERE it goes is the whole change and
+  // a second copy of the form is how the two placements would drift apart.
+  const registerCard =
+    canWrite && takeable.length > 0 ? (
+      // The id both boards' Take-register controls scroll to. Without it a
+      // click that only changes a search parameter looks like nothing.
+      <Card id={TAKE_REGISTER_ANCHOR}>
+        <CardHeader>
+          <CardTitle className="text-base">
+            {ownRegisterOnly && takeable.length === 1 ? `Register — ${takeable[0].name}` : "Register"}
+          </CardTitle>
+          <CardDescription>
+            {ownRegisterOnly && takeable.length === 1
+              ? "Everyone starts Present — mark the exceptions and save. Pick a past date to view or correct any day's register."
+              : "Pick a class and date. Today defaults everyone Present — mark the exceptions and save. Pick a past date (or a register below) to view or correct any day's register."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TakeRegister classes={takeable} lockBeforeDate={termLock?.lockBeforeDate ?? null} initialClassId={searchParams.classId} />
+        </CardContent>
+      </Card>
+    ) : null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="attendance" permissions={user.permissions}>
@@ -140,18 +200,28 @@ export default async function AttendancePage({
           title={<>Attendance</>}
           subtitle={
             <>
-              {takeable.length > 0
-                ? "Take a class register, and review a student's attendance history."
-                : canChase
-                  ? "Every class's register, and which are still outstanding. A register is taken by the class teacher — a school administrator can cover one."
-                  : "Your attendance history. Guardians are alerted automatically on an absence."}
+              {ownRegisterOnly
+                ? `Your class${takeable.length === 1 ? ` — ${takeable[0].name}` : ""}. Mark today's register and review a pupil's attendance. Classes you teach a subject to are on Classes.`
+                : takeable.length > 0
+                  ? "Take a class register, and review a student's attendance history."
+                  : canChase
+                    ? "Every class's register, and which are still outstanding. A register is taken by the class teacher — a school administrator can cover one."
+                    : "Your attendance history. Guardians are alerted automatically on an absence."}
             </>
           }
         />
 
+        {/* THE REGISTER FIRST, for the person whose only duty here is their own.
+            It used to sit below two oversight boards — measured at y=1426 in a
+            757px viewport, four screens down for an administrator — so the one
+            thing a class teacher comes to this page to do was the last thing on
+            it. Oversight readers still get the boards first: they come here to
+            CHECK registers, not to take one. */}
+        {ownRegisterOnly && registerCard}
+
         {/* Missing registers first: it is the only thing on this page that is
             time-critical, and the 7-day correction window is why. */}
-        {canChase && <RegisterBoard canConfigure={hasPermission(user.permissions, "rbac.manage")} />}
+        {canChase && schoolWide && <RegisterBoard canConfigure={hasPermission(user.permissions, "rbac.manage")} />}
 
         {/* The reminder runs on its own each afternoon in the school's own time.
             The button is for the morning a head of year wants to chase now —
@@ -166,20 +236,12 @@ export default async function AttendancePage({
 
         {/* Class-by-class attendance for senior staff. Each row carries the server's
             own canTake decision, so a supervisor sees a Take-register button only for
-            their class and an administrator sees one everywhere. */}
-        {canWrite && <ClassAttendanceBoard />}
+            their class and an administrator sees one everywhere. Not drawn for a
+            class teacher: every row but one would be a class they may not take,
+            which is exactly what made this page look like it mixed them. */}
+        {canWrite && schoolWide && <ClassAttendanceBoard />}
 
-        {canWrite && takeable.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Register</CardTitle>
-              <CardDescription>Pick a class and date. Today defaults everyone Present — mark the exceptions and save. Pick a past date (or a register below) to view or correct any day&apos;s register.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <TakeRegister classes={takeable} lockBeforeDate={termLock?.lockBeforeDate ?? null} initialClassId={searchParams.classId} />
-            </CardContent>
-          </Card>
-        )}
+        {!ownRegisterOnly && registerCard}
 
         <div className="space-y-3">
           <StudentPicker students={list} selectedId={selectedId} total={count?.students} />
@@ -227,6 +289,19 @@ export default async function AttendancePage({
             <Card>
               <CardContent className="p-0">
                 <table className="w-full text-sm">
+                  {/* WHO SIGNED FOR THIS DAY, on the row. An investigation asks
+                      "who marked that, and was it changed afterwards" — both were
+                      one screen away and only for a reader who knew to look. */}
+                  <thead className="border-b border-border text-xs text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium">Date</th>
+                      <th className="px-4 py-2 text-left font-medium">Mark</th>
+                      <th className="px-4 py-2 text-left font-medium">Class</th>
+                      <th className="px-4 py-2 text-left font-medium">Marked</th>
+                      <th className="px-4 py-2 text-left font-medium">Taken by</th>
+                      <th className="px-4 py-2 text-left font-medium">Note</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {records.map((r) => (
                       <tr key={r.id} className="border-b border-border last:border-0">
@@ -234,6 +309,21 @@ export default async function AttendancePage({
                         <td className="px-4 py-2.5">
                           <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>{titleCase(r.status)}</Badge>
                         </td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{r.session.className ?? "—"}</td>
+                        {/* THE MINUTE, in the school's own zone. A register saved
+                            at 08:05 and a gate scan at 08:41 are different facts
+                            about a child, and "8 Aug" cannot tell them apart.
+                            An amendment is named rather than left for the reader
+                            to spot by comparing two timestamps. */}
+                        <td className="px-4 py-2.5 text-muted-foreground tabular-nums">
+                          {timeOfDay(r.markedAt, region)}
+                          {r.amendedAt && (
+                            <span className="ml-1.5 text-xs text-amber-700 dark:text-amber-500">
+                              amended {dateTime(r.amendedAt, region)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{r.session.takenBy?.name ?? "—"}</td>
                         <td className="px-4 py-2.5 text-muted-foreground">{r.note || ""}</td>
                       </tr>
                     ))}

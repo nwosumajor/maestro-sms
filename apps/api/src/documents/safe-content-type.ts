@@ -19,6 +19,11 @@
 import { foldToLatin1 } from "@sms/types";
 const INERT_TYPES = new Set([
   "application/pdf",
+  // A class recording, served ONLY through its own signed inline op. Without it
+  // here, `safeDownloadType` degrades the inline response to octet-stream and
+  // the browser downloads the lecture instead of playing it — the exact
+  // opposite of the intent.
+  "video/mp4",
   "image/png",
   "image/jpeg",
   "image/gif",
