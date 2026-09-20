@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Three hundred and seventy-six write-ups, newest first. Each records a **real defect
+Three hundred and seventy-seven write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -30,6 +30,7 @@ instances live, in full, with nothing removed.
 ## Contents
 
 - [Six doors tagged a subject and two were guarded](#six-doors-tagged-a-subject-and-two-were-guarded)
+- [A go-live that has never been run, and a check that could not see what it was for](#a-go-live-that-has-never-been-run-and-a-check-that-could-not-see-what-it-was-for)
 - [A Maths teacher who could publish Physics](#a-maths-teacher-who-could-publish-physics)
 - [Every deletion this platform promises was a delete marker](#every-deletion-this-platform-promises-was-a-delete-marker)
 - [Two upload ceilings, and the door in the middle knew about one](#two-upload-ceilings-and-the-door-in-the-middle-knew-about-one)
@@ -421,6 +422,58 @@ last 100 runs.
 // Three fields on the scheduling form had a `<Label>` with no `htmlFor` and an
 // `<Input>` with no `id`, so a screen reader announced them blank — found
 // because a test could not reach "Starts" by name either.
+
+### A go-live that has never been run, and a check that could not see what it was for
+Asked what the next step to production readiness was. Measured before answering,
+and the measurement settled it: **`deploy.yml` has failed 100 of its last 100
+runs** — no AWS credentials, which CLAUDE.md records as expected. So the
+production deployment path has never once executed. `docs/PRODUCTION_DEPLOYMENT.md`
+is a document describing a procedure nobody has followed end to end, and it is
+checked only for EXISTENCE: `claims-in-claude-md` asserts the file is there and
+nothing reads its contents. `README.md`, `LEGAL.md` and `LEGAL_ROLLOUT.md` are
+read by no gate at all.
+
+So the answer was a REHEARSAL, not more prose: `go-live-rehearsal.sh` executes
+and verifies the procedure instead of instructing it. The design decision that
+matters is **three outcomes where most scripts have two** — PASS, FAIL, and a
+SKIP that is a FINDING. A check that could not run is recorded with its reason
+and never counted as a pass, because "we did not test that" and "that works" are
+the two things this codebase keeps confusing. A run in which every phase
+degraded to SKIP exits 3 and says so: a rehearsal that checked nothing must not
+read like a clean one.
+
+**AND DRIVING IT FOUND THE THING IMMEDIATELY.** The guide's Step 6 says:
+
+```
+[ ] /metrics without token  -> 401/403 (if 200, the task def lost its
+                               METRICS_TOKEN wiring — stop and fix)
+```
+
+Run against a live stack it returned **307**. Not a listed value, and the reason
+is that `<domain>/metrics` never reaches the API at all: `alb.tf` forwards only
+`/ws/*` to the API target group (priority 1) and everything else to the web tier,
+where default-deny middleware redirects to `/login`. The check is aimed at a path
+that does not reach the service it is checking — it could NEVER return 200,
+whatever METRICS_TOKEN is set to, so the failure it exists to catch is invisible
+to it. Another instance of the recorded class: **a control that appears to work
+and does not is worse than one that is missing, because the reader stops looking
+for the real switch.** The token wiring is only observable from INSIDE the VPC,
+and the gate has therefore never proved it. Both the guide and the script now
+say that, and the public-origin check asserts the right property instead — that
+no Prometheus output is served there, which is what the ALB rules promise.
+
+// GOTCHA, MINE, TWICE, and both were the script rather than the product — which
+// is the ordinary way a new gate behaves and the reason to run it before
+// trusting it. (1) "every tenant table has RLS enabled" failed with a count of
+// 1: `ultimate_participant`, the one documented exemption. Exempting it by
+// COUNT would have quietly accepted a DIFFERENT table taking its place, so it
+// is exempt BY NAME, plus a second assertion that the exempt table still exists
+// — a carve-out that has gone stale is protecting nothing. (2) "no migration
+// left unfinished" failed reading `_prisma_migrations`, because the app role is
+// denied it. That is least privilege WORKING, so it SKIPs with the query to run
+// as the migrate role rather than demanding a superuser to feel complete.
+// Mutation-validated: a tenant table created with row security off is named in
+// the failure.
 
 ### A Maths teacher who could publish Physics
 Asked how subject teachers upload videos and host live classes for the pupils

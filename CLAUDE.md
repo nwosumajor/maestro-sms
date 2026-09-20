@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **376 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **377 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -136,49 +136,31 @@ evidence live beside it, and are worth opening rather than re-deriving:
 - **A SUBJECT IS OWNED BY ITS TEACHER; THE ROOM IS NOT.** `teachesClass` is the
   UNION (supervise ∪ teach-a-subject) and answers "may I see this class" —
   **`teachesSubjectInClass` is the narrow one** and decides who may plan,
-  publish, schedule or grade a subject. The rule had four hand-rolled copies and
-  was right in three; the fourth asked the UNION, so a Maths teacher created
-  Physics lessons and Physics live classes in the same room (measured live,
-  201). One definition now, gated by `a-subject-rule-written-once`. Untagged is
-  the deliberate hole — a form tutor addresses the whole room. And the READING
-  half mirrors it: a pupil sees only sessions for subjects they OFFER, failing
-  OPEN where a school has no approved selections — and the panel SAYS it failed
-  open, because "you take every subject here" and "nobody has approved your
-  choices" are different facts that looked identical on screen.
-  // GOTCHA: the spec guarding this PASSED throughout — its double answered a
-  // query selecting `classId` with rows shaped `{ subjectId }`, so
-  // `classIdsTaughtBy` collected `[undefined]` and `teachesClass` was false in
-  // the test and true in production.
-  // GOTCHA: **COUNT THE DOORS — there were SIX, and two were guarded.**
-  // `a-subject-rule-written-once` asks about SPELLING and passed over a door in
-  // the very file it vouches for: it asserts `lms-content.service.ts` calls the
-  // shared rule, the file did, and `updateLiveSession` wrote `subjectId` with
-  // no check — so a teacher refused at create could schedule untagged and PATCH
-  // the subject on one request later. `cloneContent` carries `src.subjectId`
-  // same-class (clone the Physics teacher's lesson, own the copy) and
-  // `copyToArms` carries it onto every sibling arm. `every-door-that-tags-a-
-  // subject` COMPUTES the writer set from source instead. The per-arm loop
-  // SKIPS with a reason rather than throwing, so `mayUseSubject` is the shared
-  // predicate and `assertMayUseSubject` is built on it.
-  // GOTCHA: **the server half was INERT for as long as it existed.** The
-  // scheduling form never sent a `subjectId`, so every live class booked
-  // through the product was untagged and reached the whole class whatever the
-  // rule said. `a-field-no-screen-can-fill-in` cannot catch this class —
-  // `subjectId` is on dozens of screens, and it only asks whether the web
-  // mentions the name. Driving the form is what catches it
-  // (`a-live-class-that-says-which-subject`), and the picker offers the
-  // caller's OWN subjects, because an option the server refuses is a form that
-  // fails on Save rather than a control that is absent.
-  // GOTCHA: **and the READ doors matched.** Narrowing the panel stops a pupil
-  // SEEING the Physics lesson; `joinLiveSession` and `playRecording` take an id
-  // and asked only about CLASS enrolment, so the link still worked. Content had
-  // already solved this in `assertCanRead` with a comment about a filter being
-  // cosmetic; the live doors were never swept to it. `assertOffersSubject` is
-  // the one spelling, 404, and it runs BEFORE the "is there a recording" fork.
-  // The per-class live panel was also UNBOUNDED — O(the school's lifetime),
-  // since a class row outlives the year when a school reuses it. Capped at 50
-  // newest-first (which keeps what is UPCOMING), with the TOTAL beside it and a
-  // link to the diary, which pages and filters the same table in SQL.
+  publish, schedule or grade a subject. Untagged is the deliberate hole: a form
+  tutor addresses the whole room. The READING half mirrors it — a pupil sees
+  only the subjects they OFFER, failing OPEN where a school has no approved
+  selections, and every screen SAYS when it failed open, because "you take them
+  all" and "nobody has approved your choices" looked identical.
+  // GOTCHA: **COUNT THE DOORS — there were SIX and two were guarded**, on
+  // WRITE (create/update/clone/copy-to-arms for content, create/update for a
+  // live class) and two more on READ (`join`, `playRecording`, which took an id
+  // and asked only about CLASS enrolment, so hiding a lesson left the link
+  // working). `a-subject-rule-written-once` asks about SPELLING and passed over
+  // a door in the very file it vouches for; `every-door-that-tags-a-subject`
+  // COMPUTES the writer set from source. `mayUseSubject` is the predicate,
+  // `assertMayUseSubject` the throwing form, `assertOffersSubject` the by-id
+  // refusal (404) — one rule, three shapes, because the per-arm copy must SKIP
+  // with a reason rather than abort halfway.
+  // GOTCHA: **the server half was INERT for as long as it existed** — the
+  // scheduling form never sent a `subjectId`, so every live class was untagged
+  // and reached the whole class whatever the rule said.
+  // `a-field-no-screen-can-fill-in` cannot catch this (the name is on dozens of
+  // screens); only DRIVING the form does. The picker offers the caller's OWN
+  // subjects — an option the server refuses is a form that fails on Save rather
+  // than a control that is absent.
+  // GOTCHA: a spec here PASSED throughout while its double answered a query
+  // selecting `classId` with rows shaped `{ subjectId }`, so `classIdsTaughtBy`
+  // collected `[undefined]`: false in the test, true in production.
 - **Inside a school, duties move BOTH ways.** Bottom-up (existing): a junior_admin
   REQUESTS a permission, a DIFFERENT senior approves, it auto-expires — 49 of the 54
   permissions school_admin holds and junior_admin lacks are reachable this way.
@@ -912,7 +894,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **376 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **377 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2528,6 +2510,19 @@ correcting a roll is a download and an upload, not one pupil at a time for ever.
   API-backed read such as `/api/public/plan-pricing`.
 - When a fix changes operational behaviour, update the runbook in the SAME PR —
   a runbook that lags reality is worse than none, because it is trusted.
+- **A PROCEDURE NOBODY HAS RUN IS A HYPOTHESIS.** `deploy.yml` has failed 100 of
+  its last 100 runs (no AWS credentials), so the production path has never
+  executed, and `PRODUCTION_DEPLOYMENT.md` is gated only for EXISTENCE.
+  `infrastructure/scripts/go-live-rehearsal.sh` EXECUTES it instead:
+  **PASS / FAIL / SKIP, where a SKIP is a FINDING** — a check that could not run
+  is named with its reason, never counted as a pass, and an all-SKIP run exits
+  non-zero because a rehearsal that checked nothing must not read like a clean
+  one. // GOTCHA it found on its first run: the go-live gate's `/metrics` check
+  **could never see what it was for** — the ALB forwards only `/ws/*` to the API,
+  so `<domain>/metrics` hits the WEB tier and returns 307, and no METRICS_TOKEN
+  mis-wiring could ever show as the 200 it warned about. Aim a check at the path
+  that reaches the service, or assert the property the routing actually
+  promises.
 
 ## Demo fixtures are FAIL-CLOSED (never seed a demo account into production)
 The seed runs on EVERY cloud deploy (the one-off `migrate` ECS task calls
