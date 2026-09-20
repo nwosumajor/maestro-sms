@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { LmsLiveSessionPageDto, Serialized } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -25,7 +26,17 @@ export const dynamic = "force-dynamic";
 export default async function LiveClassesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; from?: string; to?: string; recorded?: string; page?: string }>;
+  searchParams?: Promise<{
+    q?: string;
+    from?: string;
+    to?: string;
+    recorded?: string;
+    page?: string;
+    /** Narrowed to ONE class, which is how the per-class panel hands its
+     *  reader over here for the sessions it could not fit. The API has taken
+     *  this filter since the diary was built; no screen could send it. */
+    classId?: string;
+  }>;
 }) {
   const sp = (await searchParams) ?? {};
   const session = await auth();
@@ -38,9 +49,13 @@ export default async function LiveClassesPage({
   if (sp.to) query.set("to", sp.to);
   if (sp.recorded === "1") query.set("recorded", "1");
   if (sp.page) query.set("page", sp.page);
+  if (sp.classId) query.set("classId", sp.classId);
   const qs = query.toString();
 
   const page = await apiGet<Serialized<LmsLiveSessionPageDto>>(`/live${qs ? `?${qs}` : ""}`);
+  // Name the narrowing and offer the way out of it. A filtered list that looks
+  // like the whole list is how a reader concludes a course has three sessions.
+  const onlyClass = sp.classId ? page?.rows[0]?.className ?? null : null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="live-classes" permissions={user.permissions}>
@@ -64,8 +79,26 @@ export default async function LiveClassesPage({
             help="Recordings are removed at the end of the academic session they were taught in. This runs that clear-out for your school now."
           />
         )}
+        {/* THE SAME SENTENCE THE PER-CLASS PANEL SHOWS, because it is the same
+            rule over the same rows — and the panel having it while this page
+            did not is the sibling asymmetry the fix itself was about. */}
+        {page?.narrowedToMySubjects === false && (
+          <p className="text-sm text-muted-foreground">
+            Showing every subject in your classes. Your subject choices for this term haven&rsquo;t been
+            approved yet — once they are, you&rsquo;ll only see the lessons for the subjects you take.
+          </p>
+        )}
+        {sp.classId && (
+          <p className="text-sm text-muted-foreground">
+            Showing {onlyClass ?? "one class"} only.{" "}
+            <Link href="/live-classes" className="underline underline-offset-4">
+              Show every class
+            </Link>
+            .
+          </p>
+        )}
         <LiveClassTable
-          initial={page ?? { rows: [], total: 0, page: 1, pageSize: 25 }}
+          initial={page ?? { rows: [], total: 0, page: 1, pageSize: 25, narrowedToMySubjects: null }}
           filters={{ q: sp.q ?? "", from: sp.from ?? "", to: sp.to ?? "", recorded: sp.recorded === "1" }}
           canManage={hasPermission(user.permissions, "lms.content.write")}
         />

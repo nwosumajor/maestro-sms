@@ -393,7 +393,20 @@ describe("a subject teacher with no ClassTeacher row", () => {
           if (subjectId && !teacherId) return Promise.resolve(CLASS_OFFERS.includes(subjectId) ? { id: "o1" } : null);
           return Promise.resolve(subjectId && taught.includes(subjectId) ? { id: "o1" } : null);
         }),
-        findMany: jest.fn().mockResolvedValue(taught.map((subjectId) => ({ subjectId }))),
+        // MODEL THE CONTRACT, NOT THE SIGNATURE. Two different reads land here
+        // and they select different columns: `classIdsTaughtBy` asks for
+        // `classId`, this service's own subject lookup asks for `subjectId`.
+        // Answering both with `{ subjectId }` made `classIdsTaughtBy` collect
+        // `[undefined]`, so `teachesClass` was FALSE in the test and TRUE in
+        // production — and the assertion below held for the one reason that
+        // does not generalise, while a Maths teacher published Physics live.
+        findMany: jest.fn((args?: { select?: Record<string, boolean> }) =>
+          Promise.resolve(
+            args?.select?.classId
+              ? taught.map(() => ({ classId: "cls1" }))
+              : taught.map((subjectId) => ({ subjectId })),
+          ),
+        ),
       },
       subjectSyllabusItem: { findFirst: jest.fn().mockResolvedValue({ syllabusId: "syl1" }) },
       subjectSyllabus: { findFirst: jest.fn().mockResolvedValue({ classId: "cls1", subjectId: "phys" }) },

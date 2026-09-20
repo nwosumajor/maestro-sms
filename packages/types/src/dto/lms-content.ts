@@ -283,6 +283,40 @@ export interface LmsLiveSessionPageDto {
   total: number;
   page: number;
   pageSize: number;
+  /**
+   * Narrowed to the subjects the reader OFFERS? Same three values, same
+   * meaning, as on the per-class panel — and here for the same reason. The
+   * panel was given this and the diary was not, which is the sibling asymmetry
+   * this repo records more often than any other: one of two screens showing the
+   * same rows under the same rule, and only one of them able to say so.
+   */
+  narrowedToMySubjects: boolean | null;
+}
+
+/**
+ * One class's live-session panel.
+ *
+ * Not a page: the panel shows the most recent slice and points at the diary
+ * (/live-classes) for the rest, which pages, searches and date-filters the same
+ * table in SQL. It still carries the TOTAL, because a capped list that cannot
+ * say what it left out reads as the whole record.
+ */
+export interface LmsClassLiveSessionsDto {
+  rows: LmsLiveSessionDto[];
+  /** Sessions this reader may see in this class — not the number shown. */
+  total: number;
+  /**
+   * Is this list narrowed to the subjects the reader OFFERS?
+   *
+   * `null` — the rule does not apply to this reader (staff, or a guardian, who
+   * has no subject selection of their own).
+   * `true` — narrowed: these are their subjects.
+   * `false` — the rule applies but nothing narrowed, because no term is current
+   * or their selection is not approved yet. The screen must say so: a pupil
+   * seeing every subject cannot otherwise tell that from "you take them all",
+   * and a fail-open nobody is told about is a silent one.
+   */
+  narrowedToMySubjects: boolean | null;
 }
 
 /** One student's join record for a live session (host/staff view). */

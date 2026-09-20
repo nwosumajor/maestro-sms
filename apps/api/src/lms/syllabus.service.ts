@@ -27,6 +27,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { teachesSubjectInClass } from "../common/teaches";
 
 /** Who may see and review any plan in the school, without teaching it. */
 const SYLLABUS_WIDE_ROLES = new Set(["school_admin", "principal", "head_teacher", "board", "junior_admin"]);
@@ -66,13 +67,12 @@ export class SyllabusService {
    */
   private async assertCanWrite(tx: TenantTx, p: Principal, classId: string, subjectId: string) {
     if (this.isWide(p)) return;
-    const offering = await tx.classSubjectTeacher.findFirst({
-      where: { classId, subjectId, teacherId: p.userId },
-      select: { id: true },
-    });
+    // The SHARED definition — this file had the rule right and wrote it by
+    // hand, which is how the LMS content service came to write a fourth copy
+    // and get it wrong.
     // 404, not 403: a teacher probing another class's plan learns nothing about
     // whether it exists.
-    if (!offering) throw new NotFoundException("Not found");
+    if (!(await teachesSubjectInClass(tx, p.userId, classId, subjectId))) throw new NotFoundException("Not found");
   }
 
   /** Read scope: leadership sees all; a teacher sees the subjects they teach. */

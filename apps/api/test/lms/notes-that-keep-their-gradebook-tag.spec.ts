@@ -82,9 +82,16 @@ function makeService(opts: {
       findFirst: jest.fn(async (a: { where: { classId: string } }) =>
         cannotAuthorIn.includes(a.where.classId) ? null : { id: "cst" },
       ),
-      // The offerings this user teaches — empty for the arms they do not.
+      // The offerings this user teaches — the SOURCE class plus the arms they
+      // can author in. Drawn from the same set `findFirst` answers over: one
+      // table queried two ways must not give two different answers, and this
+      // double used to omit the source from the list while confirming it by id,
+      // so a caller who held an offering there was a teacher of it to one
+      // question and a stranger to the other.
       findMany: jest.fn(async () =>
-        ARMS.filter((x) => !cannotAuthorIn.includes(x.id)).map((x) => ({ classId: x.id })),
+        [{ id: SRC.classId }, ...ARMS]
+          .filter((x) => !cannotAuthorIn.includes(x.id))
+          .map((x) => ({ classId: x.id })),
       ),
     },
     classTeacher: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
