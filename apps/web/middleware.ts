@@ -17,6 +17,7 @@
 // widening the matcher without this would have redirected every visitor to
 // /login, and narrowing it by accident would have let somebody into the app.
 import { NextResponse } from "next/server";
+import { isSafeRedirect } from "@/lib/safe-redirect";
 import { needsSession } from "@/lib/public-routes";
 import { auth } from "@/lib/auth";
 import { THEME_SCRIPT_CSP_HASH } from "@/lib/theme-script";
@@ -74,7 +75,10 @@ export const middleware = auth((req) => {
       // Carry the interrupted destination so re-authentication returns the user
       // to where they were (relative path only — LoginForm re-validates it).
       const next = pathname + req.nextUrl.search;
-      if (next && next.startsWith("/") && !next.startsWith("//")) url.searchParams.set("next", next);
+      // One shared rule (`lib/safe-redirect`), not a prefix test written here.
+      // The hand-rolled pair this replaces let `/\evil.com` through, which a
+      // browser normalises to `//evil.com` and resolves off-site.
+      if (isSafeRedirect(next)) url.searchParams.set("next", next);
       return NextResponse.redirect(url);
     }
     // 30-day reset: the password has expired — hold the user on the change page until

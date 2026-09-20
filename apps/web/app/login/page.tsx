@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DEFAULT_REDIRECT, safeRedirect } from "@/lib/safe-redirect";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import type { PublicBrandingDto } from "@sms/types";
@@ -22,15 +23,12 @@ async function getBranding(slug: string | undefined): Promise<PublicBrandingDto 
 }
 
 /** Relative-path-only guard against open redirects ("//evil.com" is protocol-relative). */
-function safeNext(next: string | undefined): string | null {
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : null;
-}
-
 export default async function LoginPage({ searchParams }: { searchParams: { school?: string; next?: string } }) {
-  const next = safeNext(searchParams.next);
+  // Validated against the destination allowlist, not a prefix test.
+  const next = safeRedirect(searchParams.next, DEFAULT_REDIRECT);
   // Already signed in -> straight to the app (or the interrupted destination).
   const session = await auth();
-  if (session?.user) redirect(next ?? "/dashboard");
+  if (session?.user) redirect(next);
 
   const branding = await getBranding(searchParams.school);
 

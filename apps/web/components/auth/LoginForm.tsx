@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { safeRedirect } from "@/lib/safe-redirect";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
@@ -10,9 +11,11 @@ import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
 
 export function LoginForm({ next }: { next?: string | null }) {
   const router = useRouter();
-  // Server-validated relative path (login/page.tsx safeNext) — re-checked here
-  // because a client can mount this component with anything.
-  const dest = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+  // Re-checked here with the SAME function the server used, because a client
+  // can mount this component with anything. (It used to name a `safeNext`
+  // helper that no longer exists — a comment asserting an agreement with code
+  // that had moved.)
+  const dest = safeRedirect(next);
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [code, setCode] = React.useState("");
