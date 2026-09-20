@@ -9,7 +9,13 @@
 // register. The API is authoritative for scope, the join window, and URL safety.
 // =============================================================================
 
-import type { LmsLiveAttendanceDto, LmsLiveSessionDto, Serialized } from "@sms/types";
+import Link from "next/link";
+import type {
+  LmsClassLiveSessionsDto,
+  LmsLiveAttendanceDto,
+  LmsLiveSessionDto,
+  Serialized,
+} from "@sms/types";
 import { MAX_RECORDING_BYTES } from "@sms/types";
 import { interpretApiError } from "@/lib/api-error";
 import * as React from "react";
@@ -21,6 +27,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Session = Serialized<LmsLiveSessionDto>;
 type Attendee = Serialized<LmsLiveAttendanceDto>;
+type Panel = Serialized<LmsClassLiveSessionsDto>;
+
+/**
+ * One subject the class runs, and who teaches it.
+ *
+ * The page already reads these for the scheme-of-work panels; the picker below
+ * reuses them rather than asking again.
+ */
+export type Offering = { subjectId: string; subjectName: string; teacherId: string };
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   LIVE: "default",
@@ -48,15 +63,37 @@ function when(iso: string): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-export function LiveSessions({ classId, canManage }: { classId: string; canManage: boolean }) {
+export function LiveSessions({
+  classId,
+  canManage,
+  offerings = [],
+  userId,
+  canUseAnySubject = false,
+}: {
+  classId: string;
+  canManage: boolean;
+  /** The class's subjects, for the picker. */
+  offerings?: Offering[];
+  /** The viewer, to work out which of those subjects are theirs. */
+  userId?: string;
+  /** School-wide staff may file a session under any of the class's subjects;
+   *  a teacher may use only their own. The server decides either way. */
+  canUseAnySubject?: boolean;
+}) {
   const [sessions, setSessions] = React.useState<Session[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [narrowed, setNarrowed] = React.useState<boolean | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [loaded, setLoaded] = React.useState(false);
 
   const load = React.useCallback(async () => {
     const r = await req("GET", `/classes/${classId}/live`);
-    if (r.ok) setSessions(r.data as Session[]);
-    else setErr(r.error);
+    if (r.ok) {
+      const panel = r.data as Panel;
+      setSessions(panel.rows);
+      setTotal(panel.total);
+      setNarrowed(panel.narrowedToMySubjects);
+    } else setErr(r.error);
     setLoaded(true);
   }, [classId]);
 
@@ -87,7 +124,26 @@ export function LiveSessions({ classId, canManage }: { classId: string; canManag
         <CardDescription>Scheduled virtual sessions. Joining opens the meeting and marks your attendance.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {canManage && <CreateForm classId={classId} onCreated={load} />}
+        {canManage && (
+          <CreateForm
+            classId={classId}
+            onCreated={load}
+            subjects={canUseAnySubject ? offerings : offerings.filter((o) => o.teacherId === userId)}
+            canUseAnySubject={canUseAnySubject}
+          />
+        )}
+
+        {/* A FAIL-OPEN NOBODY IS TOLD ABOUT IS A SILENT ONE. This list narrows
+            to the subjects the pupil offers; when no selection has been
+            approved it narrows to nothing, and without this line "you take
+            every subject here" and "nobody has approved your choices" look
+            exactly the same on screen. */}
+        {narrowed === false && (
+          <p className="text-sm text-muted-foreground">
+            Showing every subject this class runs. Your subject choices for this term haven&rsquo;t been
+            approved yet — once they are, you&rsquo;ll only see the lessons for the subjects you take.
+          </p>
+        )}
 
         {loaded && sessions.length === 0 && <p className="text-sm text-muted-foreground">No live classes scheduled.</p>}
 
@@ -95,6 +151,10 @@ export function LiveSessions({ classId, canManage }: { classId: string; canManag
           <div key={s.id} className="rounded-md border p-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{s.title}</span>
+              {/* WHICH SUBJECT. The whole rule above is about subjects, and a
+                  row that does not name one leaves the reader unable to see it
+                  working — or to spot a lesson filed under the wrong one. */}
+              {s.subjectName && <Badge variant="secondary">{s.subjectName}</Badge>}
               <Badge variant="outline">{s.provider}</Badge>
               <Badge variant={STATUS_VARIANT[s.status] ?? "outline"}>{s.status.toLowerCase()}</Badge>
               <span className="text-sm text-muted-foreground">
@@ -130,18 +190,57 @@ export function LiveSessions({ classId, canManage }: { classId: string; canManag
             )}
           </div>
         ))}
+        {/* A CAP WITH NO COUNT READS AS THE WHOLE RECORD. The panel holds the
+            most recent slice; the diary pages, searches and date-filters the
+            same sessions, so the rest is one link away rather than lost. */}
+        {total > sessions.length && (
+          <p className="text-sm text-muted-foreground">
+            Showing the {sessions.length} most recent of {total}.{" "}
+            <Link href={`/live-classes?classId=${classId}`} className="underline underline-offset-4">
+              See all live classes
+            </Link>
+            .
+          </p>
+        )}
+
         {err && <p className="text-sm text-destructive">{err}</p>}
       </CardContent>
     </Card>
   );
 }
 
-function CreateForm({ classId, onCreated }: { classId: string; onCreated: () => void }) {
+/**
+ * Scheduling a live class.
+ *
+ * THE SUBJECT FIELD IS WHY THIS EXISTS. The API has taken `subjectId` since the
+ * table was created, and this form never sent one — so every live class booked
+ * through the product was UNTAGGED, and the rule that shows a pupil only the
+ * lessons for subjects they offer passed all of them through to the whole
+ * class. The server-side half was correct and inert: a field no screen can fill
+ * in is a feature nobody has.
+ *
+ * The list offers the caller's OWN subjects, because those are the ones the
+ * server will accept — a teacher of Maths cannot file a session under Physics,
+ * and rendering the option anyway produces a form that fails on Save rather
+ * than a control that is absent. School-wide staff get the whole list.
+ */
+function CreateForm({
+  classId,
+  onCreated,
+  subjects,
+  canUseAnySubject,
+}: {
+  classId: string;
+  onCreated: () => void;
+  subjects: Offering[];
+  canUseAnySubject: boolean;
+}) {
   const [title, setTitle] = React.useState("");
   const [provider, setProvider] = React.useState("MEET");
   const [joinUrl, setJoinUrl] = React.useState("");
   const [startsAt, setStartsAt] = React.useState("");
   const [duration, setDuration] = React.useState("60");
+  const [subjectId, setSubjectId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const sel = "h-9 rounded-md border border-input bg-background px-2 text-sm";
@@ -156,26 +255,33 @@ function CreateForm({ classId, onCreated }: { classId: string; onCreated: () => 
       joinUrl: joinUrl.trim(),
       startsAt: new Date(startsAt).toISOString(),
       durationMinutes: Number(duration) || 60,
+      // Omitted, not null, when no subject is chosen: an untagged session is a
+      // whole-class one (a form period, an assembly) and reaches everybody.
+      ...(subjectId ? { subjectId } : {}),
     });
     setBusy(false);
     if (r.ok) {
       setTitle("");
       setJoinUrl("");
       setStartsAt("");
+      setSubjectId("");
       onCreated();
     } else setErr(r.error);
   }
 
   return (
     <div className="space-y-2 rounded-md border border-dashed p-3">
+      {/* Every field is NAMED — `htmlFor` to an `id`, not a label floating
+          beside an input. Three of these were unlabelled, so a screen reader
+          announced them as blank and no test could reach them by name either. */}
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="space-y-1">
-          <Label className="text-xs">Title</Label>
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Algebra revision" />
+          <Label className="text-xs" htmlFor="live-title">Title</Label>
+          <Input id="live-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Algebra revision" />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Provider</Label>
-          <select aria-label="Provider" className={sel + " w-full"} value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <Label className="text-xs" htmlFor="live-provider">Provider</Label>
+          <select id="live-provider" className={sel + " w-full"} value={provider} onChange={(e) => setProvider(e.target.value)}>
             <option value="MEET">Google Meet</option>
             <option value="ZOOM">Zoom</option>
             <option value="JITSI">Jitsi</option>
@@ -183,16 +289,41 @@ function CreateForm({ classId, onCreated }: { classId: string; onCreated: () => 
           </select>
         </div>
         <div className="space-y-1 sm:col-span-2">
-          <Label className="text-xs">Join link (https)</Label>
-          <Input value={joinUrl} onChange={(e) => setJoinUrl(e.target.value)} placeholder="https://meet.google.com/…" />
+          <Label className="text-xs" htmlFor="live-join-url">Join link (https)</Label>
+          <Input id="live-join-url" value={joinUrl} onChange={(e) => setJoinUrl(e.target.value)} placeholder="https://meet.google.com/…" />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Starts</Label>
-          <Input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
+          <Label className="text-xs" htmlFor="live-starts">Starts</Label>
+          <Input id="live-starts" type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Duration (min)</Label>
-          <Input type="number" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} />
+          <Label className="text-xs" htmlFor="live-duration">Duration (min)</Label>
+          <Input id="live-duration" type="number" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label className="text-xs" htmlFor="live-subject">
+            Subject
+          </Label>
+          <select
+            id="live-subject"
+            className={sel + " w-full"}
+            value={subjectId}
+            onChange={(e) => setSubjectId(e.target.value)}
+          >
+            <option value="">No subject — the whole class</option>
+            {subjects.map((o) => (
+              <option key={o.subjectId} value={o.subjectId}>
+                {o.subjectName}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {subjects.length === 0
+              ? "You don't teach a subject in this class, so this session is for the whole class."
+              : canUseAnySubject
+                ? "Pupils who take the subject see the lesson. Leave it unset for an assembly or form period, which reaches everyone."
+                : "Only the subjects you teach here. Pupils who take the subject see the lesson; leave it unset for a whole-class session."}
+          </p>
         </div>
       </div>
       <div className="flex items-center gap-2">

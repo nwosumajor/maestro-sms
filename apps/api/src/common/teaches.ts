@@ -78,6 +78,41 @@ export async function teachesClass(tx: TenantTx, userId: string, classId: string
   return (await classIdsTaughtBy(tx, userId)).includes(classId);
 }
 
+/**
+ * Does this user teach THIS SUBJECT in THIS CLASS — the exact offering?
+ *
+ * THE NARROW QUESTION, and the one that decides authorship of subject work.
+ * Everything above answers "may I see this class"; this answers "is this
+ * subject MINE here", and the two are different in the ordinary shape of a
+ * secondary school: Akinlabi Alex teaches Mathematics to SS1 Science A, which
+ * makes him a teacher OF that class and emphatically not the person who plans,
+ * publishes or grades its Physics.
+ *
+ * It was already written correctly THREE TIMES — the syllabus's
+ * `assertCanWrite`, the gradebook's offering check and the CBT exam scope —
+ * each spelling `{ classId, subjectId, teacherId }` by hand, and a fourth
+ * attempt in the LMS content service got it wrong in a way that disabled
+ * itself. That is the shape this codebase records as a control written six
+ * times and right five: one definition, so the next door cannot disagree.
+ *
+ * Deliberately NOT satisfied by supervising the class. The three correct
+ * implementations all confine the form tutor too, and they are right to: a
+ * class teacher answers for the room and addresses it with UNTAGGED material,
+ * while a subject tag is a claim about a subject somebody else teaches.
+ */
+export async function teachesSubjectInClass(
+  tx: TenantTx,
+  userId: string,
+  classId: string,
+  subjectId: string,
+): Promise<boolean> {
+  const offering = (await tx.classSubjectTeacher.findFirst({
+    where: { classId, subjectId, teacherId: userId },
+    select: { id: true },
+  })) as { id: string } | null;
+  return !!offering;
+}
+
 /** Does this user teach ANY of these classes? */
 export async function teachesAnyOf(tx: TenantTx, userId: string, classIds: string[]): Promise<boolean> {
   if (classIds.length === 0) return false;

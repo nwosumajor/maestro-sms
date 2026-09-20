@@ -114,7 +114,19 @@ export default async function ClassContentPage({
           <>
             {canAuthor && <ClassProgress classId={classId} />}
             <Awards classId={classId} canManage={canAuthor} />
-            <LiveSessions classId={classId} canManage={canAuthor} />
+            <LiveSessions
+              classId={classId}
+              canManage={canAuthor}
+              // Reuses the offerings already read above for the scheme-of-work
+              // panels — the picker needs exactly the same list.
+              offerings={offerings ?? []}
+              userId={user.id}
+              // Who may file a session under ANY of the class's subjects. The
+              // server is authoritative (`school_admin` is its school-wide set);
+              // this only decides which options are worth rendering, because an
+              // option the server will refuse is a form that fails on Save.
+              canUseAnySubject={user.roles.includes("school_admin")}
+            />
             <ContentFilterBar
               classId={classId}
               type={searchParams?.type}

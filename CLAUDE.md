@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **375 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **377 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -133,6 +133,34 @@ evidence live beside it, and are worth opening rather than re-deriving:
 - Relationship scoping beyond role IS IMPLEMENTED (LmsService is the reference):
   teacher→their classes, student→enrolled, parent→their children. Coarse
   permission gates the endpoint; membership joins narrow the rows; RLS backstops.
+- **A SUBJECT IS OWNED BY ITS TEACHER; THE ROOM IS NOT.** `teachesClass` is the
+  UNION (supervise ∪ teach-a-subject) and answers "may I see this class" —
+  **`teachesSubjectInClass` is the narrow one** and decides who may plan,
+  publish, schedule or grade a subject. Untagged is the deliberate hole: a form
+  tutor addresses the whole room. The READING half mirrors it — a pupil sees
+  only the subjects they OFFER, failing OPEN where a school has no approved
+  selections, and every screen SAYS when it failed open, because "you take them
+  all" and "nobody has approved your choices" looked identical.
+  // GOTCHA: **COUNT THE DOORS — there were SIX and two were guarded**, on
+  // WRITE (create/update/clone/copy-to-arms for content, create/update for a
+  // live class) and two more on READ (`join`, `playRecording`, which took an id
+  // and asked only about CLASS enrolment, so hiding a lesson left the link
+  // working). `a-subject-rule-written-once` asks about SPELLING and passed over
+  // a door in the very file it vouches for; `every-door-that-tags-a-subject`
+  // COMPUTES the writer set from source. `mayUseSubject` is the predicate,
+  // `assertMayUseSubject` the throwing form, `assertOffersSubject` the by-id
+  // refusal (404) — one rule, three shapes, because the per-arm copy must SKIP
+  // with a reason rather than abort halfway.
+  // GOTCHA: **the server half was INERT for as long as it existed** — the
+  // scheduling form never sent a `subjectId`, so every live class was untagged
+  // and reached the whole class whatever the rule said.
+  // `a-field-no-screen-can-fill-in` cannot catch this (the name is on dozens of
+  // screens); only DRIVING the form does. The picker offers the caller's OWN
+  // subjects — an option the server refuses is a form that fails on Save rather
+  // than a control that is absent.
+  // GOTCHA: a spec here PASSED throughout while its double answered a query
+  // selecting `classId` with rows shaped `{ subjectId }`, so `classIdsTaughtBy`
+  // collected `[undefined]`: false in the test, true in production.
 - **Inside a school, duties move BOTH ways.** Bottom-up (existing): a junior_admin
   REQUESTS a permission, a DIFFERENT senior approves, it auto-expires — 49 of the 54
   permissions school_admin holds and junior_admin lacks are reachable this way.
@@ -835,60 +863,24 @@ client (`DATABASE_MIGRATE_URL`→`DATABASE_RETENTION_URL`, like retention/dunnin
 503-disabled when unset. Verified: staged-chain + leave-hook + salary maker-checker +
 payroll unit suites, the 6 new RLS cross-tenant cases (coverage gate green), web
 typecheck + production build.
-HR roadmap progress (of a 15-item list): **#1 structured special requests** — a
-`STAFF_REQUEST` carries `{category,details}` (`SPECIAL_REQUEST_CATEGORIES` in
-`@sms/types`); per-type initiation rules (`WORKFLOW_TYPE_META` + pure
-`canInitiateWorkflowType`) enforced in the workflow controller (PO needs
-`fee.manage`, disciplinary `rbac.manage`, content-publish is system-only) and used
-to filter the web create dropdown; **#2 payslip PDF** (`GET /hr/payroll/runs/:id/
-payslips/:userId/pdf`, pdfkit, audited); **#4 leave coverage** ("who's out",
-`GET /hr/leave/calendar`); **#5 statutory payroll** — pure `computeMonthlyPayslip`
-(Nigerian PAYE bands + 8% pension) replaces the zero-deduction baseline, and
-payroll **finalize is maker-checker** (creator ≠ finalizer). Batch 2 added:
-**#3 fractional leave** — half-day support (`leave_request.days` + `leave_balance`
-entitled/used are now `DOUBLE PRECISION`; 0.5-day steps; web half-day toggle;
-attachment deferred to the doc-vault batch); **#6 payroll bank export** (`GET
-/hr/payroll/runs/:id/bank-export` → CSV of name/bank/account/net, audited);
-**#9 staff self-service profile** — six field-ENCRYPTED personal/bank columns on
-`employee` (`phoneEnc`/`addressEnc`/`nextOfKinEnc`/`nextOfKinPhoneEnc`/`bankNameEnc`/
-`bankAccountEnc`); `GET/PUT /hr/me` (gated `workflow.create` = any staff; edits ONLY
-personal fields, HR still owns employment + salary); web `MyProfile` on `/leave`.
-Migration `20260627160233_*` (no new tables → no RLS file). Batch 3 added the
-staff-lifecycle cluster (`apps/api/src/hr/staff-lifecycle.*`, schema 4 tables,
-migration `20260627*_hr_staff_lifecycle`, RLS `26_hr_lifecycle_rls.sql`, web
-`/hr/staff/[userId]`): **#7 onboarding/offboarding checklists** (`staff_checklist`
-+ `staff_checklist_item`, seeded with default tasks per type; toggling the last
-task flips the checklist to COMPLETED); **#8 document expiry reminders**
-(`staff_document` with `expiresAt`; `POST /hr/staff/documents/reminders/run`
-notifies HR of docs due within 30 days, idempotent via `reminderSentAt` — the
-cross-tenant DAILY BullMQ sweep mirroring dunning is the only follow-up); **#11
-training records** (`training_record`). All gated hr.read/hr.write, audited, with
-4 RLS cross-tenant cases (coverage gate green) + a `staff-lifecycle.service` unit
-suite. Batch 4 added the reviews cluster (`apps/api/src/hr/reviews.*`, schema 3
-tables, migration `20260627*_hr_appraisals_disciplinary`, RLS
-`27_hr_appraisals_disciplinary_rls.sql`, web on `/hr/staff/[userId]` + `/leave`):
-**#10 performance appraisals** (`appraisal`: DRAFT → SUBMITTED by the reviewer →
-ACKNOWLEDGED by the appraisee themselves; rating 1–5; `hr.appraisal.manage`, self-
-acknowledge gated `workflow.create` + 404-not-403 scoped to the appraisee); **#12
-disciplinary case files** (`disciplinary_case` + APPEND-ONLY `disciplinary_entry`;
-open/entry/status; `hr.disciplinary.manage`). 3 RLS cross-tenant cases + a
-`reviews.service` unit suite; new perms seeded to principal/school_admin/hr_manager.
-Batch 5 (final) COMPLETED the 15-item HR roadmap: **#13 HR analytics**
-(`HrAnalyticsService` + `GET /hr/analytics` + `/hr/analytics` — headcount, leave
-utilisation, latest payroll cost, expiring docs, training/disciplinary/appraisal
-counts; no salary/PII); **#14 recruitment / ATS-lite** (`job_requisition` +
-`applicant`, RLS `28_hr_recruitment_rls.sql`; requisitions → applicant pipeline →
-`convert` provisions a User+Employee in-tenant via the app role, step-up-gated;
-`hr.recruit.manage`; web `/hr/recruitment`); **#15 staff NDPR** (`GET /hr/me/export`
-self-service data bundle + `POST /hr/me/erase-personal` clearing the encrypted
-self-service fields while RETAINING the statutory employment/payroll record;
-buttons on `/leave`). Plus the two follow-ups: **#3 leave attachment**
-(`leave_request.attachmentDocId` Document-Vault link, accepted by the API) and
-**#8 daily reminder sweep** (`StaffReminderService` + `HrReminderDatabaseService`
-privileged client + BullMQ scheduler/processor, mirroring billing dunning — cron
-`HR_REMINDER_CRON`, disabled when no privileged URL). The full 15-item HR program
-(#1–#15) is now BUILT + verified. 2 new RLS cross-tenant cases (coverage gate green)
-+ a `recruitment.service` unit suite.
+HR roadmap (15 items) is COMPLETE — the per-item build log is in
+`docs/ENGINEERING-LOG.md` and git history; what a change is taken against is:
+- **Money and pay are maker-checker throughout.** A salary change is
+  request-then-approve by a DIFFERENT person (both step-up); `upsertEmployee`
+  cannot touch salary at all (create-only); payroll FINALIZE has its own second
+  signature (creator ≠ finalizer). Old and new salaries are field-encrypted.
+- **Payslips are SNAPSHOTS** (`breakdownEnc`), never recomputed, so history
+  never moves when a tax pack changes.
+- **`hr.self` gates self-service** (`/hr/me*`, leave, appraisal acknowledge) —
+  it used to overload `workflow.create`, which is every staff member.
+- **Leave rides the staged workflow**; the finalized hook is idempotent and
+  PENDING-only, and decrements the year's balance in-tx.
+- **Staff NDPR erasure clears the self-service fields and RETAINS the statutory
+  employment and payroll record** — the two obligations point opposite ways.
+- Lifecycle, reviews, recruitment and analytics follow the standard module
+  pattern (tenant tables + RLS file + cross-tenant case + audited mutations).
+  `RecruitmentService.convert` maps the GLOBAL `user.email` unique violation to
+  a 409, because the RLS-scoped pre-check only ever sees the same school.
 Post-build consistency/security hardening: (a) `hr.salary.approve` granted to
 principal + school_admin (not just hr_manager) so salary maker-checker actually has
 a distinct second approver in single-HR schools; (b) `RecruitmentService.convert`
@@ -902,7 +894,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **375 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **377 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.

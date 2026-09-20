@@ -21,6 +21,7 @@ import type {
   LmsContentDto,
   LmsGradebookDto,
   LmsLiveAttendanceDto,
+  LmsClassLiveSessionsDto,
   LmsLiveSessionDto,
   LmsModuleDto,
   LmsRevisionDto,
@@ -336,7 +337,7 @@ export class LmsContentController {
 
   @Get("classes/:classId/live")
   @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
-  listLive(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<LmsLiveSessionDto[]> {
+  listLive(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<LmsClassLiveSessionsDto> {
     return this.content.listLiveSessions(p, classId);
   }
 
