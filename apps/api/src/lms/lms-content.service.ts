@@ -18,7 +18,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { teachesClass } from "../common/teaches";
+import { teachesClass, teachesSubjectInClass } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import type {
   ClassProgressDto,
@@ -30,6 +30,7 @@ import type {
   GradesheetPushOutcome,
   LmsGradeRowDto,
   LmsLiveAttendanceDto,
+  LmsClassLiveSessionsDto,
   LmsLiveSessionDto,
   LmsLiveSessionPageDto,
   LmsRecordingPresignDto,
@@ -102,6 +103,22 @@ const GRADABLE_TYPES = new Set<LmsContentType>(["QUIZ", "ASSIGNMENT"]);
  * load. Narrow with the type/status filters rather than raising this.
  */
 const CONTENT_PAGE_MAX = 300;
+/**
+ * Ceiling on ONE class's live-class panel.
+ *
+ * This list was unbounded, and unlike the content list above it is not bounded
+ * by anything else either: a class row outlives the year when a school reuses
+ * it, and a timetabled class holds a live session per subject per teaching day,
+ * so the read grows with the SCHOOL's lifetime rather than with its size — the
+ * shape that degrades invisibly because it is fine for the first two years.
+ *
+ * Newest-first is right HERE and would be wrong on a register: this panel is
+ * read for what is next and what was just taught, and `startsAt desc` puts the
+ * upcoming sessions at the top of the cap. The rest is not stranded — the diary
+ * at /live-classes pages, searches and date-filters the same table in SQL, and
+ * the panel says how many it is not showing and links there.
+ */
+const LIVE_SESSION_PANEL_MAX = 50;
 /** Ceiling on the cross-class learning list. A student in ~10 classes each publishing
  *  weekly is well inside this for a full year; it exists so the query is bounded. */
 const MY_LEARNING_MAX = 400;
@@ -197,7 +214,7 @@ export class LmsContentService {
       // the Physics handout, including those who never took Physics.
       // An explicit subjectId still wins; this only fills a blank.
       const subjectId = tag.subjectId ?? topic.subjectId;
-      await this.assertMayTagSubject(tx, p, input.classId, subjectId);
+      await this.assertMayUseSubject(tx, p, input.classId, subjectId);
       const row = (await tx.lmsContent.create({
         data: {
           schoolId: p.schoolId,
@@ -276,7 +293,7 @@ export class LmsContentService {
       // content tagged Physics and then PATCH the subject to Literature — or to
       // null, which reaches every pupil in the class. A guard on one write path
       // and not the other is not a guard.
-      if (tag) await this.assertMayTagSubject(tx, p, row.classId, tag.subjectId);
+      if (tag) await this.assertMayUseSubject(tx, p, row.classId, tag.subjectId);
       // THE SAME VALIDATION AS CREATE, for the same reason: the id is a plain
       // uuid, so without this a teacher could point their notes at another
       // class's week and the notes would surface under a plan they have no part
@@ -296,7 +313,7 @@ export class LmsContentService {
         topic?.subjectId && !tag && !row.subjectId
           ? topic.subjectId
           : null;
-      if (inherited) await this.assertMayTagSubject(tx, p, row.classId, inherited);
+      if (inherited) await this.assertMayUseSubject(tx, p, row.classId, inherited);
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },
         data: {
@@ -635,14 +652,76 @@ export class LmsContentService {
   }
 
   /**
+   * THE ONE PLACE THAT DECIDES WHETHER A LIST NARROWS TO A PUPIL'S SUBJECTS.
+   *
+   * Three readers of this rule were written within one change of each other and
+   * all three spelt the condition differently — `p.roles.includes("student")`
+   * on the class content list, a bare `!staff` on the per-class live list, and
+   * `!schoolWide && taught.length === 0` on the diary. They agree today only
+   * because a guardian has no selection of their own and so falls out of the
+   * narrowing by accident rather than by rule. That is the shape this repo
+   * keeps recording: one rule, several spellings, right until one is edited.
+   *
+   * WHO IT APPLIES TO: a PUPIL reading a list that is not theirs to author.
+   * Not a teacher — they see every subject in a class they teach. Not a
+   * guardian: inferring a guardian's subjects from a child would pick the wrong
+   * child for a parent with two in the class, and would narrow a parent's view
+   * by data that is not about them.
+   *
    * Content is visible if it is UNTAGGED (general class material — notices,
    * timetables, anything not owned by one subject) or tagged with a subject the
    * pupil offers. Untagged must always pass, or turning this on would hide
    * every existing row: subjectId was optional long before this filter existed.
+   *
+   * `narrowed` is the fact the SCREEN needs and had no way to ask for: `null`
+   * when the rule does not apply to this reader, `false` when it applies and
+   * nothing narrowed (no current term, or no approved selection), `true` when
+   * the list really is this pupil's own subjects. A pupil seeing every subject
+   * cannot otherwise tell "you take them all" from "nobody has approved your
+   * choices yet", and those call for different actions from them. Reporting
+   * the fail-open is what stops it being silent.
    */
-  private offeredSubjectWhere(offered: Set<string> | null): Record<string, unknown> {
-    if (!offered) return {};
-    return { OR: [{ subjectId: null }, { subjectId: { in: [...offered] } }] };
+  private async narrowToOfferedSubjects(
+    tx: TenantTx,
+    p: Principal,
+    staff: boolean,
+  ): Promise<{ where: Record<string, unknown>; offered: Set<string> | null; narrowed: boolean | null }> {
+    if (staff || !p.roles.includes("student")) return { where: {}, offered: null, narrowed: null };
+    const offered = await this.offeredSubjectIds(tx, p.userId);
+    if (!offered) return { where: {}, offered: null, narrowed: false };
+    return {
+      where: { OR: [{ subjectId: null }, { subjectId: { in: [...offered] } }] },
+      // The SET, for the by-id door. A list hides a row; reading one by id has
+      // to refuse it, and the two must not be able to disagree about which
+      // rows those are — so both come from this one call rather than from a
+      // `where` here and a hand-rolled membership test over there.
+      offered,
+      narrowed: true,
+    };
+  }
+
+  /**
+   * A PUPIL MAY ONLY REACH A SUBJECT THEY OFFER — the by-id half of the rule.
+   *
+   * Hiding a row from a list while still serving it by id makes the filter
+   * cosmetic for anyone holding a link, so every door that hands over one
+   * subject-tagged thing asks this: the content item and its file, the live
+   * class's JOIN URL, and the recording of that lesson. The live doors were
+   * the ones missing it — narrowing the panel stopped a pupil SEEING the
+   * Physics lesson and left them able to join it by id.
+   *
+   * 404, not 403, like its neighbours: a refusal must not confirm what it
+   * hides. Untagged passes, and staff never reach here.
+   */
+  private async assertOffersSubject(
+    tx: TenantTx,
+    p: Principal,
+    subjectId: string | null,
+    notFound: string,
+  ): Promise<void> {
+    if (!subjectId) return;
+    const { offered } = await this.narrowToOfferedSubjects(tx, p, false);
+    if (offered && !offered.has(subjectId)) throw new NotFoundException(notFound);
   }
 
   // --- reads (relationship + approval scoped) -------------------------------
@@ -676,12 +755,9 @@ export class LmsContentService {
       else if (filter.status) where.status = filter.status;
       if (filter.type) where.type = filter.type;
 
-      // Narrow to subjects this pupil actually offers. Applied to the PUPIL
-      // only: a guardian has no selection of their own, and inferring one from
-      // a child would pick the wrong child for a parent with two in the class.
-      if (!staff && p.roles.includes("student")) {
-        Object.assign(where, this.offeredSubjectWhere(await this.offeredSubjectIds(tx, p.userId)));
-      }
+      // Narrow to subjects this pupil actually offers — the shared rule, which
+      // decides for itself whom it applies to.
+      Object.assign(where, (await this.narrowToOfferedSubjects(tx, p, staff)).where);
 
       const rows = (await tx.lmsContent.findMany({
         where,
@@ -725,13 +801,13 @@ export class LmsContentService {
       // The SAME subject narrowing as the per-class list. This feed is the one a
       // pupil actually opens, so leaving it out would route every hidden item
       // straight back to them and make the filter cosmetic.
-      const offered = await this.offeredSubjectIds(tx, p.userId);
+      const offered = (await this.narrowToOfferedSubjects(tx, p, false)).where;
 
       const rows = (await tx.lmsContent.findMany({
         where: {
           classId: { in: classIds },
           status: "PUBLISHED",
-          ...this.offeredSubjectWhere(offered),
+          ...offered,
         },
         orderBy: { createdAt: "desc" },
         take: MY_LEARNING_MAX,
@@ -1618,6 +1694,13 @@ export class LmsContentService {
       const targetClass = targetClassId ?? src.classId;
       if (targetClass !== src.classId) await this.assertTeacherOfClass(tx, p, targetClass);
       const sameClass = targetClass === src.classId;
+      // A CLONE IS A NEW ITEM, AND IT CARRIES THE SUBJECT. Same-class, this
+      // copies `src.subjectId` — so without this check a Maths teacher could
+      // not CREATE a Physics lesson but could clone the Physics teacher's and
+      // own the copy, which is the same outcome by a different door. The
+      // cross-class branch already drops the tag (the subject may not be
+      // offered there), so this only bites where the tag actually survives.
+      await this.assertMayUseSubject(tx, p, targetClass, sameClass ? src.subjectId : null, "clone content into");
       const row = (await tx.lmsContent.create({
         data: {
           schoolId: p.schoolId,
@@ -1764,6 +1847,15 @@ export class LmsContentService {
           skipped.push({ className: arm.name, reason: "you do not teach this arm" });
           continue;
         }
+        // ...AND THE SUBJECT IS CARRIED ONTO THE ARM, so authoring the arm is
+        // not enough. Teaching Maths to SS1A and SS1B does not make the Physics
+        // item yours to copy into SS1B under Physics. Skipped with a reason
+        // rather than thrown: this loop reports per arm, and a throw halfway
+        // would leave some arms written and the whole call reported as failed.
+        if (!(await this.mayUseSubject(tx, p, arm.id, src.subjectId))) {
+          skipped.push({ className: arm.name, reason: "you do not teach this subject in this arm" });
+          continue;
+        }
         const dup = await tx.lmsContent.findFirst({
           where: { classId: arm.id, title: src.title },
           select: { id: true },
@@ -1850,6 +1942,12 @@ export class LmsContentService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, classId);
       const subjectId = await this.assertClassOffers(tx, classId, input.subjectId);
+      // AND THAT IT IS THIS CALLER'S SUBJECT. `assertClassOffers` answers "does
+      // SS1 Science A do Physics", which is a fact about the timetable and not
+      // about who is standing in front of the room — so every one of a class's
+      // subject teachers could schedule a live lesson under somebody else's
+      // subject. The same rule the lesson notes obey, at the door beside them.
+      await this.assertMayUseSubject(tx, p, classId, subjectId);
       const row = await tx.lmsLiveSession.create({
         data: { schoolId: p.schoolId, classId, subjectId, title, provider: input.provider, joinUrl, startsAt, durationMinutes, hostId: p.userId },
       });
@@ -1858,17 +1956,53 @@ export class LmsContentService {
     });
   }
 
-  /** A class's live sessions, newest first. Relationship-scoped like content
-   *  (staff/teacher-of-class → all + attendee counts; enrolled student/guardian
-   *  → all, no counts). */
-  async listLiveSessions(p: Principal, classId: string): Promise<LmsLiveSessionDto[]> {
+  /**
+   * A class's live sessions, newest first. Relationship-scoped like content
+   * (staff/teacher-of-class → all + attendee counts; enrolled student/guardian
+   * → their own subjects, no counts).
+   *
+   * A PUPIL'S TIMETABLE IS THEIR OWN SUBJECTS. Content has been narrowed to the
+   * subjects a pupil offers since the subject-selection work; the live sessions
+   * added later were scoped by CLASS alone, so every pupil in SS1 Science A saw
+   * — and could join — the Physics lesson whether or not they take Physics.
+   * `lms_live_session.subjectId` existed the whole time to express this and
+   * nothing read it as a restriction. Untagged sessions stay visible to
+   * everyone, exactly as untagged content does.
+   *
+   * Returns a TOTAL beside the capped rows. A cap with no count is the defect
+   * this repo has found more often than any other: without it a panel showing
+   * fifty of four hundred looks exactly like a panel showing all four.
+   */
+  async listLiveSessions(p: Principal, classId: string): Promise<LmsClassLiveSessionsDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const staff = await this.canAuthor(tx, p, classId);
       if (!staff) await this.assertEnrolledOrGuardian(tx, p, classId);
-      const rows = await tx.lmsLiveSession.findMany({ where: { classId }, orderBy: { startsAt: "desc" } });
-      const names = await this.nameMap(tx, rows.map((r) => r.hostId));
+      const narrowing = await this.narrowToOfferedSubjects(tx, p, staff);
+      const where = { classId, ...narrowing.where };
+      // Counted in SQL over the SAME predicate the page is drawn from — a total
+      // narrowed differently from its list describes a different population.
+      const [rows, total] = await Promise.all([
+        tx.lmsLiveSession.findMany({
+          where,
+          orderBy: [{ startsAt: "desc" }, { id: "desc" }],
+          take: LIVE_SESSION_PANEL_MAX,
+        }),
+        tx.lmsLiveSession.count({ where }),
+      ]);
+      if (rows.length === 0) return { rows: [], total, narrowedToMySubjects: narrowing.narrowed };
+      // Named in ONE query each, never one per row. The subject is what the
+      // narrowing is ABOUT, so a row that does not say which subject it belongs
+      // to leaves the reader unable to see the rule working.
+      const [names, subjects] = await Promise.all([
+        this.nameMap(tx, rows.map((r) => r.hostId)),
+        tx.subject.findMany({
+          where: { id: { in: [...new Set(rows.map((r) => r.subjectId).filter((x): x is string => !!x))] } },
+          select: { id: true, name: true },
+        }),
+      ]);
+      const subjectName = new Map((subjects as Array<{ id: string; name: string }>).map((c) => [c.id, c.name]));
       const counts = new Map<string, number>();
-      if (staff && rows.length) {
+      if (staff) {
         const grouped = await tx.lmsLiveAttendance.groupBy({
           by: ["sessionId"],
           where: { sessionId: { in: rows.map((r) => r.id) } },
@@ -1876,7 +2010,15 @@ export class LmsContentService {
         });
         for (const g of grouped) counts.set(g.sessionId, g._count._all);
       }
-      return rows.map((r) => this.toLiveDto(r, names.get(r.hostId) ?? "Host", staff ? counts.get(r.id) ?? 0 : 0));
+      return {
+        rows: rows.map((r) =>
+          this.toLiveDto(r, names.get(r.hostId) ?? "Host", staff ? counts.get(r.id) ?? 0 : 0, {
+            subjectName: r.subjectId ? subjectName.get(r.subjectId) ?? null : null,
+          }),
+        ),
+        total,
+        narrowedToMySubjects: narrowing.narrowed,
+      };
     });
   }
 
@@ -1888,7 +2030,13 @@ export class LmsContentService {
       if (!s) throw new NotFoundException("Session not found");
       const staff = await this.canAuthor(tx, p, s.classId);
       const isHost = s.hostId === p.userId;
-      if (!staff && !isHost) await this.assertEnrolledOrGuardian(tx, p, s.classId, { studentOnly: true });
+      if (!staff && !isHost) {
+        await this.assertEnrolledOrGuardian(tx, p, s.classId, { studentOnly: true });
+        // ...AND IT MUST BE THEIR SUBJECT. Narrowing the panel stopped a pupil
+        // SEEING the Physics lesson; without this they could still join it
+        // with the id, which is the whole rule undone by a link.
+        await this.assertOffersSubject(tx, p, s.subjectId, "Session not found");
+      }
       if (!isJoinable(s.status, s.startsAt, s.durationMinutes)) {
         throw new ConflictException("This session isn't open to join right now.");
       }
@@ -1935,8 +2083,17 @@ export class LmsContentService {
       const data: Prisma.LmsLiveSessionUpdateInput = {};
       // `null` CLEARS it; `undefined` leaves it alone. Without the distinction a
       // session mis-filed under a subject could never be put back to none.
+      //
+      // AND THE SAME OWNERSHIP CHECK CREATE MAKES. A guard on one write path is
+      // not a guard: create refused a teacher scheduling under somebody else's
+      // subject while this door let them schedule it untagged and PATCH the
+      // subject on afterwards, which is the identical outcome one request
+      // later. The content service already guards both of its doors for exactly
+      // this reason, and its comment says so — this pair was the sibling nobody
+      // swept.
       if (input.subjectId !== undefined) {
         data.subjectId = input.subjectId === null ? null : await this.assertClassOffers(tx, s.classId, input.subjectId);
+        await this.assertMayUseSubject(tx, p, s.classId, data.subjectId as string | null);
       }
       if (input.status && ["SCHEDULED", "LIVE", "ENDED", "CANCELLED"].includes(input.status)) data.status = input.status;
       if (input.title !== undefined) {
@@ -2036,15 +2193,25 @@ export class LmsContentService {
         classIds = [...ids];
         // Nothing visible is an empty PAGE, not an unscoped read — a `null`
         // here would have meant "every class in the school".
-        if (classIds.length === 0) return { rows: [], total: 0, page, pageSize };
+        // `null`, not `false`: the subject rule is not what is hiding anything
+        // here — this reader is in no classes at all, and saying "your choices
+        // aren't approved" would be an explanation of the wrong thing.
+        if (classIds.length === 0) return { rows: [], total: 0, page, pageSize, narrowedToMySubjects: null };
       }
 
       const q = (opts.q ?? "").trim();
       const window = dateWindow(opts.from, opts.to);
+      // THE SAME NARROWING THE PER-CLASS LIST MAKES, from the same function, or
+      // the diary and the class page disagree about what a pupil takes.
+      // `opts.subjectId` below is a FILTER the reader chose; this is the RULE,
+      // and a filter must never be able to widen a rule.
+      const narrowing = await this.narrowToOfferedSubjects(tx, p, schoolWide || taught.length > 0);
+      const offeredOnly = narrowing.where;
       const where = {
         ...(classIds ? { classId: { in: classIds } } : {}),
         ...(opts.classId ? { classId: opts.classId } : {}),
         ...(opts.subjectId ? { subjectId: opts.subjectId } : {}),
+        ...offeredOnly,
         // A DATE WINDOW over the lesson's own date, so "what did we cover in
         // March" is one question rather than a scroll.
         // `dateWindow` is the shared definition — it round-trips each day, makes
@@ -2071,7 +2238,7 @@ export class LmsContentService {
         }),
         tx.lmsLiveSession.count({ where }),
       ]);
-      if (rows.length === 0) return { rows: [], total, page, pageSize };
+      if (rows.length === 0) return { rows: [], total, page, pageSize, narrowedToMySubjects: narrowing.narrowed };
 
       // Named in ONE query each, never one per row.
       const [hosts, classes, subjects] = await Promise.all([
@@ -2108,6 +2275,7 @@ export class LmsContentService {
         total,
         page,
         pageSize,
+        narrowedToMySubjects: narrowing.narrowed,
       };
     });
   }
@@ -2265,7 +2433,14 @@ export class LmsContentService {
       const staff = await this.canAuthor(tx, p, row.classId);
       // Pupils who were in the class — `studentOnly`, so a guardian is refused
       // here even though they may see the session exists.
-      if (!staff) await this.assertEnrolledOrGuardian(tx, p, row.classId, { studentOnly: true });
+      if (!staff) {
+        await this.assertEnrolledOrGuardian(tx, p, row.classId, { studentOnly: true });
+        // ...and only for a subject they take. The same refusal the join door
+        // makes, BEFORE the "is there a recording" fork — otherwise the two
+        // messages tell a pupil whether a lesson they may not reach was
+        // recorded, which is a fact about it they should not be given.
+        await this.assertOffersSubject(tx, p, row.subjectId, "Session not found");
+      }
       if (!row.recordingKey) {
         throw new NotFoundException(
           row.recordingRemovedAt
@@ -2783,20 +2958,14 @@ export class LmsContentService {
   /** True if the caller may author/manage content for this class (teacher/admin). */
   private async canAuthor(tx: TenantTx, p: Principal, classId: string): Promise<boolean> {
     if (this.isSchoolWide(p)) return true;
-    const teaches = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
-    if (teaches) return true;
-    // ...or they hold a SUBJECT OFFERING in the class. Assigning someone to
-    // teach SS3 Physics writes a classSubjectTeacher row and no ClassTeacher
-    // row, so a subject teacher could write the SS3 Physics SYLLABUS (that
-    // service reads the offering) and then could not create the lesson notes
-    // that hang off it — the same person, the same class, two different answers
-    // to "do you teach here". `subjectsTaughtBy` below keeps them to their own
-    // subject, which a bare ClassTeacher row never expressed.
-    const offering = await tx.classSubjectTeacher.findFirst({
-      where: { classId, teacherId: p.userId },
-      select: { id: true },
-    });
-    return !!offering;
+    // `teachesClass` is the UNION — supervising the class OR holding any
+    // subject offering in it — so this is the whole answer. It used to ask the
+    // union and then, on a false, re-ask for an offering; that second read
+    // could never return anything the first had not already found. What keeps
+    // a subject teacher to their OWN subject is `assertMayUseSubject` at each
+    // door that accepts a subjectId, not this one, which only answers "do you
+    // teach here at all".
+    return teachesClass(tx, p.userId, classId);
   }
 
   /**
@@ -2822,29 +2991,65 @@ export class LmsContentService {
    * What stays refused is publishing AS another teacher's subject — that would
    * put one teacher's material into another's stream.
    */
-  private async assertMayTagSubject(
+  /**
+   * MAY THIS CALLER PUT THIS SUBJECT'S NAME ON SOMETHING, in this class?
+   *
+   * One guard for every door that accepts a `subjectId` here — lesson notes and
+   * materials, and the live class that is scheduled against the same offering.
+   *
+   * THIS REPLACES A CHECK THAT COULD NOT FIRE. It used to ask
+   * `subjectsTaughtBy`, which returned "unrestricted" whenever `teachesClass`
+   * was true — and since the `teaches.ts` consolidation `teachesClass` is the
+   * UNION, satisfied by holding any one offering in the class. So the branch
+   * that built the allowed-subject set was unreachable for anybody who had got
+   * past the author check, and its own comment ("keeps them to their own
+   * subject") described behaviour that no longer existed.
+   *
+   * Measured live before the fix, on a real school: Akinlabi Alex, who teaches
+   * MATHEMATICS to SS1 Science A, created a PHYSICS lesson and a PHYSICS live
+   * class in that room — 201 both times. Physics is Ehimen Success's.
+   *
+   * // GOTCHA that hid it: the spec asserting "cannot publish for a subject they
+   * // do not teach" PASSED throughout, because its double answered a query
+   * // selecting `classId` with rows shaped `{ subjectId }`. `classIdsTaughtBy`
+   * // therefore collected `[undefined]`, `teachesClass` was false in the test
+   * // and true in production, and the assertion held for the one reason that
+   * // does not generalise. A double must model the CONTRACT.
+   *
+   * `null` subject is untagged — general class material, addressed to the whole
+   * room — and stays open to any teacher of the class, which is what a form
+   * tutor posts.
+   */
+  private async assertMayUseSubject(
     tx: TenantTx,
     p: Principal,
     classId: string,
     subjectId: string | null,
+    act = "publish content for",
   ): Promise<void> {
-    if (!subjectId) return;
-    const mine = await this.subjectsTaughtBy(tx, p, classId);
-    if (!mine) return;
-    if (!mine.has(subjectId)) {
-      throw new BadRequestException("You can only publish content for a subject you teach in this class.");
-    }
+    if (await this.mayUseSubject(tx, p, classId, subjectId)) return;
+    throw new BadRequestException(`You can only ${act} a subject you teach in this class.`);
   }
 
-  private async subjectsTaughtBy(tx: TenantTx, p: Principal, classId: string): Promise<Set<string> | null> {
-    if (this.isSchoolWide(p)) return null;
-    const classWide = (await teachesClass(tx, p.userId, classId) ? { id: "" } : null);
-    if (classWide) return null;
-    const rows = (await tx.classSubjectTeacher.findMany({
-      where: { classId, teacherId: p.userId },
-      select: { subjectId: true },
-    })) as Array<{ subjectId: string }>;
-    return new Set(rows.map((r) => r.subjectId));
+  /**
+   * The same question as a BOOLEAN, for the door that must not throw.
+   *
+   * `copyToArms` walks the arms of a stream and already SKIPS each one it
+   * cannot write to, naming the reason — throwing halfway through would leave
+   * some arms copied and some not, reported as a failure. So the rule needs
+   * both shapes, and they are the same function rather than two, because a
+   * predicate written twice is how the assert and the skip come to disagree
+   * about who owns a subject.
+   */
+  private async mayUseSubject(
+    tx: TenantTx,
+    p: Principal,
+    classId: string,
+    subjectId: string | null,
+  ): Promise<boolean> {
+    if (!subjectId) return true;
+    if (this.isSchoolWide(p)) return true;
+    return teachesSubjectInClass(tx, p.userId, classId, subjectId);
   }
 
   /**
@@ -2917,10 +3122,10 @@ export class LmsContentService {
     // make the filter cosmetic for anyone holding a link.
     // 404, not 403: the existing convention, and it says nothing about whether
     // the material exists.
-    if (row.subjectId && p.roles.includes("student")) {
-      const offered = await this.offeredSubjectIds(tx, p.userId);
-      if (offered && !offered.has(row.subjectId)) throw new NotFoundException("Content not found");
-    }
+    // The rule decides for itself whom it applies to — this door used to
+    // re-test `p.roles.includes("student")` on its own, which is the third
+    // spelling of a condition that belongs in one place.
+    await this.assertOffersSubject(tx, p, row.subjectId, "Content not found");
     return false;
   }
 

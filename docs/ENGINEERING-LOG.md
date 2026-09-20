@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Three hundred and seventy-four write-ups, newest first. Each records a **real defect
+Three hundred and seventy-six write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,8 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [Six doors tagged a subject and two were guarded](#six-doors-tagged-a-subject-and-two-were-guarded)
+- [A Maths teacher who could publish Physics](#a-maths-teacher-who-could-publish-physics)
 - [Every deletion this platform promises was a delete marker](#every-deletion-this-platform-promises-was-a-delete-marker)
 - [Two upload ceilings, and the door in the middle knew about one](#two-upload-ceilings-and-the-door-in-the-middle-knew-about-one)
 - [An index I added by reasoning, and what measuring it actually said](#an-index-i-added-by-reasoning-and-what-measuring-it-actually-said)
@@ -300,6 +302,191 @@ instances live, in full, with nothing removed.
 
 ---
 
+### Six doors tagged a subject and two were guarded
+A follow-up to the entry below, which fixed the two doors in front of it and
+said so. Asked whether the web UI for these fixes was actually live, whether
+the live-class recording upload worked, and whether LMS content and classes
+were reaching only the right pupils. Three questions, three findings, and the
+first one is the reason the other two were worth asking.
+
+**THE SERVER HALF WAS INERT.** `lms_live_session.subjectId` has existed since
+the table was created, the create route has always accepted it, and the
+pupil-facing rule reads it. `LiveSessions.tsx` sent title, provider, join link,
+start and duration — and no subject. So every live class booked through the
+product was UNTAGGED, untagged reaches the whole class by design, and both
+halves of the rule were correct and unreachable: the guard refusing a Maths
+teacher the class's Physics lesson could not fire from any screen, and the
+filter showing a pupil only their own subjects had nothing to filter on.
+`a-field-no-screen-can-fill-in` cannot catch this shape — it asks whether the
+web MENTIONS the field, and `subjectId` is on dozens of screens. Only driving
+the form finds it, which is what `a-live-class-that-says-which-subject` does.
+The picker offers the caller's OWN subjects rather than the class's, because
+rendering an option the server will refuse is a form that fails on Save instead
+of a control that is absent — the register's defect, one page over.
+
+**COUNT THE DOORS.** `a-subject-rule-written-once` was written in the same
+change as the fix and passed over a door in the very file it vouches for: it
+asserts `lms-content.service.ts` calls the shared rule, the file did call it,
+and `updateLiveSession` set `subjectId` through `assertClassOffers` alone.
+Create refused the Physics lesson; update let you schedule it untagged and
+PATCH the subject on a moment later, for the identical outcome one request
+afterwards. That gate asks about SPELLING; this defect is about COVERAGE, and a
+file-level assertion vouched for a method inside it — the same trap as a
+same-named method vouching for dead code.
+
+Listing the writers instead of reading the call graph found two more, both on
+content rather than live classes:
+
+```
+lmsContent.subjectId       createContent   guarded
+                           updateContent   guarded
+                           cloneContent    NOT   <- carries src.subjectId same-class
+                           copyToArms      NOT   <- carries it onto every sibling arm
+lmsLiveSession.subjectId   createLiveSession  guarded
+                           updateLiveSession  NOT   <- the retag door
+```
+
+A Maths teacher could not CREATE a Physics lesson and could clone the Physics
+teacher's and own the copy. `every-door-that-tags-a-subject` computes that set
+from source now. // GOTCHA: the two shapes of the rule are one function.
+`copyToArms` walks the arms reporting per arm, so it must SKIP with a reason
+rather than throw halfway and report the whole call as failed — hence
+`mayUseSubject` as the predicate and `assertMayUseSubject` built on top, not
+two spellings that can drift.
+
+**AND THE READING HALF HAD THE SAME SHAPE.** Narrowing the panel stops a pupil
+SEEING the Physics lesson; `joinLiveSession` and `playRecording` take an id and
+asked only whether the caller was enrolled in the CLASS, so both still handed it
+over to anyone holding the link — the join URL, and the recording of the lesson
+afterwards. The content service had solved this for itself, in `assertCanRead`,
+with a comment saying that hiding a row from a list while still serving it by id
+makes the filter cosmetic; the live doors were never swept to match. One
+`assertOffersSubject` now, 404 so the refusal does not confirm what it hides,
+and it runs BEFORE the "is there a recording" fork — otherwise the two different
+messages tell a pupil whether a lesson they may not reach was recorded.
+
+**THE RULE WAS SPELT THREE WAYS INSIDE ONE CHANGE.** `listContent` gated on
+`p.roles.includes("student")`, the per-class live list on a bare `!staff`, the
+diary on `!schoolWide && taught.length === 0`, and the by-id read tested the
+role again. They agreed only because a guardian has no selection of their own
+and fell out of the narrowing by accident. One `narrowToOfferedSubjects`
+returns the `where`, the SET (for the by-id door, which must refuse rather than
+hide) and `narrowed` — so a list and a direct read cannot disagree about which
+rows those are.
+
+**AND IT FAILED OPEN IN SILENCE.** No current term or no approved selection
+means nothing narrows, which is right for a school mid-migration and invisible
+to the pupil: "you take every subject here" and "nobody has approved your
+choices yet" rendered identically. `narrowedToMySubjects` is `null` (rule does
+not apply), `false` (applies, nothing narrowed) or `true`, and the panel says
+so in the middle case.
+
+// GOTCHA I introduced and then had to sweep: giving the PANEL
+// `narrowedToMySubjects` and not the DIARY recreated the exact asymmetry this
+// entry is about — two screens, the same rows, the same rule, one of them able
+// to say so. Both carry it now, with the same sentence. The empty-handed early
+// return says `null` rather than `false`: a reader in no classes at all is not
+// being narrowed by the subject rule, and explaining the wrong thing is its
+// own defect.
+
+**O(LIFETIME) ON THE SAME SCREEN.** The per-class live panel was unbounded — no
+`take`, no count — and unlike the content list beside it nothing else bounds it
+either: a class row outlives the year when a school reuses it, and a timetabled
+class holds a session per subject per teaching day. Capped at 50, newest-first
+because `startsAt desc` keeps what is UPCOMING at the top of the cap, with the
+TOTAL beside it and a link to the diary. The diary already paged, searched and
+date-filtered in SQL — and accepted a `classId` filter no screen had ever sent,
+so the link now sends it and the page names the narrowing and offers the way
+out of it.
+
+Recordings were the third question and the upload path needed no change: presign -> PUT ->
+confirm with the magic-byte sniff and the size ceiling is complete, both web
+halves render, and `STORAGE_KEY_PREFIXES` carries `lms`. It has never run
+against a real bucket, because nothing has: `deploy.yml` has failed 100 of its
+last 100 runs.
+
+// GOTCHA: `canAuthor` asked the union and then, on a false, re-asked for an
+// offering in the class — a second read that could never return anything the
+// first had not already found, left behind when `teachesClass` became the
+// union. Its comment still described the dead branch as what "keeps them to
+// their own subject", which is now `assertMayUseSubject`'s job entirely.
+// GOTCHA: removing it went red on `notes-that-keep-their-gradebook-tag`,
+// whose double answered `classSubjectTeacher.findFirst` for the source class
+// while its `findMany` omitted it — one table, two queries, two different
+// answers. The fixture, not the fix.
+// GOTCHA: the first mutation of the new total did not COMPILE (`classId` is
+// not in scope in the diary, which has the same `count({ where })` line), and
+// a mutation that does not compile proves nothing. Retargeted to the one
+// method, it named the right test.
+// Three fields on the scheduling form had a `<Label>` with no `htmlFor` and an
+// `<Input>` with no `id`, so a screen reader announced them blank — found
+// because a test could not reach "Starts" by name either.
+
+### A Maths teacher who could publish Physics
+Asked how subject teachers upload videos and host live classes for the pupils
+who offer their subject. Both work — `classIdsTaughtBy` is the union of
+`class.supervisorId` and `class_subject_teacher`, so a subject teacher is a
+teacher of the class. Driving it found the union was doing too much.
+
+Measured live on a real school, on the example the question named. Akinlabi Alex
+teaches MATHEMATICS to SS1 Science A; Physics there is Ehimen Success's:
+
+```
+LIVE  host a MATHS class   (his own)    201
+LIVE  host a PHYSICS class (NOT his)    201   <-
+CONTENT upload under MATHS  (his own)   201
+CONTENT upload under PHYSICS (NOT his)  201   <-
+```
+
+**TWO DOORS, TWO DIFFERENT FAULTS, ONE RULE.** `assertClassOffers` on the live
+session asks whether the CLASS runs Physics — a fact about the timetable, not
+about who is standing in the room — and never asked about the caller at all.
+`assertMayTagSubject` on content DID ask, via `subjectsTaughtBy`, which returns
+"unrestricted" whenever `teachesClass` is true; and since the `teaches.ts`
+consolidation `teachesClass` is the UNION, satisfied by holding any one
+offering. So the branch building the allowed-subject set was unreachable for
+anybody who had got past the author check, and the comment beside it — "keeps
+them to their own subject" — described behaviour that had stopped existing.
+
+// GOTCHA, AND THE REASON IT SURVIVED: a spec named "cannot publish for a
+// subject they do not teach" PASSED the whole time. Its double answered a query
+// selecting `classId` with rows shaped `{ subjectId }`, so `classIdsTaughtBy`
+// collected `[undefined]` and `teachesClass` was FALSE in the test and TRUE in
+// production. The assertion held for the one reason that does not generalise.
+// Rewriting the double to model the CONTRACT turns it red against the old code
+// — which is how the defect was confirmed before a line was changed.
+
+**THE RULE HAD FOUR HAND-ROLLED COPIES AND WAS RIGHT IN THREE.** The scheme of
+work, the gradebook and the CBT exam scope each spell
+`{ classId, subjectId, teacherId }` themselves and each is correct; the LMS
+content service wrote the fourth and got it wrong. That is this repo's most
+recorded shape. One exported `teachesSubjectInClass` now, the other sites swept
+onto it, and `a-subject-rule-written-once.spec.ts` fails on a fifth copy naming
+the file — a gate that keeps working after everyone who remembers has moved on.
+Deliberately NOT satisfied by supervising the class: all three correct
+implementations confine the form tutor too, because a class teacher addresses
+the room with UNTAGGED material while a subject tag claims somebody else's
+subject.
+
+**AND THE READING HALF WAS THE MIRROR OF IT.** Content has been narrowed to the
+subjects a pupil offers for some time; the live sessions added later were scoped
+by CLASS alone, so a pupil who never took Physics saw the Physics lesson in
+their diary and could join it. `lms_live_session.subjectId` existed the whole
+time to express exactly this and nothing read it as a restriction — sibling
+asymmetry, the rule written for content and never swept to its neighbour. Both
+readers narrow now, failing OPEN on a school with no approved selections, the
+same answer content gives.
+
+After, live, same probe: MATHS 201 / PHYSICS **400**, content MATHS 201 /
+PHYSICS **400**, scheme of work MATHS 200 / PHYSICS **404** (404-not-403 — a
+teacher probing a colleague's plan learns nothing).
+// GOTCHA in the probe itself, twice. The first run passed the DEMO school's
+// MATHEMATICS id into a MeastroTest class and read the resulting 400 as a
+// defect; it was the guard correctly refusing a cross-tenant subject, and my
+// error. The second run showed the scheme of work refusing BOTH subjects with
+// 403 — a permission refusal at the route gate, because the minted token
+// lacked `class.read`, so that probe proved nothing about the subject rule at
+// all. Read WHICH refusal before recording it as evidence.
 ### Every deletion this platform promises was a delete marker
 Asked whether the recording work was properly linked to the infrastructure and
 the production documents for S3. The application code was right; the BUCKET was

@@ -24,7 +24,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { teachesAnyOf, teachesClass } from "../common/teaches";
+import { teachesAnyOf, teachesClass, teachesSubjectInClass } from "../common/teaches";
 import { Prisma } from "@sms/db";
 import PDFDocument from "pdfkit";
 import {
@@ -204,11 +204,11 @@ export class TermResultService {
     subjectId: string,
   ): Promise<boolean> {
     if (this.isSchoolWide(p)) return true;
-    const offering = await tx.classSubjectTeacher.findFirst({
-      where: { classId, subjectId, teacherId: p.userId },
-      select: { id: true },
-    });
-    return !!offering;
+    // ONE definition of "is this offering mine" (`teachesSubjectInClass`). This
+    // rule was spelt out by hand in four places — here, the scheme of work, the
+    // CBT exam scope and the LMS content tag — and the fourth got it wrong in a
+    // way that disabled itself, so a Maths teacher published Physics.
+    return teachesSubjectInClass(tx, p.userId, classId, subjectId);
   }
 
   /**

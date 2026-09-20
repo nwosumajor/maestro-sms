@@ -98,8 +98,18 @@ describe("attaching to a week cannot widen who sees it", () => {
   });
 
   it("checks the caller may tag that subject before inheriting it", () => {
+    // ANCHORED TO THE PROPERTY, not to a method NAME. This pinned the literal
+    // `assertMayTagSubject` and went red when that guard was REPLACED — the
+    // old one asked whether the caller taught the CLASS, which any of its
+    // subject teachers satisfies, so it could never refuse anybody; the new one
+    // asks whether they teach THIS SUBJECT here. The name changed and the
+    // property got stronger, which is the wrong way round for a test to fail.
     const body = methodBody(SERVICE, "async updateContent(");
-    expect(body).toMatch(/if \(inherited\) await this\.assertMayTagSubject/);
+    // An inherited subject goes through the SAME subject-authority check the
+    // explicit one does, before it is written.
+    expect(body).toMatch(/if \(inherited\) await this\.assertMayUseSubject\(/);
+    // And the check precedes the write it guards.
+    expect(body.indexOf("assertMayUseSubject")).toBeLessThan(body.indexOf("lmsContent.update"));
   });
 
   it("never RE-tags a row that already carries a subject", () => {
