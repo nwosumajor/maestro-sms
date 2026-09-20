@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Three hundred and seventy-eight write-ups, newest first. Each records a **real defect
+Three hundred and seventy-nine write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -30,6 +30,7 @@ instances live, in full, with nothing removed.
 ## Contents
 
 - [A recording with nowhere to upload it](#a-recording-with-nowhere-to-upload-it)
+- [A sign-in page that would send you anywhere](#a-sign-in-page-that-would-send-you-anywhere)
 - [Six doors tagged a subject and two were guarded](#six-doors-tagged-a-subject-and-two-were-guarded)
 - [A go-live that has never been run, and a check that could not see what it was for](#a-go-live-that-has-never-been-run-and-a-check-that-could-not-see-what-it-was-for)
 - [A Maths teacher who could publish Physics](#a-maths-teacher-who-could-publish-physics)
@@ -339,6 +340,63 @@ was not it; `teacher` holds `lms.content.write`, so the permission was not it.
 // REBUILT from NEVER RESTARTED. Wait on the container ID changing.
 // The diary gets Remove beside Playback too: a duty given with a control is
 // taken away with one.
+### A sign-in page that would send you anywhere
+Asked for redirect URLs to be validated against an allowlist of our own
+domains. Measured first, signed in against the running stack, reading the
+`Location` header off `/login?next=`:
+
+```
+next=//evil.example.com        -> /dashboard                  blocked
+next=https://evil.example.com  -> /dashboard                  blocked
+next=/\evil.example.com        -> /\evil.example.com          SENT
+next=/%5Cevil.example.com      -> /%5Cevil.example.com        SENT
+next=/\/evil.example.com       -> /\/evil.example.com         SENT
+```
+
+**A BROWSER NORMALISES `\` TO `/` BEFORE RESOLVING A URL**, so `/\evil.com`
+leaves as a path, becomes `//evil.com`, and resolves as protocol-relative to
+another origin. The guard was `startsWith("/") && !startsWith("//")`, which
+catches the form everybody knows and misses the backslash family entirely.
+
+The damage is phishing-shaped and specific to the SIGN-IN page: a link to our
+real login URL, on our real domain, that deposits the user on an attacker's
+page the instant they authenticate. The victim does the right thing — checks
+the domain before typing a password — and is moved afterwards.
+
+**THE RULE WAS WRITTEN THREE TIMES** (`middleware.ts`, `login/page.tsx`'s
+`safeNext`, `LoginForm.tsx`'s `dest`) and all three carried the identical gap.
+Usually this repo finds a control written six times and right five; a COPIED
+check is right zero times, because the copy is what propagates the flaw.
+
+One `lib/safe-redirect.ts` now. A same-origin path passes; an absolute URL
+passes only when its host is one of ours (`PUBLIC_WEB_URL` /
+`NEXT_PUBLIC_WEB_URL` / `REDIRECT_ALLOWED_HOSTS`, bare host or full URL,
+`*.domain` for subdomains). **It is an allowlist, not a shape test** — which is
+what the brief asked for and is also the only version that survives the next
+encoding trick, because it states what is permitted rather than enumerating
+what is forbidden.
+
+// GOTCHA: a wildcard must not be a bare `endsWith`. `*.example.org` covers
+// `example.org` and `a.example.org` and must refuse `notexample.org`, a
+// different registration that merely ends with the same letters.
+// GOTCHA: control characters are refused rather than trimmed, because a
+// browser STRIPS them — so the string that is CHECKED and the string that is
+// RESOLVED are different ones unless they never get through.
+// GOTCHA: `%5C` is decoded once before the check, or the literal-character
+// test is bypassed by spelling the backslash differently.
+// GOTCHA: it FAILS CLOSED. A deployment that has not said what it owns owns
+// nothing, so every absolute URL becomes the fallback.
+// GOTCHA: `PUBLIC_WEB_URL` is server-only, and `LoginForm` re-checks in the
+// BROWSER. Without adding `window.location.hostname` the same URL was accepted
+// server-side and refused client-side — a disagreement between two halves of
+// one rule, in the safe direction, which is still a disagreement.
+// The gateway return URLs were checked and are clean: every Paystack, Stripe
+// and mobile-money callback is built server-side from `publicWebUrl()` and none
+// takes a caller-supplied address.
+// Verified live after the fix, on a container confirmed replaced by ID: all
+// five vectors land on /dashboard, and `/fees?status=OPEN` still works.
+// Mutation-validated both ways — restoring the old check fails eight named
+// vectors; re-deriving the rule in the middleware names `middleware.ts`.
 
 ### Six doors tagged a subject and two were guarded
 A follow-up to the entry below, which fixed the two doors in front of it and
