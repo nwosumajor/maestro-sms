@@ -5,6 +5,21 @@
 import { StaffLifecycleService } from "../../src/hr/staff-lifecycle.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+/**
+ * The school's day, pinned — and EVERY dated fixture below is built FROM it.
+ *
+ * This is the whole point, and it was got wrong: the pinned day sat beside an
+ * `expiresAt` of `Date.now() + 5 days`, so the two drifted apart by one day for
+ * every real day that passed. The document started 5 days from the pinned today
+ * and was 30 days from it by 2026-09-22, which is exactly
+ * DOCUMENT_REMINDER_WINDOW_DAYS — so the reminder stopped firing and a test that
+ * had passed since it was written went red on main, naming a service nobody had
+ * touched. A fixed clock only makes a test deterministic if the DATA is fixed to
+ * the same clock.
+ */
+const SCHOOL_TODAY = new Date("2026-08-28T00:00:00.000Z");
+const daysFromToday = (n: number) => new Date(SCHOOL_TODAY.getTime() + n * 86_400_000);
+
 function make(over: {
   item?: Record<string, unknown> | null;
   items?: Array<Record<string, unknown>>;
@@ -45,7 +60,7 @@ function make(over: {
   // A REAL TenantTx-backed service always has the region: `expiresAt` is a
   // `@db.Date`, so which side of expiry a document falls on is a question about
   // the SCHOOL's calendar day. `today` is fixed so the cases are deterministic.
-  const region = { todayInTx: jest.fn(async () => new Date("2026-08-28T00:00:00.000Z")) };
+  const region = { todayInTx: jest.fn(async () => SCHOOL_TODAY) };
   return {
     service: new StaffLifecycleService(db as never, audit as never, notifications as never, region as never),
     itemCreate, checklistUpdate, docUpdate, enqueue, region,
@@ -72,7 +87,9 @@ describe("StaffLifecycleService", () => {
 
   it("runDocumentReminders notifies HR for an expiring doc and stamps reminderSentAt", async () => {
     const { service, docUpdate, enqueue } = make({
-      docs: [{ id: "d1", userId: "u1", kind: "CONTRACT", name: "Contract", expiresAt: new Date(Date.now() + 5 * 86_400_000) }],
+      // Five days from the SCHOOL's today — well inside the 30-day reminder
+      // window, and it stays five days there however long this test lives.
+      docs: [{ id: "d1", userId: "u1", kind: "CONTRACT", name: "Contract", expiresAt: daysFromToday(5) }],
     });
     const res = await service.runDocumentReminders(p());
     expect(res.reminded).toBe(1);
