@@ -103,7 +103,7 @@ export function AddonShop({ offers, canBuy }: { offers: Serialized<AddonOfferDto
                         {o.activeUntil ? <>available until {shortDate(o.activeUntil)}</> : <>ends at your next renewal</>}
                       </>
                     ) : (
-                      <>{money(o.perSeatMonthlyMinor, o.currency)} per student / month, billed at each renewal</>
+                      <>{money(o.perSeatSessionMinor, o.currency)} per student / month, billed at each renewal</>
                     )}
                   </p>
                 </div>
@@ -126,7 +126,7 @@ export function AddonShop({ offers, canBuy }: { offers: Serialized<AddonOfferDto
                   <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{BLURB.get(o.module)}</p>
                 )}
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {money(o.perSeatMonthlyMinor, o.currency)} per student / month
+                  {money(o.perSeatSessionMinor, o.currency)} per student / month
                   {o.priceNowMinor > 0 && <> · {money(o.priceNowMinor, o.currency)} to add now</>}
                 </p>
               </div>

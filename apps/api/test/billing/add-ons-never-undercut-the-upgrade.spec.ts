@@ -30,13 +30,17 @@ import {
   PLAN_PRICING,
   PLAN_PRICING_BY_CURRENCY,
   MODULE_ADDON_PRICING_BY_CURRENCY,
-  addonPerSeatMonthlyMinor,
+  addonPerSeatSessionMinor,
   billableAddons,
   NOT_SOLD_SEPARATELY,
   computeSubscriptionPriceMinor,
+  perSeatCycleMinor,
   type ModuleKey,
   type Plan,
 } from "@sms/types";
+
+/** A three-term school; other calendars are covered in billing-pricing.spec. */
+const TERMS = 3;
 
 const LADDER: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
 
@@ -47,7 +51,7 @@ function tierStepFor(m: ModuleKey): { plan: Plan; stepMinor: number; adds: numbe
     if (!PLAN_MODULES[LADDER[i]].includes(m) || below.has(m)) continue;
     return {
       plan: LADDER[i],
-      stepMinor: PLAN_PRICING[LADDER[i]].perSeatMonthlyMinor - PLAN_PRICING[LADDER[i - 1]].perSeatMonthlyMinor,
+      stepMinor: PLAN_PRICING[LADDER[i]].perSeatSessionMinor - PLAN_PRICING[LADDER[i - 1]].perSeatSessionMinor,
       adds: PLAN_MODULES[LADDER[i]].filter((x) => !below.has(x)).length,
     };
   }
@@ -85,7 +89,7 @@ describe("the pricing ladder holds in every currency the platform ships", () => 
         if (!PLAN_MODULES[LADDER[i]].includes(m) || below.has(m)) continue;
         return {
           plan: LADDER[i],
-          stepMinor: tiers[LADDER[i]].perSeatMonthlyMinor - tiers[LADDER[i - 1]].perSeatMonthlyMinor,
+          stepMinor: tiers[LADDER[i]].perSeatSessionMinor - tiers[LADDER[i - 1]].perSeatSessionMinor,
           adds: PLAN_MODULES[LADDER[i]].filter((x) => !below.has(x)).length,
         };
       }
@@ -125,7 +129,7 @@ describe("the pricing ladder holds in every currency the platform ships", () => 
       for (const m of Object.keys(addons) as ModuleKey[]) {
         const t = stepFor(m);
         if (!t) continue;
-        const wholeTier = tiers[t.plan].perSeatMonthlyMinor;
+        const wholeTier = tiers[t.plan].perSeatSessionMinor;
         if ((addons[m] ?? 0) > wholeTier) {
           dear.push(`${m}: add-on ${addons[m]} > ${wholeTier} for all of ${t.plan}`);
         }
@@ -146,7 +150,7 @@ describe("the pricing ladder holds in every currency the platform ships", () => 
           .sort((a, b) => a - b)
           .slice(0, 3)
           .reduce((a, b) => a + b, 0);
-        const step = tiers[LADDER[i]].perSeatMonthlyMinor - tiers[LADDER[i - 1]].perSeatMonthlyMinor;
+        const step = tiers[LADDER[i]].perSeatSessionMinor - tiers[LADDER[i - 1]].perSeatSessionMinor;
         if (threeCheapest <= step) {
           worse.push(`${LADDER[i]}: three add-ons ${threeCheapest} <= upgrade ${step}`);
         }
@@ -203,7 +207,7 @@ describe("what an add-on costs against the tier that contains it", () => {
         .map((m) => MODULE_ADDON_PRICING[m])
         .filter((v): v is number => v !== undefined)
         .sort((a, b) => a - b);
-      const step = PLAN_PRICING[LADDER[i]].perSeatMonthlyMinor - PLAN_PRICING[LADDER[i - 1]].perSeatMonthlyMinor;
+      const step = PLAN_PRICING[LADDER[i]].perSeatSessionMinor - PLAN_PRICING[LADDER[i - 1]].perSeatSessionMinor;
       const takeN = Math.min(3, sellable.length);
       const cheapest = sellable.slice(0, takeN).reduce((a, b) => a + b, 0);
       expect([LADDER[i], cheapest > step]).toEqual([LADDER[i], true]);
@@ -213,11 +217,11 @@ describe("what an add-on costs against the tier that contains it", () => {
 
 describe("what a school is actually billed", () => {
   const seats = 100;
-  const YEARLESS = "MONTH" as const;
+  const YEARLESS = "TERM" as const;
 
   it("charges nothing extra when there are no add-ons", () => {
-    const plain = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, PLAN_PRICING);
-    const withEmpty = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, PLAN_PRICING, {
+    const plain = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, TERMS, PLAN_PRICING);
+    const withEmpty = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, TERMS, PLAN_PRICING, {
       enabled: [],
       disabled: [],
     });
@@ -225,19 +229,24 @@ describe("what a school is actually billed", () => {
   });
 
   it("charges the add-on per seat, on top of the tier", () => {
-    const plain = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, PLAN_PRICING);
-    const withHr = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, PLAN_PRICING, {
+    const plain = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, TERMS, PLAN_PRICING);
+    const withHr = computeSubscriptionPriceMinor(PLANS.STANDARD, seats, YEARLESS, TERMS, PLAN_PRICING, {
       enabled: [MODULES.HR],
     });
-    expect(withHr - plain).toBe((MODULE_ADDON_PRICING[MODULES.HR] ?? 0) * seats);
+    // The add-on price is a SESSION price like the tier's, so on a TERM cycle
+    // the school pays the term's share of it — not the whole session figure.
+    // Billing the full session price on a term invoice is exactly the overcharge
+    // this model exists to make impossible.
+    const addonPerTerm = perSeatCycleMinor(MODULE_ADDON_PRICING[MODULES.HR] ?? 0, YEARLESS, TERMS);
+    expect(withHr - plain).toBe(addonPerTerm * seats);
   });
 
   it("does NOT bill a module the tier already includes", () => {
     // The likeliest way this goes wrong: an operator comps a module, the school
     // later upgrades, and the override is left behind. Billing it twice would
     // be a charge nobody could explain.
-    const enterprise = computeSubscriptionPriceMinor(PLANS.ENTERPRISE, seats, YEARLESS, PLAN_PRICING);
-    const withStaleOverride = computeSubscriptionPriceMinor(PLANS.ENTERPRISE, seats, YEARLESS, PLAN_PRICING, {
+    const enterprise = computeSubscriptionPriceMinor(PLANS.ENTERPRISE, seats, YEARLESS, TERMS, PLAN_PRICING);
+    const withStaleOverride = computeSubscriptionPriceMinor(PLANS.ENTERPRISE, seats, YEARLESS, TERMS, PLAN_PRICING, {
       enabled: [MODULES.HR, MODULES.GROUP],
     });
     expect(withStaleOverride).toBe(enterprise);
@@ -249,8 +258,8 @@ describe("what a school is actually billed", () => {
     // quoted for two tiers, pays less extra on the tier that includes what it
     // already bought.
     const overrides = { enabled: [MODULES.HR] };
-    const standardWithAddon = addonPerSeatMonthlyMinor(PLANS.STANDARD, overrides);
-    const enterpriseWithAddon = addonPerSeatMonthlyMinor(PLANS.ENTERPRISE, overrides);
+    const standardWithAddon = addonPerSeatSessionMinor(PLANS.STANDARD, overrides);
+    const enterpriseWithAddon = addonPerSeatSessionMinor(PLANS.ENTERPRISE, overrides);
     expect(standardWithAddon).toBeGreaterThan(0);
     expect(enterpriseWithAddon).toBe(0);
   });

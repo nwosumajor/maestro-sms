@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { stripComments } from "../support/strip-comments";
 import { join } from "node:path";
-import { PLANS, PLAN_PRICING, PLAN_PRICING_BY_CURRENCY, monthlyRunRateMinor } from "@sms/types";
+import { PLANS, PLAN_PRICING, PLAN_PRICING_BY_CURRENCY, sessionRunRateMinor } from "@sms/types";
 
 /**
  * `platform-analytics.service.ts` explains at length why the payments block must
@@ -9,7 +9,7 @@ import { PLANS, PLAN_PRICING, PLAN_PRICING_BY_CURRENCY, monthlyRunRateMinor } fr
  * currency ... a bug with a start date."
  *
  * The MRR roll-up THIRTY LINES ABOVE it did exactly that, reached a different
- * way: `PLAN_PRICING[plan].perSeatMonthlyMinor * seats`, where `PLAN_PRICING` is
+ * way: `PLAN_PRICING[plan].perSeatSessionMinor * seats`, where `PLAN_PRICING` is
  * the NAIRA fallback table. Every school's run-rate was a naira figure whatever
  * it is billed in, and the attention queue rendered it behind a hard-coded naira
  * sign. The subscription query did not even select the currency column.
@@ -27,25 +27,25 @@ const QUEUE_UI = src("apps", "web", "components", "operator", "AttentionQueue.ts
 describe("a school's run-rate is in the money it is billed in", () => {
   it("prices from the school's OWN currency, not the naira table", () => {
     const seats = 5;
-    const ngn = monthlyRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "NGN", seats);
-    const usd = monthlyRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "USD", seats);
-    expect(ngn).toBe(PLAN_PRICING_BY_CURRENCY.NGN[PLANS.ENTERPRISE].perSeatMonthlyMinor * seats);
-    expect(usd).toBe(PLAN_PRICING_BY_CURRENCY.USD[PLANS.ENTERPRISE].perSeatMonthlyMinor * seats);
+    const ngn = sessionRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "NGN", seats);
+    const usd = sessionRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "USD", seats);
+    expect(ngn).toBe(PLAN_PRICING_BY_CURRENCY.NGN[PLANS.ENTERPRISE].perSeatSessionMinor * seats);
+    expect(usd).toBe(PLAN_PRICING_BY_CURRENCY.USD[PLANS.ENTERPRISE].perSeatSessionMinor * seats);
     // The whole defect in one assertion: these are different amounts of
     // different money, and the old code produced the naira one for both.
     expect(usd).not.toBe(ngn);
-    expect(ngn).toBe(PLAN_PRICING[PLANS.ENTERPRISE].perSeatMonthlyMinor * seats);
+    expect(ngn).toBe(PLAN_PRICING[PLANS.ENTERPRISE].perSeatSessionMinor * seats);
   });
 
   it("yields zero for a currency the platform does not price, never a naira figure", () => {
     // A school billed in money we do not price is an anomaly an operator should
     // see. Falling back to naira would hide it behind a plausible number.
-    expect(monthlyRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "XOF", 5)).toBe(0);
-    expect(monthlyRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "not-a-currency", 5)).toBe(0);
+    expect(sessionRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "XOF", 5)).toBe(0);
+    expect(sessionRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "not-a-currency", 5)).toBe(0);
   });
 
   it("never returns a negative run-rate from a negative seat count", () => {
-    expect(monthlyRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "NGN", -3)).toBe(0);
+    expect(sessionRunRateMinor(PLAN_PRICING_BY_CURRENCY, PLANS.ENTERPRISE, "NGN", -3)).toBe(0);
   });
 });
 
@@ -53,7 +53,7 @@ describe("both services ask the same question, once", () => {
   it("neither computes a run-rate from the naira fallback table any more", () => {
     for (const [name, file] of [["analytics", ANALYTICS], ["attention", ATTENTION]] as const) {
       expect(`${name}:${/PLAN_PRICING\[/.test(file)}`).toBe(`${name}:false`);
-      expect(file).toMatch(/monthlyRunRateMinor\(/);
+      expect(file).toMatch(/sessionRunRateMinor\(/);
     }
   });
 

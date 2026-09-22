@@ -28,7 +28,7 @@ import {
   effectivePlan,
   isCurrency,
   isPlan,
-  monthlyRunRateMinor,
+  sessionRunRateMinor,
   normalizeGender,
   resolveModules,
 } from "@sms/types";
@@ -156,7 +156,7 @@ export class PlatformAnalyticsService {
         : DEFAULT_PLAN;
       const seats = sub?.seats && sub.seats > 0 ? sub.seats : students;
       const mrrCurrency = isCurrency(sub?.currency ?? "") ? (sub!.currency as string) : HOME_CURRENCY;
-      const monthly = monthlyRunRateMinor(pricing, effective, mrrCurrency, seats);
+      const monthly = sessionRunRateMinor(pricing, effective, mrrCurrency, seats);
       const modules = resolveModules(effective, (sub?.overrides as unknown as ModuleOverrides) ?? null);
 
       schoolsByPlan[effective] = (schoolsByPlan[effective] ?? 0) + 1;

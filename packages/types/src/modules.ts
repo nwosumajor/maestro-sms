@@ -227,36 +227,45 @@ export function isPlan(value: string): value is Plan {
 // `effectivePlan` drops to the STANDARD floor while past-due-beyond-grace, so a payment
 // instantly restores the paid tier without re-resolving overrides.
 
+/**
+ * What a school may buy. TWO units, and they are the units a school thinks in.
+ *
+ * MONTH is gone. It was sold at no discount beside a term that was barely
+ * cheaper, it made the price list read in a unit no school budgets in, and its
+ * per-month rate was the ATOM every other price was multiplied out of — which
+ * is what let a "per year" price mean nine months to the biller and twelve to
+ * the reader. The remaining internal need for a rate per unit time (proration,
+ * seat arrears) is served by `perSeatDailyMinor`, which is derived and never
+ * displayed.
+ */
 export const BILLING_CYCLES = {
-  MONTH: "MONTH",
   TERM: "TERM",
-  YEAR: "YEAR",
+  SESSION: "SESSION",
 } as const;
 export type BillingCycle = (typeof BILLING_CYCLES)[keyof typeof BILLING_CYCLES];
 
-/** Months billed per cycle: a TERM is 3 months; an academic YEAR is 3 terms =
- *  9 billed months (holiday months are not billed). */
+/**
+ * CALENDAR DURATION of a cycle, in months — how long access runs, NOT a price
+ * multiplier. Price no longer derives from months at all (see
+ * `perSeatCycleMinor`); this exists only so `periodEndAfter` can say what date a
+ * purchase runs until, and it is deliberately unchanged from what it has always
+ * been so that no existing school's period moves.
+ */
 export const CYCLE_MONTHS: Record<BillingCycle, number> = {
-  MONTH: 1,
   TERM: 3,
-  YEAR: 9,
+  SESSION: 9,
 };
 
-/** Commitment discount per cycle (percent off the gross): pay-per-term saves
- *  5%, pay-per-year saves 15%. ONE constant drives quotes, checkout charges,
- *  the homepage marketing line and the onboarding estimate — they can't drift. */
-export const CYCLE_DISCOUNT_PERCENT: Record<BillingCycle, number> = {
-  MONTH: 0,
-  TERM: 5,
-  YEAR: 15,
-};
-
-/** Pure: apply a cycle's commitment discount to a gross minor-unit amount.
- *  Single deterministic rounding rule (round-half-up on the discounted value)
- *  so every surface computes the identical integer. */
-export function applyCycleDiscountMinor(grossMinor: number, cycle: BillingCycle): number {
-  return Math.round((grossMinor * (100 - CYCLE_DISCOUNT_PERCENT[cycle])) / 100);
-}
+/**
+ * What a school saves by paying for the whole session up front, as a percent.
+ *
+ * NOT APPLIED AS A DISCOUNT ANYWHERE. It is the divisor that DERIVES the term
+ * price from the stored session price, so the saving is a consequence of the
+ * arithmetic rather than a number somebody keeps true. There is no code path
+ * that can charge a session and forget it, and none that can advertise 15% while
+ * charging 14.3% — the two figures come from the same division.
+ */
+export const SESSION_DISCOUNT_PERCENT = 15;
 
 export function isBillingCycle(value: string): value is BillingCycle {
   return (Object.values(BILLING_CYCLES) as string[]).includes(value);
@@ -369,10 +378,10 @@ export function planCurrencies(plan: Plan): Currency[] {
   return Object.keys(PLAN_PRICING_BY_CURRENCY).filter(isCurrency);
 }
 /**
- * A school's monthly run-rate, IN THE MONEY IT IS BILLED IN.
+ * A school's SESSION run-rate, IN THE MONEY IT IS BILLED IN.
  *
  * Two services computed this independently and both did it the same wrong way:
- * `PLAN_PRICING[plan].perSeatMonthlyMinor * seats`, where `PLAN_PRICING` is the
+ * `PLAN_PRICING[plan].perSeatSessionMinor * seats`, where `PLAN_PRICING` is the
  * NAIRA fallback table. So every school's MRR was a naira figure whatever it
  * pays in, the operator's attention queue printed it behind a hard-coded naira
  * sign, and the analytics roll-up SUMMED them — the "kobo added to cents, which
@@ -390,31 +399,47 @@ export function planCurrencies(plan: Plan): Currency[] {
  * billed in money the platform does not price is an anomaly an operator should
  * see, not one to paper over with somebody else's number.
  */
-export function monthlyRunRateMinor(
+export function sessionRunRateMinor(
   pricing: MultiCurrencyPlanPricing,
   plan: Plan,
   currency: string,
   seats: number,
 ): number {
   if (!isCurrency(currency)) return 0;
-  const perSeat = pricing[currency]?.[plan]?.perSeatMonthlyMinor ?? 0;
+  const perSeat = pricing[currency]?.[plan]?.perSeatSessionMinor ?? 0;
   return perSeat * Math.max(0, seats);
 }
 
 /**
- * The currency a tier is DISPLAYED in by default.
+ * The currency a tier is DISPLAYED in by default: the platform's home currency,
+ * for every tier.
  *
- * ENTERPRISE still PRESENTS in dollars — that is its market, and the marketing
- * surfaces read this. It is a display preference only: the checkout offers both
- * and defaults to whichever can actually be charged right now, so a dollar
- * headline never blocks a naira sale.
+ * ENTERPRISE used to present in dollars while the other three presented in
+ * naira, which made the public price list read as four prices in two currencies
+ * — a reader cannot compare tiers across a currency boundary, and the one tier
+ * with the highest intent was the one they could not place. The list is one
+ * currency now.
+ *
+ * DISPLAY IS NOT SETTLEMENT. What a school is actually CHARGED in is resolved
+ * per school from its own region at checkout, and `planCurrencies` already
+ * offers every tier in every currency the platform has a price list and a rail
+ * for. A naira headline does not make a dollar sale any harder.
  */
 export function defaultCurrencyFor(plan: Plan): Currency {
-  return plan === PLANS.ENTERPRISE ? CURRENCIES.USD : CURRENCIES.NGN;
+  void plan;
+  return CURRENCIES.NGN;
 }
 
-/** Per-seat monthly pricing by tier, in ONE currency's minor unit (kobo/cents). */
-export type PlanPricing = Record<Plan, { perSeatMonthlyMinor: number }>;
+/**
+ * Per-seat SESSION pricing by tier, in ONE currency's minor unit (kobo/cents).
+ *
+ * THE SESSION IS THE ANCHOR, and the reason is that it is the only unit that
+ * means the same thing in every country this platform sells into. A term is two,
+ * three or four of them depending on the school's calendar; an academic year is
+ * an academic year. Anchoring on the varying unit would make every new market a
+ * chance to misprice, and the term price is one division away.
+ */
+export type PlanPricing = Record<Plan, { perSeatSessionMinor: number }>;
 /**
  * Per-currency pricing tables.
  *
@@ -427,7 +452,7 @@ export type PlanPricing = Record<Plan, { perSeatMonthlyMinor: number }>;
 export type MultiCurrencyPlanPricing = Partial<Record<Currency, PlanPricing>>;
 
 /**
- * DEFAULT per-seat (per active student) price each MONTH, in kobo, by tier.
+ * DEFAULT per-seat (per active student) price each SESSION, in kobo, by tier.
  * STANDARD is the entry tier (and the delinquency floor); higher tiers cost more
  * per seat. These are the FALLBACK values — the super_admin can override any
  * (tier, currency) price via the operator console (stored in the global
@@ -441,14 +466,14 @@ export const PLAN_PRICING: PlanPricing = {
   // below the live NGN prices (₦200/350/500/750 against ₦525/750/975/1,250), so
   // opening a NEW currency would have quoted roughly half the real price until
   // somebody noticed. A default nobody reconciles is a default that undercharges.
-  STANDARD: { perSeatMonthlyMinor: 52_500 }, // ₦525 / student / month
-  PREMIUM: { perSeatMonthlyMinor: 75_000 }, // ₦750 / student / month
-  ULTIMATE: { perSeatMonthlyMinor: 97_500 }, // ₦975 / student / month
-  ENTERPRISE: { perSeatMonthlyMinor: 125_000 }, // ₦1,250 / student / month
+  STANDARD: { perSeatSessionMinor: 401_625 }, // ₦4,016.25 / student / session
+  PREMIUM: { perSeatSessionMinor: 573_750 }, // ₦5,737.50 / student / session
+  ULTIMATE: { perSeatSessionMinor: 745_875 }, // ₦7,458.75 / student / session
+  ENTERPRISE: { perSeatSessionMinor: 956_250 }, // ₦9,562.50 / student / session
 };
 
 /**
- * GHANAIAN CEDI defaults, in pesewas.
+ * GHANAIAN CEDI defaults, in pesewas, per student per SESSION.
  *
  * Added because a Ghanaian school could not be BILLED in its own currency: the
  * platform shipped prices for NGN and USD only, so a school whose fees are in
@@ -464,18 +489,18 @@ export const PLAN_PRICING: PlanPricing = {
  * for GHS overrides them, and `PlanPricingService.effective()` merges the two.
  */
 export const PLAN_PRICING_GHS: PlanPricing = {
-  STANDARD: { perSeatMonthlyMinor: 350 }, // GHS 3.50 / student / month
-  PREMIUM: { perSeatMonthlyMinor: 500 }, // GHS 5.00
-  ULTIMATE: { perSeatMonthlyMinor: 650 }, // GHS 6.50
-  ENTERPRISE: { perSeatMonthlyMinor: 850 }, // GHS 8.50
+  STANDARD: { perSeatSessionMinor: 2_678 }, // GHS 26.78 / student / session
+  PREMIUM: { perSeatSessionMinor: 3_825 }, // GHS 38.25
+  ULTIMATE: { perSeatSessionMinor: 4_973 }, // GHS 49.73
+  ENTERPRISE: { perSeatSessionMinor: 6_503 }, // GHS 65.03
 };
 
-/** USD defaults, in cents. */
+/** USD defaults, in cents, per student per SESSION. */
 export const PLAN_PRICING_USD: PlanPricing = {
-  STANDARD: { perSeatMonthlyMinor: 25 }, // $0.25 / student / month
-  PREMIUM: { perSeatMonthlyMinor: 40 }, // $0.40 / student / month
-  ULTIMATE: { perSeatMonthlyMinor: 60 }, // $0.60 / student / month
-  ENTERPRISE: { perSeatMonthlyMinor: 100 }, // $1.00 / student / month
+  STANDARD: { perSeatSessionMinor: 191 }, // $1.91 / student / session
+  PREMIUM: { perSeatSessionMinor: 306 }, // $3.06
+  ULTIMATE: { perSeatSessionMinor: 459 }, // $4.59
+  ENTERPRISE: { perSeatSessionMinor: 765 }, // $7.65
 };
 
 /** The currencies the platform ships prices for. Typed so NGN and USD are
@@ -546,12 +571,45 @@ export function isSubscriptionInGoodStanding(
   return now <= cutoff;
 }
 
-/** Pure: the UNDISCOUNTED price to run `plan` for `activeStudents` over one
- *  `cycle` (minor units) — per-seat monthly rate × seats × cycle months. */
+/**
+ * Pure: what ONE SEAT costs for one `cycle`, derived from the stored session
+ * price.
+ *
+ * THE WHOLE PRICING MODEL IS THESE FOUR LINES.
+ *
+ *   SESSION -> the stored number, unchanged.
+ *   TERM    -> session / (1 - 15%) / termsInSession
+ *
+ * So a school paying term by term across a whole year pays exactly
+ * 1/(1-15%) of the session price, whatever its calendar — 15% more, which is the
+ * same statement as "the session saves 15%". A two-semester school divides by 2,
+ * a four-quarter school by 4, and the session price is identical for both
+ * because a year is a year.
+ *
+ * `termsInSession` is REQUIRED, with no default. A default of 3 would compile at
+ * every call site and be wrong in the United States and Canada, silently, for as
+ * long as nobody checked — and this codebase has twice found exactly that class
+ * of bug by making the parameter required (the Paystack currency, and the
+ * payment-approval threshold). The compiler is the search.
+ */
+export function perSeatCycleMinor(
+  perSeatSessionMinor: number,
+  cycle: BillingCycle,
+  termsInSession: number,
+): number {
+  if (cycle === BILLING_CYCLES.SESSION) return perSeatSessionMinor;
+  const terms = Math.max(1, Math.floor(termsInSession));
+  return Math.round((perSeatSessionMinor * 100) / (100 - SESSION_DISCOUNT_PERCENT) / terms);
+}
+
+/** Pure: the price to run `plan` for `activeStudents` over one `cycle`, in minor
+ *  units. There is no separate "gross" any more — no discount is applied after
+ *  the fact, because the saving is already inside the term derivation. */
 export function computeSubscriptionGrossMinor(
   plan: Plan,
   activeStudents: number,
   cycle: BillingCycle,
+  termsInSession: number,
   pricing: PlanPricing = PLAN_PRICING,
   /** Per-school overrides. Modules enabled ON TOP of the tier are billed as
    *  add-ons at their own per-seat rate; omitted, this behaves exactly as
@@ -559,8 +617,28 @@ export function computeSubscriptionGrossMinor(
   overrides?: ModuleOverrides,
 ): number {
   const seats = Math.max(1, Math.floor(activeStudents));
-  const perSeat = pricing[plan].perSeatMonthlyMinor + addonPerSeatMonthlyMinor(plan, overrides);
-  return perSeat * seats * CYCLE_MONTHS[cycle];
+  const perSeatSession = pricing[plan].perSeatSessionMinor + addonPerSeatSessionMinor(plan, overrides);
+  return perSeatCycleMinor(perSeatSession, cycle, termsInSession) * seats;
+}
+
+/**
+ * Pure: one seat's cost per DAY on the cycle the school is actually on.
+ *
+ * INTERNAL ONLY — proration credit and seat arrears need a rate per unit time
+ * and nothing else can supply one. It is never displayed, never quoted, and is
+ * not a cycle anybody can buy.
+ *
+ * Taken from the cycle the school IS on, not from a notional monthly figure, so
+ * a school that bought a session accrues arrears at the discounted rate it
+ * actually pays. Anything else bills mid-period growth at a price the school was
+ * never quoted.
+ */
+export function perSeatDailyMinor(
+  perSeatSessionMinor: number,
+  cycle: BillingCycle,
+  termsInSession: number,
+): number {
+  return perSeatCycleMinor(perSeatSessionMinor, cycle, termsInSession) / (CYCLE_MONTHS[cycle] * 30);
 }
 
 /**
@@ -586,26 +664,27 @@ export function computeSubscriptionGrossMinor(
  * `assertAddonPricingBeatsUpgrade` in the test suite proves that for every
  * module rather than trusting the numbers to stay right by hand.
  */
+/** Per-seat per-SESSION add-on price, minor units. */
 export const MODULE_ADDON_PRICING: Partial<Record<ModuleKey, number>> = {
   // PREMIUM-tier modules. That tier adds five sellable modules for ₦225/seat
   // (₦45 each), so an add-on at ₦80 makes the third one worse than upgrading.
-  [MODULES.WORKFLOW]: 8_000,
-  [MODULES.ANALYTICS]: 8_000,
-  [MODULES.INTEGRITY]: 8_000,
-  [MODULES.GAMES]: 8_000,
-  [MODULES.CBT]: 12_500,
+  [MODULES.WORKFLOW]: 61_200,
+  [MODULES.ANALYTICS]: 61_200,
+  [MODULES.INTEGRITY]: 61_200,
+  [MODULES.GAMES]: 61_200,
+  [MODULES.CBT]: 95_625,
   // ULTIMATE-tier modules: the tier adds six for ₦225/seat (₦37.50 each).
   // Hostel and transport are the two schools most often want on their own.
-  [MODULES.ADMISSIONS]: 12_500,
-  [MODULES.CERTIFICATE]: 10_000,
-  [MODULES.HOSTEL]: 12_500,
-  [MODULES.TRANSPORT]: 12_500,
-  [MODULES.DISCIPLINE]: 10_000,
-  [MODULES.ALUMNI]: 10_000,
+  [MODULES.ADMISSIONS]: 95_625,
+  [MODULES.CERTIFICATE]: 76_500,
+  [MODULES.HOSTEL]: 95_625,
+  [MODULES.TRANSPORT]: 95_625,
+  [MODULES.DISCIPLINE]: 76_500,
+  [MODULES.ALUMNI]: 76_500,
   // ENTERPRISE-tier modules: the tier adds two for ₦275/seat (₦137.50 each).
   // Payroll alone replaces a separate system and is priced as such.
-  [MODULES.HR]: 20_000,
-  [MODULES.GROUP]: 20_000,
+  [MODULES.HR]: 153_000,
+  [MODULES.GROUP]: 153_000,
 };
 
 /**
@@ -635,21 +714,21 @@ export const MODULE_ADDON_PRICING: Partial<Record<ModuleKey, number>> = {
  */
 export const MODULE_ADDON_PRICING_USD: Partial<Record<ModuleKey, number>> = {
   // PREMIUM adds five sellable modules for 15c/seat (3c each).
-  [MODULES.WORKFLOW]: 6,
-  [MODULES.ANALYTICS]: 6,
-  [MODULES.INTEGRITY]: 6,
-  [MODULES.GAMES]: 6,
-  [MODULES.CBT]: 9,
+  [MODULES.WORKFLOW]: 46,
+  [MODULES.ANALYTICS]: 46,
+  [MODULES.INTEGRITY]: 46,
+  [MODULES.GAMES]: 46,
+  [MODULES.CBT]: 69,
   // ULTIMATE adds six for 20c/seat (3.33c each).
-  [MODULES.ADMISSIONS]: 9,
-  [MODULES.CERTIFICATE]: 7,
-  [MODULES.HOSTEL]: 9,
-  [MODULES.TRANSPORT]: 9,
-  [MODULES.DISCIPLINE]: 7,
-  [MODULES.ALUMNI]: 7,
+  [MODULES.ADMISSIONS]: 69,
+  [MODULES.CERTIFICATE]: 54,
+  [MODULES.HOSTEL]: 69,
+  [MODULES.TRANSPORT]: 69,
+  [MODULES.DISCIPLINE]: 54,
+  [MODULES.ALUMNI]: 54,
   // ENTERPRISE adds two for 40c/seat (20c each).
-  [MODULES.HR]: 30,
-  [MODULES.GROUP]: 30,
+  [MODULES.HR]: 230,
+  [MODULES.GROUP]: 230,
 };
 
 /**
@@ -667,21 +746,21 @@ export const MODULE_ADDON_PRICING_USD: Partial<Record<ModuleKey, number>> = {
  */
 export const MODULE_ADDON_PRICING_GHS: Partial<Record<ModuleKey, number>> = {
   // PREMIUM adds five sellable modules for GHS 1.50/seat (30p each).
-  [MODULES.WORKFLOW]: 55,
-  [MODULES.ANALYTICS]: 55,
-  [MODULES.INTEGRITY]: 55,
-  [MODULES.GAMES]: 55,
-  [MODULES.CBT]: 85,
+  [MODULES.WORKFLOW]: 421,
+  [MODULES.ANALYTICS]: 421,
+  [MODULES.INTEGRITY]: 421,
+  [MODULES.GAMES]: 421,
+  [MODULES.CBT]: 650,
   // ULTIMATE adds six for GHS 1.50/seat (25p each).
-  [MODULES.ADMISSIONS]: 85,
-  [MODULES.CERTIFICATE]: 70,
-  [MODULES.HOSTEL]: 85,
-  [MODULES.TRANSPORT]: 85,
-  [MODULES.DISCIPLINE]: 70,
-  [MODULES.ALUMNI]: 70,
+  [MODULES.ADMISSIONS]: 650,
+  [MODULES.CERTIFICATE]: 536,
+  [MODULES.HOSTEL]: 650,
+  [MODULES.TRANSPORT]: 650,
+  [MODULES.DISCIPLINE]: 536,
+  [MODULES.ALUMNI]: 536,
   // ENTERPRISE adds two for GHS 2.00/seat (100p each).
-  [MODULES.HR]: 150,
-  [MODULES.GROUP]: 150,
+  [MODULES.HR]: 1_148,
+  [MODULES.GROUP]: 1_148,
 };
 
 /** Add-on prices per currency, mirroring {@link PLAN_PRICING_BY_CURRENCY}. NGN
@@ -778,26 +857,30 @@ export function overridesUnderDelinquency(overrides?: ModuleOverrides | null): M
   };
 }
 
-/** Pure: the per-seat monthly cost of a school's add-ons, in minor units. */
-export function addonPerSeatMonthlyMinor(plan: Plan, overrides?: ModuleOverrides): number {
+/** Pure: the per-seat per-SESSION cost of a school's add-ons, in minor units. */
+export function addonPerSeatSessionMinor(plan: Plan, overrides?: ModuleOverrides): number {
   return billableAddons(plan, overrides).reduce((sum, m) => sum + (MODULE_ADDON_PRICING[m] ?? 0), 0);
 }
 
-/** Pure: the CHARGED price for a cycle — gross minus the commitment discount
- *  (TERM −5%, YEAR −15%). `pricing` defaults to the platform constants; pass the
- *  operator-resolved effective pricing so overrides flow into quotes and charges.
- *  This ONE function prices every surface: quotes, checkout, homepage, estimates. */
+/**
+ * Pure: the CHARGED price for a cycle. `pricing` defaults to the platform
+ * constants; pass the operator-resolved effective pricing so overrides flow into
+ * quotes and charges. This ONE function prices every surface: quotes, checkout,
+ * homepage, estimates.
+ *
+ * There is no discount step. The session saving lives in the TERM derivation
+ * (`perSeatCycleMinor`), so there is no second place it could be applied twice
+ * or forgotten once.
+ */
 export function computeSubscriptionPriceMinor(
   plan: Plan,
   activeStudents: number,
   cycle: BillingCycle,
+  termsInSession: number,
   pricing: PlanPricing = PLAN_PRICING,
   overrides?: ModuleOverrides,
 ): number {
-  return applyCycleDiscountMinor(
-    computeSubscriptionGrossMinor(plan, activeStudents, cycle, pricing, overrides),
-    cycle,
-  );
+  return computeSubscriptionGrossMinor(plan, activeStudents, cycle, termsInSession, pricing, overrides);
 }
 
 /**
@@ -916,15 +999,16 @@ export function prorationCreditMinor(
  * and cheaper than a failed charge.
  */
 export function addonProrationMinor(
-  perSeatMonthlyMinor: number | null | undefined,
+  perSeatSessionMinor: number | null | undefined,
   seats: number,
   cycle: BillingCycle,
+  termsInSession: number,
   periodEnd: Date | null,
   now: Date,
 ): number | null {
-  if (!perSeatMonthlyMinor || perSeatMonthlyMinor <= 0 || !periodEnd) return null;
+  if (!perSeatSessionMinor || perSeatSessionMinor <= 0 || !periodEnd) return null;
   const billableSeats = Math.max(1, Math.floor(seats));
-  const full = perSeatMonthlyMinor * billableSeats * CYCLE_MONTHS[cycle];
+  const full = perSeatCycleMinor(perSeatSessionMinor, cycle, termsInSession) * billableSeats;
   const amount = Math.round(full * remainingPeriodRatio(cycle, periodEnd, now));
   return amount < MIN_CHARGE_MINOR ? null : amount;
 }
@@ -939,6 +1023,7 @@ export function computeTrueUpMinor(
   billedSeats: number | null,
   currentSeats: number,
   cycle: BillingCycle,
+  termsInSession: number,
   periodEnd: Date | null,
   now: Date,
   pricing: PlanPricing = PLAN_PRICING,
@@ -948,7 +1033,7 @@ export function computeTrueUpMinor(
   if (extraSeats <= 0) return null;
   const ratio = remainingPeriodRatio(cycle, periodEnd, now);
   if (ratio <= 0) return null;
-  const amountMinor = Math.round(computeSubscriptionPriceMinor(plan, extraSeats, cycle, pricing) * ratio);
+  const amountMinor = Math.round(computeSubscriptionPriceMinor(plan, extraSeats, cycle, termsInSession, pricing) * ratio);
   if (amountMinor < MIN_CHARGE_MINOR) return null; // not worth a charge yet
   return { extraSeats, amountMinor };
 }
@@ -967,12 +1052,16 @@ export function accrueSeatArrearsMinor(
   billedSeats: number | null,
   currentSeats: number,
   elapsedMs: number,
+  cycle: BillingCycle,
+  termsInSession: number,
   pricing: PlanPricing = PLAN_PRICING,
 ): number {
   if (billedSeats == null || billedSeats <= 0 || elapsedMs <= 0) return 0;
   const extraSeats = currentSeats - billedSeats;
   if (extraSeats <= 0) return 0;
-  const perSeatDaily = pricing[plan].perSeatMonthlyMinor / 30;
+  // The rate the school is ACTUALLY on, not a notional monthly one: a session
+  // buyer accrues at the discounted rate they were quoted.
+  const perSeatDaily = perSeatDailyMinor(pricing[plan].perSeatSessionMinor, cycle, termsInSession);
   const days = elapsedMs / (24 * 3600 * 1000);
   return Math.round(extraSeats * perSeatDaily * days);
 }
@@ -1044,7 +1133,7 @@ export function planRank(plan: Plan): number {
  * 1st place is a full session, 2nd two terms, 3rd one term.
  */
 export const SCHOLARSHIP_SCHOOL_PRIZE_MONTHS: Record<1 | 2 | 3, number> = {
-  1: CYCLE_MONTHS.YEAR,
+  1: CYCLE_MONTHS.SESSION,
   2: CYCLE_MONTHS.TERM * 2,
   3: CYCLE_MONTHS.TERM,
 };

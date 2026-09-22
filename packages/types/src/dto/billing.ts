@@ -154,7 +154,7 @@ export interface PlanPriceDto {
   /** NGN or USD — the row's currency (minor unit: kobo / cents). */
   currency: Currency;
   /** Effective per-seat monthly price in the currency's minor unit. */
-  perSeatMonthlyMinor: number;
+  perSeatSessionMinor: number;
   /** True when this is the platform default (no operator override row). */
   isDefault: boolean;
   /** How many modules the tier bundles (for the public pricing cards). */
@@ -164,7 +164,7 @@ export interface PlanPriceDto {
 /** super_admin pricing update: one entry per (tier, currency) to override.
  *  Omitted currency = NGN (back-compat); ENTERPRISE accepts only USD. */
 export interface PlanPriceUpdateDto {
-  prices: { plan: Plan; perSeatMonthlyMinor: number; currency?: Currency }[];
+  prices: { plan: Plan; perSeatSessionMinor: number; currency?: Currency }[];
 }
 
 // --- operator: cross-tenant subscription revenue --------------------------- //
@@ -397,19 +397,19 @@ export interface MessageCreditLedgerPageDto {
 export interface ModuleAddonPriceDto {
   module: string;
   currency: string;
-  perSeatMonthlyMinor: number;
+  perSeatSessionMinor: number;
   isDefault: boolean;
 }
 
 
 /** One row of the school's add-on shop. `priceNowMinor` is the PRORATED cost to
- *  switch it on today; `perSeatMonthlyMinor` is what it costs from renewal. Both
+ *  switch it on today; `perSeatSessionMinor` is what it costs from renewal. Both
  *  are shown, because a school comparing "now" against "ongoing" is exactly the
  *  question a bursar asks. */
 export interface AddonOfferDto {
   module: string;
   currency: string;
-  perSeatMonthlyMinor: number;
+  perSeatSessionMinor: number;
   priceNowMinor: number;
   includedInPlan: boolean;
   alreadyPurchased: boolean;

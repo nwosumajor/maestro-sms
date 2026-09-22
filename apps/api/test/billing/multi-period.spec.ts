@@ -21,18 +21,23 @@ import {
   periodEndAfter,
 } from "@sms/types";
 
+/** A three-term school; other calendars are covered in billing-pricing.spec. */
+const TERMS = 3;
+
 describe("period arithmetic", () => {
   it("an academic YEAR is 9 billed months, not 12", () => {
     // The label is the ambiguity this whole feature had to work around: a
     // school reading "1 year" assumes twelve months. Holidays are not charged.
-    expect(CYCLE_MONTHS[BILLING_CYCLES.YEAR]).toBe(9);
-    expect(billedMonths(BILLING_CYCLES.YEAR, 1)).toBe(9);
+    expect(CYCLE_MONTHS[BILLING_CYCLES.SESSION]).toBe(9);
+    expect(billedMonths(BILLING_CYCLES.SESSION, 1)).toBe(9);
   });
 
   it("multiplies cleanly — five years is 45 billed months in ONE charge", () => {
-    expect(billedMonths(BILLING_CYCLES.YEAR, 5)).toBe(45);
+    expect(billedMonths(BILLING_CYCLES.SESSION, 5)).toBe(45);
     expect(billedMonths(BILLING_CYCLES.TERM, 4)).toBe(12);
-    expect(billedMonths(BILLING_CYCLES.MONTH, 18)).toBe(18);
+    // A term is three calendar months of ACCESS — unchanged by the pricing move,
+    // deliberately, so no existing school's period shifts.
+    expect(billedMonths(BILLING_CYCLES.TERM, 18)).toBe(54);
   });
 
   it("clamps a period count instead of trusting it", () => {
@@ -51,7 +56,7 @@ describe("period arithmetic", () => {
     // written after it.
     const now = new Date("2026-08-09T00:00:00Z");
     const end = new Date("2026-11-09T00:00:00Z");
-    const out = periodEndAfter(BILLING_CYCLES.YEAR, 1, now, end);
+    const out = periodEndAfter(BILLING_CYCLES.SESSION, 1, now, end);
     expect(out.toISOString().slice(0, 10)).toBe("2027-08-09");
   });
 
@@ -67,16 +72,16 @@ describe("period arithmetic", () => {
   it("five years bought at once lands where five bought in a row would", () => {
     // The point of the multiplier: same destination, one charge, no race.
     const now = new Date("2026-08-09T00:00:00Z");
-    const atOnce = periodEndAfter(BILLING_CYCLES.YEAR, 5, now, null);
+    const atOnce = periodEndAfter(BILLING_CYCLES.SESSION, 5, now, null);
     let stepwise: Date | null = null;
-    for (let i = 0; i < 5; i++) stepwise = periodEndAfter(BILLING_CYCLES.YEAR, 1, now, stepwise);
+    for (let i = 0; i < 5; i++) stepwise = periodEndAfter(BILLING_CYCLES.SESSION, 1, now, stepwise);
     expect(atOnce.toISOString()).toBe(stepwise!.toISOString());
   });
 
   it("a TRUEUP-sized period count never moves the period backwards", () => {
     const now = new Date("2026-08-09T00:00:00Z");
     const end = new Date("2030-01-01T00:00:00Z");
-    expect(periodEndAfter(BILLING_CYCLES.MONTH, 1, now, end).getTime()).toBeGreaterThan(end.getTime());
+    expect(periodEndAfter(BILLING_CYCLES.TERM, 1, now, end).getTime()).toBeGreaterThan(end.getTime());
   });
 });
 
@@ -131,9 +136,9 @@ describe("the charge ceiling", () => {
       await import("@sms/types");
     // A 5,000-pupil school buying five academic years at once: the case that
     // returned a raw driver 500 after the bursar had re-authenticated.
-    const yearly = computeSubscriptionPriceMinor(PLANS.ENTERPRISE, 5_000, BILLING_CYCLES.YEAR, PLAN_PRICING);
+    const yearly = computeSubscriptionPriceMinor(PLANS.ENTERPRISE, 5_000, BILLING_CYCLES.SESSION, TERMS, PLAN_PRICING);
     expect(yearly * 5).toBeGreaterThan(2_147_483_647); // would have overflowed
     expect(yearly * 5).toBeLessThan(MAX_CHARGE_MINOR); // and is accepted now
-    expect(billedMonths(BILLING_CYCLES.YEAR, 5)).toBe(45);
+    expect(billedMonths(BILLING_CYCLES.SESSION, 5)).toBe(45);
   });
 });

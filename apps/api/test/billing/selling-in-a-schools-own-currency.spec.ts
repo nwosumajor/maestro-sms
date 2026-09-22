@@ -36,7 +36,7 @@ describe("GHS is a market the platform can actually sell in", () => {
   it("ships a tier price list", () => {
     expect(PLAN_PRICING_BY_CURRENCY.GHS).toBeDefined();
     for (const plan of Object.values(PLANS)) {
-      expect({ plan, priced: (PLAN_PRICING_BY_CURRENCY.GHS?.[plan]?.perSeatMonthlyMinor ?? 0) > 0 })
+      expect({ plan, priced: (PLAN_PRICING_BY_CURRENCY.GHS?.[plan]?.perSeatSessionMinor ?? 0) > 0 })
         .toEqual({ plan, priced: true });
     }
   });
@@ -59,7 +59,7 @@ describe("GHS is a market the platform can actually sell in", () => {
     // The ratios mirror NGN deliberately: the gap between tiers is a product
     // decision that should not change per market. Only the base moves.
     const ghs = PLAN_PRICING_BY_CURRENCY.GHS!;
-    const seats = (p: keyof typeof ghs) => ghs[p].perSeatMonthlyMinor;
+    const seats = (p: keyof typeof ghs) => ghs[p].perSeatSessionMinor;
     expect(seats(PLANS.STANDARD)).toBeLessThan(seats(PLANS.PREMIUM));
     expect(seats(PLANS.PREMIUM)).toBeLessThan(seats(PLANS.ULTIMATE));
     expect(seats(PLANS.ULTIMATE)).toBeLessThan(seats(PLANS.ENTERPRISE));

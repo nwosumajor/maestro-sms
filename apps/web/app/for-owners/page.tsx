@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import { CYCLE_DISCOUNT_PERCENT, PLANS } from "@sms/types";
+import { SESSION_DISCOUNT_PERCENT, PLANS } from "@sms/types";
 import { CheckIcon, ShieldCheckIcon, WalletIcon, ClockIcon, UsersIcon, LockIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -232,8 +232,8 @@ export default function ForOwnersPage() {
             Pricing is <strong className="font-semibold text-foreground">per active student</strong> — you pay for the
             school you actually are, not a licence tier you grow into. {PLAN_COUNT_WORD} plans let you start with core
             academics and finance, then switch on hostel, transport, CBT and group features as you need them.
-            Committing per term saves {CYCLE_DISCOUNT_PERCENT.TERM}%, and per academic year saves{" "}
-            {CYCLE_DISCOUNT_PERCENT.YEAR}%. Current pricing is always published on our website — there are no hidden
+            Pay per term, or pay for the whole academic session and save{" "}
+            {SESSION_DISCOUNT_PERCENT}%. Current pricing is always published on our website — there are no hidden
             quotes.
           </p>
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  CYCLE_MONTHS,
+  SESSION_DISCOUNT_PERCENT,
   MAX_BILLING_PERIODS,
   billedMonths,
   currencyLabel,
@@ -21,9 +21,8 @@ import { readApiError } from "@/lib/api-error";
 type Quote = Serialized<BillingQuoteDto>;
 
 const CYCLE_LABEL: Record<string, string> = {
-  MONTH: "Monthly",
-  TERM: "Per term — 3 months, save 5%",
-  YEAR: "Per year — 3 terms (9 months), save 15%",
+  TERM: "Per term",
+  SESSION: `Per session — the whole academic year, save ${SESSION_DISCOUNT_PERCENT}%`,
 };
 
 /**
@@ -93,14 +92,18 @@ export function BillingCheckout({
   // told the school the wrong one. The server knows; the page no longer guesses.
   const availability = currencyAvailability.find((c) => c.currency === effectiveCurrency);
   const unavailable = availability != null && !availability.available;
-  // Savings vs paying month-by-month for the same coverage: the MONTH quote is
-  // undiscounted, so gross = monthly quote × the cycle's months.
-  const monthQuote = quotes.find(
-    (q) => q.plan === plan && q.billingCycle === "MONTH" && q.currency === effectiveCurrency,
+  // SAVINGS AGAINST THE OTHER THING ON OFFER, which is now paying term by term.
+  // Both quotes come from the server, so this never re-derives a price in the
+  // browser — it subtracts two figures the school can also see. The term quote
+  // is already this school's own term price, so a two-semester school's saving
+  // is computed from ITS terms without the browser knowing how many there are.
+  const termQuote = quotes.find(
+    (q) => q.plan === plan && q.billingCycle === "TERM" && q.currency === effectiveCurrency,
   );
   const savings =
-    selected && monthQuote
-      ? (monthQuote.priceMinor * CYCLE_MONTHS[cycle as BillingCycle] - selected.priceMinor) * periods
+    selected && termQuote && cycle === "SESSION"
+      ? Math.max(0, Math.round((selected.priceMinor * SESSION_DISCOUNT_PERCENT) / (100 - SESSION_DISCOUNT_PERCENT))) *
+        periods
       : 0;
   const totalMinor = selected ? selected.priceMinor * periods : 0;
   // THE DATE, not the label. "1 year" does not mean twelve months here — an
@@ -216,7 +219,7 @@ export function BillingCheckout({
             >
               {Array.from({ length: MAX_BILLING_PERIODS }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
-                  {n} x {cycle === "MONTH" ? "month" : cycle === "TERM" ? "term" : "year"}
+                  {n} x {cycle === "TERM" ? "term" : "session"}
                   {n === 1 ? "" : "s"}
                 </option>
               ))}

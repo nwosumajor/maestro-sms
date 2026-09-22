@@ -29,7 +29,7 @@ export function PricingManager({ initial }: { initial: PlanPriceDto[] }) {
     // NGN/USD/GHS and 100x wrong for a zero-decimal currency — the rule this
     // repo already gates for, and the sibling AddonPricingManager beside this
     // one already used `majorFrom`/`minorFrom`. Correct next door, wrong here.
-    Object.fromEntries(initial.map((r) => [key(r), String(majorFrom(r.perSeatMonthlyMinor, r.currency))])),
+    Object.fromEntries(initial.map((r) => [key(r), String(majorFrom(r.perSeatSessionMinor, r.currency))])),
   );
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -42,14 +42,14 @@ export function PricingManager({ initial }: { initial: PlanPriceDto[] }) {
   const currencies: Currency[] = planCurrencies(PLANS.STANDARD);
 
   const save = async () => {
-    const prices: { plan: string; perSeatMonthlyMinor: number; currency: string }[] = [];
+    const prices: { plan: string; perSeatSessionMinor: number; currency: string }[] = [];
     for (const r of initial) {
       const n = Number(major[key(r)]);
       if (!Number.isFinite(n) || n <= 0) {
         setMsg(`${r.plan} (${r.currency}): enter a positive price.`);
         return;
       }
-      prices.push({ plan: r.plan, currency: r.currency, perSeatMonthlyMinor: minorFrom(n, r.currency) });
+      prices.push({ plan: r.plan, currency: r.currency, perSeatSessionMinor: minorFrom(n, r.currency) });
     }
     setBusy(true);
     setMsg(null);

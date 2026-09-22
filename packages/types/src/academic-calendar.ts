@@ -297,6 +297,20 @@ export const CALENDAR_TEMPLATES: Record<string, CalendarTemplate> = {
  *  nothing changes for anyone already live. */
 export const DEFAULT_CALENDAR_TEMPLATE = "THREE_TERM";
 
+/**
+ * How many terms a school's year has: 2, 3 or 4.
+ *
+ * THE NUMBER THAT MUST NEVER BE WRITTEN AS `3`. Subscription pricing is
+ * anchored on the SESSION and derives the term from it, so this is the divisor —
+ * and a literal 3 would overcharge a two-semester school by half and undercharge
+ * a four-quarter one by a quarter, silently, in the two markets whose calendars
+ * differ from the platform's home. Derived from the template's own period names
+ * so a fifth template added later is covered the day it lands.
+ */
+export function termsInSession(key: string | null | undefined): number {
+  return calendarTemplate(key).periodNames.length;
+}
+
 export function calendarTemplate(key: string | null | undefined): CalendarTemplate {
   return CALENDAR_TEMPLATES[key ?? DEFAULT_CALENDAR_TEMPLATE] ?? CALENDAR_TEMPLATES[DEFAULT_CALENDAR_TEMPLATE];
 }

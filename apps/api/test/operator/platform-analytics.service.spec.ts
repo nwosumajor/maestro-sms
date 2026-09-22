@@ -175,10 +175,10 @@ describe("PlatformAnalyticsService", () => {
     // moved when the code fallback was brought back in line with what is actually
     // charged, and a hard-coded 200000 turned a pricing change into a failure in
     // an analytics test that is not about pricing at all.
-    expect(out.mrr.totalMinor).toBe(10 * PLAN_PRICING.STANDARD.perSeatMonthlyMinor);
-    expect(out.mrr.byPlan.STANDARD).toBe(10 * PLAN_PRICING.STANDARD.perSeatMonthlyMinor);
+    expect(out.mrr.totalMinor).toBe(10 * PLAN_PRICING.STANDARD.perSeatSessionMinor);
+    expect(out.mrr.byPlan.STANDARD).toBe(10 * PLAN_PRICING.STANDARD.perSeatSessionMinor);
     expect(out.mrr.payingSchools).toBe(1);
-    expect(out.mrr.arpaMinor).toBe(10 * PLAN_PRICING.STANDARD.perSeatMonthlyMinor);
+    expect(out.mrr.arpaMinor).toBe(10 * PLAN_PRICING.STANDARD.perSeatSessionMinor);
     // funnel: 3 requests total, 1 approved, 2 provisioned schools, 1 paying.
     expect(out.funnel).toEqual({ requests: 3, approved: 1, provisioned: 2, paying: 1 });
     expect(out.risk).toEqual({ pastDue: 0, canceled: 0, atRiskMrrMinor: 0, atRiskByCurrency: [] });

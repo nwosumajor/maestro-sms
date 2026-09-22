@@ -24,6 +24,7 @@ import {
   computeSubscriptionPriceMinor,
   type ModuleOverrides,
   isBillingCycle,
+  termsInSession,
   isCurrency,
   isPlan,
   type BillingCycle,
@@ -147,6 +148,13 @@ export class BillingDunningService {
         seatArrearsMinor: true,
         // Needed to bill add-ons on the renewal, same as checkout does.
         overrides: true,
+        // THE SCHOOL'S OWN CALENDAR. The term price is the session price divided
+        // by how many terms this school's year actually has, so a fleet sweep
+        // that assumed three would misprice every renewal in the United States
+        // and Canada. Selected with the row rather than fetched per school —
+        // this is a cross-tenant sweep and a lookup per subscription is a query
+        // multiplier.
+        school: { select: { calendarTemplate: true } },
       },
     });
 
@@ -418,6 +426,8 @@ export class BillingDunningService {
       seats: number | null;
       currentPeriodEnd: Date | null;
       arrearsAccruedAt: Date | null;
+      billingCycle: string;
+      school: { calendarTemplate: string | null } | null;
     }>,
     now: Date,
   ): Promise<string[]> {
@@ -460,7 +470,9 @@ export class BillingDunningService {
           const elapsedMs = windowEnd.getTime() - s.arrearsAccruedAt.getTime();
           const currency: Currency = isCurrency(s.currency ?? "") ? (s.currency as Currency) : CURRENCIES.NGN;
           const pricing = await this.pricing.effective(currency);
-          const accrued = accrueSeatArrearsMinor(s.plan, s.seats, seatCount.get(s.schoolId) ?? 0, elapsedMs, pricing);
+          const terms = termsInSession(s.school?.calendarTemplate ?? null);
+          const cycle: BillingCycle = isBillingCycle(s.billingCycle) ? s.billingCycle : BILLING_CYCLES.TERM;
+          const accrued = accrueSeatArrearsMinor(s.plan, s.seats, seatCount.get(s.schoolId) ?? 0, elapsedMs, cycle, terms, pricing);
           await client.schoolSubscription.update({
             where: { id: s.id },
             data: { arrearsAccruedAt: now, ...(accrued > 0 ? { seatArrearsMinor: { increment: accrued } } : {}) },
@@ -502,6 +514,8 @@ export class BillingDunningService {
       schoolId: string;
       plan: string;
       billingCycle: string;
+      // The school's own calendar, for the term divisor — see accrueSeatArrears.
+      school?: { calendarTemplate: string | null } | null;
       paystackAuthorizationEnc: string | null;
       seatArrearsMinor: bigint | number;
       // Add-ons renew with the subscription; without this the renewal charged
@@ -533,7 +547,8 @@ export class BillingDunningService {
       // Add-ons renew with the subscription. A renewal that quietly dropped
       // them would hand the school a free module every period.
       const overrides = (s.overrides ?? undefined) as ModuleOverrides | undefined;
-      const amountMinor = computeSubscriptionPriceMinor(plan, seats, cycle, pricing, overrides) + arrearsMinor;
+      const amountMinor =
+        computeSubscriptionPriceMinor(plan, seats, cycle, termsInSession(s.school?.calendarTemplate ?? null), pricing, overrides) + arrearsMinor;
 
       // The charge needs a customer email — the school's first admin.
       const admin = await client.userRole.findFirst({

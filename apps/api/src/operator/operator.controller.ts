@@ -240,7 +240,7 @@ const addonPricingSchema = z.object({
     .array(
       z.object({
         module: z.string().min(1).max(40),
-        perSeatMonthlyMinor: z.number().int().min(0),
+        perSeatSessionMinor: z.number().int().min(0),
         currency: z.enum(SELLING_CURRENCIES).default(CURRENCIES.NGN),
       }),
     )
@@ -255,7 +255,7 @@ const pricingSchema = z.object({
     .array(
       z.object({
         plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
-        perSeatMonthlyMinor: z.number().int().positive(),
+        perSeatSessionMinor: z.number().int().positive(),
         // Omitted means NGN (back-compat with the single-currency callers).
         // It said "ENTERPRISE accepts USD only (service-enforced)" — no such
         // rule exists in the service, and ENTERPRISE ships prices in all three.
@@ -700,7 +700,7 @@ export class OperatorController {
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(addonPricingSchema)) body: z.infer<typeof addonPricingSchema>,
   ) {
-    return this.addonPricing.update(p, body.prices as Array<{ module: string; currency: string; perSeatMonthlyMinor: number }>);
+    return this.addonPricing.update(p, body.prices as Array<{ module: string; currency: string; perSeatSessionMinor: number }>);
   }
 
   /** Set per-tier prices. Step-up: platform-wide money configuration. Audited. */

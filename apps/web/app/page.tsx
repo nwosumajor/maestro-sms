@@ -45,14 +45,14 @@ import {
 import {
   BILLING_CYCLES,
   CURRENCY_SYMBOL,
-  CYCLE_DISCOUNT_PERCENT,
-  CYCLE_MONTHS,
+  SESSION_DISCOUNT_PERCENT,
+  type BillingCycle,
   MODULE_CATALOG,
   PLANS as PLAN_KEYS,
   PLAN_MODULES,
   PLAN_PRICING_BY_CURRENCY,
   toMajor as minorToMajor,
-  applyCycleDiscountMinor,
+  perSeatCycleMinor,
   defaultCurrencyFor,
   type Plan,
   type PlanPriceDto,
@@ -270,6 +270,11 @@ function fmtAmount(n: number): string {
   return n.toLocaleString("en-NG", { minimumFractionDigits: n % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 });
 }
 
+/** The term count the PUBLIC price list assumes. This page is read before any
+ *  school exists, so there is no calendar to consult; the SESSION figure beside
+ *  it is exact for every school, being the stored price itself. */
+const HOME_TERMS = 3;
+
 async function effectivePlans() {
   let rows: PlanPriceDto[] | null = null;
   try {
@@ -283,15 +288,18 @@ async function effectivePlans() {
     // API unreachable (e.g. static build) -> platform default pricing below.
   }
   return (Object.values(PLAN_KEYS) as Plan[]).map((plan) => {
-    // Each tier displays in its DEFAULT currency: ₦ locally, $ for ENTERPRISE
-    // (USD-only — it targets international schools). Rows are per-currency.
+    // ONE CURRENCY FOR THE WHOLE LIST — the platform's home currency, for every
+    // tier including ENTERPRISE. A public price list a reader cannot compare
+    // across is not a price list, and ENTERPRISE in dollars beside three naira
+    // tiers was exactly that. What a school is CHARGED in is resolved from its
+    // own region at checkout, which is a different question entirely.
     const currency = defaultCurrencyFor(plan);
     const row = rows?.find((r) => r.plan === plan && r.currency === currency);
     // The pricing table is PARTIAL — a currency the platform can express is not
     // automatically one it has prices for. Falls back to the naira table rather
     // than rendering a blank price on the public page.
-    const fallback = (PLAN_PRICING_BY_CURRENCY[currency] ?? PLAN_PRICING_BY_CURRENCY.NGN)[plan].perSeatMonthlyMinor;
-    const perSeatMinor = row?.perSeatMonthlyMinor ?? fallback;
+    const fallback = (PLAN_PRICING_BY_CURRENCY[currency] ?? PLAN_PRICING_BY_CURRENCY.NGN)[plan].perSeatSessionMinor;
+    const perSeatMinor = row?.perSeatSessionMinor ?? fallback;
     // Cycle marketing: the SAME discount rule checkout charges with (one source).
     // Scaled by the CURRENCY, not by 100 — the shared helper, so this page cannot
     // drift from what checkout charges.
@@ -299,14 +307,18 @@ async function effectivePlans() {
     // result is already exact. `Math.round(x * 100) / 100` re-imposed two
     // decimal places on a currency that may have none.
     const toMajor = (minor: number) => minorToMajor(minor, currency);
-    const perStudent = (cycle: keyof typeof CYCLE_MONTHS) =>
-      toMajor(applyCycleDiscountMinor(perSeatMinor * CYCLE_MONTHS[cycle], cycle));
+    // THE PUBLIC LIST ASSUMES THE PLATFORM'S OWN CALENDAR, because this page is
+    // read before any school exists and there is no template to consult. The
+    // session figure is exact for everyone — it is the stored price — and only
+    // the per-term figure varies by calendar, which the quote at checkout
+    // resolves from the school's own template.
+    const perStudent = (cycle: BillingCycle) => toMajor(perSeatCycleMinor(perSeatMinor, cycle, HOME_TERMS));
     return {
       name: plan.charAt(0) + plan.slice(1).toLowerCase(),
       symbol: CURRENCY_SYMBOL[currency],
-      price: toMajor(perSeatMinor),
+      price: perStudent(BILLING_CYCLES.TERM),
       termPrice: perStudent(BILLING_CYCLES.TERM),
-      yearPrice: perStudent(BILLING_CYCLES.YEAR),
+      yearPrice: perStudent(BILLING_CYCLES.SESSION),
       modules: row?.modulesIncluded ?? PLAN_MODULES[plan].length,
       ...PLAN_META[plan],
     };
@@ -861,12 +873,11 @@ async function Plans() {
               <p className="mt-5 flex items-baseline gap-1">
                 <span className="text-xs text-muted-foreground">{p.symbol}</span>
                 <span className="tnum font-display text-3xl font-semibold tracking-tight">{p.price}</span>
-                <span className="text-xs text-muted-foreground">/student/mo</span>
+                <span className="text-xs text-muted-foreground">/student/term</span>
               </p>
               <p className="tnum mt-2 text-xs text-muted-foreground">
-                {p.symbol}{fmtAmount(p.termPrice)}/term <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {CYCLE_DISCOUNT_PERCENT.TERM}%)</span>
-                {" · "}
-                {p.symbol}{fmtAmount(p.yearPrice)}/year <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {CYCLE_DISCOUNT_PERCENT.YEAR}%)</span>
+                {p.symbol}{fmtAmount(p.yearPrice)}/student/session{" "}
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {SESSION_DISCOUNT_PERCENT}%)</span>
               </p>
               <p className="tnum mt-3 text-sm text-muted-foreground">
                 <span className="font-semibold text-foreground">{p.modules}</span> modules included

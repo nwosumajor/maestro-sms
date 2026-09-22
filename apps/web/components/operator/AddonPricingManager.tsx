@@ -44,7 +44,7 @@ function tierBenchmark(module: string): { plan: string; perModuleMinor: number }
     if (!here.includes(module) || below.has(module)) continue;
     const adds = here.filter((m) => !below.has(m)).length;
     const step =
-      PLAN_PRICING[LADDER[i]].perSeatMonthlyMinor - PLAN_PRICING[LADDER[i - 1]].perSeatMonthlyMinor;
+      PLAN_PRICING[LADDER[i]].perSeatSessionMinor - PLAN_PRICING[LADDER[i - 1]].perSeatSessionMinor;
     return { plan: LADDER[i], perModuleMinor: Math.round(step / adds) };
   }
   return null;
@@ -64,7 +64,7 @@ export function AddonPricingManager({ initial }: { initial: ModuleAddonPriceDto[
   const symbol = CURRENCY_SYMBOL[currency] ?? "";
   // Edited in MAJOR units for humans; the API stores minor units.
   const [major, setMajor] = React.useState<Record<string, string>>(
-    Object.fromEntries(initial.map((r) => [r.module, String(majorFrom(r.perSeatMonthlyMinor, currency))])),
+    Object.fromEntries(initial.map((r) => [r.module, String(majorFrom(r.perSeatSessionMinor, currency))])),
   );
 
   // Switching currency re-reads that market's prices. Keeping the old figures
@@ -82,20 +82,20 @@ export function AddonPricingManager({ initial }: { initial: ModuleAddonPriceDto[
     }
     const fresh = (await res.json()) as ModuleAddonPriceDto[];
     setRows(fresh);
-    setMajor(Object.fromEntries(fresh.map((r) => [r.module, String(majorFrom(r.perSeatMonthlyMinor, next))])));
+    setMajor(Object.fromEntries(fresh.map((r) => [r.module, String(majorFrom(r.perSeatSessionMinor, next))])));
   };
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
   const save = async () => {
-    const prices: { module: string; currency: string; perSeatMonthlyMinor: number }[] = [];
+    const prices: { module: string; currency: string; perSeatSessionMinor: number }[] = [];
     for (const r of rows) {
       const n = Number(major[r.module]);
       if (!Number.isFinite(n) || n < 0) {
         setMsg(`${LABEL.get(r.module) ?? r.module}: enter a price of zero or more.`);
         return;
       }
-      prices.push({ module: r.module, currency: r.currency, perSeatMonthlyMinor: minorFrom(n, r.currency) });
+      prices.push({ module: r.module, currency: r.currency, perSeatSessionMinor: minorFrom(n, r.currency) });
     }
     setBusy(true);
     setMsg(null);

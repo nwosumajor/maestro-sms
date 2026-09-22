@@ -11,14 +11,13 @@ import * as React from "react";
 import {
   BILLING_CYCLES,
   CURRENCY_SYMBOL,
-  CYCLE_DISCOUNT_PERCENT,
-  CYCLE_MONTHS,
+  SESSION_DISCOUNT_PERCENT,
   MODULE_CATALOG,
   ONBOARDING_CONTACT_ROLES,
   ONBOARDING_SCHOOL_TYPES,
   PLANS,
   PLAN_MODULES,
-  applyCycleDiscountMinor,
+  perSeatCycleMinor,
   defaultCurrencyFor,
   type BillingCycle,
   type ModuleKey,
@@ -66,6 +65,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </fieldset>
   );
 }
+
+/**
+ * The term count the PUBLIC estimate assumes.
+ *
+ * This form runs before a school exists, so there is no calendar template to
+ * read — the applicant has not told us their country yet. Three is the
+ * platform's home shape and the estimate says it is an estimate. The moment the
+ * school is provisioned, every real quote and charge uses that school's OWN
+ * term count; nothing downstream inherits this number.
+ */
+const ESTIMATE_TERMS = 3;
 
 export function OnboardForm({
   defaultReferralCode = "",
@@ -127,21 +137,20 @@ export function OnboardForm({
   // (TERM 3 months −5%, YEAR 9 months −15%) — one shared function, no drift.
   const [cycle, setCycle] = React.useState<BillingCycle>(BILLING_CYCLES.TERM);
   const estCurrency = defaultCurrencyFor(plan);
-  const perSeat = pricing?.find((r) => r.plan === plan && r.currency === estCurrency)?.perSeatMonthlyMinor ?? null;
+  const perSeat = pricing?.find((r) => r.plan === plan && r.currency === estCurrency)?.perSeatSessionMinor ?? null;
   // toMajor asks the currency, rather than assuming hundredths. Both tiers are
   // priced in NGN or USD today, so this is the same number — but the assumption
   // is one `planCurrencies()` entry away from being wrong, and it is the figure
   // a prospective owner decides on.
   const estimate =
     perSeat != null && students > 0
-      ? toMajor(applyCycleDiscountMinor(students * perSeat * CYCLE_MONTHS[cycle], cycle), estCurrency)
+      ? toMajor(students * perSeatCycleMinor(perSeat, cycle, ESTIMATE_TERMS), estCurrency)
       : null;
   const CYCLE_LABEL: Record<BillingCycle, string> = {
-    MONTH: "Monthly",
-    TERM: `Per term (3 months — save ${CYCLE_DISCOUNT_PERCENT.TERM}%)`,
-    YEAR: `Per year (9 months — save ${CYCLE_DISCOUNT_PERCENT.YEAR}%)`,
+    TERM: "Per term",
+    SESSION: `Per session — save ${SESSION_DISCOUNT_PERCENT}%`,
   };
-  const CYCLE_UNIT: Record<BillingCycle, string> = { MONTH: "month", TERM: "term", YEAR: "year" };
+  const CYCLE_UNIT: Record<BillingCycle, string> = { TERM: "term", SESSION: "session" };
 
   const [busy, setBusy] = React.useState(false);
   const [done, setDone] = React.useState(false);
@@ -347,7 +356,7 @@ export function OnboardForm({
           {estimate != null && (
             <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
               ≈ {CURRENCY_SYMBOL[estCurrency]}{estimate.toLocaleString("en-NG")}/{CYCLE_UNIT[cycle]} for {students.toLocaleString("en-NG")} students
-              {CYCLE_DISCOUNT_PERCENT[cycle] > 0 && ` (${CYCLE_DISCOUNT_PERCENT[cycle]}% off)`}
+              {cycle === "SESSION" && ` (${SESSION_DISCOUNT_PERCENT}% off)`}
             </span>
           )}
         </div>
