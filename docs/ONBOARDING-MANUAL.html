@@ -353,6 +353,7 @@
       <li><a href="#roles-you">Owner vs. Principal</a></li>
       <li><a href="#first-login">Your first login</a></li>
       <li><a href="#launch">The first 30 days</a></li>
+      <li><a href="#onboarding-people">Putting your people on the system</a></li>
       <li><a href="#navigating">Finding your way around</a></li>
       <li><a href="#delegation">Delegating: the role model</a></li>
       <li><a href="#rails">The safety rails</a></li>
@@ -467,21 +468,30 @@
       <p class="lede">This order is not arbitrary. Each step depends on the one before it — students cannot be enrolled into classes that don't exist, and fees cannot be invoiced to students who haven't been imported.</p>
 
       <h3>Week 1 — People and structure</h3>
+      <p><strong>Do these in this order.</strong> The student import matches each pupil to a class by its <em>name or code</em>, so the classes have to exist before the pupils arrive — import first and every class reference in your file fails.</p>
       <ol class="steps">
         <li>
           <h4>Create your staff accounts</h4>
           <span class="where">Admin → Users, then Admin → Roles</span>
           <p>Add teachers, your accountant, HR staff and your second administrator. Each receives a one-time temporary password and must set their own at first login. Assign roles as you go — a member of staff with no role can sign in but will see almost nothing.</p>
+          <p>You need a <strong>second administrator before you can import anybody</strong>: an import is approved by a different person from the one who uploaded it, and that is deliberate — it is the check that stops one mistake becoming your whole roll.</p>
+        </li>
+        <li>
+          <h4>Build classes, subjects, the session and its terms</h4>
+          <span class="where">Classes, then Academic</span>
+          <p>Create each class and assign its teachers. Name a <strong>class teacher</strong> wherever you can: that person takes the register and writes the class remark on report cards. You are not blocked if a class is not staffed yet — you can lay next year out before you know who is teaching it — but note that once a class teacher is set they can be <em>changed</em> and never <em>cleared</em>, because a class with nobody responsible for its register is the gap this rule exists to close.</p>
+          <p>Then create your academic session and its terms, and mark the current one. <strong>Do not skip the current term.</strong> Without it the register never locks, report cards have no period to scope to, and the daily reminder that chases an unmarked register skips your school silently — everything looks normal and nothing is happening.</p>
         </li>
         <li>
           <h4>Import your students</h4>
           <span class="where">Admin → Bulk import</span>
-          <p>Upload a CSV. A pupil needs only a <strong>name</strong> — a sign-in identifier is generated from it and your school's domain, so you do not have to invent an email address for a seven-year-old, and two pupils who share a name both import. Parent links can be imported in the same pass, which saves considerable work later. <strong>Upload at most 200 rows at a time.</strong> A larger file is refused before anything is created, and the refusal tells you how many rows it found: split it and upload the parts one after another. A <em>different</em> administrator approves the batch, and approval generates printable login slips with a unique one-time password per pupil — <strong>shown once</strong>, so print or save them before you leave the page.</p>
+          <p>Upload a CSV. A pupil needs only a <strong>name</strong> — a sign-in identifier is generated from it and your school's domain, so you do not have to invent an email address for a seven-year-old, and two pupils who share a name both import. <strong>Upload at most 200 rows at a time.</strong> A larger file is refused before anything is created, and the refusal tells you how many rows it found: split it and upload the parts one after another. A <em>different</em> administrator approves the batch, and approval generates printable login slips with a unique one-time password per pupil — <strong>shown once</strong>, so print or save them before you leave the page.</p>
+          <p>Two columns are worth more care than the rest, and they are covered in full under <a href="#onboarding-people">Putting your people on the system</a>.</p>
         </li>
         <li>
-          <h4>Build classes, subjects and the academic session</h4>
-          <span class="where">Classes</span>
-          <p>Create each class, assign its teachers, and name a <strong>class teacher</strong> — required, because that person takes the register and writes the class remark on report cards. A class can be handed to a different teacher later, but never left with nobody. Enrol students, link guardians, then set up your session and its terms. Grading has nowhere to record marks until terms exist.</p>
+          <h4>Import your guardians</h4>
+          <span class="where">Admin → Parents</span>
+          <p>After the pupils, never before: guardians are matched to their children by <strong>admission number</strong>, so the children must already be on the system. One guardian row can name several children.</p>
         </li>
       </ol>
 
@@ -536,6 +546,116 @@
           <p>Check your plan, your student count and your renewal date before your trial ends. Details under <a href="#subscription">Money out</a>.</p>
         </li>
       </ol>
+    </section>
+
+    <!-- ================================================================= -->
+    <section id="onboarding-people">
+      <div class="sec-label">Setup</div>
+      <h2 class="sec-title">Putting your people on the system</h2>
+      <p class="lede">Getting your roll and your staff in correctly, the first time. Almost every problem schools hit here comes from one of four things, and all four are avoidable if you read this before you upload rather than after.</p>
+
+      <h3>Before you upload anything</h3>
+      <ol class="steps">
+        <li>
+          <h4>Have two administrators</h4>
+          <p>Whoever uploads a batch <strong>cannot approve it</strong>. This is not a setting and it cannot be turned off. If you are your school's only administrator, create the second one first — otherwise you will prepare a perfect file and have nobody who can let it through.</p>
+        </li>
+        <li>
+          <h4>Settle your admission numbers</h4>
+          <p>The admission number is the thread everything else hangs on. Guardians are matched to their children by it. Any later correction finds the pupil by it. The roster you download to make changes is keyed on it.</p>
+          <p><strong>Put your own admission numbers in the file.</strong> If you leave the column blank the system allocates one — and from that moment neither your guardian upload nor any correction file can name that pupil, because you and the system disagree about what they are called. If your school does not use admission numbers, invent them in the spreadsheet now and keep that spreadsheet.</p>
+        </li>
+        <li>
+          <h4>Create the classes first</h4>
+          <p>The <code>class</code> column matches the class <strong>name or code exactly as it appears on your Classes page</strong> — "SS3 Science A", not a code you use only on paper. Capitalisation does not matter. If the class does not exist, that pupil arrives with no class, and you will be fixing it by hand.</p>
+        </li>
+      </ol>
+
+      <h3>The student file, column by column</h3>
+      <p>Download the template from <strong>Admin &rarr; Bulk import</strong> rather than typing headers yourself — it arrives with a worked example row showing exactly how each column should look.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Column</th><th>Needed?</th><th>What goes wrong if you get it wrong</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Full name</td><td><strong>Required</strong></td><td>The only column that must be filled in.</td></tr>
+            <tr><td>Admission number</td><td>Strongly advised</td><td>Leave it blank and you lose the ability to link guardians or correct the record later.</td></tr>
+            <tr><td>Class</td><td>Advised</td><td>Must match a class that already exists, by name or code. No match, no class.</td></tr>
+            <tr><td>Date of birth</td><td>Optional</td><td>Must be written <code>YYYY-MM-DD</code>. A date written the other way round is either refused or silently wrong.</td></tr>
+            <tr><td>Gender</td><td>Optional</td><td>&mdash;</td></tr>
+            <tr><td>Email</td><td>Optional</td><td>Leave it blank for children. A sign-in identifier is generated for them.</td></tr>
+            <tr><td>Phone</td><td>Optional</td><td>&mdash;</td></tr>
+            <tr><td>Address lines 1 and 2</td><td>Optional</td><td>&mdash;</td></tr>
+            <tr><td>City and State</td><td><strong>Fill these in</strong></td><td>A profile without them counts as incomplete, and the system will chase those families &mdash; for two facts you never asked them for.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Addresses containing commas are safe as long as your spreadsheet saved them properly &mdash; export as CSV from Excel or Google Sheets and do not edit the file in a text editor afterwards.</p>
+
+      <div class="note">
+        <span class="note-tag">What is deliberately not in the file</span>
+        <p>Medical information and emergency contacts cannot be imported, by design. They are held encrypted and every read of them is logged, and a spreadsheet passed around by email is the wrong place for a child's medical record. Collect them from families at the start of term instead &mdash; which also means what you hold is current and freshly consented to, rather than copied forward from a system you have left.</p>
+      </div>
+
+      <h3>What happens when the second administrator approves</h3>
+      <p>Nothing exists until that moment. A batch you have uploaded is held, and can be rejected without trace &mdash; so <strong>check the batch before approving, not after</strong>. Rejecting costs you nothing; approving is what creates real accounts.</p>
+      <ul>
+        <li><strong>Login slips appear once.</strong> Every pupil gets their own randomly generated temporary password, offered as a printable list. They are never stored anywhere readable and cannot be produced again in bulk. Save or print that file before you navigate away. Each pupil is forced to choose their own password at first sign-in.</li>
+        <li><strong>A full class is refused.</strong> If the batch would push a class past its capacity, the import stops rather than overfilling it. Raise the capacity or split the class and upload again.</li>
+        <li><strong>The approver sees what changes.</strong> When a row updates an existing pupil rather than creating one, the fields that will change are shown before the decision.</li>
+      </ul>
+
+      <h3>Correcting a mistake &mdash; the part most schools do the hard way</h3>
+      <p>You do not need to fix pupils one at a time, and you should not.</p>
+      <ol class="steps">
+        <li>
+          <h4>Download your roster</h4>
+          <span class="where">Admin &rarr; Export students</span>
+          <p>It comes out in the same shape as the import template.</p>
+        </li>
+        <li>
+          <h4>Correct it in a spreadsheet</h4>
+          <p>Fix what is wrong. <strong>A cell you leave blank does not erase what is stored</strong> &mdash; so a file containing only addresses will not wipe everybody's date of birth. This is safe by design.</p>
+        </li>
+        <li>
+          <h4>Upload it again</h4>
+          <p>Rows are matched on admission number: an existing pupil is updated, a new one is created. It still needs a second administrator's approval, because it is rewriting children's records.</p>
+        </li>
+      </ol>
+
+      <h3>Your staff</h3>
+      <p><strong>There is no bulk import for staff.</strong> Staff are added one at a time under <strong>Admin &rarr; Users</strong>, given roles under <strong>Admin &rarr; Roles</strong>, and then given an employment record under <strong>HR</strong> if you are using payroll. For most schools this is an afternoon's work once, and it is worth doing carefully &mdash; a role is what someone can see and do.</p>
+      <ul>
+        <li><strong>A member of staff with no role sees almost nothing.</strong> If a teacher tells you the system is empty, check their roles first.</li>
+        <li><strong>Be sparing with administrator roles.</strong> Nobody can remove their own school administrator or principal role, and the last one in the school cannot be removed at all &mdash; so granting them casually is hard to undo.</li>
+        <li><strong>Appointing a junior administrator needs a second signature</strong>, like an import. It is raised as an approval that a different senior person confirms.</li>
+        <li><strong>Someone who has left should be exited, not deleted.</strong> An exited account cannot sign in at all, while the employment and payroll record you are obliged to keep is retained.</li>
+      </ul>
+
+      <h3>What the system will chase you about, and why</h3>
+      <ul>
+        <li><strong>Incomplete pupil profiles.</strong> Missing city or state, mainly. Fill those columns at import and this never starts.</li>
+        <li><strong>Registers nobody has taken.</strong> Each class teacher is reminded once, in your school's own afternoon. A class with no class teacher cannot be reminded at all &mdash; the board tells you which those are, because "nobody is assigned" is a different problem from "the teacher forgot".</li>
+        <li><strong>Nothing at all.</strong> If you never set a current term, the register reminder skips your school every day, permanently, and you would have no way of knowing. Setting the term is the cure.</li>
+      </ul>
+
+      <h3>When something is refused</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>What you see</th><th>What it means</th><th>What to do</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>The file is refused before anything happens</td><td>More than 200 rows</td><td>Split it and upload the parts one after another</td></tr>
+            <tr><td>You cannot approve your own upload</td><td>Working as intended</td><td>A second administrator approves it</td></tr>
+            <tr><td>"No class called &hellip;"</td><td>The class column does not match any class</td><td>Check the spelling against the Classes page, or create the class</td></tr>
+            <tr><td>Approval refused, class full</td><td>Capacity would be exceeded</td><td>Raise the capacity or split the class</td></tr>
+            <tr><td>Guardians import but link to nobody</td><td>Admission numbers were left blank at student import</td><td>Export the roster, take the numbers the system allocated, rebuild the guardian file</td></tr>
+            <tr><td>Pupils imported with no class</td><td>Classes were created after the pupils</td><td>Correct the roster export and upload it again</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- ================================================================= -->

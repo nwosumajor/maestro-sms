@@ -51,6 +51,24 @@ const DOCS: Doc[] = [
     pdf: { href: "/runbooks/incident.pdf", label: "Download PDF ↓", note: "A generated file — 12 pages." },
   },
   {
+    href: "/runbooks/migration",
+    title: "School migration",
+    audience: "Whoever runs the migration",
+    description:
+      "Moving a school off its old system without importing a mess you cannot delete: what to migrate, what to archive instead, and the order that keeps every step recoverable.",
+    contents: [
+      "The one decision: migrate the operating state, archive the history",
+      "Fixing admission numbers first — the key everything else joins on",
+      "Shaping the data, and why the school must not do it",
+      "The skeleton: region, session and terms, classes, subjects",
+      "Loading pupils and guardians, and the staff gap",
+      "Opening balances, on a ledger with no delete",
+      "The hand-over checklist, and the failure modes seen so far",
+    ],
+    source: "docs/RUNBOOK-SCHOOL-MIGRATION.md",
+    pdf: { href: "/runbooks/migration.pdf", label: "Download PDF ↓", note: "A generated file." },
+  },
+  {
     href: "/runbooks/backup",
     title: "Backup & restore",
     audience: "On-call and platform staff",

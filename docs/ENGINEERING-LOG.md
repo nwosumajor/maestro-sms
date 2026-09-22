@@ -18676,3 +18676,67 @@ VERIFIED LIVE, not merely tested: rebuilt the API container and probed as the
 affected teacher with a minted token (never a real user's password) —
 `200 OK`, `{"scope":"family","attendance":{...,"total":0,"ratePct":null}}`
 where it had been 500, and zero `unhandled_exception` lines since.
+
+### Two runbook figures that had rotted, and a migration nobody had written down
+
+Asked for a migration runbook, and for the existing ones to be checked rather
+than assumed correct. The check found more than the writing did.
+
+**A runbook that lags reality is worse than none, because it is trusted** — this
+repo already says so, and then carried two figures an on-call reader would have
+acted on:
+
+- "Subscription paid, modules off — entitlement cache (**30s**) … Wait 30s".
+  `CACHE_TTL_MS` is **600_000**. Ten minutes. Someone waits half a minute, sees
+  nothing, and escalates to Redis pub/sub for a cache that was simply still warm.
+  Corrected, and the *useful* distinction stated instead: a write through the app
+  invalidates immediately and fans across tasks, so only a plan changed DIRECTLY
+  in the database waits out the TTL.
+- "Payment stuck pending — **≥₦50,000** needs a second approver". That is the
+  naira constant this codebase already recorded as not being a rule for every
+  school. `effectivePaymentApprovalThresholdMinor` returns the school's own
+  figure, falls back to ₦50,000 **only on the platform's own currency**, and
+  otherwise returns **0** — so for a foreign-currency school with no figure set,
+  EVERY payment is held. A newly onboarded school looks stuck on everything and
+  the runbook explained it as a large-payment rule.
+
+Verified the rest rather than spot-checking: every path either runbook names
+exists (one apparent miss was `YYYY-MM-DD-short-slug.md`, a filename pattern);
+every env var they document is genuinely read by the script they document it for;
+and `MAX_FAILS`, `SUPER_ADMIN_LOCK_MS`, `PASSWORD_MAX_AGE_DAYS`, log retention,
+PITR days and the AWS Backup defaults all match the code and the terraform.
+
+TWO GAPS, both on-call-shaped. **A full connection pool answers 503 with
+`Retry-After: 5`** and is the one slowness symptom that is not a query problem —
+the latency playbook sent the reader to Performance Insights for it. And
+**mobile money has no webhook retry**: the card playbook's `gateway_event` lookup
+finds nothing for a lost M-Pesa callback, because that table logs webhooks that
+ARRIVED. Both now have their own subsection, with the recovery sweep and the
+rule that PENDING means ask again.
+
+// GOTCHA in the manual, and it contradicted its own lede: Week 1 ordered
+// "import your students" BEFORE "build classes", while the lede said "students
+// cannot be enrolled into classes that don't exist". The import matches the
+// `class` column against a class NAME or CODE, so following the manual's order
+// put every pupil in no class at all. Reordered, with the reason on the page.
+// GOTCHA: the same section called a class teacher **required**. `supervisorId`
+// is `nullish()` on create — a class can be made without one, deliberately, so a
+// school can lay next year out before it is staffed. What is enforced is that an
+// EXISTING one cannot be cleared, only changed. The manual promised a constraint
+// the product does not have and hid the one it does.
+// GOTCHA: the paragraph-survival gate took a HAND-KEPT list of two books while
+// the generator emitted three, so the new runbook would have been checked for
+// its headings and its page count and never for whether its PARAGRAPHS survived
+// — the one thing that describe exists for. It computes the set from the
+// generated file now, and asserts it found at least three.
+
+Schools cannot read any of this: `/runbooks/*` is gated on
+`platform.tenants.read` and answers 404 otherwise. So the school-facing half went
+into the Leader's Manual, which every signed-in user can open — a new chapter on
+putting pupils and staff on the system, written around the four things that
+actually go wrong (no second administrator, blank admission numbers, classes
+created after the pupils, and login slips shown once). Driven live: a principal
+gets 200 on `/manual` with the new chapter served, and 404 on
+`/runbooks/migration`. `/runbooks` answers 200 for them because Next streams the
+shell before `redirect()` fires — the recorded shape — and no runbook title
+appears in the body.
