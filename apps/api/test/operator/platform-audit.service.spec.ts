@@ -89,6 +89,27 @@ describe("PlatformAuditService", () => {
     expect(client.userRole.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ role: { name: "school_admin" } }) }));
   });
 
+  // A role/email filter that matched NOBODY must answer with an empty page, not
+  // a 500. `audit_log."actorId"` is a uuid column, so the sentinel this used to
+  // filter on — `{ in: ["__none__"] }`, meaning "match nothing" — was rejected
+  // by Prisma before the query reached Postgres, and a search that simply found
+  // no one blew up. Same defect, same day, as the analytics attendance scope.
+  it("a filter matching NOBODY returns no rows instead of erroring on a uuid sentinel", async () => {
+    const client = makeClient();
+    // The role exists but nobody in any customer school holds it.
+    client.userRole.findMany = jest.fn().mockImplementation(({ where }: { where: Record<string, unknown> }) =>
+      where.role ? Promise.resolve([]) : Promise.resolve([]),
+    );
+    const { service } = makeService(client);
+    const { entries, nextCursor } = await service.list(owner, { role: "warden" });
+    expect(entries).toEqual([]);
+    expect(nextCursor).toBeNull();
+    // The real assertion: no query was ever issued carrying a non-uuid actorId.
+    expect(client.auditLog.findMany).not.toHaveBeenCalled();
+    const sent = JSON.stringify(client.auditLog.findMany.mock.calls);
+    expect(sent).not.toContain("__none__");
+  });
+
   it("meta-audits the view", async () => {
     const { service, audit } = makeService(makeClient());
     await service.list(owner, {});

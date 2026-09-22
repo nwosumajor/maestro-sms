@@ -255,6 +255,50 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
   });
 
   // ===========================================================================
+  // ===========================================================================
+  // A SCOPED READER WITH NOTHING IN SCOPE YET
+  // ===========================================================================
+  // `studentId` is a uuid column, so the sentinel this used to filter on
+  // (`"__none__"`, meaning "match nothing") was rejected by Prisma before the
+  // query reached Postgres — "Error creating UUID ... found `_` at 1" — and the
+  // whole request 500d. The dashboard reads a failed overview as "could not
+  // ask" and shows its amber "Some figures could not be loaded" banner, so a
+  // teacher with no class assigned, a parent with no child linked or a pupil
+  // not yet enrolled got a permanently broken dashboard that reloading could
+  // never fix. The grade aggregate had already been given a skip for exactly
+  // this; the attendance block beside it was never swept.
+  //
+  // Must be a REAL DB test: a mocked groupBy accepts any string and proves
+  // nothing about the uuid coercion, which is where the defect lived.
+  describe("a reader scoped to students who has none", () => {
+    const NOBODY = randomUUID();
+    // A teacher is deliberately NOT in STAFF_WIDE (they see their own classes,
+    // not the school), so they take the family-scoped branch with an empty set.
+    const teacher = (): Principal => ({
+      userId: NOBODY,
+      schoolId: SA,
+      roles: ["teacher"],
+      permissions: [...perms, "attendance.read"],
+    });
+
+    it("answers instead of throwing, and reports attendance as UNKNOWN rather than 0%", async () => {
+      const o = await svc.overview(teacher());
+      expect(o.scope).toBe("family");
+      expect(o.attendance?.total).toBe(0);
+      // Null, not 0 — a rate over no registers is not 0%, it is unknown, and the
+      // dashboard omits the tile rather than reporting a school at zero.
+      expect(o.attendance?.ratePct).toBeNull();
+    });
+
+    it("never counts another family's registers into the empty scope", async () => {
+      // The failure mode a sentinel-free skip must not introduce: dropping the
+      // studentId filter entirely would hand this reader the whole school.
+      const o = await svc.overview(teacher());
+      expect(o.attendance?.PRESENT).toBe(0);
+      expect(o.attendance?.ABSENT).toBe(0);
+    });
+  });
+
   // The reporting WINDOW
   // ===========================================================================
   describe("period selection", () => {
