@@ -149,9 +149,10 @@ export function BillingCheckout({
       <CardHeader>
         <CardTitle>Upgrade or renew</CardTitle>
         <CardDescription>
-          Per-seat pricing across {activeStudents} active student{activeStudents === 1 ? "" : "s"}. Pay monthly,
-          per term (3 months — 5% off) or per year (9 months — 15% off). Every plan, including Enterprise, can
-          be paid in {planCurrencies.length > 0 ? planCurrencies.join(", ") : "any selling currency"}. Your plan
+          Per-seat pricing across {activeStudents} active student{activeStudents === 1 ? "" : "s"}. Pay per
+          term, or for the whole academic session and save {SESSION_DISCOUNT_PERCENT}%. Every plan, including
+          Enterprise, can be paid in{" "}
+          {planCurrencies.length > 0 ? planCurrencies.join(", ") : "any selling currency"}. Your plan
           activates automatically once the payment is confirmed.
         </CardDescription>
       </CardHeader>

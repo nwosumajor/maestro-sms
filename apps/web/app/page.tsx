@@ -837,7 +837,7 @@ async function Plans() {
             Pay for the students you have, on the plan that fits.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-            Billed per active student, per month. Move up a tier the moment you need more — your school keeps
+            Billed per active student, per term. Move up a tier the moment you need more — your school keeps
             everything it already had.
           </p>
           <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-brand2/30 bg-brand2/10 px-3 py-1 text-xs font-medium text-brand2">
@@ -872,7 +872,7 @@ async function Plans() {
               <p className="mt-1 text-xs text-muted-foreground">{p.tagline}</p>
               <p className="mt-5 flex items-baseline gap-1">
                 <span className="text-xs text-muted-foreground">{p.symbol}</span>
-                <span className="tnum font-display text-3xl font-semibold tracking-tight">{p.price}</span>
+                <span className="tnum font-display text-3xl font-semibold tracking-tight">{fmtAmount(p.price)}</span>
                 <span className="text-xs text-muted-foreground">/student/term</span>
               </p>
               <p className="tnum mt-2 text-xs text-muted-foreground">
@@ -891,10 +891,10 @@ async function Plans() {
           ))}
         </div>
         <p className="mt-6 text-xs text-muted-foreground">
-          Standard, Premium and Ultimate are priced in Nigerian naira (card payments via Paystack); Enterprise
-          is billed in US dollars (Stripe) for schools worldwide. Pay monthly, per term (3 months — save 5%)
-          or per year (3 terms / 9 months — save 15%). No setup fees, change plans any time, and your data is
-          never deleted — even if a payment lapses, your school keeps running on the core modules until you renew.
+          Prices are shown in Nigerian naira; your school is charged in its own currency at checkout. Pay per
+          term, or for the whole academic session and save {SESSION_DISCOUNT_PERCENT}%. No setup fees, change
+          plans any time, and your data is never deleted — even if a payment lapses, your school keeps running
+          on the core modules until you renew.
         </p>
       </div>
     </section>
@@ -1113,7 +1113,7 @@ function Steps() {
 const FAQS: { q: string; a: string }[] = [
   {
     q: "What happens when the 30-day trial ends?",
-    a: "You pay per active student — monthly, per term (3 months, 5% off) or per year (9 months, 15% off) — from inside the app, by card, and you can save a card to renew automatically. If you don't pay, nothing is deleted: after a grace period (7 days by default) your school simply runs on the core Standard modules until payment, and your full plan returns the instant you pay.",
+    a: `You pay per active student — per term, or for the whole academic session at ${SESSION_DISCOUNT_PERCENT}% less — from inside the app, by card, and you can save a card to renew automatically. A session is your school's own academic year, so the term price is that figure divided by however many terms your year has. If you don't pay, nothing is deleted: after a grace period (7 days by default) your school simply runs on the core Standard modules until payment, and your full plan returns the instant you pay.`,
   },
   {
     q: "Where does parents' fee money go?",

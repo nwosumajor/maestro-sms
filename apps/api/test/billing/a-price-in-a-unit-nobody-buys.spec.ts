@@ -66,6 +66,40 @@ describe("no per-month price survives anywhere", () => {
     expect(offenders.map((f) => f.slice(repoRoot.length + 1))).toEqual([]);
   });
 
+  // THE HALF A TYPECHECK CANNOT SEE. The code moved to term/session and five
+  // sentences went on advertising "Pay monthly, per term (3 months — save 5%)"
+  // — on the homepage, in the FAQ, in /help and on the checkout card. Every
+  // typecheck passed and 498 web tests passed, because prose is not typed. It
+  // was found by loading the page.
+  //
+  // A pricing number typed as prose is this repo's most-recorded rot, so the
+  // rule is the same one the owner-facing documents already keep: derive it, or
+  // do not state it.
+  it("no screen advertises a cycle or a discount the product no longer sells", () => {
+    const FORBIDDEN = [
+      // ANCHORED. "5% off" is a SUBSTRING of "15% off", and the first draft of
+      // this gate duly flagged the manual's correct 15% line — the exact trap
+      // `assertions-that-match-by-accident` exists for, made again here.
+      /(?<!\d)5% off/i,
+      /save (?<!\d)5%/i,
+      /pay monthly/i,
+      /per active student,? per month/i,
+      /monthly, per[- ]term/i,
+      // A literal "15% off" is fine ONLY if it is interpolated from the
+      // constant; a hard-coded one rots the moment the figure moves.
+      /\(9 months[^)]*15% off\)/i,
+    ];
+    const offenders: string[] = [];
+    for (const f of files) {
+      if (!/apps\/web\//.test(f)) continue;
+      const src = code(f);
+      for (const re of FORBIDDEN) {
+        if (re.test(src)) offenders.push(`${f.slice(repoRoot.length + 1)} :: ${re}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("no MONTH billing cycle is offered or compared", () => {
     const offenders = files.filter((f) => /BILLING_CYCLES\.MONTH|["']MONTH["']/.test(code(f)));
     expect(offenders.map((f) => f.slice(repoRoot.length + 1))).toEqual([]);

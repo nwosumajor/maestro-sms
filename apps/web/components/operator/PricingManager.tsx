@@ -68,7 +68,8 @@ export function PricingManager({ initial }: { initial: PlanPriceDto[] }) {
       <CardHeader>
         <CardTitle className="text-base">Plan pricing</CardTitle>
         <CardDescription>
-          Per active student, per month, in every currency the platform sells in. Which card rail
+          Per active student, per SESSION, in every currency the platform sells in. The term price is
+          derived from it and each school's own term count. Which card rail
           takes a payment is decided at checkout from the currency AND which rails are switched on —
           it is not fixed per currency. Applies platform-wide: billing quotes, checkout charges and
           the public pricing page all read these values. Step-up required.
