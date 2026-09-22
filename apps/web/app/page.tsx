@@ -273,6 +273,27 @@ function fmtAmount(n: number): string {
 /** The term count the PUBLIC price list assumes. This page is read before any
  *  school exists, so there is no calendar to consult; the SESSION figure beside
  *  it is exact for every school, being the stored price itself. */
+/**
+ * ALWAYS SERVER-RENDERED, so an operator's price change reaches the public price
+ * list on the very next view.
+ *
+ * `cache: "no-store"` on the pricing fetch is NOT enough on its own, and the
+ * reason is worth keeping: during `next build` the API is not running, the fetch
+ * THROWS, and the catch below swallows it — so Next never observes the no-store
+ * call that would have marked this route dynamic, prerenders it, and serves the
+ * FALLBACK prices from the full route cache with `s-maxage=31536000`. A year.
+ *
+ * It looked right only because the fallback happens to equal the shipped
+ * default, so the page was correct until the first time somebody changed a
+ * price — exactly the day it matters. Measured: the operator row read 500,000
+ * and the homepage kept showing 401,625 while `/api/public/plan-pricing`
+ * returned the new figure.
+ *
+ * `/for-owners` already had this line; the page carrying the actual price list
+ * did not.
+ */
+export const dynamic = "force-dynamic";
+
 const HOME_TERMS = 3;
 
 async function effectivePlans() {
