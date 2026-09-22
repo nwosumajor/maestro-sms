@@ -320,6 +320,43 @@ it until it comes back worse.
 Recent precedent worth knowing: a load test at 5,000 schools showed **the writer
 idle** while the real fix was an entitlement-cache TTL. Measure, don't assume.
 
+#### A wave of 503s with `Retry-After: 5` is the connection pool, not an outage
+
+This has its own signature and its own fix, and it is the one slowness symptom
+that is NOT a query problem.
+
+Every tenant-scoped read opens a transaction — `runAsTenant` sets the RLS GUC
+inside one — so when the Prisma pool is exhausted the request raises **P2028**
+(**P2024** for a plain, non-transactional query). Both are translated to a
+**503** carrying `Retry-After: 5` and logged at WARN, saying explicitly that
+nothing was changed and the caller should retry. A genuine fault is still a
+loud 500, so the two are distinguishable in the logs.
+
+```bash
+# Is it the pool? These log at WARN with the Prisma code in the message.
+aws logs filter-log-events --log-group-name /ecs/sms-api \
+  --filter-pattern '"P2028"' --start-time $(date -u -d '15 minutes ago' +%s)000
+```
+
+**What it means.** The work itself is fine. A 1,200-pupil school renders its
+analytics in roughly 250 ms on its own, and 32-way concurrency over small
+schools fails nothing. It is a handful of LARGE tenants arriving together that
+empties the pool — 30 concurrent large-school reads failed 24 of 40 in
+measurement, and 1,500 schools at 30-way concurrency failed 1,358 of 1,500.
+
+**The fix is configuration, not code.** The default pool is `cpus × 2 + 1` and
+**no `connection_limit` is set explicitly**. Set it in the deployment's
+`DATABASE_URL` against the task's CPU count and the RDS `max_connections`
+budget:
+
+```
+postgresql://…/sms?connection_limit=<n>&pool_timeout=10
+```
+
+Do not simply raise it to the ceiling: every task multiplies it, and exhausting
+`max_connections` on RDS turns a slow request into a refused one for everybody.
+Count tasks × limit first.
+
 ### 5.3 Database problems
 
 **Storage <5 GB — treat as urgent.** A full disk makes Postgres reject writes:
@@ -426,10 +463,57 @@ curl -X POST "$APP_URL/api/fees/reconciliation/run" -H "Authorization: Bearer <s
 | Paid, invoice unchanged | Webhook lost | Run reconciliation ↑ |
 | Paid twice, credited once | **Correct** — idempotent on gateway reference | Explain; refund the duplicate |
 | Bank transfer unallocated | No open invoice | Landed as student CREDIT; finance notified |
-| Payment stuck pending | ≥₦50,000 needs a second approver | Not a bug — §5.7 |
-| Subscription paid, modules off | Entitlement cache (30s) or invalidation didn't fan out | Wait 30s; if persistent, check Redis pub/sub |
+| Payment stuck pending | At or above the SCHOOL's own approval threshold, a second approver is required | Not a bug — see below |
+| Subscription paid, modules off | Entitlement cache (**ten minutes**) or invalidation didn't fan out | A write through the app invalidates immediately; wait up to 10 min only if the plan was changed DIRECTLY in the database. If neither, check Redis pub/sub |
 | "… is coming soon" at checkout | That rail is switched OFF in the switchboard | Intentional unless it isn't — check the audit ↑ |
 | One school cannot pay at all, others fine | No enabled rail settles their currency | Enable a rail that covers them (mobile money for most non-Paystack currencies) |
+
+**"Payment stuck pending" — the threshold is per school, and an unset one means
+EVERY payment.** `school.paymentApprovalThresholdMinor` is the figure. When it is
+null the resolver falls back to ₦50,000 **only for a school on the platform's own
+currency**; for any other currency it returns **0**, so every payment is held for
+a second signature until the school states its figure. That is deliberate — a
+control that relaxes when unset has stopped protecting — but it means a newly
+onboarded foreign-currency school can look "stuck" on everything. The fix is for
+them to set the figure on the money-policy card under Fees → Reports, not to
+raise it centrally. There is no FX rate in this platform and nothing converts
+the naira default on their behalf.
+
+#### Mobile money: the rail that does not retry
+
+Card gateways retry a failed webhook for days. **M-Pesa, MTN MoMo and Airtel do
+not** — the callback is unsigned, delivered once, best-effort, and it is the only
+thing that says the payment succeeded. Lose one and the payer has been debited
+while the invoice stays open for ever, with nothing in `gateway_event` to find,
+because that log records verified webhooks and this one never arrived.
+
+There is a separate recovery sweep for exactly this, running **hourly** rather
+than daily:
+
+```bash
+# Asks each rail for the status of every still-pending intent.
+curl -X POST "$APP_URL/api/payments/mobile-money/recovery/run" \
+  -H "Authorization: Bearer <fee.reconcile.run holder>"
+```
+
+```sql
+-- Intents that never resolved. We write MobileMoneyIntent BEFORE the prompt
+-- goes out and settle from OUR figure, so this is the authoritative list of
+-- who was asked to pay and what we asked them for.
+SELECT provider, status, count(*), min("createdAt")
+FROM mobile_money_intent GROUP BY 1, 2 ORDER BY 1, 2;
+```
+
+Read the states exactly: **PENDING means ask again** — never settle it and never
+fail it. Past three days an intent becomes **EXPIRED, not FAILED**, because money
+may still have moved and only the rail can say. Expiry runs before the rail check,
+so intents on a decommissioned rail still close. One rail being down does not
+stall the others.
+
+**Before suspecting the code, check the rail was ever switched on properly.** No
+provider sandbox has been exercised end to end — the adapters are pinned against
+each provider's published contract, which is necessary but not sufficient. A
+school going live on a new rail should have that provider's sandbox run first.
 
 **Never hand-edit the ledger.** `InvoiceSettlementService` is the single
 idempotent posting path; a manual row bypasses the audit trail and the

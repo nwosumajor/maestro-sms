@@ -41,7 +41,7 @@ describe("the runbooks served inside the app", () => {
     // A converter that silently dropped content would pass the staleness check
     // above, because it would drop it consistently.
     const generated = readFileSync(generatedPath, "utf8");
-    for (const key of ["incident", "backup"]) {
+    for (const key of ["incident", "backup", "migration"]) {
       expect(generated).toContain(`"${key}":`);
     }
     expect(generated).toMatch(/<h2 id=/);
@@ -62,7 +62,7 @@ describe("the runbooks served inside the app", () => {
 
   it("carries a real PDF for each runbook, not a promise of one", () => {
     const generated = readFileSync(generatedPath, "utf8");
-    for (const key of ["incident", "backup"]) {
+    for (const key of ["incident", "backup", "migration"]) {
       const m = new RegExp(`"${key}": \\{ title: ".*?", html: ".*?", pdfBase64: "([A-Za-z0-9+/=]+)"`, "s").exec(
         generated,
       );
@@ -188,10 +188,24 @@ describe("every paragraph survives into the PDF", () => {
     return out.join("").replace(/\s+/g, " ");
   };
 
+  // COMPUTED from the generated file, not hand-kept. This list named two
+  // runbooks while the generator emitted three, so a new book would have been
+  // checked for its headings and its page count and never for whether its
+  // PARAGRAPHS survived — the one thing this describe exists for. A gate whose
+  // set is written by hand only guards what somebody remembered.
+  const runbookKeys = [...readFileSync(generatedPath, "utf8").matchAll(/"([a-z][a-z-]*)": \{ title: "/g)].map(
+    (m) => m[1],
+  );
+
+  it("found every runbook the generator emits", () => {
+    // No files, no offenders: a walk that finds nothing must not pass silently.
+    expect(runbookKeys.length).toBeGreaterThanOrEqual(3);
+    expect(runbookKeys).toEqual(expect.arrayContaining(["incident", "backup", "migration"]));
+  });
+
   it.each([
-    ["incident", join(webRoot, "app", "runbooks", "runbook-html.ts"), "incident"],
-    ["backup", join(webRoot, "app", "runbooks", "runbook-html.ts"), "backup"],
-    ["manual", join(webRoot, "app", "manual", "manual-html.ts"), undefined],
+    ...runbookKeys.map((k) => [k, join(webRoot, "app", "runbooks", "runbook-html.ts"), k] as const),
+    ["manual", join(webRoot, "app", "manual", "manual-html.ts"), undefined] as const,
   ])("%s: no paragraph is cut off mid-sentence", (_name, path, key) => {
     const text = textOf(pdfOf(path, key));
     // A paragraph clipped by the cursor bug ends without terminal punctuation

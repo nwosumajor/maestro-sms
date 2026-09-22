@@ -108,6 +108,14 @@ const DOCS = [
     meta: ["For: on-call and platform staff", "Read before you need it", "Source: docs/RUNBOOK-INCIDENT-RESPONSE.md"],
   },
   {
+    key: "migration",
+    file: "RUNBOOK-SCHOOL-MIGRATION.md",
+    title: "School migration",
+    eyebrow: "Onboarding runbook",
+    lede: "Moving a school off its old system: what to migrate, what to archive, and the order that keeps it recoverable.",
+    meta: ["For: whoever runs the migration", "Read before the first call, not the first upload", "Source: docs/RUNBOOK-SCHOOL-MIGRATION.md"],
+  },
+  {
     key: "backup",
     file: "RUNBOOK-BACKUP-RESTORE.md",
     title: "Backup & restore",
