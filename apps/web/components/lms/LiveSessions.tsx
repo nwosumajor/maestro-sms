@@ -16,9 +16,9 @@ import type {
   LmsLiveSessionDto,
   Serialized,
 } from "@sms/types";
-import { MAX_RECORDING_BYTES } from "@sms/types";
 import { interpretApiError } from "@/lib/api-error";
 import * as React from "react";
+import { RecordingControl } from "@/components/lms/RecordingControl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -185,7 +185,12 @@ export function LiveSessions({
                   </Button>
                 )}
                 <Attendance sessionId={s.id} />
-                <RecordingControl session={s} onChanged={load} />
+                <RecordingControl
+                  sessionId={s.id}
+                  title={s.title}
+                  hasRecording={s.hasRecording}
+                  onChanged={load}
+                />
               </div>
             )}
           </div>
@@ -370,107 +375,6 @@ function Attendance({ sessionId }: { sessionId: string }) {
           )}
         </div>
       )}
-    </>
-  );
-}
-
-/**
- * Attach the recording of a class that has happened, or take it down early.
- *
- * Three steps, and the middle one is the browser talking straight to the
- * bucket: presign (what we will allow), PUT (the bytes, which the API never
- * sees), confirm (what actually arrived). Nothing is attached until the server
- * has looked at the bytes — an upload is a claim until then, and a failed PUT
- * that still said "Attached" is a defect this codebase has already met.
- */
-function RecordingControl({ session, onChanged }: { session: Session; onChanged: () => void }) {
-  const [busy, setBusy] = React.useState<string | null>(null);
-  const [err, setErr] = React.useState<string | null>(null);
-  const fileRef = React.useRef<HTMLInputElement>(null);
-
-  async function upload(file: File) {
-    setErr(null);
-    setBusy("Preparing…");
-    const pre = await req("POST", `/live/${session.id}/recording/presign`, {
-      fileName: file.name,
-      contentType: file.type || "video/mp4",
-      sizeBytes: file.size,
-    });
-    if (!pre.ok) {
-      setBusy(null);
-      setErr(pre.error);
-      return;
-    }
-    const { url, key } = pre.data as { url: string; key: string };
-    setBusy("Uploading…");
-    // Straight to storage. A lecture is hundreds of megabytes and must never go
-    // through the API — that is the whole point of a presigned PUT.
-    const put = await fetch(url, { method: "PUT", body: file, headers: { "Content-Type": file.type || "video/mp4" } });
-    if (!put.ok) {
-      setBusy(null);
-      setErr("The upload did not finish. Please try again.");
-      return;
-    }
-    setBusy("Checking…");
-    const done = await req("POST", `/live/${session.id}/recording/confirm`, { key });
-    setBusy(null);
-    if (!done.ok) {
-      setErr(done.error);
-      return;
-    }
-    onChanged();
-  }
-
-  async function remove() {
-    setErr(null);
-    setBusy("Removing…");
-    const r = await req("DELETE", `/live/${session.id}/recording`);
-    setBusy(null);
-    if (!r.ok) setErr(r.error);
-    else onChanged();
-  }
-
-  return (
-    <>
-      {/* Hidden, and still NAMED: a screen reader announces the control the
-          click opens, and "blank" is what an unlabelled file input reads as. */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept="video/mp4"
-        aria-label={`Attach a recording of ${session.title}`}
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = "";
-          if (f) void upload(f);
-        }}
-      />
-      {session.hasRecording ? (
-        <>
-          <span className="text-muted-foreground">· recorded</span>
-          <Button size="sm" variant="ghost" className="h-7 text-destructive" disabled={!!busy} onClick={() => void remove()}>
-            {busy ?? "Remove recording"}
-          </Button>
-        </>
-      ) : (
-        <>
-          <Button size="sm" variant="ghost" className="h-7" disabled={!!busy} onClick={() => fileRef.current?.click()}>
-            {busy ?? "Attach recording"}
-          </Button>
-          {/* SAID BEFORE THE FILE IS CHOSEN, and derived from the same constant
-              the server refuses on, so the screen cannot promise a size the API
-              rejects. The teacher has already recorded by the time they get
-              here, so the useful half of this is the RESOLUTION, not the
-              number. */}
-          {!busy && (
-            <span className="text-muted-foreground">
-              · MP4 up to {(MAX_RECORDING_BYTES / 1024 / 1024 / 1024).toFixed(1)} GB — record at 720p
-            </span>
-          )}
-        </>
-      )}
-      {err && <span className="text-destructive">{err}</span>}
     </>
   );
 }

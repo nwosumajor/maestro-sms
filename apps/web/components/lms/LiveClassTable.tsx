@@ -21,6 +21,7 @@ import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RecordingControl } from "@/components/lms/RecordingControl";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -245,6 +246,17 @@ export function LiveClassTable({
                                   have, rather than finding it gone. */}
                               {r.recordingExpiresAt ? ` · until ${shortDate(r.recordingExpiresAt)}` : ""}
                             </div>
+                            {/* A duty given with a control is taken away with
+                                one: whoever can attach it can take it down. */}
+                            {canManage && (
+                              <RecordingControl
+                                sessionId={r.id}
+                                title={r.title}
+                                hasRecording
+                                onChanged={() => router.refresh()}
+                                layout="row"
+                              />
+                            )}
                           </div>
                         ) : r.recordingRemovedAt ? (
                           // REMOVED and NEVER RECORDED are different facts, and
@@ -252,6 +264,22 @@ export function LiveClassTable({
                           <span className="text-xs text-muted-foreground">
                             Removed {shortDate(r.recordingRemovedAt)}
                           </span>
+                        ) : canManage ? (
+                          // THE WAY TO FINISH IT. This page is the one called
+                          // "Live classes" in the nav and it lists the ENDED
+                          // sessions — precisely the rows that need a recording
+                          // — so showing a teacher an em-dash here and keeping
+                          // the only upload control three clicks away inside a
+                          // class's Learning content tab is a control with no
+                          // door. Same component as that panel, not a second
+                          // copy of the three-step upload.
+                          <RecordingControl
+                            sessionId={r.id}
+                            title={r.title}
+                            hasRecording={false}
+                            onChanged={() => router.refresh()}
+                            layout="row"
+                          />
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
