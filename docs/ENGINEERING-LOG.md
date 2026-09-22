@@ -1,6 +1,6 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Three hundred and seventy-eight write-ups, newest first. Each records a **real defect
+Three hundred and seventy-nine write-ups, newest first. Each records a **real defect
 found and fixed**: what was wrong, how it was measured (usually driven against
 the running stack rather than reasoned about), the decision taken and the
 alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
@@ -29,6 +29,7 @@ instances live, in full, with nothing removed.
 
 ## Contents
 
+- [A recording with nowhere to upload it](#a-recording-with-nowhere-to-upload-it)
 - [A sign-in page that would send you anywhere](#a-sign-in-page-that-would-send-you-anywhere)
 - [Six doors tagged a subject and two were guarded](#six-doors-tagged-a-subject-and-two-were-guarded)
 - [A go-live that has never been run, and a check that could not see what it was for](#a-go-live-that-has-never-been-run-and-a-check-that-could-not-see-what-it-was-for)
@@ -304,6 +305,41 @@ instances live, in full, with nothing removed.
 
 ---
 
+### A recording with nowhere to upload it
+Reported as "I can't view some buttons". Driven on the running stack as the
+demo teacher, and the report was right.
+
+`/live-classes` — the entry in the NAV, the page named after the thing, which
+lists every session including the ENDED ones and says of each whether it has a
+recording — offered `Join live` and `Playback`, and for a lesson with no
+recording yet an EM-DASH. `recording/presign` and `recording/confirm` appeared
+nowhere in that component. The only upload control lived inside the per-class
+panel, reached by going Classes -> a class -> Learning content -> scroll. So
+the teacher who has just finished teaching, looking at that exact lesson on the
+page named after it, had no way to do the one thing the row is about.
+
+**A CONTROL THE PRODUCT IMPOSES MUST HAVE A WAY TO FINISH IT**, and the fix is
+the SHARED component rather than a second copy of the three-step presign -> PUT
+-> confirm flow: copying it is how this repo got six doors tagging a subject
+with guards on two, one week earlier, in the same module.
+
+Ruled out first, because a missing button is usually one of these: the demo
+school is STANDARD and `MODULES.LMS` is in that bundle, so the entitlement gate
+was not it; `teacher` holds `lms.content.write`, so the permission was not it.
+
+// GOTCHA, and it is the one this session kept paying for: **grepping the
+// SERVER-RENDERED HTML for a row proves nothing about a CLIENT ISLAND.**
+// `LiveSessions` fetches on mount, so its rows are never in the SSR output. My
+// first pass concluded the panel was broken; the tell was that the byte count
+// was IDENTICAL before and after creating a session — a page that had not
+// changed at all, rather than one missing a row. Driving the endpoint the
+// browser actually calls showed the panel was correct throughout.
+// GOTCHA: the same trap one level out — an "after the fix" reading taken
+// against a container that had not finished rebuilding. A wait condition of
+// "does /login respond" was true the whole time and could not distinguish
+// REBUILT from NEVER RESTARTED. Wait on the container ID changing.
+// The diary gets Remove beside Playback too: a duty given with a control is
+// taken away with one.
 ### A sign-in page that would send you anywhere
 Asked for redirect URLs to be validated against an allowlist of our own
 domains. Measured first, signed in against the running stack, reading the
