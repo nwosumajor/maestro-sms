@@ -1027,13 +1027,19 @@ export function computeTrueUpMinor(
   periodEnd: Date | null,
   now: Date,
   pricing: PlanPricing = PLAN_PRICING,
+  /** The school's module overrides, so a mid-period seat costs what a renewal
+   *  seat costs. Omitted, this prices the TIER only — which is what it used to
+   *  do unconditionally, and was the gap. */
+  overrides?: ModuleOverrides,
 ): { extraSeats: number; amountMinor: number } | null {
   if (!periodEnd || billedSeats == null || billedSeats <= 0) return null;
   const extraSeats = currentSeats - billedSeats;
   if (extraSeats <= 0) return null;
   const ratio = remainingPeriodRatio(cycle, periodEnd, now);
   if (ratio <= 0) return null;
-  const amountMinor = Math.round(computeSubscriptionPriceMinor(plan, extraSeats, cycle, termsInSession, pricing) * ratio);
+  const amountMinor = Math.round(
+    computeSubscriptionPriceMinor(plan, extraSeats, cycle, termsInSession, pricing, overrides) * ratio,
+  );
   if (amountMinor < MIN_CHARGE_MINOR) return null; // not worth a charge yet
   return { extraSeats, amountMinor };
 }
@@ -1055,13 +1061,21 @@ export function accrueSeatArrearsMinor(
   cycle: BillingCycle,
   termsInSession: number,
   pricing: PlanPricing = PLAN_PRICING,
+  /** The school's module overrides — see computeTrueUpMinor. */
+  overrides?: ModuleOverrides,
 ): number {
   if (billedSeats == null || billedSeats <= 0 || elapsedMs <= 0) return 0;
   const extraSeats = currentSeats - billedSeats;
   if (extraSeats <= 0) return 0;
   // The rate the school is ACTUALLY on, not a notional monthly one: a session
   // buyer accrues at the discounted rate they were quoted.
-  const perSeatDaily = perSeatDailyMinor(pricing[plan].perSeatSessionMinor, cycle, termsInSession);
+  //
+  // ADD-ONS COUNT. A pupil who arrives mid-term uses the hostel module exactly
+  // as one who was there at renewal does, and at renewal every seat pays tier
+  // PLUS add-ons — so metering mid-period growth at the bare tier rate charged
+  // a school less for the same product because of WHEN the pupil enrolled.
+  const perSeatSession = pricing[plan].perSeatSessionMinor + addonPerSeatSessionMinor(plan, overrides);
+  const perSeatDaily = perSeatDailyMinor(perSeatSession, cycle, termsInSession);
   const days = elapsedMs / (24 * 3600 * 1000);
   return Math.round(extraSeats * perSeatDaily * days);
 }

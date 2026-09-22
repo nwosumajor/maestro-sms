@@ -18824,3 +18824,51 @@ source, asserts it scanned a real tree, fails on any surviving
 `perSeatMonthlyMinor` or MONTH cycle with comments stripped, and checks the 15%
 across every tier x every priced currency x EVERY calendar template, so a fifth
 template added in some later year is covered the day it lands.
+
+### A pupil who arrived late used the add-on modules free
+
+Asked, of the new pricing, whether mid-period enrolment and add-on modules were
+billed accurately and consistently. Proration was exact; add-ons were not.
+
+MEASURED, on the pure functions: one seat, STANDARD with the hostel add-on, a
+three-term school.
+
+    at RENEWAL                    tier NGN 1,575.00 | tier + hostel NGN 1,950.00
+    the SAME seat arriving mid-period
+      arrears (elapsed days)      NGN 1,575.00
+      true-up (remaining days)    NGN 1,575.00     <- the NGN 375 add-on is absent
+
+Neither `computeTrueUpMinor` nor `accrueSeatArrearsMinor` took an `overrides`
+argument, so there was no way to pass one and nothing to notice. At renewal every
+seat pays tier PLUS add-ons; mid-period growth was metered at the bare tier. A
+pupil who enrolled in week two used the hostel module all term and the school was
+never charged for it. On the demo school: 601 extra seats x NGN 375 = NGN 225,375
+of unbilled access for one term, and it scaled with every school that bought an
+add-on.
+
+NOT a rounding question and not new — the overrides were never threaded; the
+recent session-anchoring only added the `terms` parameter beside them. What made
+it invisible is that both halves of mid-period billing were wrong in the SAME
+direction, so arrears + true-up agreed with each other perfectly and disagreed
+only with the renewal price nobody compared them to.
+
+Fixed by threading `overrides` into both functions and passing the school's own
+at all three call sites — the /billing quote, the true-up checkout (which must
+agree with that quote to the kobo) and the fleet arrears sweep, whose query
+already selected `overrides` for the renewal charge.
+
+// GOTCHA in my own mutation check, and the reason to read it rather than trust
+// the word "mutated": the target line
+// `perSeatSession = pricing[plan].perSeatSessionMinor + addonPerSeatSessionMinor(...)`
+// appears TWICE — once in `computeSubscriptionGrossMinor` and once in
+// `accrueSeatArrearsMinor` — and a whole-string replace hit both. Both SIDES of
+// the comparison then lost add-ons symmetrically, four of the six tests passed,
+// and the mutation proved nothing. Mutating the arrears line ALONE fails five of
+// six. A mutation that changes no relative behaviour is not a mutation.
+
+Gate: `a-pupil-who-arrived-late-uses-the-same-modules` — asserts arrears +
+true-up equals a full renewal seat within a kobo, for EVERY calendar template and
+both cycles; that the figure is strictly greater than the bare tier (so dropping
+the argument cannot pass arithmetically); that the gap is the add-on's own share
+of the cycle rather than some other number; and that a module the TIER already
+includes is still never charged twice.

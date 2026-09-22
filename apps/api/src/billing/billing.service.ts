@@ -378,6 +378,11 @@ export class BillingService {
             subRow.currentPeriodEnd,
             now,
             await this.planPricing.effective(subCurrency),
+            // ADD-ONS COUNT TOWARDS A MID-PERIOD SEAT. At renewal every seat
+            // pays tier PLUS add-ons, so quoting mid-period growth at the bare
+            // tier rate charged a school less for the same product purely
+            // because of WHEN the pupil enrolled.
+            (subRow.overrides ?? undefined) as ModuleOverrides | undefined,
           )
         : null;
 
@@ -773,6 +778,8 @@ export class BillingService {
       prep.sub.currentPeriodEnd,
       now,
       await this.planPricing.effective(currency),
+      // The CHARGE must agree with the quote above, to the kobo.
+      (prep.sub.overrides ?? undefined) as ModuleOverrides | undefined,
     );
     // The top-up settles BOTH sides of mid-period growth: the metered arrears
     // already accrued (past usage) plus forward coverage for the time left.

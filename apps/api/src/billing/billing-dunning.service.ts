@@ -428,6 +428,8 @@ export class BillingDunningService {
       arrearsAccruedAt: Date | null;
       billingCycle: string;
       school: { calendarTemplate: string | null } | null;
+      /** Already selected for the renewal charge; the meter needs it too. */
+      overrides?: unknown;
     }>,
     now: Date,
   ): Promise<string[]> {
@@ -472,7 +474,18 @@ export class BillingDunningService {
           const pricing = await this.pricing.effective(currency);
           const terms = termsInSession(s.school?.calendarTemplate ?? null);
           const cycle: BillingCycle = isBillingCycle(s.billingCycle) ? s.billingCycle : BILLING_CYCLES.TERM;
-          const accrued = accrueSeatArrearsMinor(s.plan, s.seats, seatCount.get(s.schoolId) ?? 0, elapsedMs, cycle, terms, pricing);
+          const accrued = accrueSeatArrearsMinor(
+            s.plan,
+            s.seats,
+            seatCount.get(s.schoolId) ?? 0,
+            elapsedMs,
+            cycle,
+            terms,
+            pricing,
+            // Same rule as the true-up quote: a pupil who arrives mid-term uses
+            // the add-on modules exactly as one who was there at renewal does.
+            (s.overrides ?? undefined) as ModuleOverrides | undefined,
+          );
           await client.schoolSubscription.update({
             where: { id: s.id },
             data: { arrearsAccruedAt: now, ...(accrued > 0 ? { seatArrearsMinor: { increment: accrued } } : {}) },
