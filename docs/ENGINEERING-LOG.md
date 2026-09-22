@@ -18572,3 +18572,71 @@ would announce as blank.
 // PASSED against the old test; and the same leak fails the rewritten one by
 // name. A test committed before its mutation was checked, caught by the repo
 // rather than by me.
+
+### A sentinel that was not a uuid, and the dashboard that said so
+
+Found by REVIEWING THE RUNNING APP, not by reading it. The dashboard showed its
+amber "Some figures could not be loaded, so they are shown as '—' or left out.
+Reload to try again — this is not a report that everything is at zero." The
+banner was telling the truth: `GET /analytics/overview` was answering **500**,
+every time, and reloading could never have helped.
+
+    Invalid `prisma.attendanceRecord.groupBy()` invocation:
+    Inconsistent column data: Error creating UUID, invalid character:
+    expected an optional prefix of `urn:uuid:` ... found `_` at 1
+
+The attendance scope filtered on a SENTINEL meant to match nothing:
+
+    if (!studentIds || studentIds.length === 0) where.studentId = "__none__";
+
+`attendance_record."studentId"` is a **uuid** column, so Prisma rejects the
+value before the query reaches Postgres. The intended "match no rows" is instead
+a thrown request — and `apiGet` returns null for a 500 exactly as it does for a
+network failure, so the page reports "could not ask" and offers a reload that
+fixes nothing.
+
+WHO HIT IT: anyone on the family-scoped branch with an EMPTY student set — a
+teacher with no class assigned yet, a parent with no child linked, a pupil not
+yet enrolled. `scopedStudentIds` only ever adds the caller (if a pupil) and
+their `parentChild` links, and a teacher is deliberately NOT in `STAFF_WIDE`, so
+EVERY teacher was in this branch. Measured on the demo fleet: one teacher at
+MeastroTest School, ten identical 500s in a minute of ordinary browsing.
+
+// GOTCHA, and why a role sweep missed it first time: the dashboard asks for the
+// overview ONLY when the school HAS the ANALYTICS module — the guard added when
+// this same banner was firing at every STANDARD school about a module they had
+// never bought. The demo school is STANDARD, so a sweep of all seventeen demo
+// logins came back clean while two ENTERPRISE schools were broken for every
+// teacher. A negative result from the tier that cannot ask proves nothing about
+// the tier that can.
+
+SIBLING ASYMMETRY, the first defect class in CLAUDE.md, with the evidence in the
+file itself: the GRADE aggregate 190 lines below had ALREADY been given a skip
+for exactly this, and its comment says so — "skip the query, same as the old
+`__none__` short-circuit". Whoever reasoned that out fixed the block in front of
+them and did not sweep the one above it. The remedy is the same short-circuit,
+so there is now one shape in the file rather than two.
+
+Zero is NOT the fallback: `attendanceRatePct` returns null over no registers
+("a rate over no registers is not 0% — it is unknown"), and the dashboard
+already omits the tile on null. The correct answer was reachable all along; the
+query simply had to not run.
+
+// SWEPT: `platform-audit.service.ts` had the same sentinel into
+// `audit_log."actorId"`, also a uuid — `{ in: actorIdFilter.length ?
+// actorIdFilter : ["__none__"] }`. LATENT, not live: it fires when an operator
+// filters the platform audit log by a role or email matching NOBODY, so a
+// search that simply found no one answered 500 instead of no rows. It is the
+// ONE query behind both the paged list and the CSV export, so the guard covers
+// both doors. Fixed in the same commit, per the rule.
+
+// GOTCHA on testing it: the analytics regression is a REAL-DB test on purpose.
+// A mocked `groupBy` accepts any string for `studentId` and passes against the
+// defect — the uuid coercion is the whole bug, and it lives in the driver, not
+// in our code. Both gates were mutation-validated by reintroducing the sentinel
+// and watching them fail naming the production error verbatim.
+
+VERIFIED LIVE, not merely tested: rebuilt the API container and probed as the
+affected teacher with a minted token (never a real user's password) —
+`200 OK`, `{"scope":"family","attendance":{...,"total":0,"ratePct":null}}`
+where it had been 500, and zero `unhandled_exception` lines since.

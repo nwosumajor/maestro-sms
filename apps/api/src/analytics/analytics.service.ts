@@ -204,16 +204,31 @@ export class AnalyticsService {
         // createdAt, so a back-filled absence counted against the wrong period and
         // silently vanished from the one it belonged to.
         const where: Record<string, unknown> = { date: { gte: period.from, lte: period.to } };
-        if (!staff) {
-          if (!studentIds || studentIds.length === 0) where.studentId = "__none__";
-          else where.studentId = { in: studentIds };
-        }
+        // A reader scoped to students who has NONE yet: a teacher with no class
+        // assigned, a parent with no child linked, a pupil not yet enrolled.
+        //
+        // SKIP the query — never filter on a sentinel. `studentId` is a uuid
+        // column, so `"__none__"`, intended to match nothing, is rejected by
+        // Prisma BEFORE it reaches Postgres ("Error creating UUID ... found `_`")
+        // and the whole request 500s. The dashboard reads that 500 as "could not
+        // ask" and shows the amber "Some figures could not be loaded" banner, so
+        // a teacher with no classes got a permanently broken dashboard that
+        // reloading could never fix.
+        //
+        // The zeroed defaults below are already the right answer, and
+        // `attendanceRatePct` returns null over zero registers, so the tile is
+        // omitted rather than reported as 0%. Same short-circuit the grade
+        // aggregate already uses — this is its unswept sibling.
+        const noScopedStudents = !staff && (!studentIds || studentIds.length === 0);
+        if (!staff && !noScopedStudents) where.studentId = { in: studentIds as string[] };
         // groupBy: the DB counts per status — don't ship every row just to count.
-        const grouped = await tx.attendanceRecord.groupBy({
-          by: ["status"],
-          where: where as never, // reason: dynamic where narrowed above; groupBy's generic rejects the loose Record type
-          _count: { _all: true },
-        });
+        const grouped = noScopedStudents
+          ? []
+          : await tx.attendanceRecord.groupBy({
+              by: ["status"],
+              where: where as never, // reason: dynamic where narrowed above; groupBy's generic rejects the loose Record type
+              _count: { _all: true },
+            });
         const by = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 };
         let total = 0;
         for (const g of grouped) {

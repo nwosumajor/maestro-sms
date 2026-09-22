@@ -98,7 +98,14 @@ export class PlatformAuditService {
     const where: Record<string, unknown> = {
       schoolId: f.schoolId && customerIds.includes(f.schoolId) ? f.schoolId : { in: customerIds },
     };
-    if (actorIdFilter) where.actorId = { in: actorIdFilter.length ? actorIdFilter : ["__none__"] };
+    // A role/email filter that matched NOBODY: answer with an empty page rather
+    // than filtering on a sentinel. `actorId` is a uuid column, so `"__none__"`
+    // is rejected by Prisma before the query reaches Postgres and a search that
+    // simply found no one 500s instead of returning no rows. Same defect as the
+    // analytics attendance scope. This is the ONE query behind both the paged
+    // list and the CSV export, so the guard covers both doors.
+    if (actorIdFilter && actorIdFilter.length === 0) return [];
+    if (actorIdFilter) where.actorId = { in: actorIdFilter };
     if (f.action) where.action = { contains: f.action, mode: "insensitive" };
     if (f.entity) where.entity = f.entity;
     if (f.from || f.to) {
