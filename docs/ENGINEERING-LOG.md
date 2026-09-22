@@ -18740,3 +18740,135 @@ gets 200 on `/manual` with the new chapter served, and 404 on
 `/runbooks/migration`. `/runbooks` answers 200 for them because Next streams the
 shell before `redirect()` fires — the recorded shape — and no runbook title
 appears in the body.
+
+### Pricing per TERM and per SESSION, anchored on the unit that means the same everywhere
+
+Asked to price per term and per session instead of per month, with 15% off for
+paying by session, a naira price list on the public page, and the school's own
+currency at checkout.
+
+THE TRAP, and the reason the anchor went where it did: **a session is not three
+terms for every school.** `CALENDAR_TEMPLATES` ships THREE_TERM (3),
+TWO_SEMESTER (2 — the United States and Canada), FOUR_QUARTER (4) and TRIMESTER
+(3). Anchor on the TERM and price a session as three of them, and a US school
+pays for a term it does not have while a four-quarter school gets one free: the
+advertised 15% saving becomes a **27% penalty** for one and a **36% giveaway**
+for the other, silently, in the two markets whose calendars differ from the
+platform's home. Same shape as the naira constant applied to every school.
+
+So the SESSION is stored and the TERM is derived:
+
+    SESSION -> the stored number
+    TERM    -> session / (1 - 15%) / termsInSession(school)
+
+A year is a year in every country; a term is two, three or four of them. The
+saving is then a consequence of the division rather than a number somebody keeps
+true — there is no second place it could be applied twice or forgotten once, and
+no path that advertises 15% while charging 14.3%.
+
+`termsInSession` reads the school's own template and is a REQUIRED parameter
+with no default. A default of 3 would compile at every call site and be wrong in
+two countries for as long as nobody checked; required makes the compiler the
+search, the same trick that found the Paystack currency sites and the
+payment-approval threshold. It found 96 references across 24 files.
+
+THE MONTHLY ATOM IS GONE, not deprecated. Leaving `perSeatMonthlyMinor` beside
+the new field would have left some path reading it with nothing to say which;
+deleting it made every one of those 96 references a compile error that named
+itself. What survives is `perSeatDailyMinor`, derived and never displayed,
+because proration and seat arrears need a rate per unit time — and it is taken
+from the cycle the school is ACTUALLY on, so a session buyer accrues arrears at
+the discounted rate they were quoted rather than at a notional monthly figure
+nobody is charged.
+
+WHAT MOVES, stated plainly because it is money: the backfill is
+`monthly x 7.65`, which reproduces the old annual charge (`monthly x 9 x 0.85`)
+**exactly** — verified on real rows, 401,625 = 401,625, so no school on a
+session cycle sees its renewal move by a kobo. TERM payers rise 5.26%, which is
+`1/0.95 - 1`: the old 5% term discount is gone because the term is now the list
+price. That was a decision, not an accident — holding the session flat and
+letting the term rise makes the session discount visibly worth taking, which is
+the behaviour the pricing is for.
+
+// GOTCHA: the ENTERPRISE tier displayed in dollars while three tiers displayed
+// in naira, so the public list was four prices in two currencies and the tier
+// with the highest intent was the one a reader could not place against the
+// others. `defaultCurrencyFor` returns the home currency for every tier now.
+// Display was already separate from settlement — `planCurrencies` had long
+// since stopped gating ENTERPRISE to USD — so nothing about who can pay in what
+// changed.
+// GOTCHA: the add-on tables were per-seat MONTHLY too, and the tier price and
+// the add-on are summed BEFORE the cycle division — so an add-on bought on a
+// term cycle is billed the term's share. A test asserting the full session
+// figure caught it, which is the assertion working.
+// GOTCHA: the gate asserting "exactly 15%" failed on USD/STANDARD legitimately.
+// The term price is rounded to a whole minor unit PER SEAT, so the error is
+// proportional to the price and not diluted by seats: a 191-cent session gives
+// a 75c term whose half-cent rounding is 0.67% on its own. A fixed 0.1%
+// tolerance fails a correct row and a fixed 1% passes a broken cheap currency —
+// the tolerance is derived from the price, and a separate assertion says the
+// session must never cost MORE however the rounding falls.
+// GOTCHA, the familiar one: a `region` double without `academicForSchool` threw
+// inside the service and read as a code fault rather than a missing fixture.
+
+The migration keeps the old column NULLABLE rather than dropping it, so a
+rollback between this release and the follow-up still has its data, and it
+migrates the stored cycles (`YEAR` -> `SESSION`, `MONTH` -> `TERM`) rather than
+leaving rows naming a cycle the code no longer knows. Replayed from scratch
+against a real Postgres, twice — the second time after restamping the folder
+later than every existing migration, because authoring order and folder order
+must agree in this repo for reasons already written up above.
+
+Gate: `a-price-in-a-unit-nobody-buys` — computes its file set by walking the
+source, asserts it scanned a real tree, fails on any surviving
+`perSeatMonthlyMinor` or MONTH cycle with comments stripped, and checks the 15%
+across every tier x every priced currency x EVERY calendar template, so a fifth
+template added in some later year is covered the day it lands.
+
+### A pupil who arrived late used the add-on modules free
+
+Asked, of the new pricing, whether mid-period enrolment and add-on modules were
+billed accurately and consistently. Proration was exact; add-ons were not.
+
+MEASURED, on the pure functions: one seat, STANDARD with the hostel add-on, a
+three-term school.
+
+    at RENEWAL                    tier NGN 1,575.00 | tier + hostel NGN 1,950.00
+    the SAME seat arriving mid-period
+      arrears (elapsed days)      NGN 1,575.00
+      true-up (remaining days)    NGN 1,575.00     <- the NGN 375 add-on is absent
+
+Neither `computeTrueUpMinor` nor `accrueSeatArrearsMinor` took an `overrides`
+argument, so there was no way to pass one and nothing to notice. At renewal every
+seat pays tier PLUS add-ons; mid-period growth was metered at the bare tier. A
+pupil who enrolled in week two used the hostel module all term and the school was
+never charged for it. On the demo school: 601 extra seats x NGN 375 = NGN 225,375
+of unbilled access for one term, and it scaled with every school that bought an
+add-on.
+
+NOT a rounding question and not new — the overrides were never threaded; the
+recent session-anchoring only added the `terms` parameter beside them. What made
+it invisible is that both halves of mid-period billing were wrong in the SAME
+direction, so arrears + true-up agreed with each other perfectly and disagreed
+only with the renewal price nobody compared them to.
+
+Fixed by threading `overrides` into both functions and passing the school's own
+at all three call sites — the /billing quote, the true-up checkout (which must
+agree with that quote to the kobo) and the fleet arrears sweep, whose query
+already selected `overrides` for the renewal charge.
+
+// GOTCHA in my own mutation check, and the reason to read it rather than trust
+// the word "mutated": the target line
+// `perSeatSession = pricing[plan].perSeatSessionMinor + addonPerSeatSessionMinor(...)`
+// appears TWICE — once in `computeSubscriptionGrossMinor` and once in
+// `accrueSeatArrearsMinor` — and a whole-string replace hit both. Both SIDES of
+// the comparison then lost add-ons symmetrically, four of the six tests passed,
+// and the mutation proved nothing. Mutating the arrears line ALONE fails five of
+// six. A mutation that changes no relative behaviour is not a mutation.
+
+Gate: `a-pupil-who-arrived-late-uses-the-same-modules` — asserts arrears +
+true-up equals a full renewal seat within a kobo, for EVERY calendar template and
+both cycles; that the figure is strictly greater than the bare tier (so dropping
+the argument cannot pass arithmetically); that the gap is the add-on's own share
+of the cycle rather than some other number; and that a module the TIER already
+includes is still never charged twice.

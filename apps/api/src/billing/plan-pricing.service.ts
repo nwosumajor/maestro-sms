@@ -103,7 +103,7 @@ export class PlanPricingService implements OnModuleInit {
       planCurrencies(plan).map((currency) => ({
         plan,
         currency,
-        perSeatMonthlyMinor: pricing[currency]?.[plan].perSeatMonthlyMinor ?? 0,
+        perSeatSessionMinor: pricing[currency]?.[plan].perSeatSessionMinor ?? 0,
         isDefault: !overridden.has(`${plan}:${currency}`),
         modulesIncluded: PLAN_MODULES[plan].length,
       })),
@@ -132,12 +132,12 @@ export class PlanPricingService implements OnModuleInit {
         throw new BadRequestException(`${row.plan} is billed in ${planCurrencies(row.plan).join("/")} only`);
       }
       if (
-        !Number.isInteger(row.perSeatMonthlyMinor) ||
-        row.perSeatMonthlyMinor <= 0 ||
-        row.perSeatMonthlyMinor > MAX_PER_SEAT_MINOR
+        !Number.isInteger(row.perSeatSessionMinor) ||
+        row.perSeatSessionMinor <= 0 ||
+        row.perSeatSessionMinor > MAX_PER_SEAT_MINOR
       ) {
         throw new BadRequestException(
-          `perSeatMonthlyMinor for ${row.plan} must be a positive integer (minor units) ≤ ${MAX_PER_SEAT_MINOR}`,
+          `perSeatSessionMinor for ${row.plan} must be a positive integer (minor units) ≤ ${MAX_PER_SEAT_MINOR}`,
         );
       }
     }
@@ -145,8 +145,8 @@ export class PlanPricingService implements OnModuleInit {
     for (const row of rows) {
       await client.planPrice.upsert({
         where: { plan_currency: { plan: row.plan, currency: row.currency } },
-        update: { perSeatMonthlyMinor: row.perSeatMonthlyMinor },
-        create: { plan: row.plan, currency: row.currency, perSeatMonthlyMinor: row.perSeatMonthlyMinor },
+        update: { perSeatSessionMinor: row.perSeatSessionMinor },
+        create: { plan: row.plan, currency: row.currency, perSeatSessionMinor: row.perSeatSessionMinor },
       });
     }
     // Drop this task's cache AND every other replica's (Redis fan-out; local
@@ -205,7 +205,7 @@ export class PlanPricingService implements OnModuleInit {
         // and `effective()` refuses the currency until every tier has a price.
         if (!PLAN_PRICING_BY_CURRENCY[r.currency]) openedByOperator.add(r.currency);
         const table = (pricing[r.currency] ??= {} as PlanPricing);
-        table[r.plan] = { perSeatMonthlyMinor: r.perSeatMonthlyMinor };
+        table[r.plan] = { perSeatSessionMinor: r.perSeatSessionMinor };
         overridden.add(`${r.plan}:${r.currency}`);
       }
     }

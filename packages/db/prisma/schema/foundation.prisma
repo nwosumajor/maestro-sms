@@ -585,8 +585,12 @@ model ModuleAddonPrice {
   module              String
   /// NGN | USD — one row per (module, currency).
   currency            String   @default("NGN")
-  /// Per-seat (active student) monthly price, minor units.
-  perSeatMonthlyMinor Int
+  /// Per-seat (active student) monthly price, minor units. SUPERSEDED by
+  /// `perSeatSessionMinor`; kept nullable for one release so a rollback between
+  /// the two migrations is survivable, then dropped by the follow-up.
+  perSeatMonthlyMinor Int?
+  /// Per-seat (active student) price for one SESSION, minor units.
+  perSeatSessionMinor Int
   updatedAt           DateTime @updatedAt
 
   @@id([module, currency])
@@ -599,8 +603,15 @@ model PlanPrice {
   /// NGN | USD — one override row per (tier, currency). ENTERPRISE is USD-only
   /// (enforced in PlanPricingService.update, not the schema).
   currency            String   @default("NGN")
-  /// Per-seat (active student) monthly price, minor units (kobo / cents).
-  perSeatMonthlyMinor Int
+  /// Per-seat (active student) monthly price, minor units. SUPERSEDED by
+  /// `perSeatSessionMinor` and no longer read by any code path — kept for one
+  /// release so a rollback between the two migrations is survivable. Dropped by
+  /// the follow-up migration once this release is settled.
+  perSeatMonthlyMinor Int?
+  /// Per-seat (active student) price for one SESSION (academic year), minor
+  /// units (kobo / cents). THE STORED ANCHOR: the term price is derived from it
+  /// by `perSeatCycleMinor`, using the school's own number of terms.
+  perSeatSessionMinor Int
   updatedAt           DateTime @updatedAt
 
   @@id([plan, currency])

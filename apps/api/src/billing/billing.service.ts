@@ -53,7 +53,7 @@ import {
   type PlatformPaymentDto,
   type SubscriptionDto,
   PAYMENT_CHANNELS,
-  pickCardRail, formatMoneyPdf, resolveRegion, schoolDateString } from "@sms/types";
+  pickCardRail, formatMoneyPdf, resolveRegion, schoolDateString, termsInSession } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -84,7 +84,7 @@ import { createPdfDocument } from "../common/pdf-document";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
-const QUOTE_CYCLES: BillingCycle[] = [BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR];
+const QUOTE_CYCLES: BillingCycle[] = [BILLING_CYCLES.TERM, BILLING_CYCLES.SESSION];
 
 function addMonths(from: Date, months: number): Date {
   const d = new Date(from);
@@ -362,6 +362,7 @@ export class BillingService {
     // deciding to. This only chooses the DEFAULT for a school that has not
     // chosen yet.
     const schoolCurrency = (await this.region.forSchool(p.schoolId)).currency;
+    const terms = await this.termsFor(p.schoolId);
     const preferred: Currency = planCurrencies(DEFAULT_PLAN).includes(schoolCurrency as Currency)
       ? (schoolCurrency as Currency)
       : CURRENCIES.NGN;
@@ -373,9 +374,15 @@ export class BillingService {
             subRow.seats,
             activeStudents,
             subCycle,
+            terms,
             subRow.currentPeriodEnd,
             now,
             await this.planPricing.effective(subCurrency),
+            // ADD-ONS COUNT TOWARDS A MID-PERIOD SEAT. At renewal every seat
+            // pays tier PLUS add-ons, so quoting mid-period growth at the bare
+            // tier rate charged a school less for the same product purely
+            // because of WHEN the pupil enrolled.
+            (subRow.overrides ?? undefined) as ModuleOverrides | undefined,
           )
         : null;
 
@@ -396,7 +403,7 @@ export class BillingService {
           plan,
           billingCycle: cycle,
           seats: billableSeats,
-          priceMinor: computeSubscriptionPriceMinor(plan, billableSeats, cycle, pricing[currency], quoteOverrides),
+          priceMinor: computeSubscriptionPriceMinor(plan, billableSeats, cycle, terms, pricing[currency], quoteOverrides),
           currency,
         })),
       ),
@@ -467,6 +474,20 @@ export class BillingService {
    * the button and the receipt is the surest way to lose a sale and earn a
    * support ticket.
    */
+  /**
+   * How many terms this school's year has — the divisor that turns the stored
+   * SESSION price into a term price.
+   *
+   * Read from the school's own calendar template, NEVER assumed to be three. A
+   * literal 3 here would charge a US two-semester school for a third term it
+   * does not have, and hand a four-quarter school a term it never paid for.
+   * `SchoolRegionService` is @Global and caches for 60s, so this is not a query
+   * per quote.
+   */
+  private async termsFor(schoolId: string): Promise<number> {
+    return termsInSession((await this.region.academicForSchool(schoolId)).calendarTemplate);
+  }
+
   async listAddonOffers(p: Principal): Promise<AddonOfferDto[]> {
     const now = new Date();
     const { sub, seats } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => ({
@@ -481,12 +502,13 @@ export class BillingService {
     const cancelling = new Set(overrides?.cancelling ?? []);
     const included = new Set(PLAN_MODULES[plan]);
     const prices = await this.addonPricing.effective(currency);
+    const terms = await this.termsFor(p.schoolId);
     return sellableAlone().map((module) => ({
       module,
       currency,
-      perSeatMonthlyMinor: prices[module] ?? 0,
+      perSeatSessionMinor: prices[module] ?? 0,
       // What it costs to switch on right now, for the rest of this period.
-      priceNowMinor: addonProrationMinor(prices[module], seats, cycle, sub?.currentPeriodEnd ?? null, now) ?? 0,
+      priceNowMinor: addonProrationMinor(prices[module], seats, cycle, terms, sub?.currentPeriodEnd ?? null, now) ?? 0,
       includedInPlan: included.has(module),
       alreadyPurchased: owned.has(module) && !included.has(module),
       cancelling: cancelling.has(module) && owned.has(module),
@@ -589,7 +611,8 @@ export class BillingService {
     }
 
     const prices = await this.addonPricing.effective(currency);
-    const amountMinor = addonProrationMinor(prices[moduleKey], prep.seats, cycle, prep.sub.currentPeriodEnd, now);
+    const terms = await this.termsFor(p.schoolId);
+    const amountMinor = addonProrationMinor(prices[moduleKey], prep.seats, cycle, terms, prep.sub.currentPeriodEnd, now);
     // NULL MEANS "not worth a charge": too close to renewal, or no price. Switch
     // it on now and let the renewal bill it — a failed gateway charge for ₦40
     // costs more goodwill than the ₦40 is worth.
@@ -745,14 +768,18 @@ export class BillingService {
         `${currency} payments are not available yet. ${settleable.reason ?? ""}`.trim(),
       );
     }
+    const terms = await this.termsFor(p.schoolId);
     const quote = computeTrueUpMinor(
       prep.sub.plan as Plan,
       prep.sub.seats,
       prep.seats,
       cycle,
+      terms,
       prep.sub.currentPeriodEnd,
       now,
       await this.planPricing.effective(currency),
+      // The CHARGE must agree with the quote above, to the kobo.
+      (prep.sub.overrides ?? undefined) as ModuleOverrides | undefined,
     );
     // The top-up settles BOTH sides of mid-period growth: the metered arrears
     // already accrued (past usage) plus forward coverage for the time left.
@@ -936,7 +963,7 @@ export class BillingService {
         });
         const overrides = (current?.overrides ?? undefined) as ModuleOverrides | undefined;
         const listMinor =
-          computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing, overrides) * periods;
+          computeSubscriptionPriceMinor(plan, seats, billingCycle, await this.termsFor(p.schoolId), pricing, overrides) * periods;
         const grossMinor = promo ? Math.round((listMinor * (100 - promo.percentOff)) / 100) : listMinor;
         if (grossMinor <= 0) throw new BadRequestException("Nothing to charge for this plan");
 

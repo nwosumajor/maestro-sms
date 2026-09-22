@@ -19,7 +19,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CYCLE_DISCOUNT_PERCENT,
+  SESSION_DISCOUNT_PERCENT,
   CYCLE_MONTHS,
   PLANS,
   SUBSCRIPTION_TRIAL_DAYS,
@@ -37,12 +37,14 @@ const nairaThreshold = (PAYMENT_APPROVAL_THRESHOLD_MINOR / 100).toLocaleString("
 
 /** Every claim, the doc that makes it, and how to fix a failure. */
 const CLAIMS: { file: string; label: string; needle: string }[] = [
-  // --- commitment discounts -------------------------------------------------
-  { file: MANUAL, label: "per-term discount", needle: `${CYCLE_DISCOUNT_PERCENT.TERM}% off` },
-  { file: MANUAL, label: "per-year discount", needle: `${CYCLE_DISCOUNT_PERCENT.YEAR}% off` },
-  // --- cycle lengths (a "year" is the ACADEMIC year, not 12 months) ----------
+  // --- the ONE commitment discount ------------------------------------------
+  // There is no per-term discount any more: the term IS the list price and the
+  // session is what saves. A document still promising two discounts is quoting
+  // a commercial fact the product stopped offering.
+  { file: MANUAL, label: "session discount", needle: `${SESSION_DISCOUNT_PERCENT}% off` },
+  // --- cycle lengths (a "session" is the ACADEMIC year, not 12 months) -------
   { file: MANUAL, label: "term length in months", needle: `${CYCLE_MONTHS.TERM} months` },
-  { file: MANUAL, label: "academic-year length in months", needle: `${CYCLE_MONTHS.YEAR} months` },
+  { file: MANUAL, label: "academic-session length in months", needle: `${CYCLE_MONTHS.SESSION} months` },
   // --- trial ----------------------------------------------------------------
   { file: PROPOSAL, label: "trial length", needle: `${SUBSCRIPTION_TRIAL_DAYS}-day trial` },
   // --- maker-checker threshold on money -------------------------------------
@@ -78,7 +80,7 @@ describe("owner-facing documents quote CURRENT pricing", () => {
     // means /manual serves outdated pricing even after the source was fixed.
     const source = read(MANUAL);
     const generated = read("apps/web/app/manual/manual-html.ts");
-    const marker = `${CYCLE_DISCOUNT_PERCENT.YEAR}% off`;
+    const marker = `${SESSION_DISCOUNT_PERCENT}% off`;
     expect(source).toContain(marker);
     if (!generated.includes(marker)) {
       throw new Error(

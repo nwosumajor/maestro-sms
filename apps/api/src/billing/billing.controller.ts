@@ -44,7 +44,7 @@ const creditsSchema = z.object({ bundleId: z.string().min(1).max(10) });
 
 const checkoutSchema = z.object({
   plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
-  billingCycle: z.enum([BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR]),
+  billingCycle: z.enum([BILLING_CYCLES.TERM, BILLING_CYCLES.SESSION]),
   // NGN → Paystack, USD → Stripe. Omitted → the tier's default (₦; $ for ENTERPRISE).
   // DERIVED FROM WHAT THE PLATFORM SELLS, not typed out. This enum listed NGN
   // and USD, so a currency the quote grid offered and the pricing console

@@ -53,7 +53,7 @@ describe("an add-on price is not a naira price", () => {
     const svc = serviceWithNoOperatorRows();
     for (const currency of Object.keys(MODULE_ADDON_PRICING_BY_CURRENCY)) {
       const prices = await svc.effective(currency as "USD");
-      const ultimate = PLAN_PRICING_BY_CURRENCY[currency as "USD"][PLANS.ULTIMATE].perSeatMonthlyMinor;
+      const ultimate = PLAN_PRICING_BY_CURRENCY[currency as "USD"][PLANS.ULTIMATE].perSeatSessionMinor;
       expect(prices[MODULES.HOSTEL]!).toBeLessThan(ultimate);
     }
   });

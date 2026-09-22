@@ -26,7 +26,7 @@ import {
   planCurrencies,
   allowedChannels,
   BULK_IMPORT_MAX_ROWS,
-  CYCLE_DISCOUNT_PERCENT,
+  SESSION_DISCOUNT_PERCENT,
   CYCLE_MONTHS,
   REFERRAL_REWARD_MONTHS,
   SUBSCRIPTION_GRACE_DAYS,
@@ -172,9 +172,11 @@ describe("every number the guide quotes is the number the code uses", () => {
     ["the grace period after a lapse", `${SUBSCRIPTION_GRACE_DAYS} days`, "SUBSCRIPTION_GRACE_DAYS"],
     ["the bulk-import row cap", `${BULK_IMPORT_MAX_ROWS} rows`, "BULK_IMPORT_MAX_ROWS"],
     ["a term's length in months", `${CYCLE_MONTHS.TERM} months`, "CYCLE_MONTHS.TERM"],
-    ["a year's billed months", `${CYCLE_MONTHS.YEAR} months`, "CYCLE_MONTHS.YEAR"],
-    ["the per-term discount", `${CYCLE_DISCOUNT_PERCENT.TERM}% off`, "CYCLE_DISCOUNT_PERCENT.TERM"],
-    ["the per-year discount", `${CYCLE_DISCOUNT_PERCENT.YEAR}% off`, "CYCLE_DISCOUNT_PERCENT.YEAR"],
+    ["a year's billed months", `${CYCLE_MONTHS.SESSION} months`, "CYCLE_MONTHS.SESSION"],
+    // ONE discount now, and it is the only one the documents may state: paying
+    // for the session saves this much against paying term by term. The old
+    // per-term discount is gone because the term IS the list price.
+    ["the session discount", `${SESSION_DISCOUNT_PERCENT}% off`, "SESSION_DISCOUNT_PERCENT"],
   ];
 
   it.each(claims)("states %s as the code does (%s, from %s)", (_what, phrase) => {
@@ -204,7 +206,7 @@ describe("every number the guide quotes is the number the code uses", () => {
     };
     check(/(\d+) rows at a time/g, BULK_IMPORT_MAX_ROWS, "bulk import");
     check(/per-term \((\d+) months/g, CYCLE_MONTHS.TERM, "term months");
-    check(/per-year \((\d+) months/g, CYCLE_MONTHS.YEAR, "year months");
+    check(/per-year \((\d+) months/g, CYCLE_MONTHS.SESSION, "year months");
     expect(wrong).toEqual([]);
   });
 });

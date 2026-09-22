@@ -32,6 +32,9 @@ import { GrowthService } from "../../src/billing/growth.service";
 import type { NotificationService } from "../../src/notifications/notification.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
+/** A three-term school; other calendars are covered in billing-pricing.spec. */
+const TERMS = 3;
+
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
 const d = APP_URL && ADMIN_URL ? describe : describe.skip;
@@ -152,13 +155,13 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       `INSERT INTO platform_subscription_payment
          (id,"schoolId",plan,"billingCycle",seats,"amountMinor",reference,status,"initiatedById","updatedAt")
        VALUES ($1,$2,'STANDARD','TERM',400,$3,$4,'PENDING',$5,now())`,
-      [randomUUID(), SA, computeSubscriptionPriceMinor("STANDARD", 400, "TERM"), REF, UA],
+      [randomUUID(), SA, computeSubscriptionPriceMinor("STANDARD", 400, "TERM", TERMS), REF, UA],
     );
 
     const event: PaystackEvent = {
       event: "charge.success",
       data: {
-        amount: computeSubscriptionPriceMinor("STANDARD", 400, "TERM"),
+        amount: computeSubscriptionPriceMinor("STANDARD", 400, "TERM", TERMS),
         reference: REF,
         metadata: { kind: "subscription", schoolId: SA },
       },
@@ -193,7 +196,7 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       [SA, JSON.stringify({ enabled: ["hostel"], disabled: [], purchased: ["hostel"], cancelling: ["hostel"] })],
     );
     const REF_CANCEL = `SUB-cancel-${randomUUID().slice(0, 8)}`;
-    const amount = computeSubscriptionPriceMinor("STANDARD", 400, "TERM");
+    const amount = computeSubscriptionPriceMinor("STANDARD", 400, "TERM", TERMS);
     await admin.query(
       `INSERT INTO platform_subscription_payment
          (id,"schoolId",plan,"billingCycle",seats,"amountMinor",reference,status,"initiatedById","updatedAt")
@@ -215,7 +218,7 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
   });
 
   it("a mismatched settlement NEVER activates: underpaid or wrong-currency → FAILED + audited", async () => {
-    const expected = computeSubscriptionPriceMinor("STANDARD", 400, "TERM");
+    const expected = computeSubscriptionPriceMinor("STANDARD", 400, "TERM", TERMS);
     const REF_UNDER = `SUB-under-${randomUUID().slice(0, 8)}`;
     const REF_CCY = `SUB-ccy-${randomUUID().slice(0, 8)}`;
     for (const ref of [REF_UNDER, REF_CCY]) {
@@ -284,7 +287,7 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
 
   it("a referred school's FIRST paid subscription rewards BOTH sides one free term — once", async () => {
     const dayMs = 24 * 3600 * 1000;
-    const priceMinor = computeSubscriptionPriceMinor("STANDARD", 400, "TERM");
+    const priceMinor = computeSubscriptionPriceMinor("STANDARD", 400, "TERM", TERMS);
     const pay = async (ref: string) => {
       await admin.query(
         `INSERT INTO platform_subscription_payment

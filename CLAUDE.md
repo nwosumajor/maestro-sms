@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **381 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **383 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -489,9 +489,8 @@ evidence live beside it, and are worth opening rather than re-deriving:
   module, pricing them credibly low made three cheaper than the upgrade, and
   pricing them high enough to protect the ladder was a price nobody would pay —
   so they stay tier sweeteners. // GOTCHA: `PLAN_PRICING` in code is the fallback
-  for a currency with no operator `plan_price` row and had drifted to about half
-  the live NGN prices, so opening a new currency would have quoted half price.
-  Realigned to ₦525/750/975/1,250.
+  for a currency with no operator `plan_price` row, and had drifted to half the
+  live prices — opening a new currency would have quoted half price.
 - **ADD-ON PURCHASE — BUILT, self-serve** (`AddonPricingService`,
   `module_addon_price` + migration `20270103000000` + rls/111,
   `platform_subscription_payment.addonModule`, `SUBSCRIPTION_PAYMENT_KINDS.ADDON`,
@@ -512,13 +511,30 @@ evidence live beside it, and are worth opening rather than re-deriving:
   one entry. Operator prices them on /operator/pricing, and each row SHOWS what
   the module costs inside its tier and flags a price that undercuts the upgrade —
   it warns rather than blocks, because a deliberate loss-leader is legitimate.
+- **PRICING IS ANCHORED ON THE SESSION; THE TERM IS DERIVED.** A school buys a
+  TERM or a SESSION, nothing else. NGN is ₦4,016.25/5,737.50/7,458.75/9,562.50
+  per seat per session. `plan_price.perSeatSessionMinor` is the ONE stored
+  number per (tier, currency); term =
+  `session / (1 - SESSION_DISCOUNT_PERCENT) / termsInSession(school)`, so the 15%
+  is a consequence of the division rather than a figure anyone keeps true.
+  // GOTCHA: **a session is NOT three terms for every school** — TWO_SEMESTER is
+  2 (US, Canada), FOUR_QUARTER is 4. Pricing a session as three terms makes the
+  advertised 15% a 27% PENALTY for one and a 36% giveaway for the other.
+  `termsInSession` is REQUIRED with no default: a default of 3 compiles
+  everywhere and is wrong in two countries.
+  // The monthly atom is GONE. `perSeatDailyMinor` survives for proration and
+  arrears only, never displayed, rated from the cycle the school is ON.
+  `CYCLE_MONTHS` is CALENDAR DURATION now, never a price multiplier. The PUBLIC
+  list is one currency (every tier, ENTERPRISE included); what a school is
+  CHARGED in comes from its own region at checkout. Gate:
+  `a-price-in-a-unit-nobody-buys` (15% across every tier x currency x TEMPLATE).
 - **THE TAKE-RATE IS ON**: `platform_fee_config` id `'fees'` (a SINGLETON — a row
   with any other id is invisible to `PlatformFeeService`, which cost me a probe
   to discover), 150bp capped at ₦2,000, borne by the PARENT.
 - **Self-serve BILLING ENGINE — BUILT** (`apps/api/src/billing`, `apps/web/.../billing`):
   turns the entitlement gate into recurring revenue. A school's principal/
   school_admin self-checks-out a tier (`@RequireStepUp`) at `/billing`; pricing is
-  **per-seat** (active students × tier monthly rate × cycle months — pure
+  **per-seat** (active students × the cycle's per-seat price — pure
   `computeSubscriptionPriceMinor` in `@sms/types`), money in integer kobo. Paystack
   is reused via a shared `PaystackService` (`apps/api/src/payments`); the ONE
   account-wide webhook stays on the `@Public` fees route and is dispatched by
@@ -894,7 +910,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **381 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **383 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1721,61 +1737,38 @@ all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
-## ID-card QR scan — BUILT (`apps/api/src/certificate`)
-// GOTCHA: **a REPRINT reprints — it does not mint a second certificate.**
-`issueForClass` promises a pupil is "skipped, never re-serialled", and the
-console's own flow then printed each card through `POST /certificates/issue`,
-which created a fresh row with a fresh serial on every press. Measured on a
-class of 20: register, print, print again -> three registry rows for one
-physical card, and the serial the bulk run registered printed on nothing. A
-plain reprint (no title/body, what `ClassIssuer` sends) now reuses the
-registered certificate and its serial, audited as `certificate.reprint`; a
-title or body means a DIFFERENT award and still gets its own. And the serial
-was generated TWICE — the bulk path from a uuid, with the comment explaining
-why, and the printing path from a 4-character `Math.random()` suffix, a space
-2,557x smaller. One `certificateSerial()` now, and `serial` is UNIQUE
-(migration `20260907000000`) so a collision is a 409, not two cards that verify
-as one.
-// GOTCHA: **AND NOTHING COULD VERIFY ONE.** Every certificate prints
-"Authenticity may be verified with the issuing school by quoting the serial
-number", and no route, service method or screen accepted a serial — the only
-sight of one was `history/:subjectId`, which needs the pupil's ID, and somebody
-checking a document they were handed has the serial and not the identity.
-`GET /certificates/verify/:serial` answers it now: `runAsTenant` so RLS confines
-it, another school's serial 404s **in the same words** as an unknown one,
-audited because it names a pupil. Web: **Check a certificate** on
-`/certificates`.
-// GOTCHA: **the reprint fix above was half a fix.** It reused the SERIAL and
-went on rendering from the REQUEST, which on a plain reprint is empty. Measured:
-a pupil holding "Best in Science" and "Best in Mathematics" could only get a
-replacement copy by (a) pressing Generate with the title still filled in, which
-minted a THIRD row for one physical award, or (b) clearing the boxes, which
-printed a GENERIC merit certificate under "Best in Science"'s serial and picked
-the older of the two in silence. A reprint now renders the REGISTERED words,
-serial and **issue date** (today's date on last year's testimonial is a different
-document again); `certificateId` names WHICH one and is checked against the
+## ID-card QR scan + certificate reprints — BUILT (`apps/api/src/certificate`)
+**A REPRINT REPRINTS — it does not mint a second certificate.** A plain reprint
+(no title/body, what `ClassIssuer` sends) reuses the registered certificate AND
+its serial, audited as `certificate.reprint`; a title or body means a DIFFERENT
+award and gets its own. It renders the REGISTERED words, serial and ISSUE DATE —
+not the request, which on a reprint is empty, and not today's date on last
+year's testimonial. `certificateId` names WHICH one and is checked against the
 subject and type; a plain reprint of a type held SEVERAL times REFUSES and names
-them. Every history row has a **Reprint** control, so the refusal is a fork and
-not a dead end.
-Student/staff ID cards now carry a REAL scannable QR (pdfkit vector squares via
-the `qrcode` lib) encoding the member's global `uniqueId` — replacing the old
-decorative barcode. A tenant-scoped lookup resolves a scanned code to a member
-of the SCANNER's OWN school for library / attendance / exam-hall / gate desks:
-`GET /members/scan/:code` (`member.scan`, seeded to principal/school_admin/
-junior_admin/head_teacher/teacher/librarian/warden/head_warden). SECURITY: runs
-in `runAsTenant` so RLS confines it — a foreign `uniqueId` returns **404, not
-403** (no cross-tenant existence disclosure); returns ROSTER-level fields only
-(name/role/admission#/class/status), never medical/PII; every scan audited
-(`member.scan`). Web desk at `/scan` (`ScanConsole` — always-focused input for a
-handheld scanner + a purpose selector). The desk also RECORDS actions:
-`POST /members/scan/:code {purpose}` writes an append-only `scan_event`
-(rls/88, INSERT+SELECT only, migration `20261003000000`) — CHECK_IN of a
-student ALSO marks them PRESENT in today's class register (a deliberate
-central check-in that bypasses the per-class teacher restriction, `takenById`
-= scanner); CHECK_OUT/LIBRARY/EXAM log the movement only. GET stays a pure
-side-effect-free lookup. `member.scan` is a NEW permission: run the seed against a live
-DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
-(`role-permissions.service`, static `@sms/types` map is only the fallback).
+them, and every history row has a **Reprint** control so the refusal is a fork
+rather than a dead end. ONE `certificateSerial()`, and `serial` is UNIQUE
+(migration `20260907000000`) so a collision is a 409, not two cards that verify
+as one. The full write-up — three rounds of this, each a half-fix — is in the
+engineering log.
+**A serial nobody can check is not a verification.** Every certificate prints
+"may be verified … by quoting the serial number", and for a long time no route,
+method or screen accepted one. `GET /certificates/verify/:serial` does:
+`runAsTenant` so RLS confines it, another school's serial 404s **in the same
+words** as an unknown one, audited because it names a pupil. Web: **Check a
+certificate** on `/certificates`.
+ID cards carry a REAL scannable QR (pdfkit vector squares, `qrcode`) encoding the
+member's global `uniqueId`. `GET /members/scan/:code` (`member.scan`, seeded to
+principal/school_admin/junior_admin/head_teacher/teacher/librarian/warden/
+head_warden) resolves it within the SCANNER's OWN school: `runAsTenant`, a
+foreign `uniqueId` is **404 not 403**, ROSTER-level fields only (name/role/
+admission#/class/status) and never medical/PII, every scan audited. Web desk at
+`/scan`. `POST /members/scan/:code {purpose}` writes an append-only `scan_event`
+(rls/88, INSERT+SELECT only, migration `20261003000000`) — CHECK_IN of a student
+ALSO marks them PRESENT in today's register (a deliberate central check-in that
+bypasses the per-class teacher restriction, `takenById` = scanner);
+CHECK_OUT/LIBRARY/EXAM log the movement only. GET stays side-effect-free.
+`member.scan` is a NEW permission: re-run the seed on a live DB or it 403s even
+for staff — the guard reads role→perms from the DB.
 
 ## The report card is a GRIDDED FORM, not a flowing document
 Laid out from a real Continuous Assessment Report: every section is a bordered
@@ -2570,7 +2563,7 @@ lengths, trial length, the maker-checker money threshold) to school owners. A
 stale number here is not a cosmetic bug — a proposal quoting a discount you no
 longer offer is a commitment a prospect will hold you to.
 - `apps/web/app/for-owners/page.tsx` — the PUBLIC marketing page. **Derives**
-  `CYCLE_DISCOUNT_PERCENT` and the `PLANS` count from `@sms/types`; never type a
+  `SESSION_DISCOUNT_PERCENT` and the `PLANS` count from `@sms/types`; never type a
   pricing number as prose here.
 - `docs/ONBOARDING-MANUAL.html` — the leader's manual, served at `/manual`
   (signed-in only). Static HTML, so it cannot import constants.

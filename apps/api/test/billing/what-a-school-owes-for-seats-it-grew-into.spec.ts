@@ -21,53 +21,60 @@
 // Naming it is the fix; converting it is not.
 // =============================================================================
 
-import { PLANS, PLAN_PRICING, accrueSeatArrearsMinor, computeTrueUpMinor } from "@sms/types";
+import { PLANS, PLAN_PRICING, accrueSeatArrearsMinor, computeTrueUpMinor, perSeatDailyMinor } from "@sms/types";
+
+/** A three-term school; other calendars are covered in billing-pricing.spec. */
+const TERMS = 3;
 
 const DAY = 24 * 3600 * 1000;
-const perSeatMonth = PLAN_PRICING.ENTERPRISE.perSeatMonthlyMinor;
+const perSeatSession = PLAN_PRICING.ENTERPRISE.perSeatSessionMinor;
 
 describe("400 seats paid, 500 more pupils a week later", () => {
   it("meters the extra seats from the day they arrive, not from the renewal", () => {
     // The whole point of the meter: delay must not discount the bill. Seven
     // days of 500 extra seats at the ENTERPRISE per-seat daily rate.
-    const week = accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 900, 7 * DAY);
-    expect(week).toBe(Math.round(500 * (perSeatMonth / 30) * 7));
+    const week = accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 900, 7 * DAY, "TERM", TERMS);
+    // AT THE RATE THIS SCHOOL IS ON. They bought TERMS, so the meter runs at the
+    // term price spread over the term's days — not at a notional monthly figure
+    // and not at the discounted session rate they did not buy.
+    const daily = perSeatDailyMinor(perSeatSession, "TERM", TERMS);
+    expect(week).toBe(Math.round(500 * daily * 7));
     expect(week).toBeGreaterThan(0);
   });
 
   it("keeps counting the longer nobody settles", () => {
     // A forward-only quote SHRINKS as the term runs down, so waiting was worth
     // money to the school. The meter runs the other way.
-    const week = accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 900, 7 * DAY);
-    const month = accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 900, 30 * DAY);
+    const week = accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 900, 7 * DAY, "TERM", TERMS);
+    const month = accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 900, 30 * DAY, "TERM", TERMS);
     expect(month).toBeGreaterThan(week);
   });
 
   it("charges nothing for a roll that SHRINKS", () => {
     // Billed seats are a floor. A school that loses pupils mid-period accrues
     // nothing and is credited nothing — the seats were bought.
-    expect(accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 250, 30 * DAY)).toBe(0);
+    expect(accrueSeatArrearsMinor(PLANS.ENTERPRISE, 400, 250, 30 * DAY, "TERM", TERMS)).toBe(0);
   });
 
   it("offers a top-up that covers only the time LEFT", () => {
     // The forward half. Paid for 400, carrying 900, 83 days left of a term.
     const end = new Date(Date.now() + 83 * DAY);
-    const q = computeTrueUpMinor(PLANS.ENTERPRISE, 400, 900, "TERM", end, new Date());
+    const q = computeTrueUpMinor(PLANS.ENTERPRISE, 400, 900, "TERM", TERMS, end, new Date());
     expect(q?.extraSeats).toBe(500);
     // Less than a whole term at 500 seats, because most of the term remains but
     // not all of it.
-    expect(q!.amountMinor).toBeLessThan(500 * perSeatMonth * 3);
+    expect(q!.amountMinor).toBeLessThan(500 * perSeatSession);
     expect(q!.amountMinor).toBeGreaterThan(0);
   });
 
   it("offers no top-up once the period is over — the meter carries it instead", () => {
     // Nothing forward to sell. The arrears are still owed and ride the renewal.
-    expect(computeTrueUpMinor(PLANS.ENTERPRISE, 400, 900, "TERM", new Date(Date.now() - DAY), new Date())).toBeNull();
+    expect(computeTrueUpMinor(PLANS.ENTERPRISE, 400, 900, "TERM", TERMS, new Date(Date.now() - DAY), new Date())).toBeNull();
   });
 
   it("offers no top-up for a school that never bought seats", () => {
     // A trial or a comped subscription has no billed seat count to grow past.
-    expect(computeTrueUpMinor(PLANS.ENTERPRISE, null, 900, "TERM", new Date(Date.now() + 30 * DAY), new Date())).toBeNull();
-    expect(accrueSeatArrearsMinor(PLANS.ENTERPRISE, null, 900, 30 * DAY)).toBe(0);
+    expect(computeTrueUpMinor(PLANS.ENTERPRISE, null, 900, "TERM", TERMS, new Date(Date.now() + 30 * DAY), new Date())).toBeNull();
+    expect(accrueSeatArrearsMinor(PLANS.ENTERPRISE, null, 900, 30 * DAY, "TERM", TERMS)).toBe(0);
   });
 });

@@ -107,7 +107,12 @@ function makeService(rows: Row[]) {
     { quote: jest.fn() } as never, // addonPricing
     { grantRewardsInTx: jest.fn() } as never, // referrals
     { record: jest.fn() } as never, // growth
-    { forSchool: jest.fn(async () => ({ currency: "NGN" })) } as never, // region
+    {
+      forSchool: jest.fn(async () => ({ currency: "NGN" })),
+      // The term divisor. A double that omits it does not fail as a missing
+      // fixture — it throws inside the service and reads as a code fault.
+      academicForSchool: jest.fn(async () => ({ calendarTemplate: "THREE_TERM" })),
+    } as never, // region
   );
   return { svc, tx };
 }

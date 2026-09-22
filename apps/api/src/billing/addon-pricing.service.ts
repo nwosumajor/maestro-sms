@@ -107,7 +107,7 @@ export class AddonPricingService implements OnModuleInit {
       currency,
       // `?? 0` is deliberately gone: a module the table does not price is a gap
       // to fill, and quoting it FREE is the one answer that costs money.
-      perSeatMonthlyMinor: table[module] ?? defaults?.[module] ?? 0,
+      perSeatSessionMinor: table[module] ?? defaults?.[module] ?? 0,
       isDefault: !overridden.has(`${module}:${currency}`),
     }));
   }
@@ -119,7 +119,7 @@ export class AddonPricingService implements OnModuleInit {
    * real module key, a module that is actually sold alone, a non-negative
    * integer, and under the ceiling.
    */
-  async update(p: Principal, rows: Array<{ module: string; currency: string; perSeatMonthlyMinor: number }>): Promise<ModuleAddonPriceDto[]> {
+  async update(p: Principal, rows: Array<{ module: string; currency: string; perSeatSessionMinor: number }>): Promise<ModuleAddonPriceDto[]> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Add-on pricing requires the privileged database configuration");
     const allowed = new Set<string>(sellableAlone());
@@ -127,10 +127,10 @@ export class AddonPricingService implements OnModuleInit {
       if (!isModuleKey(r.module) || !allowed.has(r.module)) {
         throw new BadRequestException(`${r.module} is not a module that can be bought on its own`);
       }
-      if (!Number.isInteger(r.perSeatMonthlyMinor) || r.perSeatMonthlyMinor < 0) {
+      if (!Number.isInteger(r.perSeatSessionMinor) || r.perSeatSessionMinor < 0) {
         throw new BadRequestException("A price must be a whole number of minor units, and never negative");
       }
-      if (r.perSeatMonthlyMinor > MAX_PER_SEAT_MINOR) {
+      if (r.perSeatSessionMinor > MAX_PER_SEAT_MINOR) {
         throw new BadRequestException("That price is beyond the sanity ceiling — check for an extra zero");
       }
       // WHAT THE PLATFORM SELLS IN, asked rather than named. This was
@@ -146,8 +146,8 @@ export class AddonPricingService implements OnModuleInit {
     for (const r of rows) {
       await client.moduleAddonPrice.upsert({
         where: { module_currency: { module: r.module, currency: r.currency } },
-        create: { module: r.module, currency: r.currency, perSeatMonthlyMinor: r.perSeatMonthlyMinor },
-        update: { perSeatMonthlyMinor: r.perSeatMonthlyMinor },
+        create: { module: r.module, currency: r.currency, perSeatSessionMinor: r.perSeatSessionMinor },
+        update: { perSeatSessionMinor: r.perSeatSessionMinor },
       });
     }
     await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
@@ -158,7 +158,7 @@ export class AddonPricingService implements OnModuleInit {
           entity: "module_addon_price",
           entityId: p.schoolId,
           schoolId: p.schoolId,
-          metadata: { rows: rows.map((r) => ({ module: r.module, currency: r.currency, perSeatMonthlyMinor: r.perSeatMonthlyMinor })) },
+          metadata: { rows: rows.map((r) => ({ module: r.module, currency: r.currency, perSeatSessionMinor: r.perSeatSessionMinor })) },
         },
         tx,
       ),
@@ -186,11 +186,11 @@ export class AddonPricingService implements OnModuleInit {
     // The APP role may read this table (rls/111), so no privileged client is
     // needed for the read path — quotes and renewals run on the ordinary client.
     const rows = await this.db.runAsTenantReadOnly({ schoolId: ZERO_UUID, userId: ZERO_UUID }, (tx) =>
-      tx.moduleAddonPrice.findMany(),
+      tx.moduleAddonPrice.findMany({ select: { module: true, currency: true, perSeatSessionMinor: true } }),
     );
-    for (const r of rows as Array<{ module: string; currency: string; perSeatMonthlyMinor: number }>) {
+    for (const r of rows as unknown as Array<{ module: string; currency: string; perSeatSessionMinor: number }>) {
       if (!isModuleKey(r.module)) continue;
-      (byCurrency[r.currency] ??= {})[r.module] = r.perSeatMonthlyMinor;
+      (byCurrency[r.currency] ??= {})[r.module] = r.perSeatSessionMinor;
       overridden.add(`${r.module}:${r.currency}`);
     }
     this.cache = { at: now, byCurrency, overridden };

@@ -2,73 +2,110 @@
 // Platform billing — pure pricing + effective-plan unit tests (no DB)
 // =============================================================================
 // Pins the two pure functions the whole revenue layer rests on:
-//   - computeSubscriptionPriceMinor: per-seat × cycle months, seat clamp
+//   - computeSubscriptionPriceMinor: the SESSION price is stored, the TERM price
+//     is derived from it and the school's own term count
 //   - effectivePlan: status-driven downgrade that NEVER mutates the purchased
 //     plan (the STANDARD floor while past-due beyond grace / canceled past period end)
 // =============================================================================
 
 import {
   BILLING_CYCLES,
-  CYCLE_MONTHS,
+  CALENDAR_TEMPLATES,
   PLANS,
   PLAN_PRICING,
+  SESSION_DISCOUNT_PERCENT,
   SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
-  applyCycleDiscountMinor,
-  computeSubscriptionGrossMinor,
   computeSubscriptionPriceMinor,
   effectivePlan,
+  perSeatCycleMinor,
+  termsInSession,
 } from "@sms/types";
 
+/** Every calendar shape the platform ships, as term counts. */
+const TERM_COUNTS = Object.keys(CALENDAR_TEMPLATES).map((k) => [k, termsInSession(k)] as const);
+
 describe("computeSubscriptionPriceMinor", () => {
-  it("is per-seat × monthly rate × cycle months, minus the commitment discount", () => {
+  it("charges the stored session price for a SESSION, whatever the calendar", () => {
     const seats = 400;
-    const monthly = PLAN_PRICING.STANDARD.perSeatMonthlyMinor;
-    // MONTH: 1 month, no discount.
-    expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.MONTH)).toBe(monthly * seats * 1);
-    // TERM: 3 months at 5% off.
-    expect(CYCLE_MONTHS.TERM).toBe(3);
-    expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.TERM)).toBe(
-      Math.round(monthly * seats * 3 * 0.95),
-    );
-    // YEAR: 9 billed months (3 terms) at 15% off.
-    expect(CYCLE_MONTHS.YEAR).toBe(9);
-    expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.YEAR)).toBe(
-      Math.round(monthly * seats * 9 * 0.85),
-    );
+    const session = PLAN_PRICING.STANDARD.perSeatSessionMinor;
+    // THE POINT OF ANCHORING ON THE SESSION: a year costs the same everywhere.
+    // A US two-semester school and a four-quarter school pay what a Nigerian
+    // three-term school pays, because a year is a year.
+    for (const [, terms] of TERM_COUNTS) {
+      expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.SESSION, terms)).toBe(session * seats);
+    }
   });
 
-  it("discount rounding is deterministic and integer (kobo/cents never fractional)", () => {
-    // 3 seats × ₦333.33 × 3 months × 0.95 exercises the rounding path.
-    const odd = { ...PLAN_PRICING, STANDARD: { perSeatMonthlyMinor: 33_333 } };
-    const gross = computeSubscriptionGrossMinor(PLANS.STANDARD, 3, BILLING_CYCLES.TERM, odd);
-    const net = computeSubscriptionPriceMinor(PLANS.STANDARD, 3, BILLING_CYCLES.TERM, odd);
-    expect(Number.isInteger(net)).toBe(true);
-    expect(net).toBe(Math.round(gross * 0.95));
-    expect(net).toBe(applyCycleDiscountMinor(gross, BILLING_CYCLES.TERM));
-  });
-
-  it("a year (9 months at 15% off) beats three terms (9 months at 5% off)", () => {
+  it("derives the TERM price so a whole year of terms is exactly 15% dearer — in EVERY calendar", () => {
     const seats = 250;
-    const threeTerm = 3 * computeSubscriptionPriceMinor(PLANS.PREMIUM, seats, BILLING_CYCLES.TERM);
-    const year = computeSubscriptionPriceMinor(PLANS.PREMIUM, seats, BILLING_CYCLES.YEAR);
-    expect(year).toBeLessThan(threeTerm);
+    // This is the promise the homepage makes, asserted as arithmetic rather
+    // than trusted to a constant somebody keeps true. It must hold for 2, 3 and
+    // 4 terms alike: a literal 3 anywhere in the derivation breaks two of them.
+    expect(TERM_COUNTS.length).toBeGreaterThanOrEqual(4); // the walk found something
+    for (const plan of Object.values(PLANS)) {
+      for (const [key, terms] of TERM_COUNTS) {
+        const perTerm = computeSubscriptionPriceMinor(plan, seats, BILLING_CYCLES.TERM, terms);
+        const perSession = computeSubscriptionPriceMinor(plan, seats, BILLING_CYCLES.SESSION, terms);
+        const wholeYearInTerms = perTerm * terms;
+        const saving = 1 - perSession / wholeYearInTerms;
+        // Within a kobo of 15% — the only slack is integer rounding per seat.
+        expect([key, plan, Math.abs(saving - SESSION_DISCOUNT_PERCENT / 100) < 0.0005]).toEqual([key, plan, true]);
+        expect(perSession).toBeLessThan(wholeYearInTerms);
+      }
+    }
+  });
+
+  it("a two-semester school pays MORE per term than a three-term school, and the same per year", () => {
+    // The failure this model exists to prevent: dividing a session by a hard
+    // coded 3 would bill a US school for a term it does not have.
+    const seats = 100;
+    const two = computeSubscriptionPriceMinor(PLANS.PREMIUM, seats, BILLING_CYCLES.TERM, 2);
+    const three = computeSubscriptionPriceMinor(PLANS.PREMIUM, seats, BILLING_CYCLES.TERM, 3);
+    const four = computeSubscriptionPriceMinor(PLANS.PREMIUM, seats, BILLING_CYCLES.TERM, 4);
+    expect(two).toBeGreaterThan(three);
+    expect(three).toBeGreaterThan(four);
+    // ...and each school's year still totals the same, bar rounding.
+    for (const [terms, perTerm] of [[2, two], [3, three], [4, four]] as const) {
+      expect(Math.abs(perTerm * terms - three * 3)).toBeLessThan(terms * seats);
+    }
+  });
+
+  it("prices are integers — kobo and cents are never fractional", () => {
+    for (const [, terms] of TERM_COUNTS) {
+      for (const cycle of Object.values(BILLING_CYCLES)) {
+        const v = computeSubscriptionPriceMinor(PLANS.ULTIMATE, 337, cycle, terms);
+        expect(Number.isInteger(v)).toBe(true);
+      }
+    }
+    // An odd session price exercises the rounding path in the term derivation.
+    const odd = { ...PLAN_PRICING, STANDARD: { perSeatSessionMinor: 33_333 } };
+    expect(Number.isInteger(computeSubscriptionPriceMinor(PLANS.STANDARD, 3, BILLING_CYCLES.TERM, 3, odd))).toBe(true);
   });
 
   it("clamps seats to at least 1 (never charges for 0 students)", () => {
-    const monthly = PLAN_PRICING.ENTERPRISE.perSeatMonthlyMinor;
-    expect(computeSubscriptionPriceMinor(PLANS.ENTERPRISE, 0, BILLING_CYCLES.MONTH)).toBe(monthly * 1);
-    expect(computeSubscriptionPriceMinor(PLANS.ENTERPRISE, -5, BILLING_CYCLES.MONTH)).toBe(monthly * 1);
+    const session = PLAN_PRICING.ENTERPRISE.perSeatSessionMinor;
+    expect(computeSubscriptionPriceMinor(PLANS.ENTERPRISE, 0, BILLING_CYCLES.SESSION, 3)).toBe(session);
+    expect(computeSubscriptionPriceMinor(PLANS.ENTERPRISE, -5, BILLING_CYCLES.SESSION, 3)).toBe(session);
   });
 
   it("higher tiers cost more per seat (STANDARD < PREMIUM < ULTIMATE < ENTERPRISE)", () => {
-    const std = PLAN_PRICING.STANDARD.perSeatMonthlyMinor;
-    const prem = PLAN_PRICING.PREMIUM.perSeatMonthlyMinor;
-    const ult = PLAN_PRICING.ULTIMATE.perSeatMonthlyMinor;
-    const ent = PLAN_PRICING.ENTERPRISE.perSeatMonthlyMinor;
+    const std = PLAN_PRICING.STANDARD.perSeatSessionMinor;
+    const prem = PLAN_PRICING.PREMIUM.perSeatSessionMinor;
+    const ult = PLAN_PRICING.ULTIMATE.perSeatSessionMinor;
+    const ent = PLAN_PRICING.ENTERPRISE.perSeatSessionMinor;
     expect(std).toBeLessThan(prem);
     expect(prem).toBeLessThan(ult);
     expect(ult).toBeLessThan(ent);
+  });
+
+  it("a term count of zero or nonsense cannot produce a free or infinite term", () => {
+    // Defensive: the divisor is clamped, so a school whose template somehow
+    // resolves to nothing is billed as a single-term school rather than
+    // dividing by zero and charging Infinity.
+    const v = perSeatCycleMinor(PLAN_PRICING.STANDARD.perSeatSessionMinor, BILLING_CYCLES.TERM, 0);
+    expect(Number.isFinite(v)).toBe(true);
+    expect(v).toBeGreaterThan(0);
   });
 });
 
@@ -161,16 +198,18 @@ describe("currency rules", () => {
     }
   });
 
-  it("keeps ENTERPRISE PRESENTING in dollars — display is not the same as sale", () => {
-    // The marketing surfaces still read defaultCurrencyFor; what changed is
-    // that the checkout no longer inherits that as a restriction.
-    expect(defaultCurrencyFor(PLANS.ENTERPRISE)).toBe(CURRENCIES.USD);
-    expect(planCurrencies(PLANS.ENTERPRISE)).toContain(CURRENCIES.NGN);
+  it("DISPLAYS every tier in one currency — a price list a reader can compare", () => {
+    // ENTERPRISE used to present in dollars beside three naira tiers, so the
+    // public list read as four prices in two currencies and the top tier was
+    // the one nobody could place against the others.
+    for (const plan of Object.values(PLANS)) {
+      expect([plan, defaultCurrencyFor(plan)]).toEqual([plan, CURRENCIES.NGN]);
+    }
   });
 
-  it("defaults: ₦ locally, $ for ENTERPRISE", () => {
-    expect(defaultCurrencyFor(PLANS.ENTERPRISE)).toBe(CURRENCIES.USD);
-    expect(defaultCurrencyFor(PLANS.STANDARD)).toBe(CURRENCIES.NGN);
+  it("but still SELLS every tier in every priced currency — display is not settlement", () => {
+    expect(planCurrencies(PLANS.ENTERPRISE)).toContain(CURRENCIES.NGN);
+    expect(planCurrencies(PLANS.ENTERPRISE)).toContain(CURRENCIES.USD);
   });
 
   it("separates what the platform can EXPRESS from what it can SELL IN", () => {
@@ -196,7 +235,7 @@ describe("currency rules", () => {
   it("USD pricing computes in cents with the USD table", () => {
     const seats = 500;
     expect(
-      computeSubscriptionPriceMinor(PLANS.ENTERPRISE, seats, BILLING_CYCLES.MONTH, PLAN_PRICING_USD),
-    ).toBe(PLAN_PRICING_USD.ENTERPRISE.perSeatMonthlyMinor * seats);
+      computeSubscriptionPriceMinor(PLANS.ENTERPRISE, seats, BILLING_CYCLES.SESSION, 3, PLAN_PRICING_USD),
+    ).toBe(PLAN_PRICING_USD.ENTERPRISE.perSeatSessionMinor * seats);
   });
 });

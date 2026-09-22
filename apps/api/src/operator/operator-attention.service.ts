@@ -24,7 +24,7 @@ import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common"
 import { Prisma } from "@sms/db";
 import {
   isCurrency,
-  monthlyRunRateMinor,
+  sessionRunRateMinor,
   DEFAULT_PLAN,
   PLAN_PRICING,
   PLATFORM_HOME_CURRENCY,
@@ -151,7 +151,7 @@ export class OperatorAttentionService {
       // sign — on the one figure this console exists to answer "what does this
       // cost me" with.
       const mrrCurrency = isCurrency(sub?.currency ?? "") ? (sub!.currency as string) : PLATFORM_HOME_CURRENCY;
-      const mrrMinor = monthlyRunRateMinor(pricing, effective, mrrCurrency, seats);
+      const mrrMinor = sessionRunRateMinor(pricing, effective, mrrCurrency, seats);
 
       const signals: AttentionSignalDto[] = [];
       const add = (kind: AttentionKind, detail: string, severity: 1 | 2 | 3) => {

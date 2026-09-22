@@ -54,7 +54,7 @@ describe("what the platform sells in is asked, never restated", () => {
     // complete — the refusal `PlanPricingService.effective` already makes.
     for (const c of planCurrencies(DEFAULT_PLAN)) {
       for (const plan of Object.values(PLANS)) {
-        expect(PLAN_PRICING_BY_CURRENCY[c]?.[plan]?.perSeatMonthlyMinor).toBeGreaterThan(0);
+        expect(PLAN_PRICING_BY_CURRENCY[c]?.[plan]?.perSeatSessionMinor).toBeGreaterThan(0);
       }
     }
   });

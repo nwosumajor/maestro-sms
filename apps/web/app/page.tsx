@@ -45,14 +45,14 @@ import {
 import {
   BILLING_CYCLES,
   CURRENCY_SYMBOL,
-  CYCLE_DISCOUNT_PERCENT,
-  CYCLE_MONTHS,
+  SESSION_DISCOUNT_PERCENT,
+  type BillingCycle,
   MODULE_CATALOG,
   PLANS as PLAN_KEYS,
   PLAN_MODULES,
   PLAN_PRICING_BY_CURRENCY,
   toMajor as minorToMajor,
-  applyCycleDiscountMinor,
+  perSeatCycleMinor,
   defaultCurrencyFor,
   type Plan,
   type PlanPriceDto,
@@ -270,6 +270,32 @@ function fmtAmount(n: number): string {
   return n.toLocaleString("en-NG", { minimumFractionDigits: n % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 });
 }
 
+/** The term count the PUBLIC price list assumes. This page is read before any
+ *  school exists, so there is no calendar to consult; the SESSION figure beside
+ *  it is exact for every school, being the stored price itself. */
+/**
+ * ALWAYS SERVER-RENDERED, so an operator's price change reaches the public price
+ * list on the very next view.
+ *
+ * `cache: "no-store"` on the pricing fetch is NOT enough on its own, and the
+ * reason is worth keeping: during `next build` the API is not running, the fetch
+ * THROWS, and the catch below swallows it — so Next never observes the no-store
+ * call that would have marked this route dynamic, prerenders it, and serves the
+ * FALLBACK prices from the full route cache with `s-maxage=31536000`. A year.
+ *
+ * It looked right only because the fallback happens to equal the shipped
+ * default, so the page was correct until the first time somebody changed a
+ * price — exactly the day it matters. Measured: the operator row read 500,000
+ * and the homepage kept showing 401,625 while `/api/public/plan-pricing`
+ * returned the new figure.
+ *
+ * `/for-owners` already had this line; the page carrying the actual price list
+ * did not.
+ */
+export const dynamic = "force-dynamic";
+
+const HOME_TERMS = 3;
+
 async function effectivePlans() {
   let rows: PlanPriceDto[] | null = null;
   try {
@@ -283,15 +309,18 @@ async function effectivePlans() {
     // API unreachable (e.g. static build) -> platform default pricing below.
   }
   return (Object.values(PLAN_KEYS) as Plan[]).map((plan) => {
-    // Each tier displays in its DEFAULT currency: ₦ locally, $ for ENTERPRISE
-    // (USD-only — it targets international schools). Rows are per-currency.
+    // ONE CURRENCY FOR THE WHOLE LIST — the platform's home currency, for every
+    // tier including ENTERPRISE. A public price list a reader cannot compare
+    // across is not a price list, and ENTERPRISE in dollars beside three naira
+    // tiers was exactly that. What a school is CHARGED in is resolved from its
+    // own region at checkout, which is a different question entirely.
     const currency = defaultCurrencyFor(plan);
     const row = rows?.find((r) => r.plan === plan && r.currency === currency);
     // The pricing table is PARTIAL — a currency the platform can express is not
     // automatically one it has prices for. Falls back to the naira table rather
     // than rendering a blank price on the public page.
-    const fallback = (PLAN_PRICING_BY_CURRENCY[currency] ?? PLAN_PRICING_BY_CURRENCY.NGN)[plan].perSeatMonthlyMinor;
-    const perSeatMinor = row?.perSeatMonthlyMinor ?? fallback;
+    const fallback = (PLAN_PRICING_BY_CURRENCY[currency] ?? PLAN_PRICING_BY_CURRENCY.NGN)[plan].perSeatSessionMinor;
+    const perSeatMinor = row?.perSeatSessionMinor ?? fallback;
     // Cycle marketing: the SAME discount rule checkout charges with (one source).
     // Scaled by the CURRENCY, not by 100 — the shared helper, so this page cannot
     // drift from what checkout charges.
@@ -299,14 +328,18 @@ async function effectivePlans() {
     // result is already exact. `Math.round(x * 100) / 100` re-imposed two
     // decimal places on a currency that may have none.
     const toMajor = (minor: number) => minorToMajor(minor, currency);
-    const perStudent = (cycle: keyof typeof CYCLE_MONTHS) =>
-      toMajor(applyCycleDiscountMinor(perSeatMinor * CYCLE_MONTHS[cycle], cycle));
+    // THE PUBLIC LIST ASSUMES THE PLATFORM'S OWN CALENDAR, because this page is
+    // read before any school exists and there is no template to consult. The
+    // session figure is exact for everyone — it is the stored price — and only
+    // the per-term figure varies by calendar, which the quote at checkout
+    // resolves from the school's own template.
+    const perStudent = (cycle: BillingCycle) => toMajor(perSeatCycleMinor(perSeatMinor, cycle, HOME_TERMS));
     return {
       name: plan.charAt(0) + plan.slice(1).toLowerCase(),
       symbol: CURRENCY_SYMBOL[currency],
-      price: toMajor(perSeatMinor),
+      price: perStudent(BILLING_CYCLES.TERM),
       termPrice: perStudent(BILLING_CYCLES.TERM),
-      yearPrice: perStudent(BILLING_CYCLES.YEAR),
+      yearPrice: perStudent(BILLING_CYCLES.SESSION),
       modules: row?.modulesIncluded ?? PLAN_MODULES[plan].length,
       ...PLAN_META[plan],
     };
@@ -825,7 +858,7 @@ async function Plans() {
             Pay for the students you have, on the plan that fits.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-            Billed per active student, per month. Move up a tier the moment you need more — your school keeps
+            Billed per active student, per term. Move up a tier the moment you need more — your school keeps
             everything it already had.
           </p>
           <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-brand2/30 bg-brand2/10 px-3 py-1 text-xs font-medium text-brand2">
@@ -860,13 +893,12 @@ async function Plans() {
               <p className="mt-1 text-xs text-muted-foreground">{p.tagline}</p>
               <p className="mt-5 flex items-baseline gap-1">
                 <span className="text-xs text-muted-foreground">{p.symbol}</span>
-                <span className="tnum font-display text-3xl font-semibold tracking-tight">{p.price}</span>
-                <span className="text-xs text-muted-foreground">/student/mo</span>
+                <span className="tnum font-display text-3xl font-semibold tracking-tight">{fmtAmount(p.price)}</span>
+                <span className="text-xs text-muted-foreground">/student/term</span>
               </p>
               <p className="tnum mt-2 text-xs text-muted-foreground">
-                {p.symbol}{fmtAmount(p.termPrice)}/term <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {CYCLE_DISCOUNT_PERCENT.TERM}%)</span>
-                {" · "}
-                {p.symbol}{fmtAmount(p.yearPrice)}/year <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {CYCLE_DISCOUNT_PERCENT.YEAR}%)</span>
+                {p.symbol}{fmtAmount(p.yearPrice)}/student/session{" "}
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {SESSION_DISCOUNT_PERCENT}%)</span>
               </p>
               <p className="tnum mt-3 text-sm text-muted-foreground">
                 <span className="font-semibold text-foreground">{p.modules}</span> modules included
@@ -880,10 +912,10 @@ async function Plans() {
           ))}
         </div>
         <p className="mt-6 text-xs text-muted-foreground">
-          Standard, Premium and Ultimate are priced in Nigerian naira (card payments via Paystack); Enterprise
-          is billed in US dollars (Stripe) for schools worldwide. Pay monthly, per term (3 months — save 5%)
-          or per year (3 terms / 9 months — save 15%). No setup fees, change plans any time, and your data is
-          never deleted — even if a payment lapses, your school keeps running on the core modules until you renew.
+          Prices are shown in Nigerian naira; your school is charged in its own currency at checkout. Pay per
+          term, or for the whole academic session and save {SESSION_DISCOUNT_PERCENT}%. No setup fees, change
+          plans any time, and your data is never deleted — even if a payment lapses, your school keeps running
+          on the core modules until you renew.
         </p>
       </div>
     </section>
@@ -1102,7 +1134,7 @@ function Steps() {
 const FAQS: { q: string; a: string }[] = [
   {
     q: "What happens when the 30-day trial ends?",
-    a: "You pay per active student — monthly, per term (3 months, 5% off) or per year (9 months, 15% off) — from inside the app, by card, and you can save a card to renew automatically. If you don't pay, nothing is deleted: after a grace period (7 days by default) your school simply runs on the core Standard modules until payment, and your full plan returns the instant you pay.",
+    a: `You pay per active student — per term, or for the whole academic session at ${SESSION_DISCOUNT_PERCENT}% less — from inside the app, by card, and you can save a card to renew automatically. A session is your school's own academic year, so the term price is that figure divided by however many terms your year has. If you don't pay, nothing is deleted: after a grace period (7 days by default) your school simply runs on the core Standard modules until payment, and your full plan returns the instant you pay.`,
   },
   {
     q: "Where does parents' fee money go?",

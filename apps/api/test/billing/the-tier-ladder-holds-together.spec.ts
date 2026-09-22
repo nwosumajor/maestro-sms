@@ -95,8 +95,8 @@ describe("the tier ladder", () => {
 
   it("charges more for more", () => {
     for (let i = 1; i < LADDER.length; i++) {
-      const lower = PLAN_PRICING[LADDER[i - 1]].perSeatMonthlyMinor;
-      const higher = PLAN_PRICING[LADDER[i]].perSeatMonthlyMinor;
+      const lower = PLAN_PRICING[LADDER[i - 1]].perSeatSessionMinor;
+      const higher = PLAN_PRICING[LADDER[i]].perSeatSessionMinor;
       expect([LADDER[i], higher > lower]).toEqual([LADDER[i], true]);
     }
   });
