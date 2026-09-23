@@ -44,6 +44,7 @@ export default async function SecurityPage() {
           grants={grants ?? []}
           userId={user.id}
           canApprove={hasPermission(user.permissions, "security.elevation.approve")}
+          myPermissions={user.permissions}
         />
 
         {/* The same authority as approving someone's request, pointed the other

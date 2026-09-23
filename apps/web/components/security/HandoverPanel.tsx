@@ -21,20 +21,21 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UserPicker } from "@/components/people/UserPicker";
 import { readApiError } from "@/lib/api-error";
+import { NON_ELEVATABLE_PERMISSIONS } from "@sms/types";
 
-/** Kept in step with NON_ELEVATABLE_PERMISSIONS on the server. Shown as disabled
- *  rather than hidden: "you cannot lend this" is more useful than silence when
- *  somebody goes looking for it. */
-const NEVER_LENDABLE = new Set([
-  "fee.approve",
-  "hr.salary.approve",
-  "rbac.manage",
-  "security.elevation.approve",
-  "billing.manage",
-  "billing.dunning.run",
-  "scholarship.admin",
-  "game.ultimate.admin",
-]);
+/**
+ * THE SERVER'S OWN SET, imported — not a copy kept in step by hand.
+ *
+ * This was a second list with a comment promising it matched
+ * `NON_ELEVATABLE_PERMISSIONS`. The two happened to agree, which is the most
+ * dangerous state for a duplicated control: nothing was wrong yet, and the day
+ * somebody added a ninth maker-checker authority the UI would have gone on
+ * offering it — a handover that always fails, or worse, one the server accepts
+ * because the divergence ran the other way. A control written twice is right
+ * once. Named rather than hidden, as before: "you cannot lend this" is more use
+ * than silence to somebody looking for it.
+ */
+const NEVER_LENDABLE = NON_ELEVATABLE_PERMISSIONS;
 
 export function HandoverPanel({ myPermissions }: { myPermissions: string[] }) {
   const router = useRouter();
