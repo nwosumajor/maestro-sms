@@ -52,11 +52,21 @@ export function StudentPicker({
    * from outside, e.g. a saved draft), so it survives both the cleared query and
    * a re-render.
    */
+  // A DEFAULT `[]` IS A NEW ARRAY EVERY RENDER and it sits in the search
+  // effect's dependency list — the same fix, same reason, same sweep as
+  // UserPicker. Frozen so the effect re-runs when the seed CHANGES, not when
+  // the component merely re-renders.
+  const seedRef = React.useRef(seed);
+  if (seed.length !== seedRef.current.length || seed.some((x, i) => x.id !== seedRef.current[i]?.id)) {
+    seedRef.current = seed;
+  }
+  const stableSeed = seedRef.current;
+
   const [picked, setPicked] = React.useState<PickedStudent | null>(null);
   const selected = React.useMemo(() => {
     if (picked && picked.id === value) return picked;
-    return [...seed, ...(results ?? [])].find((s) => s.id === value) ?? null;
-  }, [picked, seed, results, value]);
+    return [...stableSeed, ...(results ?? [])].find((s) => s.id === value) ?? null;
+  }, [picked, stableSeed, results, value]);
 
   // A parent clearing the field must clear the remembered name with it.
   React.useEffect(() => {
@@ -66,11 +76,26 @@ export function StudentPicker({
   React.useEffect(() => {
     const needle = q.trim();
     if (!needle) {
-      setResults(null);
-      return;
+      // A BLANK BOX IS NOT A LIST. Callers that pass no seed — the certificate
+      // issuer and the document browser among them — showed NOTHING until the
+      // user guessed a spelling. Opening it loads the first scoped page, so the
+      // control offers pupils rather than demanding recall.
+      if (!open || stableSeed.length > 0) {
+        setResults(null);
+        return;
+      }
+      let alive = true;
+      setBusy(true);
+      void fetch(`/api/sms/students`)
+        .then(async (res) => {
+          if (!alive) return;
+          setResults(res.ok ? ((await res.json()) as PickedStudent[]) : []);
+        })
+        .finally(() => { if (alive) setBusy(false); });
+      return () => { alive = false; };
     }
     // Local first: if the seed already answers it, do not ask the server.
-    const local = seed.filter((s) => s.name.toLowerCase().includes(needle.toLowerCase()));
+    const local = stableSeed.filter((s) => s.name.toLowerCase().includes(needle.toLowerCase()));
     if (local.length > 0) {
       setResults(local);
       return;
@@ -88,9 +113,9 @@ export function StudentPicker({
       live = false;
       clearTimeout(t);
     };
-  }, [q, seed]);
+  }, [q, stableSeed, open]);
 
-  const list = results ?? seed.slice(0, 20);
+  const list = results ?? stableSeed.slice(0, 20);
 
   return (
     <div className={`relative ${className}`}>
@@ -131,7 +156,7 @@ export function StudentPicker({
         </button>
       )}
 
-      {open && (q.trim() || seed.length > 0) && (
+      {open && (q.trim() || stableSeed.length > 0 || (results?.length ?? 0) > 0 || busy) && (
         <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-card shadow-lg">
           {busy && <li className="px-3 py-2 text-xs text-muted-foreground">Searching…</li>}
           {!busy &&

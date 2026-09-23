@@ -34,6 +34,15 @@ export function UserPicker({
   className?: string;
   disabled?: boolean;
 }) {
+  // A DEFAULT `[]` IS A NEW ARRAY ON EVERY RENDER, and `seed` sits in the search
+  // effect's dependency list — so the effect re-ran on every render and its own
+  // cleanup could discard the fetch already in flight. Frozen once here.
+  const seedRef = React.useRef(seed);
+  if (seed.length !== seedRef.current.length || seed.some((u, i) => u.id !== seedRef.current[i]?.id)) {
+    seedRef.current = seed;
+  }
+  const stableSeed = seedRef.current;
+
   const [q, setQ] = React.useState("");
   const [results, setResults] = React.useState<PickedUser[] | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -49,8 +58,8 @@ export function UserPicker({
   const [picked, setPicked] = React.useState<PickedUser | null>(null);
   const selected = React.useMemo(() => {
     if (picked && picked.id === value) return picked;
-    return [...seed, ...(results ?? [])].find((u) => u.id === value) ?? null;
-  }, [picked, seed, results, value]);
+    return [...stableSeed, ...(results ?? [])].find((u) => u.id === value) ?? null;
+  }, [picked, stableSeed, results, value]);
 
   React.useEffect(() => {
     if (!value) setPicked(null);
@@ -59,10 +68,26 @@ export function UserPicker({
   React.useEffect(() => {
     const needle = q.trim();
     if (!needle) {
-      setResults(null);
-      return;
+      // A BLANK BOX IS NOT A LIST. With no seed this control showed NOTHING
+      // until the user guessed a name — an open input where a list belongs, on
+      // a form whose whole job is "choose a colleague". Opening it now loads the
+      // first page of the directory, so the common case is picking from what is
+      // offered rather than recalling how somebody's name is spelled.
+      if (!open || stableSeed.length > 0) {
+        setResults(null);
+        return;
+      }
+      let alive = true;
+      setBusy(true);
+      void fetch(`/api/sms/users?kind=${kind}`)
+        .then(async (res) => {
+          if (!alive) return;
+          setResults(res.ok ? ((await res.json()) as PickedUser[]) : []);
+        })
+        .finally(() => { if (alive) setBusy(false); });
+      return () => { alive = false; };
     }
-    const local = seed.filter((u) => u.name.toLowerCase().includes(needle.toLowerCase()));
+    const local = stableSeed.filter((u) => u.name.toLowerCase().includes(needle.toLowerCase()));
     if (local.length > 0) {
       setResults(local);
       return;
@@ -80,9 +105,9 @@ export function UserPicker({
       live = false;
       clearTimeout(t);
     };
-  }, [q, seed, kind]);
+  }, [q, stableSeed, kind, open]);
 
-  const list = results ?? seed.slice(0, 20);
+  const list = results ?? stableSeed.slice(0, 20);
 
   return (
     <div className={`relative ${className}`}>
@@ -120,7 +145,7 @@ export function UserPicker({
         </button>
       )}
 
-      {open && (q.trim() || seed.length > 0) && (
+      {open && (q.trim() || stableSeed.length > 0 || (results?.length ?? 0) > 0 || busy) && (
         <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-card shadow-lg">
           {busy && <li className="px-3 py-2 text-xs text-muted-foreground">Searching…</li>}
           {!busy &&

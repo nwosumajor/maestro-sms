@@ -75,6 +75,7 @@ export * from "./permissions/scholarship";
 export * from "./permissions/meeting";
 export * from "./permissions/exam";
 export * from "./permissions/all";
+export * from "./permissions/catalogue";
 export * from "./dto/common";
 export * from "./dto/scholarship";
 export * from "./dto/fees";
