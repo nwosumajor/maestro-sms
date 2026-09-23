@@ -87,7 +87,7 @@ export default async function AdminPage() {
     { label: "Manage classes", href: "/classes", perm: "class.write", desc: "Create classes, enroll, assign" },
     { label: "Edit student records", href: "/students", perm: "student.profile.write", desc: "Profile, contacts, medical" },
     { label: "Audit log", href: "/admin/audit", perm: "security.audit.read", desc: "Mutations + sensitive access" },
-    { label: "Access elevation", href: "/admin/security", perm: "security.elevation.request", desc: "Just-in-time privileges" },
+    { label: "Security (Access Elevation)", href: "/admin/security", perm: "security.elevation.request", desc: "Just-in-time privileges" },
     { label: "Recertification", href: "/admin/recertification", perm: "security.audit.read", desc: "Roles, assignments, anomalies" },
     { label: "Erasure requests", href: "/admin/privacy", perm: "privacy.erasure.review", desc: "NDPR right-to-erasure review" },
     { label: "Data protection", href: "/admin/compliance", perm: "privacy.compliance.manage", desc: "Regime, DPO, breach register" },

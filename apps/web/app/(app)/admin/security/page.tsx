@@ -24,7 +24,7 @@ export default async function SecurityPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <PageHeader title={<>Access elevation</>} subtitle={<>Time-boxed privilege grants, in both directions: a colleague REQUESTS one and a
+          <PageHeader title={<>Security (Access Elevation)</>} subtitle={<>Time-boxed privilege grants, in both directions: a colleague REQUESTS one and a
               different senior approves, or a senior HANDS OVER a duty they already hold. Separation of
               duties either way; every step is audit-logged.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
