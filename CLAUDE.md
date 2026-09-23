@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **383 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **384 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -222,8 +222,9 @@ evidence live beside it, and are worth opening rather than re-deriving:
   push), MTN MoMo (Collections) and Airtel Money (Airtel Africa Open API) — all
   three implemented. `MOBILE_MONEY_COVERAGE` in `@sms/types` is a DATA table — a new
   country is a row, never a branch — and the school's REGION picks the rails.
-  // GOTCHA #0, and the reason `*-wire.spec.ts` exists: **NO PROVIDER SANDBOX HAS
-  EVER BEEN EXERCISED** (no credentials, no public callback URL). The rails are
+  // GOTCHA #0, and the reason `*-wire.spec.ts` exists: **NO MOBILE-MONEY SANDBOX
+  HAS EVER BEEN EXERCISED** (no credentials, no public callback URL) — Paystack's
+  has, for the OUTBOUND half only; see Online payments. These three rails are
   instead pinned against each provider's PUBLISHED contract, using their real
   documented callback bodies. Doing that found six money-losing defects that every
   unit test had passed over, because a fixture shaped like our own code only proves
@@ -703,8 +704,14 @@ report-card scope, `generate(...,termId)` folds them into a Remarks section, and
 are scaffolded (Paystack via `fetch`: `POST /invoices/:id/pay/init` → hosted
 checkout; `@Public` HMAC-SHA512-verified webhook → records a POSTED payment on
 charge.success; gracefully 503-disabled when `PAYSTACK_SECRET_KEY` is unset —
-the disabled/public paths are verified, but live charging needs real creds +
-outbound network). **Chargeback/dispute handling is BUILT — BOTH gateways**
+the disabled/public paths are verified). **PAYSTACK'S SANDBOX HAS NOW BEEN
+EXERCISED — the OUTBOUND half, real `sk_test` account** (2026-09-23): the PROVIDER
+echoed back `currency: NGN` and the exact amount (the guard that once let a GHS
+invoice charge in naira — a wire test proves we SEND it, only the provider proves
+the rail HEARD it); a USD invoice was refused 503 naming the way out, never a
+silent fallback; a test card charged `success`; verify-on-return settled it PAID;
+three replays answered `already_recorded`, one payment. STILL UNPROVEN: webhook
+DELIVERY and signed bodies (`PUBLIC_WEB_URL` is localhost), Stripe, all 3 mobile rails. **Chargeback/dispute handling is BUILT — BOTH gateways**
 (`apps/api/src/fees/disputes.*` in its own `DisputesModule` — imported by
 FeesModule AND BillingModule, imports neither; `payment_dispute` table,
 migration `20260913000000`, RLS `78` — no DELETE, financial record). ONE
@@ -910,7 +917,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **383 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **384 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.

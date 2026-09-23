@@ -18872,3 +18872,50 @@ both cycles; that the figure is strictly greater than the bare tier (so dropping
 the argument cannot pass arithmetically); that the gap is the add-on's own share
 of the cycle rather than some other number; and that a module the TIER already
 includes is still never charged twice.
+
+### The first provider sandbox this platform has ever touched
+
+Asked to run the provider sandbox test. It could be run, for one rail: a
+`sk_test` Paystack key was already in `infrastructure/.env` and the API container
+has outbound network. Stripe, M-Pesa, MTN and Airtel have no credentials, so they
+remain pinned only against published contracts.
+
+WHAT WAS EXERCISED, all through OUR OWN code rather than hand-rolled calls,
+because the point is to test the product and not a fetch:
+
+    key authenticates              200, real test account, sk_test (no real money)
+    POST /invoices/:id/pay/init    -> https://checkout.paystack.com/tsrtdp1rn2lfpvn
+    provider's own verify says     currency NGN, amount 100000, metadata intact
+    USD invoice                    503, refused, naming the way out
+    POST /charge (test card)       status success, gateway_response Successful
+    POST .../pay/confirm           {"status":"posted"} -> invoice PAID
+    the same confirm, 3x more      already_recorded, still ONE payment
+
+THE ONE THAT MATTERED. The provider reporting back `currency: NGN` is the guard
+whose absence once charged a Ghanaian school's GHS 5,000 invoice as NGN 5,000 —
+about a tenth — while settlement marked it PAID. A wire test proves we SEND the
+field; only the provider echoing it back proves the rail HEARD it. It did.
+
+AND THE REFUSAL IS A GOOD REFUSAL, on a real account that genuinely cannot settle
+USD: "This Paystack account cannot charge in USD. Enable that currency on the
+Paystack dashboard, or collect this payment by mobile money." No silent fallback
+to the account's own currency, and the way out is named.
+
+IDEMPOTENCY ON A REAL CHARGE, which is different from idempotency on a fixture:
+three replays of a genuinely provider-confirmed settlement each answered
+`already_recorded` and left one payment of 100,000 against a 100,000 invoice.
+Separately proven at the database level by six CONCURRENT identical inserts —
+1 committed, 5 rejected on `payment_invoiceId_reference_key`, one payment posted.
+
+// STILL UNPROVEN, and worth being exact about because the claim is easy to
+// overstate: the INBOUND half. `PUBLIC_WEB_URL` is localhost, so Paystack cannot
+// deliver a webhook here. Settlement was driven through verify-on-return, which
+// ASKS the gateway and posts from its answer — the strongest path available
+// without a public URL, but not the same as a Paystack-SIGNED body arriving at
+// our endpoint, nor its retry behaviour. That needs a tunnel or a deployed
+// environment. Stripe and the three mobile rails remain entirely unexercised.
+
+// GOTCHA for whoever runs this next: the settled invoice is a REAL financial
+// record in the demo school, left PAID rather than deleted, because the ledger
+// is append-only by design and a probe must not be the one exception. Reverse it
+// with a refund entry if it matters; do not DELETE the row.
