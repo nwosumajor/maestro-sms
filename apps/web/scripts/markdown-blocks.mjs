@@ -21,7 +21,7 @@
  * @typedef {{type:"heading",level:number,text:string,id:string}
  *   | {type:"para",text:string}
  *   | {type:"code",text:string}
- *   | {type:"list",ordered:boolean,items:string[]}
+ *   | {type:"list",ordered:boolean,start:number,items:string[]}
  *   | {type:"table",head:string[]|null,rows:string[][]}
  *   | {type:"quote",text:string}
  *   | {type:"rule"}} Block
@@ -53,11 +53,17 @@ export function parseMarkdown(md) {
   while (i < lines.length) {
     const line = lines[i];
 
-    if (line.startsWith("```")) {
+    // A fence may be INDENTED — the commands for a numbered step sit inside that
+    // step — and its body loses exactly the fence's own indentation, so the
+    // command a reader copies is the command that was written.
+    const fence = line.match(/^(\s*)```/);
+    if (fence) {
+      const indent = fence[1].length;
       const body = [];
       i += 1;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        body.push(lines[i]);
+      while (i < lines.length && !/^\s*```/.test(lines[i])) {
+        const l = lines[i];
+        body.push(l.slice(Math.min(indent, l.length - l.trimStart().length)));
         i += 1;
       }
       i += 1;
@@ -93,17 +99,36 @@ export function parseMarkdown(md) {
       continue;
     }
 
-    if (/^\s*[-*]\s+/.test(line) || /^\s*\d+\.\s+/.test(line)) {
+    // A LIST ITEM IS NOT A LINE. These documents wrap their steps, and a step's
+    // second line used to fall out of the list as a separate paragraph — so the
+    // next step began a NEW list, and every numbered procedure rendered as
+    // "1. 1. 1.", in the page and the PDF alike. An indented line continues the
+    // item above it; a blank line continues the list if the list resumes after
+    // it. A code block inside a step ends the list there, and the list that
+    // follows it keeps the number the markdown gave it (`start`).
+    const itemRe = /^\s*(\d+)\.\s+|^\s*[-*]\s+/;
+    if (itemRe.test(line)) {
       const ordered = /^\s*\d+\.\s+/.test(line);
+      const sameKind = (l) => (ordered ? /^\s*\d+\.\s+/.test(l) : /^\s*[-*]\s+/.test(l));
+      const continuation = (l) => /^\s{2,}\S/.test(l) && !sameKind(l) && !/^\s*```/.test(l);
+      const start = ordered ? Number(line.match(/^\s*(\d+)\./)[1]) : 1;
       const items = [];
-      while (
-        i < lines.length &&
-        (ordered ? /^\s*\d+\.\s+/.test(lines[i]) : /^\s*[-*]\s+/.test(lines[i]))
-      ) {
-        items.push(lines[i].replace(ordered ? /^\s*\d+\.\s+/ : /^\s*[-*]\s+/, ""));
-        i += 1;
+      while (i < lines.length) {
+        const l = lines[i];
+        if (sameKind(l)) {
+          items.push(l.replace(ordered ? /^\s*\d+\.\s+/ : /^\s*[-*]\s+/, ""));
+          i += 1;
+        } else if (items.length && continuation(l)) {
+          items[items.length - 1] += " " + l.trim();
+          i += 1;
+        } else if (l.trim() === "") {
+          let j = i;
+          while (j < lines.length && lines[j].trim() === "") j += 1;
+          if (j < lines.length && (sameKind(lines[j]) || continuation(lines[j]))) i = j;
+          else break;
+        } else break;
       }
-      blocks.push({ type: "list", ordered, items });
+      blocks.push({ type: "list", ordered, start, items });
       continue;
     }
 
@@ -132,7 +157,7 @@ export function parseMarkdown(md) {
     while (
       i < lines.length &&
       lines[i].trim() !== "" &&
-      !lines[i].startsWith("```") &&
+      !/^\s*```/.test(lines[i]) &&
       !lines[i].startsWith("|") &&
       !lines[i].startsWith(">") &&
       !/^#{1,6}\s/.test(lines[i]) &&

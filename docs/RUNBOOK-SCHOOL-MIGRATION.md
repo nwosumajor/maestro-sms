@@ -5,6 +5,7 @@
 
 A migration is mostly conversation and spreadsheet work. The uploading is the
 short part. This runbook is ordered the way the work actually happens.
+**§11 is the reverse:** a school leaving, and the purge you should rarely run.
 
 ---
 
@@ -311,6 +312,167 @@ In this order:
    screens" sheet turns §1 from a conversation into an instruction.
 
 Do the first few by hand, so the tooling is shaped by what actually hurt.
+
+---
+
+## 11. When a school leaves
+
+The mirror of everything above. **The default is to DISABLE the school, not to
+delete it.** A disabled school blocks every login, is skipped by the dunning
+sweep, costs only its storage, and comes back with one switch. A purge is
+irreversible short of restoring the whole database, and it destroys records
+other people are owed: the school's financial ledger, its audit trail, and the
+platform's own billing history for that school.
+
+### 11.1 In this order, while the school can still sign in
+
+Disabling blocks the school's own staff too, and several of these steps are
+theirs to take. Do them first.
+
+1. **Agree it in writing.** The leaving date; what the school takes with it;
+   whether they are asking for their data to be *erased* (they are the data
+   controller, so that is their instruction to give, in writing); and how long
+   records must be kept first. The school's own figure for leavers is
+   `school.leaverRetentionYears`; statutory retention for financial records is
+   set by the law of the school's country, not by this platform. Where the two
+   disagree, keep the longer.
+2. **The school takes its archive.** A principal or school_admin opens
+   **Admin → long-term archives** and takes a **whole-school** export (no
+   session chosen), then downloads it (`POST /privacy/archives`, then
+   `POST /privacy/archives/:id/download`, both step-up). Check that the file
+   opens before you go on. The archive is stored under the school's own storage
+   prefix, so **§11.3 would delete it**: the downloaded copy the school holds
+   is the record.
+3. **Settle the money.** Card payments taken before the school registered a
+   settlement bank sit in the platform's gateway account. Pay the balance
+   shown on the school's settlement card at the bank, then record it with
+   `POST /operator/tenants/:schoolId/settlement-release`. That route records a
+   transfer; it does not make one.
+4. **Stop future charges.** The school turns saved-card renewal off on
+   **/billing** (`PUT /billing/auto-renew {"enabled": false}`). Disabling in
+   step 5 also stops it, because the dunning sweep skips a disabled school,
+   but do both: the school should see the switch go off.
+5. **Disable.** `PUT /operator/tenants/:schoolId/status {"status": "DISABLED"}`
+   (`platform.tenants.status`, step-up). Confirm a staff login now fails.
+
+Most departures stop here.
+
+### 11.2 Purging the database rows — only when §11.1 step 1 requires it
+
+Nothing in the product hard-deletes a school. A purge is SQL, run by a person,
+as the **privileged** role: the app role has no DELETE on financial tables, by
+design.
+
+1. **Take a fresh backup first** (`RUNBOOK-BACKUP-RESTORE.md`). Restoring from
+   it later means restoring the whole database, but without it there is no
+   route back at all.
+2. **Export the platform's own records for the school.** The purge below
+   deletes every row carrying the school's `schoolId`, and that includes
+   `platform_subscription_payment`, the platform's revenue record for that
+   school, which the platform's own accounts still need:
+   ```
+   \copy (SELECT * FROM platform_subscription_payment WHERE "schoolId" = '<id>') TO 'school-<id>-platform-payments.csv' CSV HEADER
+   ```
+3. **Build temporary indexes on every foreign key that has none.** Without
+   them, each deleted user makes Postgres scan each referencing table once, and
+   the delete runs for hours. The generator derives the list from the catalogue
+   and **must print a non-zero count**. An index step whose output nobody
+   read, and which had built nothing, is how one purge ran 2 hours without
+   committing.
+   ```
+   SELECT format('CREATE INDEX IF NOT EXISTS %I ON %s (%I);',
+                 'purge_tmp_' || c.relname || '_' || a.attname,
+                 con.conrelid::regclass::text, a.attname)
+   FROM pg_constraint con
+   JOIN pg_class c ON c.oid = con.conrelid
+   JOIN LATERAL unnest(con.conkey) k(attnum) ON true
+   JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+   WHERE con.contype = 'f' AND con.conparentid = 0
+     AND con.confrelid IN ('"user"'::regclass, 'invoice'::regclass, 'class'::regclass, 'school'::regclass)
+     AND array_length(con.conkey, 1) = 1
+     AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = con.conrelid AND i.indkey[0] = a.attnum)
+   \gexec
+   SELECT count(*) AS purge_indexes FROM pg_indexes WHERE indexname LIKE 'purge_tmp_%';
+   ```
+4. **Delete the school's rows, then its users, then the school**, in one
+   transaction. This walks every table that has a `schoolId` column, so it
+   also catches rows written after this runbook was last edited, and retries
+   past foreign-key order:
+   ```
+   DO $$
+   DECLARE sid uuid := '<id>'; t text; n bigint; pass int := 0; blocked bigint;
+   BEGIN
+     LOOP
+       pass := pass + 1; blocked := 0;
+       FOR t IN SELECT c.relname FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+                WHERE ns.nspname = 'public' AND c.relkind IN ('r','p') AND NOT c.relispartition
+                  AND c.relname NOT IN ('user','school')
+                  AND EXISTS (SELECT 1 FROM information_schema.columns col
+                              WHERE col.table_name = c.relname AND col.column_name = 'schoolId')
+       LOOP
+         BEGIN
+           EXECUTE format('DELETE FROM %I WHERE "schoolId" = $1', t) USING sid;
+         EXCEPTION WHEN foreign_key_violation THEN
+           EXECUTE format('SELECT count(*) FROM %I WHERE "schoolId" = $1', t) INTO n USING sid;
+           blocked := blocked + n;
+         END;
+       END LOOP;
+       EXIT WHEN blocked = 0 OR pass > 8;
+     END LOOP;
+     IF blocked > 0 THEN RAISE EXCEPTION '% rows still blocked after % passes', blocked, pass; END IF;
+     DELETE FROM "user" WHERE "schoolId" = sid;
+     DELETE FROM school WHERE id = sid;
+   END $$;
+   ```
+   **Several schools at once: one school per transaction**, never one
+   statement for all of them. Separate transactions show progress, and a
+   cancel loses one school's work rather than everything. Disjoint sets of
+   schools can run in parallel.
+5. **Drop the temporary indexes** and refresh statistics:
+   ```
+   SELECT 'DROP INDEX IF EXISTS ' || quote_ident(indexname) || ';'
+   FROM pg_indexes WHERE indexname LIKE 'purge_tmp_%' \gexec
+   VACUUM (ANALYZE);
+   ```
+   Plain `VACUUM` does not return disk space to the OS. `VACUUM FULL` does,
+   but it locks each table it rewrites, so it belongs in a maintenance window.
+6. **Record the purge outside the database it just deleted from.** The
+   school's audit trail went with it. Write down who ran it, who approved it,
+   the date, and the row counts before and after.
+
+### 11.3 Purging the stored files
+
+Every stored file is keyed `<prefix>/<schoolId>/…`, and the prefixes are
+`STORAGE_KEY_PREFIXES` in `apps/api/src/documents/local-storage.controller.ts`.
+Read that constant rather than trusting a list typed here. Delete each
+`<prefix>/<schoolId>/` **only after the school has confirmed it holds its
+downloaded archive** (§11.1 step 2): the archive lives under `schools/<id>/`.
+
+The documents bucket is versioned, so a delete writes a delete marker and the
+bytes survive until the lifecycle rule expires them
+(`documents_noncurrent_retention_days` in Terraform). The erasure is complete
+when that window has passed, not when the command returns. Say so to the school.
+
+### 11.4 How long a purge takes
+
+Measured on the local stack (September 2026). The two single-school rows ran
+§11.2 steps 2–5 **exactly as written above**, from the export to the vacuum:
+
+| What | Time |
+|---|---|
+| One 500-pupil school, first year of history (99,000 register marks, 103,000 audit rows) | 9 seconds |
+| One 500-pupil school with **ten years** of history (968,500 register marks, 967,000 audit rows) | 2 min 26 s |
+| 5,000 schools, 2.5M users, indexes in place, one batch of 50 schools per transaction, four workers in parallel | about 20 minutes |
+| The same 2.5M users as a single statement, **without** the indexes | over 2 hours, never committed |
+
+For one school most of the time is deleting its own rows, so the indexes save
+little: the ten-year school took about 3 minutes without them. Across many
+schools they are the difference between minutes and hours.
+
+The slowest checks are the foreign keys held by the two **partitioned** tables,
+`audit_log.actorId` and `attendance_record.studentId`. Those checks look in
+every monthly partition, so a purge gets slower as the platform gets older,
+not only as the school gets bigger.
 
 ---
 

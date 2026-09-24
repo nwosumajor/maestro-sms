@@ -72,7 +72,8 @@ function toHtml(blocks) {
         break;
       case "list": {
         const tag = b.ordered ? "ol" : "ul";
-        out.push(`<${tag}>${b.items.map((i) => `<li>${inlineHtml(i)}</li>`).join("")}</${tag}>`);
+        const start = b.ordered && b.start > 1 ? ` start="${b.start}"` : "";
+        out.push(`<${tag}${start}>${b.items.map((i) => `<li>${inlineHtml(i)}</li>`).join("")}</${tag}>`);
         break;
       }
       case "table": {

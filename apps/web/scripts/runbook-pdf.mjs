@@ -191,7 +191,7 @@ export function renderRunbookPdf(doc) {
         case "list": {
           for (let n = 0; n < b.items.length; n += 1) {
             need(22);
-            const marker = b.ordered ? `${n + 1}.` : "•";
+            const marker = b.ordered ? `${(b.start ?? 1) + n}.` : "•";
             pdf.fontSize(SIZE.body).font("Helvetica").fillColor(MUTED).text(marker, left + 4, pdf.y, {
               width: 16,
               continued: false,
