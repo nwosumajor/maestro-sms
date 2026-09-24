@@ -18973,17 +18973,20 @@ operator tenant list, search and filter, 58–135 ms. The public directory 29 ms
 
 THE ONE THAT DID NOT HOLD: `/operator/analytics`, **~9–11 s** and consistent
 across runs. Not a hydration bug; everything is already aggregated in SQL.
-`headcountBySchool` is **8.7 s** (three `count(DISTINCT)` over a parallel seq
-scan of 2.5M `user_role` rows); the growth query 4.3 s, doing 2.5M `user_pkey`
-lookups to read one timestamp per pupil.
+~~`headcountBySchool` is **8.7 s**~~ — CORRECTED, see "The operator dashboard
+at 5,000 schools, fixed" below: that figure was measured straight after
+back-dating 2M user rows and BEFORE a vacuum, so the query was reading dead row
+versions. Measured properly, as the app runs it (a prepared statement), the page
+was growth 3.8 s, headcount 2.9 s and the age bands 1.8 s, run one after another.
+The growth query does 2.5M `user_pkey` lookups to read one timestamp per pupil.
 // GOTCHA on my own hypothesis: both growth queries aggregate ALL TIME (39
 // months of buckets) to draw six bars, which is the O(lifetime) class this log
 // has recorded many times. Bounding them to the six months was measured on a
 // fixture back-dated across three years so that the bound excluded something:
 // 4.5 s bounded against 4.2–5.4 s unbounded, inside the noise. The filter
 // applies after the join and the scan happens either way. The waste is real
-// and is not the bottleneck. A real fix is a roll-up or an index, which is a
-// design decision. Left as found and reported; platform staff only.
+// and is not the bottleneck on its own. (Fixed later by changing the query's
+// SHAPE, not just its bound — see the entry below.)
 
 ### Ten years of one school, and the reads that did not grow
 
@@ -19109,3 +19112,78 @@ by a code block resumes at the number the markdown wrote: `start` on the block,
 
 Gate: `a-runbook-step-that-wraps.test.ts` (10 cases, the real parser over the
 real runbooks). PDF checked by eye (`pdftotext`): §11.2 reads 1 to 6.
+
+### The operator dashboard at 5,000 schools, fixed: 9 s to 3.6 s, and what the plan said
+
+`/operator/analytics` took ~9 s on a 5,000-school, 2.5M-pupil fixture (clean,
+vacuumed, 80% of pupils back-dated across three years). Its response is now
+**byte-for-byte identical in every figure** — diffed field by field against a
+snapshot taken before the change, 0 differences — in 3.6 s.
+
+MEASURED AS THE APP RUNS IT, which mattered twice. Timing the SQL by hand in
+psql gave headcount 1.45 s; `log_min_duration_statement` on the real request
+gave **2.87 s**, because Prisma sends prepared statements with bound parameters
+and those get a GENERIC plan. Every candidate below was benchmarked as
+`PREPARE` + `EXECUTE` under `plan_cache_mode = force_generic_plan`. The page was
+three statements run one after another: growth 3.8 s + headcount 2.9 s + age
+bands 1.8 s.
+
+THE GROWTH CHART — a planner misestimate, not a missing bound. Joined through
+`role.name = 'student'`, Postgres assumes each of 19 roles holds a nineteenth
+of `user_role`: it estimated **54,957** pupil rows against **2.5M** actual, and
+on that estimate chose a nested loop — 2.5M separate `user_pkey` lookups, 3.2 s
+of the 4.1 s. That is why bounding it to six months did nothing: the date
+filter sat on the far side of the lookups.
+- Rewriting it user-first with `EXISTS` made it WORSE, **14 s**: the planner
+  turned the EXISTS into a semi-join off the same misestimate.
+- Reading the six-month window from `"user"` FIRST, whose `createdAt`
+  statistics are accurate, in a `MATERIALIZED` CTE so it cannot be folded back
+  into lookups: **1.8 s**, identical for every month the chart draws.
+
+THE HEADCOUNT — one DISTINCT sorts everything. Keeping `count(DISTINCT userId)`
+only on staff saved nothing (3.27 -> 3.34 s): a DISTINCT aggregate makes the
+GroupAggregate sort its WHOLE input by (school, user), 2.5M rows, spilling 41 MB
+to disk, however few rows its FILTER keeps. Now two parts: pupils and parents
+by `count(*)` — exact only because `user_role` is UNIQUE (userId, roleId) —
+and staff de-duplicated over staff rows alone: **2.1 s**, identical for all
+5,003 schools. `headcountBySchool` also feeds the registry, directory and
+school profile, which inherit it.
+
+DEMOGRAPHICS — two scans of 2.5M profiles became one (each gender group carries
+its own age bands).
+
+CONCURRENCY — the ten reads were independent and awaited one by one. Now ONE
+`Promise.all` (not promises started early and awaited later: a read that fails
+before anyone awaits it is an unhandled rejection, and Node exits). Two reads
+filtered by a 5,000-element `schoolId IN (…)` list taken from the first read;
+they use the `school.isPlatform = false` relation instead, so nothing waits.
+
+WHAT IS LEFT, stated rather than hidden: under concurrency the three scans slow
+each other on 8 shared cores (growth 1.8 -> 3.5 s, headcount 2.1 -> 3.3 s,
+demographics 0.5 -> 3.1 s), so the page is its slowest statement under
+contention, ~3.6 s. That is three full passes over 2.5M rows, and going much
+lower means not recomputing the fleet on every load — a periodic snapshot — a
+design decision, not taken here. JIT compilation costs ~0.3–0.7 s of each big
+query; switching it off is a database setting, also not taken here.
+
+// GOTCHA that cost the most time, and it was mine: the "8.7 s headcount" in
+// the entry above was measured right after an UPDATE of 2M rows and before a
+// VACUUM. Every figure on a freshly mutated fixture is suspect until vacuumed.
+// GOTCHA: M3 of the mutation run SURVIVED — swapping FULL JOIN for LEFT JOIN
+// changed nothing, because the pupils-and-parents part groups EVERY on-roll
+// role row and so already holds a staff-only school. The FULL JOIN, and the
+// comment claiming it kept that school visible, were both wrong. It is a LEFT
+// JOIN now, and the mutation that DOES remove the school (narrowing that part
+// to pupil and parent rows) fails the test.
+// GOTCHA: the test database had no `head_teacher` role (seeded before it
+// existed), so one fixture role row silently failed to insert. The fixture's
+// own row-count check caught it before any assertion could pass vacuously.
+
+Tests: `a-headcount-that-counts-people-once.e2e-spec.ts` (real Postgres; fails
+on staff not de-duplicated, on leavers counted, and on the staff-only school
+dropped). The two unit tests that asserted the SQL's SPELLING now assert what
+the cheap form depends on — the (userId, roleId) uniqueness in the schema, and
+that both parts read the one on-roll fragment. `platform-analytics.service.spec`
+gained: every read issued before any settles; both monthly reads bounded to the
+chart; the platform org excluded from the subscription and payment reads too.
+Each mutation-validated.

@@ -47,9 +47,22 @@ type Queryable = { $queryRaw<T = unknown>(q: TemplateStringsArray | Prisma.Sql, 
 /**
  * Headcount for many schools at once, in ONE query.
  *
- * `count(DISTINCT "userId")` per category is what makes the staff figure right:
- * a head teacher who also teaches holds two staff roles and is one member of staff.
- * Summing per-role counts — the obvious implementation — would report them twice.
+ * Each figure counts DISTINCT PEOPLE. A head teacher who also teaches holds two
+ * staff roles and is one member of staff; summing per-role counts — the obvious
+ * implementation — would report them twice.
+ *
+ * HOW, AND WHY IN TWO PARTS. `user_role` is UNIQUE on (userId, roleId),
+ * enforced by the database, so nobody holds the student role twice or the
+ * parent role twice: `count(*)` over those rows already IS the number of
+ * distinct people. Only STAFF can hold several roles at once, so only staff are
+ * de-duplicated — and separately, over the staff rows alone.
+ *
+ * This was one query with `count(DISTINCT "userId")` on all three figures. A
+ * DISTINCT aggregate makes Postgres sort ITS WHOLE INPUT by (school, user) —
+ * even with a FILTER, and even if only one of the three keeps it — and at the
+ * 5,000-school / 2.5M-pupil target that sort spilled 41 MB to disk: 3.3 s as a
+ * prepared statement, the form the app actually runs. Split, it is 2.1 s, with
+ * the same answer for every one of 5,003 schools.
  */
 export async function headcountBySchool(
   client: Queryable,
@@ -58,30 +71,50 @@ export async function headcountBySchool(
   const out = new Map<string, SchoolHeadcount>();
   if (isEmptyScope(scope)) return out;
 
+  // ON ROLL, not ever-enrolled, in BOTH parts. This counted people who had
+  // LEFT: exit a pupil and the operator console said 901 while billing charged
+  // for 900, which reads as a school being under-billed rather than as two
+  // questions being asked. The Prisma call sites were fixed when
+  // common/student-scope.ts was written; this raw SQL was missed, and the
+  // giveaway was that the constant written for it — ON_ROLL_STUDENT_ROLE_ROW,
+  // "expressed against user_role for the cross-tenant fleet sweep" — had no
+  // callers at all. Applied to staff and parents too: a departed teacher is not
+  // headcount either, and three figures on one screen must answer the same
+  // question.
+  const onRoll = Prisma.sql`
+    FROM user_role ur
+    JOIN role r ON r.id = ur."roleId"
+    JOIN "user" u ON u.id = ur."userId" AND u.status = 'ACTIVE'
+    WHERE ${inSchoolScope(Prisma.sql`ur."schoolId"`, scope)}`;
+
   const rows = await client.$queryRaw<
     Array<{ schoolId: string; students: number; staff: number; parents: number }>
   >(Prisma.sql`
-    SELECT ur."schoolId",
-           count(DISTINCT ur."userId") FILTER (WHERE r.name = 'student')::int AS students,
-           count(DISTINCT ur."userId") FILTER (WHERE r.name <> ALL(ARRAY[${Prisma.join([
-             ...NON_SCHOOL_STAFF_ROLE_NAMES,
-           ])}]::text[]))::int                                                AS staff,
-           count(DISTINCT ur."userId") FILTER (WHERE r.name = 'parent')::int  AS parents
-    FROM user_role ur
-    JOIN role r ON r.id = ur."roleId"
-    -- ON ROLL, not ever-enrolled. This counted people who had LEFT: exit a
-    -- pupil and the operator console said 901 while billing charged for 900,
-    -- which reads as a school being under-billed rather than as two questions
-    -- being asked. The Prisma call sites were fixed when common/student-scope.ts
-    -- was written; this raw SQL was missed, and the giveaway was that the
-    -- constant written for it — ON_ROLL_STUDENT_ROLE_ROW, "expressed against
-    -- user_role for the cross-tenant fleet sweep" — had no callers at all.
-    --
-    -- Applied to staff and parents too: a departed teacher is not headcount
-    -- either, and three figures on one screen must answer the same question.
-    JOIN "user" u ON u.id = ur."userId" AND u.status = 'ACTIVE'
-    WHERE ${inSchoolScope(Prisma.sql`ur."schoolId"`, scope)}
-    GROUP BY ur."schoolId"
+    WITH families AS (
+      SELECT ur."schoolId",
+             count(*) FILTER (WHERE r.name = 'student')::int AS students,
+             count(*) FILTER (WHERE r.name = 'parent')::int  AS parents
+      ${onRoll}
+      GROUP BY ur."schoolId"
+    ), staff AS (
+      SELECT "schoolId", count(*)::int AS staff
+      FROM (
+        SELECT DISTINCT ur."schoolId", ur."userId"
+        ${onRoll}
+          AND r.name <> ALL(ARRAY[${Prisma.join([...NON_SCHOOL_STAFF_ROLE_NAMES])}]::text[])
+      ) people
+      GROUP BY "schoolId"
+    )
+    -- families groups EVERY on-roll role row, staff included, so it holds
+    -- every school with anybody on roll — a school with staff and no pupils
+    -- yet is a row with zeros. That is why this can be a LEFT JOIN, and why
+    -- families must never be narrowed to pupil and parent rows.
+    SELECT f."schoolId",
+           f.students,
+           COALESCE(s.staff, 0) AS staff,
+           f.parents
+    FROM families f
+    LEFT JOIN staff s ON s."schoolId" = f."schoolId"
   `);
 
   for (const r of rows) {

@@ -32,12 +32,15 @@ describe("the cross-tenant headcount query", () => {
 
   it("applies that to staff and parents too, not only pupils", () => {
     // Three figures on one screen must answer the same question. A departed
-    // teacher is not headcount either.
-    const join = /JOIN "user" u ON u\.id = ur\."userId" AND u\.status = 'ACTIVE'/;
-    const before = sql.slice(0, sql.search(join));
-    // The join precedes the GROUP BY, so every FILTER in the SELECT sees it.
-    expect(before).toContain("FILTER (WHERE r.name = 'student')");
-    expect(before).toContain("FILTER (WHERE r.name = 'parent')");
+    // teacher is not headcount either. The figures come from TWO parts now
+    // (pupils and parents, then staff de-duplicated on their own), and the
+    // on-roll join is ONE shared fragment that both parts must read from — a
+    // second hand-written copy is how one part would drift.
+    // Behaviour, for every category, is proven against a real database in
+    // a-headcount-that-counts-people-once.e2e-spec.ts.
+    const fragment = sql.match(/const onRoll = Prisma\.sql`([\s\S]*?)`;/);
+    expect(fragment?.[1]).toMatch(/JOIN "user" u ON u\.id = ur\."userId" AND u\.status = 'ACTIVE'/);
+    expect(sql.match(/\$\{onRoll\}/g)).toHaveLength(2);
   });
 
   it("still groups per school, so one tenant cannot absorb another's count", () => {

@@ -14,6 +14,8 @@
 // role (and keeps covering new ones), and people are counted once.
 // =============================================================================
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ROLE_PERMISSIONS, NON_SCHOOL_STAFF_ROLE_NAMES } from "@sms/types";
 import { headcountBySchool, headcountInTenant } from "../../src/operator/operator-people";
 
@@ -49,15 +51,26 @@ describe("headcountBySchool", () => {
   });
 
   it("counts DISTINCT people, not role assignments", async () => {
-    // The over-count bug: a head teacher who also teaches holds two staff roles and
-    // is one member of staff. Asserted on the SQL, because the arithmetic happens
-    // in Postgres — a test that only checked the returned numbers would pass against
-    // the broken implementation too.
+    // The over-count bug: a head teacher who also teaches holds two staff roles
+    // and is one member of staff. The behaviour is proven against a REAL
+    // database in a-headcount-that-counts-people-once.e2e-spec.ts, for all
+    // three figures, leavers included. What this checks, without a database, is
+    // the one assumption that makes the cheap form correct:
+    //
+    // pupils and parents are counted with count(*), which equals the number of
+    // distinct people ONLY because user_role is UNIQUE on (userId, roleId), so
+    // nobody can hold the student role twice. Drop that constraint and those two
+    // figures silently become role ASSIGNMENTS again — so it is pinned here.
+    const schema = readFileSync(join(__dirname, "../../../../packages/db/prisma/schema/foundation.prisma"), "utf8");
+    const model = schema.match(/model UserRole \{[\s\S]*?\n\}/)?.[0];
+    expect(model).toBeDefined();
+    expect(model).toMatch(/@@unique\(\[userId, roleId\]\)/);
+
+    // Staff CAN hold several roles, so staff alone are de-duplicated.
     const { client, calls } = mkClient([]);
     await headcountBySchool(client as never, [SCHOOL_A]);
     const sql = JSON.stringify(calls[0]);
-    expect(sql).toContain("count(DISTINCT");
-    expect(sql).not.toMatch(/count\(\*\)/);
+    expect(sql).toMatch(/SELECT DISTINCT ur\.\\"schoolId\\", ur\.\\"userId\\"/);
   });
 
   it("does no work for an empty school list", async () => {

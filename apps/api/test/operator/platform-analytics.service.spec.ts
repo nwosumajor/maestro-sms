@@ -33,9 +33,13 @@ function makeClient() {
    * CONTRACT, not merely satisfy the call.
    */
   const paidRows = async (): Promise<Array<{ amountMinor: number; currency?: string; createdAt: Date }>> =>
-    (await client.platformSubscriptionPayment.findMany({})) as never;
+    (await paymentsFixture({})) as never;
 
   const client: ReturnType<typeof build> = build();
+  // The double reads its fixture through the ORIGINAL mock, so a test that
+  // wraps the client's methods sees only the SERVICE's calls, not the double
+  // answering itself. Same mock object, so `mockResolvedValue` overrides apply.
+  const paymentsFixture = client.platformSubscriptionPayment.findMany;
   return client;
 
   function build() {
@@ -73,7 +77,13 @@ function makeClient() {
           ? (await paidRows()).filter((r) => (r.currency ?? "NGN") === wants)
           : await paidRows();
         if (sql.includes("date_trunc")) {
-          return home.map((r) => ({ month: r.createdAt, total: BigInt(r.amountMinor) }));
+          // HONOURS THE QUERY'S OWN window, for the same reason as the currency
+          // above: a double that ignored it would pass against a service that
+          // stopped bounding the trend.
+          const from = (q as { values?: unknown[] })?.values?.find((v): v is Date => v instanceof Date);
+          return home
+            .filter((r) => !from || r.createdAt >= from)
+            .map((r) => ({ month: r.createdAt, total: BigInt(r.amountMinor) }));
         }
         const since30 = Date.now() - 30 * 24 * 60 * 60 * 1000;
         return [
@@ -93,21 +103,21 @@ function makeClient() {
       // so the assertions below still describe the same two pupils and a double
       // returning fixed numbers could not vouch for a broken query.
       if (sql.includes("student_profile")) {
-        const rows = PROFILE_FIXTURE;
-        if (sql.includes("GROUP BY p.gender")) {
-          const by = new Map<string | null, number>();
-          for (const r of rows) by.set(r.gender, (by.get(r.gender) ?? 0) + 1);
-          return [...by].map(([gender, n]) => ({ gender, n }));
-        }
+        // ONE scan now: a row per gender, each carrying its own age bands.
+        // Built from the same fixture, so the two figures cannot agree with
+        // themselves while disagreeing with the service.
         const age = (d: Date) => Math.floor((now.getTime() - d.getTime()) / (365.25 * 864e5));
         const band = (a: number) =>
           a <= 5 ? "b0" : a <= 10 ? "b1" : a <= 13 ? "b2" : a <= 16 ? "b3" : a <= 18 ? "b4" : "b5";
-        const out: Record<string, number> = { unknown: 0, b0: 0, b1: 0, b2: 0, b3: 0, b4: 0, b5: 0 };
-        for (const r of rows) {
-          if (!r.dateOfBirth) out.unknown += 1;
-          else out[band(age(r.dateOfBirth))] += 1;
+        const by = new Map<string | null, Record<string, number>>();
+        for (const r of PROFILE_FIXTURE) {
+          const row = by.get(r.gender) ?? { n: 0, unknown: 0, b0: 0, b1: 0, b2: 0, b3: 0, b4: 0, b5: 0 };
+          row.n += 1;
+          if (!r.dateOfBirth) row.unknown += 1;
+          else row[band(age(r.dateOfBirth))] += 1;
+          by.set(r.gender, row);
         }
-        return [out];
+        return [...by].map(([gender, row]) => ({ gender, ...row }));
       }
       if (sql.includes("date_trunc")) {
         return [{ month: now, count: 2 }]; // both students enrolled this month
@@ -262,6 +272,62 @@ describe("PlatformAnalyticsService", () => {
     expect(client.school.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { isPlatform: false } }),
     );
+    // The subscriptions and the payment preview used to be narrowed by an
+    // explicit list of every customer id taken from that school read. They now
+    // carry the predicate themselves, so each must say so.
+    expect(client.schoolSubscription.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { school: { isPlatform: false } } }),
+    );
+    expect(client.platformSubscriptionPayment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ school: { isPlatform: false } }) }),
+    );
+  });
+
+  it("issues every read before any of them settles", async () => {
+    // THE DEFECT THIS EXISTS FOR: ten independent reads awaited one after
+    // another, so the dashboard cost the SUM of its queries — about 9 s at
+    // 5,000 schools and 2.5M pupils. Run together it costs roughly the slowest.
+    // A return to sequential awaits changes no figure on the page, so without
+    // this nothing would notice the page getting slow again.
+    const client = makeClient();
+    let issued = 0;
+    let issuedWhenFirstSettled: number | null = null;
+    const slow = (fn: jest.Mock) =>
+      jest.fn(async (...args: unknown[]) => {
+        issued += 1;
+        await new Promise((r) => setImmediate(r));
+        if (issuedWhenFirstSettled === null) issuedWhenFirstSettled = issued;
+        return fn(...args);
+      });
+    client.$queryRaw = slow(client.$queryRaw as jest.Mock) as never;
+    client.school.findMany = slow(client.school.findMany) as never;
+    client.schoolSubscription.findMany = slow(client.schoolSubscription.findMany) as never;
+    client.platformSubscriptionPayment.findMany = slow(client.platformSubscriptionPayment.findMany) as never;
+    client.onboardingRequest.groupBy = slow(client.onboardingRequest.groupBy) as never;
+
+    const { service } = makeService(client);
+    await service.overview(owner);
+    expect(issued).toBeGreaterThanOrEqual(8); // it made the reads at all
+    expect(issuedWhenFirstSettled).toBe(issued);
+  });
+
+  it("bounds both monthly reads to the six months the chart draws", async () => {
+    // The growth chart draws six months and used to read every month the
+    // platform has existed, discarding the rest in the bucketing. Both monthly
+    // reads carry the window's first day.
+    const client = makeClient();
+    const { service } = makeService(client);
+    const out = await service.overview(owner);
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const monthly = (client.$queryRaw as jest.Mock).mock.calls
+      .map((c) => c[0] as { sql?: string; values?: unknown[] })
+      .filter((q) => (q.sql ?? "").includes("date_trunc"));
+    expect(monthly).toHaveLength(2); // pupils joined, and revenue
+    for (const q of monthly) {
+      expect(q.values?.some((v) => v instanceof Date && v.getTime() === first.getTime())).toBe(true);
+    }
+    expect(out.growth).toHaveLength(6);
   });
 
   it("503s when the privileged client is not configured", async () => {
