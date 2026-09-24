@@ -1,10 +1,13 @@
 # Engineering log — findings, and the reasoning behind each fix
 
-Three hundred and seventy-nine write-ups, newest first. Each records a **real defect
-found and fixed**: what was wrong, how it was measured (usually driven against
-the running stack rather than reasoned about), the decision taken and the
-alternatives rejected, the `// GOTCHA` lines that cost time, and how the test
-guarding it was mutation-validated.
+The count of write-ups lives in `CLAUDE.md`, where a gate keeps it true; a
+number typed here had already drifted by eight. Entries written before the move
+out of `CLAUDE.md` run newest first, and later ones are appended at the end.
+Most record a **real defect found and fixed**: what was wrong, how it was
+measured (usually driven against the running stack rather than reasoned about),
+the decision taken and the alternatives rejected, the `// GOTCHA` lines that
+cost time, and how the test guarding it was mutation-validated. A few record a
+measurement run and exactly what it did and did not establish.
 
 **These lived in `CLAUDE.md` and were 87% of it.** That file is loaded into
 context on every session, so it has to be the *contract* — the rules a change is
@@ -18919,3 +18922,190 @@ Separately proven at the database level by six CONCURRENT identical inserts —
 // record in the demo school, left PAID rather than deleted, because the ledger
 // is append-only by design and a probe must not be the one exception. Reverse it
 // with a refund entry if it matters; do not DELETE the row.
+
+### Five thousand schools at once: what held, and the one screen that did not
+
+Asked to simulate 5,000 schools of 500 pupils each before going live. Built in
+the real local Postgres rather than in memory, because every question worth
+asking is about the database: **2,505,000 users, 2.5M enrolments, 2.5M invoices
+(1.5M overdue), 50,000 classes**, 5 GB, across ten countries including a
+zero-decimal currency (XOF) and a TWO_SEMESTER calendar (US).
+
+TENANT ISOLATION, measured as `major_user` under RLS and never as `postgres`:
+
+    one tenant's own counts             500 pupils, 500 invoices, 10 classes
+    other tenants' rows visible         0 (user, enrollment, invoice)
+    a foreign invoice by primary key    0 rows
+    INSERT naming a foreign schoolId    ERROR: new row violates row-level security policy
+    the same INSERT for its own school  INSERT 0 1
+    UPDATE a foreign invoice by id      UPDATE 0 (its own: UPDATE 1)
+    DELETE on invoice                   permission denied (no DELETE on money)
+    no tenant GUC at all                fails closed
+    tenant tables with RLS off          1: ultimate_participant, the documented one
+
+// GOTCHA, and the reason the INSERT row reads the way it does: the first
+// version of that probe SELECTed its source row from the other school, so the
+// SELECT itself was RLS-filtered and inserted nothing — `INSERT 0 0`, which
+// reads as a pass and proves only the read policy. The WITH CHECK policy was
+// never reached. Re-run with a literal foreign id fetched as superuser, it
+// fails loudly, and the same-tenant twin succeeding is what shows the refusal
+// was the policy and not a broken statement.
+
+THE DUNNING SWEEP across the fleet: 21.8 s, `scanned 4003, pastDue 0, failed
+1167, alerted 1000`. Every number needed explaining before it could be trusted:
+- `failed 1167` was the fixture: schools billed in currencies with no price
+  list, which `PlanPricingService` refuses rather than quoting zero. Each was
+  logged by school and counted. The rule "one school's failure must not end the
+  fleet's sweep" held at 1,167 failures.
+- `scanned` and `alerted` are not caps. The query has no `take`, and `alerted`
+  is the digest of every past-due school, which was exactly 1,000.
+- `pastDue 0` had a harmless reading (an earlier run had already flipped them)
+  and a dangerous one (it flipped them and did not count). Set 137 back to
+  ACTIVE and re-ran: **pastDue 137**, `scanned` up by exactly 137. It counts
+  what it wrote.
+
+THE FEE REMINDER confirmed an old fix at volume: `reminded 0, invoices 400,
+unreachable 400, backlog 0` for a school whose fixture pupils had no guardians.
+The recorded defect was "30 invoices, no guardian links, 30 reminded".
+
+ONE SCHOOL INSIDE THE FLEET: its own reads 13–102 ms, its pages 95–292 ms. The
+operator tenant list, search and filter, 58–135 ms. The public directory 29 ms.
+
+THE ONE THAT DID NOT HOLD: `/operator/analytics`, **~9–11 s** and consistent
+across runs. Not a hydration bug; everything is already aggregated in SQL.
+`headcountBySchool` is **8.7 s** (three `count(DISTINCT)` over a parallel seq
+scan of 2.5M `user_role` rows); the growth query 4.3 s, doing 2.5M `user_pkey`
+lookups to read one timestamp per pupil.
+// GOTCHA on my own hypothesis: both growth queries aggregate ALL TIME (39
+// months of buckets) to draw six bars, which is the O(lifetime) class this log
+// has recorded many times. Bounding them to the six months was measured on a
+// fixture back-dated across three years so that the bound excluded something:
+// 4.5 s bounded against 4.2–5.4 s unbounded, inside the noise. The filter
+// applies after the join and the scan happens either way. The waste is real
+// and is not the bottleneck. A real fix is a roll-up or an index, which is a
+// design decision. Left as found and reported; platform staff only.
+
+### Ten years of one school, and the reads that did not grow
+
+Asked whether the platform would lag after many years. The question is about
+one school's OWN history, since the fleet run showed RLS keeps other schools'
+rows out of a school's reads. So: one 500-pupil Nigerian school, measured as its
+admin, a pupil and that pupil's parent, at year 1 and again with nine more years
+added by the same parameterised script. Deliberately worse than life: the same
+500 pupils stay all ten years, so a pupil's record reaches ten years, not six.
+
+    year 1     99,000 register marks    2,000 invoices    12,000 term results    17 partitions each
+    year 10   968,500 register marks   15,500 invoices   120,000 term results   125 partitions each
+              plus 233,000 notifications and 967,000 audit rows
+
+Thirty-five reads, median of three, year 1 -> year 10 with roll-ups in place:
+the student list 27 -> 31 ms, dashboard 18 -> 18, current-term analytics
+67 -> 72, the report-card PDF 215 -> 186, the session report 75 -> 75, class
+broadsheets and term analytics down slightly, and every pupil and parent read
+about 20 ms at both ends. Pages: /attendance 210 -> 314, /fees 139 -> 190,
+/fees/reports 102 -> 165. Everything else within noise.
+
+THE ONE FAMILY THAT GROWS WITH AGE: the fee summary 25 -> 56 ms and the aging
+report 31 -> 71 ms. That is inherent: the card states ALL-TIME collected money,
+so it reads the whole ledger. `FeesService.invoiceSummary` already records the
+deliberate measurement at 185,413 invoices (542 ms) and the alternatives
+rejected. 15,500 -> 56 ms sits on the same line. Not an oversight.
+
+THE ROLL-UP IS O(new), NOT O(lifetime): backfilling ten years took 2.7 s (30
+terms), and an ordinary night after that took 29 ms and did nothing. Measured
+without roll-ups first, a pupil's attendance-by-session went 44 -> 79 ms (every
+ended term computed live); with them, 44 -> 36.
+
+// GOTCHA, three, all in the fixture and all silent:
+// - `docker exec` without `-i` ignores a heredoc and exits 0. The partition
+//   helper "succeeded" and created nothing; found only by counting partitions.
+// - `substring(email from 2 for 3)::int` read `p1@yearsim` as `1@y`, which
+//   rolled the whole base back; the year script then failed on a NULL school.
+// - A plain `VACUUM` after deleting 2.5M fixture rows leaves the pages
+//   allocated, and a seq scan still reads them. Measuring on that would have
+//   inflated BOTH phases. `VACUUM FULL` the fixture tables first. (Docker's
+//   64 MB `/dev/shm` also refuses a parallel vacuum worker locally:
+//   `PARALLEL 0`. Not a production concern.)
+
+NOT MEASURED, and worth saying: 5,000 schools x 10 years together (about five
+billion register marks) does not fit on a developer machine. The two runs each
+cover one half. The remaining question is buffer-cache sizing for the
+production database, which is infrastructure rather than code.
+
+### Purging a tenant, the third time: the recipe alone does not scale to a fleet
+
+Two entries above record the same prediction and the same remedy: index the
+foreign keys, delete, drop the indexes. The third instance found what they did
+not, because this was the first purge of 2.5M users.
+- **The index step produced nothing and nobody noticed.** It ran inside a
+  shell script, its output was never read, and afterwards there were ZERO
+  temporary indexes. The delete behind it ran **2 h 14 min without committing**
+  before it was cancelled. The exact cause inside that script was not pinned
+  down; the lesson does not need it. The generator now prints its count, and a
+  zero is a stop.
+- **With the 61 indexes in place it was still ~80 minutes as one statement.**
+  `EXPLAIN ANALYZE` on one school's 501 users named the cost: the FK triggers
+  for `audit_log.actorId` (177 ms) and `attendance_record.studentId` (172 ms),
+  both on PARTITIONED tables, where each check visits every monthly partition.
+  **A purge gets slower as the platform ages**, not only as the school grows.
+- **Batched and parallel, it finished in ~20 minutes**: 50 schools per
+  transaction, four workers on disjoint slug ranges, about 150,000 users a
+  minute. Separate transactions also make progress visible, and a cancel costs
+  one batch rather than everything.
+
+The procedure is now written down where an operator will look for it:
+`docs/RUNBOOK-SCHOOL-MIGRATION.md` §11, which starts from DISABLE, the default,
+reversible action, and treats a purge as the exception. Its SQL was run
+VERBATIM, extracted from the markdown with only the school id substituted: a
+first-year 500-pupil school in **9 s** end to end, a ten-year one in
+**2 min 26 s**.
+// GOTCHA the verbatim run caught: the table I first wrote said "about 1
+// second" for a first-year school and "3 minutes" for a ten-year one, under a
+// heading claiming the indexes were in place. The first came from fleet
+// schools with no history; the second was measured without the indexes. Both
+// looked plausible and both were wrong. Measure the procedure you publish.
+// Two facts in §11 that no earlier entry recorded: the purge deletes
+// `platform_subscription_payment`, the PLATFORM's own revenue record for that
+// school, so export it first; and the school's archive is stored under its own
+// `schools/<id>/` prefix, so a storage purge would delete the record the school
+// was promised. The downloaded copy is the record.
+
+### Every numbered step in the served runbooks read "1."
+
+Found while adding §11 to the migration runbook: its SQL, rendered on
+`/runbooks`, came out as running text with raw backticks, and its steps were
+numbered 1, 1, 1. The cause was the ONE parser both the page and the PDF share
+(`scripts/markdown-blocks.mjs`), and it was not new. Measured across the three
+runbooks before the fix:
+
+    wrapped list items                         68
+    numbered steps rendered as a one-item <ol>   39  (so every one read "1.")
+    code blocks leaked into text as raw ```       7
+
+Three of those seven were already in the incident runbook, one of them the
+isolation-probe command in the SEV-1 tenant-breach playbook: the step an on-call
+engineer copies at three in the morning.
+
+Two gaps, both in how the parser read a LINE. A list item ended at its first
+newline, so the wrapped half of a step fell out as a paragraph and the next step
+opened a new list. A fence was only a fence in column 0, so a command indented
+under its step was text. Now an indented line continues the item above it, a
+blank line continues a list that resumes after it, an indented fence is a fence
+(and its body loses exactly the fence's own indentation), and a list interrupted
+by a code block resumes at the number the markdown wrote: `start` on the block,
+`<ol start>` in the page, `start + n` in the PDF.
+
+// GOTCHA, and the reason nothing caught it: `runbook-freshness` asserts that
+// the served copy MATCHES the markdown, and it did, faithfully, through a wrong
+// parse. A gate that compares an output with its source cannot see a defect
+// they share. The new one asserts a property of the RENDERED document against
+// the WRITTEN one instead: every step numbered as written, no fence in running
+// text, every wrapped line inside its step.
+// GOTCHA on validating it: with the old parser restored, 8 of its 10 cases
+// failed. The two that passed were correct to: the backup runbook has no fences
+// to leak, and the served-page check reads the committed generated file. That
+// one is caught by mutating the EMITTER instead: freshness reports the page
+// stale, and once regenerated the `<ol start>` case fails.
+
+Gate: `a-runbook-step-that-wraps.test.ts` (10 cases, the real parser over the
+real runbooks). PDF checked by eye (`pdftotext`): §11.2 reads 1 to 6.
