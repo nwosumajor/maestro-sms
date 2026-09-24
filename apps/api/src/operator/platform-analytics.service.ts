@@ -45,6 +45,13 @@ interface PlatformAgeBandRow {
   b0: number; b1: number; b2: number; b3: number; b4: number; b5: number;
 }
 
+/** One gender group, carrying its own age bands, so gender and age come from a
+ *  single scan of the profiles. */
+interface PlatformDemographicRow extends PlatformAgeBandRow {
+  gender: string | null;
+  n: number;
+}
+
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import { PlanPricingService } from "../billing/plan-pricing.service";
@@ -77,35 +84,167 @@ export class PlatformAnalyticsService {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Platform analytics are not configured");
 
-    // --- customer schools (exclude the platform org itself) ---
-    const schools = await client.school.findMany({
-      where: { isPlatform: false },
-      select: { id: true, name: true, status: true, createdAt: true },
-    });
+    // The growth chart draws SIX months, from the start of the month five
+    // before this one. Both monthly reads below are bounded to that window.
+    const now = new Date();
+    const growthFrom = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const since30 = new Date(Date.now() - 30 * DAY_MS);
+
+    // EVERY READ AT ONCE. None of these depends on another, and they used to
+    // run one after the other, so the page cost the SUM of its queries. At the
+    // 5,000-school / 2.5M-pupil target that was ~9 s, three queries making up
+    // almost all of it. Concurrently, it costs roughly the slowest one. ONE
+    // Promise.all rather than promises started early and awaited later: a read
+    // that failed before anybody awaited it would be an unhandled rejection,
+    // and Node exits on those.
+    //
+    // Two reads were filtered by `schoolId IN (<every customer id>)`, which made
+    // them wait for the school list AND sent a 5,000-element list the planner
+    // had to digest. They use the same `isPlatform = false` predicate as the
+    // rest of the page, through the relation.
+    const [schools, subs, headcounts, studentCreatedAt, pricing, [totals], payments, onboarding, revenueByMonth, demographics] =
+      await Promise.all([
+        // --- customer schools (exclude the platform org itself) ---
+        client.school.findMany({
+          where: { isPlatform: false },
+          select: { id: true, name: true, status: true, createdAt: true },
+        }),
+        // --- subscriptions (drives plan mix, MRR, module adoption, risk) ---
+        client.schoolSubscription.findMany({
+          where: { school: { isPlatform: false } },
+          select: { schoolId: true, plan: true, status: true, currency: true, currentPeriodEnd: true, graceDays: true, seats: true, overrides: true },
+        }),
+        // --- people (students + staff), plus students-per-school for MRR seats + top schools ---
+        // COUNTED, not scanned. This used to fetch EVERY user_role row for EVERY
+        // customer school into Node and tally them here — unbounded, and at the
+        // 5,000-school target that is tens of millions of rows crossing the wire to
+        // produce a dozen numbers. It also used a hand-written list of nine staff roles
+        // that omitted warden, driver, head_warden, head_driver, librarian and
+        // junior_admin, so the fleet staff figure quietly under-reported every boarding
+        // school. One grouped query, one shared definition (see operator-people.ts).
+        headcountBySchool(client, ALL_CUSTOMER_SCHOOLS),
+        // Enrolment by month for the growth chart — a grouped date_trunc rather than
+        // pulling every student row back to read one timestamp off each.
+        //
+        // BOUNDED TO THE CHART, AND READ IN A SHAPE THE PLANNER CANNOT GET WRONG.
+        // It read every pupil the platform has EVER had, then threw away all but
+        // six months in the bucketing below. Bounding it alone changed nothing,
+        // which is what the plan explained: joined through `role.name`, Postgres
+        // estimates a role's rows as a nineteenth of `user_role` — 55,000 — when
+        // almost all 2.5M are pupils, so it chose 2.5M separate index lookups
+        // into "user", and the date filter sat on the far side of them. 3.8 s.
+        // The window is now read FIRST, from "user", whose createdAt statistics
+        // are accurate, and MATERIALIZED so it cannot be folded back into those
+        // lookups: 1.8 s, the same figure for every month the chart draws.
+        client.$queryRaw<Array<{ month: Date; count: number }>>(Prisma.sql`
+          WITH window_users AS MATERIALIZED (
+            SELECT u.id, u."createdAt"
+            FROM "user" u
+            WHERE u."createdAt" >= ${growthFrom}
+              AND ${inSchoolScope(Prisma.sql`u."schoolId"`, ALL_CUSTOMER_SCHOOLS)}
+          )
+          SELECT date_trunc('month', w."createdAt") AS month, count(*)::int AS count
+          FROM window_users w
+          JOIN user_role ur ON ur."userId" = w.id
+          JOIN role r ON r.id = ur."roleId"
+          WHERE r.name = 'student'
+          GROUP BY 1
+        `),
+        this.planPricing.effectiveAll(),
+        // --- revenue from PAID platform-subscription payments --- (see the note below)
+        client.$queryRaw<Array<{ all_time: bigint | null; last30: bigint | null; n: number }>>(Prisma.sql`
+          SELECT COALESCE(SUM("amountMinor"), 0)                                          AS all_time,
+                 COALESCE(SUM("amountMinor") FILTER (WHERE "createdAt" >= ${since30}), 0)  AS last30,
+                 count(*)::int                                                            AS n
+          FROM platform_subscription_payment
+          WHERE status = 'PAID'
+            AND currency = ${HOME_CURRENCY}
+            AND ${inSchoolScope(Prisma.sql`"schoolId"`, ALL_CUSTOMER_SCHOOLS)}
+        `),
+        // The preview needs TEN rows, and always did — it never needed five thousand.
+        client.platformSubscriptionPayment.findMany({
+          where: { school: { isPlatform: false }, status: "PAID" },
+          select: { schoolId: true, plan: true, amountMinor: true, currency: true, status: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+          take: 10,
+        }),
+        // --- onboarding intake pipeline (global, RLS-exempt registry table) ---
+        client.onboardingRequest.groupBy({ by: ["status"], _count: { _all: true } }),
+        // HOME CURRENCY ONLY, exactly as the headline figures above, and GROUPED IN
+        // SQL for the same reason they now are: this looped the capped 5,000-row
+        // array, so as the platform grew, payments fell out of the window OLDEST
+        // FIRST and the historical bars of a growth chart shrank month by month. A
+        // chart of the platform's growth that quietly erased its own past.
+        client.$queryRaw<Array<{ month: Date; total: bigint | null }>>(Prisma.sql`
+          SELECT date_trunc('month', "createdAt") AS month, COALESCE(SUM("amountMinor"), 0) AS total
+          FROM platform_subscription_payment
+          WHERE status = 'PAID'
+            AND "createdAt" >= ${growthFrom}
+            AND currency = ${HOME_CURRENCY}
+            AND ${inSchoolScope(Prisma.sql`"schoolId"`, ALL_CUSTOMER_SCHOOLS)}
+          GROUP BY 1
+        `),
+        // --- platform-wide student demographics (from profiles across all schools) ---
+        // BUCKETED IN POSTGRES, not shipped to Node. This fetched EVERY
+        // `student_profile` row on the platform — `{ gender, dateOfBirth }` for every
+        // pupil in every school — and tallied them in a JS loop to produce two small
+        // histograms. The database answers the same question as an aggregate in
+        // ~64ms; the cost was moving the rows and hydrating them.
+        //
+        // Measured on this box: 0 pupils 0.5s, 200,000 pupils 3.2s — about 15ms per
+        // thousand, all of it hydration. A real fleet of 5,000 schools at ~900 pupils
+        // is 4.5M profiles, i.e. roughly SEVENTY SECONDS and 4.5M objects live in the
+        // API task, on the platform owner's dashboard. It would not time out
+        // gracefully; it would take the task's memory with it.
+        //
+        // THE CORRECT SIBLING WAS ALREADY THERE. `analytics.service.ts` does exactly
+        // this in SQL for a SINGLE school, with a comment saying why — "rather than
+        // shipping every student_profile row into Node just to tally". The half that
+        // was left is the one that runs over five thousand times as many rows.
+        //
+        // Same shape as that sibling so the two cannot drift: gender is grouped by
+        // RAW value and folded through `normalizeGender` over the handful of grouped
+        // rows, so the normalisation stays one definition and two spellings of one
+        // gender still merge; the age bands are FILTER counts using Postgres `age()`,
+        // whose completed-year count matches the pure `ageYears()` these DTOs used
+        // before (NULL / out-of-range DOB -> "Unknown").
+        //
+        // Scoped by `school."isPlatform" = false` rather than a 5,000-element
+        // `IN (...)`: the predicate is the same one, expressed where the planner can
+        // use it, and it does not grow with the fleet.
+        //
+        // ONE SCAN, not two. Gender and age were separate queries over the same
+        // 2.5M profiles; each gender group now carries its own age bands and the
+        // bands are summed across groups below.
+        client.$queryRaw<Array<PlatformDemographicRow>>(Prisma.sql`
+          SELECT gender,
+                 count(*)::int                                          AS n,
+                 count(*) FILTER (WHERE age IS NULL)::int              AS unknown,
+                 count(*) FILTER (WHERE age <= 5)::int                 AS b0,
+                 count(*) FILTER (WHERE age BETWEEN 6 AND 10)::int     AS b1,
+                 count(*) FILTER (WHERE age BETWEEN 11 AND 13)::int    AS b2,
+                 count(*) FILTER (WHERE age BETWEEN 14 AND 16)::int    AS b3,
+                 count(*) FILTER (WHERE age BETWEEN 17 AND 18)::int    AS b4,
+                 count(*) FILTER (WHERE age >= 19)::int                AS b5
+          FROM (
+            SELECT gender, (CASE WHEN a >= 0 AND a < 130 THEN a ELSE NULL END) AS age FROM (
+              SELECT p.gender, date_part('year', age(p."dateOfBirth"))::int AS a
+              FROM "student_profile" p JOIN "school" s ON s.id = p."schoolId"
+              WHERE s."isPlatform" = false
+            ) x
+          ) t
+          GROUP BY gender
+        `),
+      ]);
+
     const schoolName = new Map(schools.map((s) => [s.id, s.name]));
-    const customerIds = schools.map((s) => s.id);
     const schoolStatus = { total: schools.length, active: 0, disabled: 0 };
     for (const s of schools) {
       if (s.status === "ACTIVE") schoolStatus.active++;
       else schoolStatus.disabled++;
     }
-
-    // --- subscriptions (drives plan mix, MRR, module adoption, risk) ---
-    const subs = await client.schoolSubscription.findMany({
-      where: { schoolId: { in: customerIds } },
-      select: { schoolId: true, plan: true, status: true, currency: true, currentPeriodEnd: true, graceDays: true, seats: true, overrides: true },
-    });
     const subBySchool = new Map(subs.map((s) => [s.schoolId, s]));
 
-    // --- people (students + staff), plus students-per-school for MRR seats + top schools ---
-    // COUNTED, not scanned. This used to fetch EVERY user_role row for EVERY
-    // customer school into Node and tally them here — unbounded, and at the
-    // 5,000-school target that is tens of millions of rows crossing the wire to
-    // produce a dozen numbers. It also used a hand-written list of nine staff roles
-    // that omitted warden, driver, head_warden, head_driver, librarian and
-    // junior_admin, so the fleet staff figure quietly under-reported every boarding
-    // school. One grouped query, one shared definition (see operator-people.ts).
-    const headcounts = await headcountBySchool(client, ALL_CUSTOMER_SCHOOLS);
     const studentsBySchool = new Map<string, number>();
     let studentTotal = 0;
     let staffTotal = 0;
@@ -114,17 +253,6 @@ export class PlatformAnalyticsService {
       studentTotal += h.students;
       staffTotal += h.staff;
     }
-    // Enrolment by month for the growth chart — a grouped date_trunc rather than
-    // pulling every student row back to read one timestamp off each.
-    const studentCreatedAt = await client.$queryRaw<Array<{ month: Date; count: number }>>(Prisma.sql`
-      SELECT date_trunc('month', u."createdAt") AS month, count(*)::int AS count
-      FROM "user" u
-      JOIN user_role ur ON ur."userId" = u.id
-      JOIN role r ON r.id = ur."roleId"
-      WHERE r.name = 'student'
-        AND ${inSchoolScope(Prisma.sql`u."schoolId"`, ALL_CUSTOMER_SCHOOLS)}
-      GROUP BY 1
-    `);
 
     // --- per-school roll-up: effective plan, seats, MRR, effective modules ---
     // THE PRICE THE OPERATOR ACTUALLY SET, in the money each school is billed
@@ -133,7 +261,6 @@ export class PlatformAnalyticsService {
     // to a total that then added them together. That is the "kobo added to
     // cents, which is not money in any currency" defect the payments block
     // below was fixed for; this roll-up sits thirty lines ABOVE it.
-    const pricing = await this.planPricing.effectiveAll();
     const mrrByCurrency = new Map<string, { totalMinor: number; payingSchools: number }>();
     const atRiskByCurrency = new Map<string, number>();
     const schoolsByPlan: Record<string, number> = {};
@@ -213,16 +340,6 @@ export class PlatformAnalyticsService {
     // A capped newest-first list dropping the oldest rows is the defect class
     // this codebase keeps meeting; a revenue total is simply the worst place for
     // it, because the number stays plausible while being wrong.
-    const since30 = new Date(Date.now() - 30 * DAY_MS);
-    const [totals] = await client.$queryRaw<Array<{ all_time: bigint | null; last30: bigint | null; n: number }>>(Prisma.sql`
-      SELECT COALESCE(SUM("amountMinor"), 0)                                          AS all_time,
-             COALESCE(SUM("amountMinor") FILTER (WHERE "createdAt" >= ${since30}), 0)  AS last30,
-             count(*)::int                                                            AS n
-      FROM platform_subscription_payment
-      WHERE status = 'PAID'
-        AND currency = ${HOME_CURRENCY}
-        AND ${inSchoolScope(Prisma.sql`"schoolId"`, ALL_CUSTOMER_SCHOOLS)}
-    `);
     // SUM over int8 comes back as BigInt, which JSON.stringify THROWS on — the
     // same trap the school archive records. These are minor units of one
     // currency and comfortably inside Number, so they are narrowed here rather
@@ -231,13 +348,6 @@ export class PlatformAnalyticsService {
     const last30dMinor = Number(totals?.last30 ?? 0);
     const homeCurrencyPayments = totals?.n ?? 0;
 
-    // The preview needs TEN rows, and always did — it never needed five thousand.
-    const payments = await client.platformSubscriptionPayment.findMany({
-      where: { schoolId: { in: customerIds }, status: "PAID" },
-      select: { schoolId: true, plan: true, amountMinor: true, currency: true, status: true, createdAt: true },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-    });
     // The PREVIEW carries every currency — it is a list of individual payments,
     // not a total, so a dollar renewal belongs in it. What it must not do is
     // omit the currency and let the screen choose one, which is what it did.
@@ -251,14 +361,12 @@ export class PlatformAnalyticsService {
     }));
 
     // --- onboarding intake pipeline (global, RLS-exempt registry table) ---
-    const onboarding = await client.onboardingRequest.groupBy({ by: ["status"], _count: { _all: true } });
     const onboardingPipeline: Record<string, number> = {};
     for (const o of onboarding as Array<{ status: string; _count: { _all: number } }>) {
       onboardingPipeline[o.status] = o._count._all;
     }
 
     // --- 6-month growth + revenue trend ---
-    const now = new Date();
     const buckets: { key: string; month: string; schools: number; students: number; revenueMinor: number }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -282,84 +390,20 @@ export class PlatformAnalyticsService {
       const i = bucketOf.get(keyFor(m.month));
       if (i !== undefined) buckets[i].students += m.count;
     }
-    // HOME CURRENCY ONLY, exactly as the headline figures above, and GROUPED IN
-    // SQL for the same reason they now are: this looped the capped 5,000-row
-    // array, so as the platform grew, payments fell out of the window OLDEST
-    // FIRST and the historical bars of a growth chart shrank month by month. A
-    // chart of the platform's growth that quietly erased its own past.
-    const revenueByMonth = await client.$queryRaw<Array<{ month: Date; total: bigint | null }>>(Prisma.sql`
-      SELECT date_trunc('month', "createdAt") AS month, COALESCE(SUM("amountMinor"), 0) AS total
-      FROM platform_subscription_payment
-      WHERE status = 'PAID'
-        AND currency = ${HOME_CURRENCY}
-        AND ${inSchoolScope(Prisma.sql`"schoolId"`, ALL_CUSTOMER_SCHOOLS)}
-      GROUP BY 1
-    `);
     for (const r of revenueByMonth) {
       const i = bucketOf.get(keyFor(r.month));
       if (i !== undefined) buckets[i].revenueMinor += Number(r.total ?? 0);
     }
 
-    // --- platform-wide student demographics (from profiles across all schools) ---
-    //
-    // BUCKETED IN POSTGRES, not shipped to Node. This fetched EVERY
-    // `student_profile` row on the platform — `{ gender, dateOfBirth }` for every
-    // pupil in every school — and tallied them in a JS loop to produce two small
-    // histograms. The database answers the same question as an aggregate in
-    // ~64ms; the cost was moving the rows and hydrating them.
-    //
-    // Measured on this box: 0 pupils 0.5s, 200,000 pupils 3.2s — about 15ms per
-    // thousand, all of it hydration. A real fleet of 5,000 schools at ~900 pupils
-    // is 4.5M profiles, i.e. roughly SEVENTY SECONDS and 4.5M objects live in the
-    // API task, on the platform owner's dashboard. It would not time out
-    // gracefully; it would take the task's memory with it.
-    //
-    // THE CORRECT SIBLING WAS ALREADY THERE. `analytics.service.ts` does exactly
-    // this in SQL for a SINGLE school, with a comment saying why — "rather than
-    // shipping every student_profile row into Node just to tally". The half that
-    // was left is the one that runs over five thousand times as many rows.
-    //
-    // Same shape as that sibling so the two cannot drift: gender is grouped by
-    // RAW value and folded through `normalizeGender` over the handful of grouped
-    // rows, so the normalisation stays one definition and two spellings of one
-    // gender still merge; the age bands are FILTER counts using Postgres `age()`,
-    // whose completed-year count matches the pure `ageYears()` these DTOs used
-    // before (NULL / out-of-range DOB -> "Unknown").
-    //
-    // Scoped by `school."isPlatform" = false` rather than a 5,000-element
-    // `IN (...)`: the predicate is the same one, expressed where the planner can
-    // use it, and it does not grow with the fleet.
-    const [genderRows, [bandRow]] = await Promise.all([
-      client.$queryRaw<Array<{ gender: string | null; n: number }>>(Prisma.sql`
-        SELECT p.gender, count(*)::int AS n
-        FROM "student_profile" p JOIN "school" s ON s.id = p."schoolId"
-        WHERE s."isPlatform" = false
-        GROUP BY p.gender
-      `),
-      client.$queryRaw<Array<PlatformAgeBandRow>>(Prisma.sql`
-        SELECT
-          count(*) FILTER (WHERE age IS NULL)::int              AS unknown,
-          count(*) FILTER (WHERE age <= 5)::int                 AS b0,
-          count(*) FILTER (WHERE age BETWEEN 6 AND 10)::int     AS b1,
-          count(*) FILTER (WHERE age BETWEEN 11 AND 13)::int    AS b2,
-          count(*) FILTER (WHERE age BETWEEN 14 AND 16)::int    AS b3,
-          count(*) FILTER (WHERE age BETWEEN 17 AND 18)::int    AS b4,
-          count(*) FILTER (WHERE age >= 19)::int                AS b5
-        FROM (
-          SELECT (CASE WHEN a >= 0 AND a < 130 THEN a ELSE NULL END) AS age FROM (
-            SELECT date_part('year', age(p."dateOfBirth"))::int AS a
-            FROM "student_profile" p JOIN "school" s ON s.id = p."schoolId"
-            WHERE s."isPlatform" = false
-          ) x
-        ) t
-      `),
-    ]);
+    // --- demographics: folded from the one grouped scan above ---
     const genderMix: Record<string, number> = {};
+    const bands: PlatformAgeBandRow = { unknown: 0, b0: 0, b1: 0, b2: 0, b3: 0, b4: 0, b5: 0 };
     let profiledTotal = 0;
-    for (const r of genderRows) {
+    for (const r of demographics) {
       const g = normalizeGender(r.gender);
       genderMix[g] = (genderMix[g] ?? 0) + r.n;
       profiledTotal += r.n;
+      for (const k of Object.keys(bands) as Array<keyof PlatformAgeBandRow>) bands[k] += r[k];
     }
     // Only bands with somebody in them, so the shape of the response is
     // unchanged from the loop it replaces.
@@ -369,7 +413,7 @@ export class PlatformAnalyticsService {
       ["b3", "14–16"], ["b4", "17–18"], ["b5", "19+"], ["unknown", "Unknown"],
     ];
     for (const [key, label] of BANDS) {
-      const n = bandRow?.[key] ?? 0;
+      const n = bands[key];
       if (n > 0) ageMix[label] = n;
     }
 
