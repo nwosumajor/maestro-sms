@@ -9,6 +9,8 @@ import { ServiceUnavailableException } from "@nestjs/common";
 import { PLAN_PRICING, PLAN_PRICING_BY_CURRENCY } from "@sms/types";
 import { PlatformAnalyticsService } from "../../src/operator/platform-analytics.service";
 import { OperatorController } from "../../src/operator/operator.controller";
+import { OVERVIEW_SHARED_KEY, reviveOverview } from "../../src/operator/platform-analytics.service";
+import { randomUUID } from "node:crypto";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
 const owner: Principal = { schoolId: "platform", userId: "owner", roles: ["super_admin"], permissions: ["platform.operate"] };
@@ -150,7 +152,63 @@ function makeClient() {
   }
 }
 
-function makeService(client: ReturnType<typeof makeClient> | null) {
+/**
+ * An in-memory stand-in for Redis that models the CONTRACT the service relies
+ * on, not just its method names: values EXPIRE (on the faked clock), a lock is
+ * EXCLUSIVE until it expires, only the token that took a lock can release it,
+ * `offline` is a connection that is known to be down (`available` false), and
+ * `failing` is one that looks up and fails every command — a Redis that is
+ * reachable but broken, the case a fallback is actually for.
+ */
+function fakeRedis() {
+  const store = new Map<string, { v: string; until: number }>();
+  const live = (k: string) => {
+    const e = store.get(k);
+    if (!e) return null;
+    if (Date.now() >= e.until) {
+      store.delete(k);
+      return null;
+    }
+    return e;
+  };
+  const r = {
+    store,
+    offline: false,
+    failing: false,
+    get available() {
+      return !r.offline;
+    },
+    guard() {
+      if (r.offline || r.failing) throw new Error("redis unavailable");
+    },
+    async get(k: string) {
+      r.guard();
+      return live(k)?.v ?? null;
+    },
+    async set(k: string, v: string, ttl: number) {
+      r.guard();
+      store.set(k, { v, until: Date.now() + ttl });
+    },
+    async tryLock(k: string, ttl: number) {
+      r.guard();
+      if (live(k)) return null;
+      const t = randomUUID();
+      store.set(k, { v: t, until: Date.now() + ttl });
+      return t;
+    },
+    async unlock(k: string, t: string) {
+      r.guard();
+      if (live(k)?.v === t) store.delete(k);
+    },
+    async isLocked(k: string) {
+      r.guard();
+      return live(k) !== null;
+    },
+  };
+  return r;
+}
+
+function makeService(client: ReturnType<typeof makeClient> | null, shared: unknown = { available: false }) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = { runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn({}) };
   const privileged = { client };
@@ -158,7 +216,7 @@ function makeService(client: ReturnType<typeof makeClient> | null) {
   // school's own currency rather than an invented table.
   const planPricing = { effectiveAll: async () => PLAN_PRICING_BY_CURRENCY };
   return {
-    service: new PlatformAnalyticsService(db as never, audit as never, privileged as never, planPricing as never),
+    service: new PlatformAnalyticsService(db as never, audit as never, privileged as never, planPricing as never, shared as never),
     audit,
   };
 }
@@ -400,6 +458,119 @@ describe("PlatformAnalyticsService", () => {
       const retry = await service.overview(owner);
       expect(client.school.findMany).toHaveBeenCalledTimes(2);
       expect(retry.schools.total).toBe(2);
+    });
+  });
+
+  describe("one copy shared by every API task", () => {
+    // Production runs at least two API tasks. A copy in process memory is a copy
+    // PER TASK: reloads could disagree, and after Refresh the "as of" time could
+    // go BACKWARDS when the next reload lands on a task still holding its older
+    // copy. Two service instances over one Redis stand in for two tasks.
+    const T0 = new Date("2026-09-25T09:00:00Z");
+    beforeEach(() => {
+      jest.useFakeTimers({
+        now: T0,
+        doNotFake: ["hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate",
+          "setInterval", "clearInterval", "setTimeout", "clearTimeout"],
+      });
+    });
+    afterEach(() => {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    });
+
+    const twoTasks = () => {
+      const redis = fakeRedis();
+      const a = makeClient();
+      const b = makeClient();
+      return { redis, a, b, taskA: makeService(a, redis).service, taskB: makeService(b, redis).service };
+    };
+
+    it("serves one task's computation from every task", async () => {
+      const { a, b, taskA, taskB } = twoTasks();
+      const first = await taskA.overview(owner);
+      const second = await taskB.overview(owner);
+      expect(a.school.findMany).toHaveBeenCalledTimes(1);
+      expect(b.school.findMany).not.toHaveBeenCalled();
+      expect(second.asOf.getTime()).toBe(first.asOf.getTime());
+    });
+
+    it("never shows an OLDER time after Refresh, whichever task the next reload lands on", async () => {
+      const { taskA, taskB } = twoTasks();
+      await taskB.overview(owner); // B holds the 09:00:00 figures
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const refreshed = await taskA.overview(owner, { fresh: true }); // Refresh lands on A
+      const reload = await taskB.overview(owner); // the next reload lands on B
+      expect(refreshed.asOf.getTime()).toBe(T0.getTime() + 5_000);
+      expect(reload.asOf.getTime()).toBe(refreshed.asOf.getTime());
+    });
+
+    it("recomputes on ONE task while the other waits for its result", async () => {
+      const { a, b, taskA, taskB } = twoTasks();
+      const [x, y] = await Promise.all([taskA.overview(owner, { fresh: true }), taskB.overview(owner, { fresh: true })]);
+      const computations = a.school.findMany.mock.calls.length + b.school.findMany.mock.calls.length;
+      expect(computations).toBe(1);
+      expect(y.asOf.getTime()).toBe(x.asOf.getTime());
+    });
+
+    it("never publishes a FAILED computation — the waiting task computes for itself", async () => {
+      const { redis, a, taskA, taskB } = twoTasks();
+      const real = a.$queryRaw as jest.Mock;
+      a.$queryRaw = jest.fn().mockRejectedValueOnce(new Error("pool busy")).mockImplementation(real) as never;
+      const [x, y] = await Promise.allSettled([taskA.overview(owner), taskB.overview(owner)]);
+      expect(x.status).toBe("rejected");
+      expect(y.status).toBe("fulfilled");
+      const published = redis.store.get(OVERVIEW_SHARED_KEY);
+      expect(published).toBeDefined();
+      expect(reviveOverview(published!.v).schools.total).toBe(2); // B's good result, not an error
+      expect(redis.store.has(`${OVERVIEW_SHARED_KEY}:lock`)).toBe(false); // A released it on failure
+    });
+
+    it("falls back to this task's own copy when Redis is known to be down", async () => {
+      const redis = fakeRedis();
+      redis.offline = true;
+      const c = makeClient();
+      const { service } = makeService(c, redis);
+      await service.overview(owner);
+      await service.overview(owner);
+      expect(c.school.findMany).toHaveBeenCalledTimes(1); // local copy served the second
+    });
+
+    it("falls back, rather than failing, when Redis looks up but every command fails", async () => {
+      const redis = fakeRedis();
+      redis.failing = true;
+      const c = makeClient();
+      const { service } = makeService(c, redis);
+      const out = await service.overview(owner);
+      expect(out.schools.total).toBe(2);
+    });
+
+    it("does not retry a failed COMPUTATION as if Redis were the problem", async () => {
+      // A database failure must propagate. Mistaking it for a cache outage would
+      // run the whole failing computation a second time on every request.
+      const redis = fakeRedis();
+      const c = makeClient();
+      c.$queryRaw = jest.fn().mockRejectedValue(new Error("pool busy")) as never;
+      const { service } = makeService(c, redis);
+      await expect(service.overview(owner)).rejects.toThrow("pool busy");
+      expect(c.school.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("brings back every Date in the response as a Date", async () => {
+      // A DTO read back from Redis has ISO strings where the type says Date.
+      // This walks a REAL computed response, so a Date field added to the DTO
+      // later without being revived fails here.
+      const { service } = makeService(makeClient());
+      const computed = await service.overview(owner);
+      const datesIn = (x: unknown, path = ""): Array<[string, number]> =>
+        x instanceof Date
+          ? [[path, x.getTime()]]
+          : x && typeof x === "object"
+            ? Object.entries(x).flatMap(([k, v]) => datesIn(v, `${path}.${k}`))
+            : [];
+      const before = datesIn(computed);
+      expect(before.length).toBeGreaterThanOrEqual(2); // asOf and a payment's createdAt at least
+      expect(datesIn(reviveOverview(JSON.stringify(computed)))).toEqual(before);
     });
   });
 

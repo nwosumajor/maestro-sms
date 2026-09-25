@@ -19216,20 +19216,42 @@ A cache has three characteristic ways of lying, and each is answered in code:
 Kept deliberately: every view is audited, cached or not. The log records who
 looked, not how the figures were produced.
 
-Stated, not fixed: each API process holds its own copy, so two reloads landing
-on different tasks can show different `asOf` times within the minute. It is
-visible because the time is printed, and bounded by the TTL. A shared copy in
-Redis would remove it, at the cost of a network hop and a serialisation format
-for Dates.
+**A copy per SERVER is its own lie.** Production runs at least two API tasks
+(`api_desired_count = 2`, scaling to 10), and a copy in process memory is a copy
+per task: reloads disagree, and after Refresh the time goes BACKWARDS when the
+next reload lands on a task still holding its older copy. The copy therefore
+lives in Redis (`SharedCacheService`), with a short lock so one task recomputes
+while the others wait for ITS result (after Refresh, only a copy newer than the
+one they had counts). The lock is released on failure, so a waiting task sees
+nothing new and computes for itself: a failure is never published. Every Redis
+failure falls back to the process-local copy, and a DATABASE failure is told
+apart from a Redis one, so a failing computation is never run twice.
+// GOTCHA: the pub/sub connection WAITS through a Redis outage
+// (`maxRetriesPerRequest: null`, right for pub/sub). Reused for a cache, an
+// outage becomes a dashboard that hangs. The cache has its own connection that
+// fails fast: one retry, no offline queue, a 1 s command timeout.
+// GOTCHA: a DTO read back from Redis has ISO strings where the type says Date.
+// Revived by name, and a test walks a REAL computed response so a Date field
+// added later without being revived fails.
 
-// GOTCHA in validating it: the first mutation (`if (false && …)`) did not
-// COMPILE, and the run reported `Tests: 0 total` rather than a failure. That
-// proves nothing either way; rewritten as `< 0`, it failed the two tests it
-// should.
+Verified on TWO real API containers behind nginx, driving each by its own
+address. Through nginx alone all 25 requests reached one container (the web
+tier reuses its connection), which proves nothing about two, so that run was
+not counted. Direct, with Redis up: both served one copy; Refresh on one, then
+a reload on the other, showed the refreshed figures; a simultaneous Refresh on
+both was ONE computation. With Redis STOPPED, the same probe went red exactly as
+predicted (the reload went backwards, two computations), while every request
+still answered promptly and the page loaded in 0.37 s. Redis restarted: sharing
+resumed with no restart of either API, each having logged the outage once.
+
+// GOTCHA in validating it, THREE times: mutations that did not COMPILE report
+// `Tests: 0 total`, not a failure, and prove nothing either way. Each was
+// rewritten in a compiling form and then failed the tests it should.
 
 Verified live: two opens two seconds apart shared one `asOf`; `fresh=1`
 produced a new one that the next ordinary open was then served; four views
 wrote four audit rows; the page shows the time in the operator's own zone.
-Tests: six cache cases and two route cases in `platform-analytics.service.spec`,
-plus `a-refresh-that-asks-for-new-figures` for the button, each
-mutation-validated.
+Tests: six cache cases, eight shared-copy cases (two service instances over one
+contract-modelling Redis stand-in) and two route cases in
+`platform-analytics.service.spec`, plus `a-refresh-that-asks-for-new-figures`
+for the button; every case mutation-validated.
