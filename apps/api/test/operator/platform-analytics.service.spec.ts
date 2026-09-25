@@ -579,6 +579,33 @@ describe("PlatformAnalyticsService", () => {
       expect(entry.until).toBe(duringOutage.asOf.getTime() + 60_000);
     });
 
+    it("serves an ordinary open the CURRENT copy while a Refresh recalculates on the same task", async () => {
+      // It used to join whatever was running on the task — including someone
+      // else's Refresh — and wait seconds for figures it had not asked for.
+      // The simulation: 50 of 70 slow ordinary opens were exactly that.
+      const redis = fakeRedis();
+      const c = makeClient();
+      const { service } = makeService(c, redis);
+      const current = await service.overview(owner); // a copy exists (T0)
+
+      // Hold the Refresh's database read open until we say so.
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const realFind = c.school.findMany;
+      c.school.findMany = jest.fn(async (...a: unknown[]) => {
+        await gate;
+        return (realFind as jest.Mock)(...a);
+      }) as never;
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const refresh = service.overview(owner, { fresh: true });
+
+      const ordinary = await service.overview(owner); // must NOT wait for the gate
+      expect(ordinary.asOf.getTime()).toBe(current.asOf.getTime());
+
+      release();
+      expect((await refresh).asOf.getTime()).toBe(T0.getTime() + 5_000);
+    });
+
     it("brings back every Date in the response as a Date", async () => {
       // A DTO read back from Redis has ISO strings where the type says Date.
       // This walks a REAL computed response, so a Date field added to the DTO

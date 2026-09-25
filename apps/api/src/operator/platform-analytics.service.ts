@@ -168,9 +168,16 @@ export class PlatformAnalyticsService {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Platform analytics are not configured");
     const fresh = opts.fresh === true;
-    // Served straight from the local copy only when Redis is NOT in use: with
-    // Redis available, the shared copy is the one every task must agree on.
-    if (!fresh && !this.shared.available && this.localHit()) return this.cached!.value;
+    // AN ORDINARY OPEN IS SERVED THE CURRENT COPY FIRST, before looking at any
+    // computation already running on this task. It used to join whatever was
+    // in flight — including somebody else's Refresh — and wait seconds for
+    // figures it had not asked for while a perfectly good copy existed.
+    // Measured in the 3-server simulation: 50 of 70 slow ordinary opens were
+    // exactly that.
+    if (!fresh) {
+      const current = await this.currentCopy();
+      if (current) return current;
+    }
     if (this.inflight) return this.inflight;
     const run = (async () => {
       if (!this.shared.available) return this.viaLocal(client);
@@ -186,6 +193,30 @@ export class PlatformAnalyticsService {
     });
     this.inflight = run;
     return run;
+  }
+
+  /**
+   * The copy an ordinary open should be served, or null when there is none to
+   * serve (nothing yet, or it has expired). Never waits on a computation. With
+   * Redis, the shared copy — after publishing this task's own copy if a Redis
+   * outage left it NEWER (see viaShared). Without Redis, or if Redis fails
+   * here, this task's own copy.
+   */
+  private async currentCopy(): Promise<PlatformAnalyticsDto | null> {
+    const own = this.localHit() ? this.cached!.value : null;
+    if (!this.shared.available) return own;
+    try {
+      const raw = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
+      const shared = raw ? reviveOverview(raw) : null;
+      if (own && (!shared || own.asOf.getTime() > shared.asOf.getTime())) {
+        await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(own), this.remainingTtlMs()));
+        return own;
+      }
+      return shared ? this.remember(shared) : null;
+    } catch (e) {
+      if (!(e instanceof SharedCacheUnavailable)) throw e;
+      return own;
+    }
   }
 
   private localHit(): boolean {
