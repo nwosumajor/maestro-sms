@@ -19286,8 +19286,25 @@ minus `asOf`). Three runs; the third passed all seven:
 // `compose up` without `--no-deps` would have recreated Postgres with its old
 // 64 MB. A green run from a broken harness is the most convincing wrong answer
 // there is.
-Remaining, measured and stated: an open that arrives exactly as the minute
-runs out waits for the next copy (~4 s at this scale, 2% of opens, p99).
+- **Whoever opened as the minute ran out waited ~4 s** for the next copy. Past
+  its minute a copy is now served for up to a further minute while ONE task
+  recalculates behind it (same Redis lock). Checked directly at full scale,
+  because the fourth simulation's Refresh presses kept every copy under a
+  minute old and never reached the boundary: a fresh copy took 3,527 ms; an
+  open 62 s later was served the previous copy in 118 ms (labelled 66 s old);
+  an open 8 s after that got the new copy in 55 ms. Past the grace the copy is
+  gone, so a quiet dashboard recalculates on demand and a background run that
+  keeps failing cannot hide behind an ever-older copy.
+Remaining, measured and stated: the very first open when NO copy exists
+waits for one (14 of the fourth run's 19 slow opens, because the harness wipes
+Redis first; in production the copy survives API restarts and deploys). The
+other 5 were a Postgres COMMIT stall on the laptop's disk — eight COMMITs
+finishing within 3 ms of each other after 0.8-1.4 s — which the view's own
+audit-row insert waited on. That is the disk, not the cache.
+// GOTCHA: a run that PASSES can still not have EXERCISED the thing added.
+// The fourth run was all-green and its copies never passed 43 s old, so the
+// stale-copy path never ran. Check what a run actually reached, not only
+// what it asserted.
 
 Verified live: two opens two seconds apart shared one `asOf`; `fresh=1`
 produced a new one that the next ordinary open was then served; four views
