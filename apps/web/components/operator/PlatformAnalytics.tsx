@@ -11,6 +11,8 @@ import { RCArea, RCBars, RCColumns, RCDonut } from "@/components/charts/rc";
 import { RC } from "@/components/charts/colors";
 import { money, shortDate, timeOfDay, type DisplayRegion } from "@/lib/format";
 import { AnalyticsRefresh } from "./AnalyticsRefresh";
+import { CardReadProblem } from "./CardReadProblem";
+import type { CardRead } from "@/lib/card-read";
 
 const PLAN_PALETTE = [RC.primary, RC.primarySoft, RC.primaryFaint, RC.amber, RC.muted];
 const STATUS_COLOR: Record<string, string> = { ACTIVE: RC.primary, PAST_DUE: RC.amber, CANCELED: RC.red, CANCELLED: RC.red };
@@ -22,27 +24,15 @@ function planColors(keys: string[]): Record<string, string> {
 }
 
 export function PlatformAnalytics({
-  data,
+  read,
   region,
 }: {
-  data: Serialized<PlatformAnalyticsDto> | null;
+  read: CardRead<Serialized<PlatformAnalyticsDto>>;
   /** The operator's own display region, for the "as of" time. */
   region?: Partial<DisplayRegion>;
 }) {
-  if (!data) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Platform analytics</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Analytics are unavailable — the privileged database connection is not configured.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (read.state !== "ok") return <CardReadProblem title="Platform analytics" read={read} />;
+  const data = read.data;
 
   const planKeys = [...new Set([...Object.keys(data.schoolsByPlan), ...Object.keys(data.mrr.byPlan)])];
   const planColor = planColors(planKeys);

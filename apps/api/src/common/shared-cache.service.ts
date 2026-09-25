@@ -51,7 +51,11 @@ export class SharedCacheService implements OnModuleInit, OnModuleDestroy {
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
       commandTimeout: 1_000,
-      retryStrategy: (times: number) => Math.min(times * 200, 5000),
+      // Reconnect at most a second apart. While disconnected every caller runs
+      // on its own copy, so the backoff IS the length of the disagreement after
+      // Redis returns: the 5 s ceiling the other connections use left servers
+      // on their own copies for seconds after recovery.
+      retryStrategy: (times: number) => Math.min(times * 200, 1000),
     };
     try {
       this.client = new Redis(opts);

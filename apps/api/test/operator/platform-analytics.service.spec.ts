@@ -556,6 +556,29 @@ describe("PlatformAnalyticsService", () => {
       expect(c.school.findMany).toHaveBeenCalledTimes(1);
     });
 
+    it("after a Redis outage, publishes a NEWER copy held locally instead of serving the older shared one", async () => {
+      // During an outage each task runs on its own copy; a task that
+      // recomputed then holds figures newer than the copy still in Redis.
+      // Serving the shared one would take anyone who saw the newer figures
+      // backwards. The run before this fix: 11 of 49 requests in the ten
+      // seconds after Redis returned saw an older copy than one already shown.
+      const { redis, taskA, taskB } = twoTasks();
+      const before = await taskA.overview(owner); // T0, shared
+      redis.failing = true;
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const duringOutage = await taskB.overview(owner, { fresh: true }); // T0+5, local only
+      expect(duringOutage.asOf.getTime()).toBeGreaterThan(before.asOf.getTime());
+      redis.failing = false;
+      jest.setSystemTime(new Date(T0.getTime() + 6_000));
+      const fromB = await taskB.overview(owner); // B notices the shared copy is older
+      const fromA = await taskA.overview(owner); // and A now serves B's newer copy
+      expect(fromB.asOf.getTime()).toBe(duringOutage.asOf.getTime());
+      expect(fromA.asOf.getTime()).toBe(duringOutage.asOf.getTime());
+      // Published with what was LEFT of its minute, not a fresh minute.
+      const entry = redis.store.get(OVERVIEW_SHARED_KEY)!;
+      expect(entry.until).toBe(duringOutage.asOf.getTime() + 60_000);
+    });
+
     it("brings back every Date in the response as a Date", async () => {
       // A DTO read back from Redis has ISO strings where the type says Date.
       // This walks a REAL computed response, so a Date field added to the DTO

@@ -192,6 +192,12 @@ export class PlatformAnalyticsService {
     return this.cached !== null && Date.now() - this.cached.at < OVERVIEW_CACHE_TTL_MS;
   }
 
+  /** What is left of the local copy's minute, so publishing it after an outage
+   *  does not extend its life: it expires in Redis when it would have here. */
+  private remainingTtlMs(): number {
+    return Math.max(1, OVERVIEW_CACHE_TTL_MS - (Date.now() - (this.cached?.at ?? 0)));
+  }
+
   private remember(value: PlatformAnalyticsDto): PlatformAnalyticsDto {
     this.cached = { value, at: value.asOf.getTime() };
     return value;
@@ -221,7 +227,19 @@ export class PlatformAnalyticsService {
 
   private async viaShared(client: PrivilegedClient, fresh: boolean): Promise<PlatformAnalyticsDto> {
     const raw = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
-    const previous = raw ? reviveOverview(raw) : null;
+    let previous = raw ? reviveOverview(raw) : null;
+    // AFTER A REDIS OUTAGE this task may hold a copy NEWER than the shared one:
+    // during the outage it recomputed on its own (a Refresh, or an expiry), and
+    // the shared copy still in Redis is from before. Serving the shared one
+    // would take anyone who saw this task's figures BACKWARDS, so the newer copy
+    // is published instead and every task converges on it. Measured before
+    // this: 11 of 49 requests in the ten seconds after Redis returned saw an
+    // older copy than one already shown.
+    const mine = this.localHit() ? this.cached!.value : null;
+    if (mine && (!previous || mine.asOf.getTime() > previous.asOf.getTime())) {
+      await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(mine), this.remainingTtlMs()));
+      previous = mine;
+    }
     if (previous && !fresh) return this.remember(previous);
 
     const token = await this.sh(this.shared.tryLock(OVERVIEW_LOCK_KEY, OVERVIEW_LOCK_TTL_MS));

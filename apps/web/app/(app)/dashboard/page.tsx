@@ -38,6 +38,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, regionOf, shortDate, type DisplayRegion } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { PlatformAnalytics } from "@/components/operator/PlatformAnalytics";
+import { readForCard } from "@/lib/card-read";
 import { GamesAnalytics } from "@/components/operator/GamesAnalytics";
 
 export const dynamic = "force-dynamic";
@@ -158,11 +159,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
   // The platform owner has no tenant data — their console is the cross-tenant
   // business overview (management lives on the Operator console).
   if (can("platform.tenants.read")) {
+    // Each card's read is caught ON ITS OWN (readForCard): awaited together
+    // raw, one failing read threw into the error boundary and blanked the
+    // whole dashboard, the other card included.
     const [analytics, games] = await Promise.all([
       // `?fresh=` comes from the Refresh button: recompute rather than serve the
       // copy, which can be up to a minute old.
-      apiGet<Serialized<PlatformAnalyticsDto>>(searchParams.fresh ? "/operator/analytics?fresh=1" : "/operator/analytics"),
-      apiGet<Serialized<GamesAnalyticsDto>>("/operator/games-analytics"),
+      readForCard(apiGet<Serialized<PlatformAnalyticsDto>>(searchParams.fresh ? "/operator/analytics?fresh=1" : "/operator/analytics")),
+      readForCard(apiGet<Serialized<GamesAnalyticsDto>>("/operator/games-analytics")),
     ]);
     return (
       <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="dashboard" permissions={user.permissions}>
@@ -173,8 +177,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
             subtitle={<>Business health across every customer school — management lives on the Operator console.</>}
             actions={<Link href="/operator"><Button variant="outline">Operator console →</Button></Link>}
           />
-          <PlatformAnalytics data={analytics ?? null} region={region} />
-          <GamesAnalytics data={games ?? null} />
+          <PlatformAnalytics read={analytics} region={region} />
+          <GamesAnalytics read={games} />
         </div>
       </AppShell>
     );
