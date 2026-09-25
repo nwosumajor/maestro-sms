@@ -208,6 +208,11 @@ function fakeRedis() {
   return r;
 }
 
+/** Wait for the recalculation a stale read started in the background. */
+async function backgroundOf(service: unknown): Promise<void> {
+  await (service as { revalidating: Promise<void> | null }).revalidating;
+}
+
 function makeService(client: ReturnType<typeof makeClient> | null, shared: unknown = { available: false }) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = { runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn({}) };
@@ -420,14 +425,32 @@ describe("PlatformAnalyticsService", () => {
       expect(second).toBe(first);
     });
 
-    it("recomputes once the minute is up", async () => {
+    it("past its minute, serves the previous copy AT ONCE and recalculates behind it", async () => {
+      // Nobody waits on an expiry. The first open after the minute gets the
+      // previous copy immediately; the next copy is calculated in the
+      // background, and the open after it is served that.
+      const client = makeClient();
+      const { service } = makeService(client);
+      const first = await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 60_001));
+      const atExpiry = await service.overview(owner);
+      expect(atExpiry.asOf.getTime()).toBe(first.asOf.getTime()); // served, not waited for
+      await backgroundOf(service);
+      const next = await service.overview(owner);
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+      expect(next.asOf.getTime()).toBe(T0.getTime() + 60_001);
+    });
+
+    it("past its grace, the copy is GONE and an open waits for a new one", async () => {
+      // A dashboard nobody has looked at recalculates on demand; a stale copy is
+      // not kept alive for ever.
       const client = makeClient();
       const { service } = makeService(client);
       await service.overview(owner);
-      jest.setSystemTime(new Date(T0.getTime() + 60_001));
+      jest.setSystemTime(new Date(T0.getTime() + 120_001));
       const later = await service.overview(owner);
+      expect(later.asOf.getTime()).toBe(T0.getTime() + 120_001);
       expect(client.school.findMany).toHaveBeenCalledTimes(2);
-      expect(later.asOf.getTime()).toBe(T0.getTime() + 60_001);
     });
 
     it("recomputes on request — the Refresh button", async () => {
@@ -576,7 +599,7 @@ describe("PlatformAnalyticsService", () => {
       expect(fromA.asOf.getTime()).toBe(duringOutage.asOf.getTime());
       // Published with what was LEFT of its minute, not a fresh minute.
       const entry = redis.store.get(OVERVIEW_SHARED_KEY)!;
-      expect(entry.until).toBe(duringOutage.asOf.getTime() + 60_000);
+      expect(entry.until).toBe(duringOutage.asOf.getTime() + 120_000); // its minute + the grace
     });
 
     it("serves an ordinary open the CURRENT copy while a Refresh recalculates on the same task", async () => {
@@ -604,6 +627,36 @@ describe("PlatformAnalyticsService", () => {
 
       release();
       expect((await refresh).asOf.getTime()).toBe(T0.getTime() + 5_000);
+    });
+
+    it("at the minute, ONE task recalculates in the background while every task serves the previous copy", async () => {
+      const { a, b, taskA, taskB } = twoTasks();
+      const first = await taskA.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 61_000));
+      const [x, y] = await Promise.all([taskA.overview(owner), taskB.overview(owner)]);
+      expect(x.asOf.getTime()).toBe(first.asOf.getTime()); // neither waited
+      expect(y.asOf.getTime()).toBe(first.asOf.getTime());
+      await Promise.all([backgroundOf(taskA), backgroundOf(taskB)]);
+      const computations = a.school.findMany.mock.calls.length + b.school.findMany.mock.calls.length;
+      expect(computations).toBe(2); // the first, then ONE background recalculation
+      const [x2, y2] = await Promise.all([taskA.overview(owner), taskB.overview(owner)]);
+      expect(x2.asOf.getTime()).toBe(T0.getTime() + 61_000);
+      expect(y2.asOf.getTime()).toBe(T0.getTime() + 61_000);
+    });
+
+    it("a FAILED background recalculation publishes nothing and keeps serving the previous copy", async () => {
+      const { redis, a, taskA } = twoTasks();
+      const first = await taskA.overview(owner);
+      const real = a.$queryRaw as jest.Mock;
+      a.$queryRaw = jest.fn().mockRejectedValueOnce(new Error("pool busy")).mockImplementation(real) as never;
+      jest.setSystemTime(new Date(T0.getTime() + 61_000));
+      const stale = await taskA.overview(owner);
+      await backgroundOf(taskA);
+      expect(stale.asOf.getTime()).toBe(first.asOf.getTime());
+      expect(reviveOverview(redis.store.get(OVERVIEW_SHARED_KEY)!.v).asOf.getTime()).toBe(first.asOf.getTime());
+      expect(redis.store.has(`${OVERVIEW_SHARED_KEY}:lock`)).toBe(false); // released
+      const again = await taskA.overview(owner); // still served, and it tries again
+      expect(again.asOf.getTime()).toBe(first.asOf.getTime());
     });
 
     it("brings back every Date in the response as a Date", async () => {

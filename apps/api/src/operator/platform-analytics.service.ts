@@ -83,8 +83,9 @@ type PrivilegedClient = NonNullable<PrivilegedDatabaseService["client"]>;
  * one per minute per API process, however many times the page is opened.
  *
  * WHAT IT COSTS, and how each is answered:
- *  - a figure up to a minute old — the response carries `asOf`, the dashboard
- *    prints it, and `fresh` bypasses the cache (the Refresh button);
+ *  - a figure up to a minute old (two, with OVERVIEW_STALE_GRACE_MS) — the
+ *    response carries `asOf`, the dashboard prints it, and `fresh` bypasses
+ *    the cache (the Refresh button);
  *  - production runs several API tasks, so a copy in PROCESS memory would be a
  *    copy per task: two reloads could disagree, and after Refresh the time
  *    could go BACKWARDS (refresh on one task, reload lands on another still
@@ -96,6 +97,26 @@ type PrivilegedClient = NonNullable<PrivilegedDatabaseService["client"]>;
  *    minute.
  */
 export const OVERVIEW_CACHE_TTL_MS = 60_000;
+
+/**
+ * How long past its minute a copy is still SERVED while the next one is
+ * calculated in the background ("stale while revalidating").
+ *
+ * Without it, whoever opened the dashboard as the minute ran out waited for a
+ * full recalculation — about 4 s at 5,000 schools, 2% of opens and the whole of
+ * the p99 in the 3-server simulation. With it, that open gets the previous copy
+ * at once and ONE task recalculates behind it (under the same Redis lock), so
+ * nobody waits on an expiry. The cost is age: a copy can be served up to
+ * TTL + grace old (two minutes) to the first open after a quiet minute — which
+ * the page states, because it prints `asOf`. Past the grace the copy is gone,
+ * so a dashboard nobody has looked at recalculates on demand rather than
+ * keeping a stale copy alive, and a background recalculation that keeps
+ * failing surfaces as a failure once the grace runs out instead of hiding
+ * behind an ever-older copy.
+ */
+export const OVERVIEW_STALE_GRACE_MS = 60_000;
+/** How long a copy is kept at all: its fresh minute plus the grace. */
+const OVERVIEW_KEEP_MS = OVERVIEW_CACHE_TTL_MS + OVERVIEW_STALE_GRACE_MS;
 
 /** The shared copy's key. Versioned because the value is a serialised DTO: if
  *  its SHAPE changes, bump this so a new task never reads an old task's shape.
@@ -145,6 +166,9 @@ export class PlatformAnalyticsService {
   /** A request already under way on THIS task, shared by anyone who asks
    *  meanwhile, so two opens on one task make one trip, not two. */
   private inflight: Promise<PlatformAnalyticsDto> | null = null;
+  /** A background recalculation started by a stale read on THIS task, so one
+   *  task never starts two. (Across tasks, the Redis lock does the same.) */
+  private revalidating: Promise<void> | null = null;
 
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
@@ -155,7 +179,9 @@ export class PlatformAnalyticsService {
   ) {}
 
   /**
-   * The fleet overview, served from a copy at most OVERVIEW_CACHE_TTL_MS old.
+   * The fleet overview, served from a copy — fresh for OVERVIEW_CACHE_TTL_MS,
+   * then served for up to OVERVIEW_STALE_GRACE_MS more while the next copy is
+   * calculated in the background, so no ordinary open waits on an expiry.
    * `fresh` recomputes (the dashboard's Refresh button). A computation already
    * running is shared even by a `fresh` request rather than starting a second
    * set of scans: it began at most one computation's length earlier (seconds),
@@ -175,7 +201,7 @@ export class PlatformAnalyticsService {
     // Measured in the 3-server simulation: 50 of 70 slow ordinary opens were
     // exactly that.
     if (!fresh) {
-      const current = await this.currentCopy();
+      const current = await this.currentCopy(client);
       if (current) return current;
     }
     if (this.inflight) return this.inflight;
@@ -186,7 +212,7 @@ export class PlatformAnalyticsService {
       } catch (e) {
         if (!(e instanceof SharedCacheUnavailable)) throw e; // a failed COMPUTATION propagates
         this.logger.warn(`Shared overview cache unavailable, using this task's copy: ${e.message}`);
-        return !fresh && this.localHit() ? this.cached!.value : this.viaLocal(client);
+        return !fresh && this.ownUsable() ? this.cached!.value : this.viaLocal(client);
       }
     })().finally(() => {
       this.inflight = null;
@@ -197,36 +223,75 @@ export class PlatformAnalyticsService {
 
   /**
    * The copy an ordinary open should be served, or null when there is none to
-   * serve (nothing yet, or it has expired). Never waits on a computation. With
-   * Redis, the shared copy — after publishing this task's own copy if a Redis
-   * outage left it NEWER (see viaShared). Without Redis, or if Redis fails
-   * here, this task's own copy.
+   * serve (nothing yet, or older than its grace). Never waits on a computation.
+   * With Redis, the shared copy — after publishing this task's own copy if a
+   * Redis outage left it NEWER (see viaShared). Without Redis, or if Redis
+   * fails here, this task's own copy. A copy past its fresh minute is still
+   * served, and starts the next recalculation in the background.
    */
-  private async currentCopy(): Promise<PlatformAnalyticsDto | null> {
-    const own = this.localHit() ? this.cached!.value : null;
-    if (!this.shared.available) return own;
-    try {
-      const raw = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
-      const shared = raw ? reviveOverview(raw) : null;
-      if (own && (!shared || own.asOf.getTime() > shared.asOf.getTime())) {
-        await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(own), this.remainingTtlMs()));
-        return own;
+  private async currentCopy(client: PrivilegedClient): Promise<PlatformAnalyticsDto | null> {
+    const own = this.ownUsable() ? this.cached!.value : null;
+    let chosen: PlatformAnalyticsDto | null = own;
+    if (this.shared.available) {
+      try {
+        const raw = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
+        const shared = raw ? reviveOverview(raw) : null;
+        if (own && (!shared || own.asOf.getTime() > shared.asOf.getTime())) {
+          await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(own), this.remainingLifeMs(own)));
+        } else {
+          chosen = shared ? this.remember(shared) : null;
+        }
+      } catch (e) {
+        if (!(e instanceof SharedCacheUnavailable)) throw e;
+        chosen = own;
       }
-      return shared ? this.remember(shared) : null;
-    } catch (e) {
-      if (!(e instanceof SharedCacheUnavailable)) throw e;
-      return own;
     }
+    if (chosen && !this.isFresh(chosen)) this.revalidateInBackground(client);
+    return chosen;
   }
 
-  private localHit(): boolean {
-    return this.cached !== null && Date.now() - this.cached.at < OVERVIEW_CACHE_TTL_MS;
+  private isFresh(v: PlatformAnalyticsDto): boolean {
+    return Date.now() - v.asOf.getTime() < OVERVIEW_CACHE_TTL_MS;
   }
 
-  /** What is left of the local copy's minute, so publishing it after an outage
-   *  does not extend its life: it expires in Redis when it would have here. */
-  private remainingTtlMs(): number {
-    return Math.max(1, OVERVIEW_CACHE_TTL_MS - (Date.now() - (this.cached?.at ?? 0)));
+  /**
+   * Start the next copy WITHOUT making anyone wait for it. One per task, and
+   * across tasks the Redis lock: a task that cannot take it leaves the work to
+   * whoever holds it. A failure is logged and never published; the previous
+   * copy goes on being served until its grace runs out.
+   */
+  private revalidateInBackground(client: PrivilegedClient): void {
+    if (this.inflight || this.revalidating) return;
+    this.revalidating = (async () => {
+      try {
+        if (!this.shared.available) {
+          await this.viaLocal(client);
+          return;
+        }
+        const token = await this.shared.tryLock(OVERVIEW_LOCK_KEY, OVERVIEW_LOCK_TTL_MS);
+        if (!token) return; // another task is already recalculating
+        try {
+          await this.computeAndPublish(client);
+        } finally {
+          await this.shared.unlock(OVERVIEW_LOCK_KEY, token).catch(() => undefined);
+        }
+      } catch (e) {
+        this.logger.warn(`Background recalculation failed; the previous copy is still served: ${(e as Error).message}`);
+      } finally {
+        this.revalidating = null;
+      }
+    })();
+  }
+
+  /** This task's own copy is still within its fresh minute or its grace. */
+  private ownUsable(): boolean {
+    return this.cached !== null && Date.now() - this.cached.at < OVERVIEW_KEEP_MS;
+  }
+
+  /** What is left of a copy's life, so republishing it after an outage does
+   *  not extend it: it expires in Redis when it would have expired here. */
+  private remainingLifeMs(v: PlatformAnalyticsDto): number {
+    return Math.max(1, OVERVIEW_KEEP_MS - (Date.now() - v.asOf.getTime()));
   }
 
   private remember(value: PlatformAnalyticsDto): PlatformAnalyticsDto {
@@ -252,7 +317,7 @@ export class PlatformAnalyticsService {
   private async computeAndPublish(client: PrivilegedClient): Promise<PlatformAnalyticsDto> {
     const value = await this.computeOverview(client);
     // A failed WRITE does not waste the computation: this caller still gets it.
-    await this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(value), OVERVIEW_CACHE_TTL_MS).catch(() => undefined);
+    await this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(value), OVERVIEW_KEEP_MS).catch(() => undefined);
     return this.remember(value);
   }
 
@@ -266,9 +331,9 @@ export class PlatformAnalyticsService {
     // is published instead and every task converges on it. Measured before
     // this: 11 of 49 requests in the ten seconds after Redis returned saw an
     // older copy than one already shown.
-    const mine = this.localHit() ? this.cached!.value : null;
+    const mine = this.ownUsable() ? this.cached!.value : null;
     if (mine && (!previous || mine.asOf.getTime() > previous.asOf.getTime())) {
-      await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(mine), this.remainingTtlMs()));
+      await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(mine), this.remainingLifeMs(mine)));
       previous = mine;
     }
     if (previous && !fresh) return this.remember(previous);

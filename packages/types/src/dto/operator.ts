@@ -80,10 +80,12 @@ export interface PlatformRevenueEntryDto {
  *  span EVERY customer school (the platform org itself is excluded). Money is in
  *  integer minor units (NGN kobo). */
 export interface PlatformAnalyticsDto {
-  /** WHEN these figures were read from the database. The overview is computed
-   *  at most once a minute per API process (see PlatformAnalyticsService), so a
-   *  response can be up to a minute old; the dashboard states this time rather
-   *  than presenting a cached figure as live. */
+  /** WHEN these figures were read from the database. The overview is
+   *  recalculated at most once a minute (see PlatformAnalyticsService): a copy
+   *  is normally under a minute old, and the first open after a quiet minute
+   *  can be served one up to two minutes old while the next is calculated in
+   *  the background. The dashboard states this time rather than presenting a
+   *  cached figure as live. */
   asOf: Date;
   /** Customer schools (the platform org is never counted). */
   schools: { total: number; active: number; disabled: number };
