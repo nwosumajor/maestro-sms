@@ -19248,6 +19248,47 @@ resumed with no restart of either API, each having logged the outage once.
 // `Tests: 0 total`, not a failure, and prove nothing either way. Each was
 // rewritten in a compiling form and then failed the tests it should.
 
+THE SIMULATION, and what it found that no unit test had. 5,000 schools and
+2.5M pupils; THREE API containers; 15 simulated staff opening the dashboard
+every 1-4 s on a random server for three minutes; Redis stopped for 20 s
+mid-run with a Refresh forced on one server inside the outage. A checker
+written BEFORE the run: every request succeeds; nobody sees the time go
+backwards (strict, across every reader, Redis up); recalculation per Refresh
+and per minute, not per server (counted from the database's own statement
+log); copies fast; every view audited (counted from audit_log); every response
+carrying the SAME figures as a fresh calculation (a fingerprint of the body
+minus `asOf`). Three runs; the third passed all seven:
+- **An ordinary open waited on somebody else's Refresh.** `overview()` joined a
+  computation already running on the task before looking for a copy, so an
+  open that arrived during a Refresh on the same server waited seconds for
+  figures it had not asked for. 50 of 70 slow opens. Now an ordinary open is
+  served the current copy first: p95 2,854 ms -> 41 ms.
+- **After Redis returned, a task could hold a copy NEWER than Redis's** (it
+  recomputed during the outage) and the others served the older one. It now
+  publishes its own, with what was left of its minute, and the cache
+  connection retries at most 1 s apart (was 5 s): the last backwards view after
+  recovery went 3.4 s -> 1.9 s. Not zero, and cannot be: while Redis is down the
+  tasks cannot coordinate, and they reconnect at slightly different moments.
+- **A 500 that was not the cache**: Postgres error 53100, the 64 MB `/dev/shm`
+  Docker gives a container, exhausted by concurrent parallel queries while the
+  tasks recomputed on their own during the outage. Local/compose only (RDS is
+  not a container); fixed separately with `shm_size`.
+- **Both dashboard cards asserted a cause they could not know** ("the privileged
+  database connection is not configured") and one failing read blanked the
+  whole dashboard. Each card is now read on its own (`readForCard`) and says
+  what is known.
+// GOTCHA, four in the HARNESS, each of which would have reported something
+// untrue: readiness checked through nginx reached only the old container, so
+// 15 requests failed against containers still booting; `date +%s%3N` prints
+// NANOSECONDS on this machine, so the outage window was a million times too
+// large and silently excluded every request from the outage checks; counting
+// statements with `docker logs --since` returned an earlier run's lines; and
+// `compose up` without `--no-deps` would have recreated Postgres with its old
+// 64 MB. A green run from a broken harness is the most convincing wrong answer
+// there is.
+Remaining, measured and stated: an open that arrives exactly as the minute
+runs out waits for the next copy (~4 s at this scale, 2% of opens, p99).
+
 Verified live: two opens two seconds apart shared one `asOf`; `fresh=1`
 produced a new one that the next ordinary open was then served; four views
 wrote four audit rows; the page shows the time in the operator's own zone.
