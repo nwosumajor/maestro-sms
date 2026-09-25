@@ -585,8 +585,13 @@ export class OperatorController {
   /** Platform-owner business dashboard: cross-tenant schools/revenue/plan metrics. */
   @Get("analytics")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
-  async analytics(@CurrentPrincipal() p: Principal): Promise<PlatformAnalyticsDto> {
-    const result = await this.analyticsSvc.overview(p);
+  async analytics(
+    @CurrentPrincipal() p: Principal,
+    // `?fresh=1` recomputes instead of serving the copy (up to a minute old).
+    @Query("fresh") fresh?: string,
+  ): Promise<PlatformAnalyticsDto> {
+    const result = await this.analyticsSvc.overview(p, { fresh: fresh === "1" });
+    // Every view is audited, served from the copy or not.
     await this.analyticsSvc.auditView(p);
     return result;
   }

@@ -80,6 +80,11 @@ export interface PlatformRevenueEntryDto {
  *  span EVERY customer school (the platform org itself is excluded). Money is in
  *  integer minor units (NGN kobo). */
 export interface PlatformAnalyticsDto {
+  /** WHEN these figures were read from the database. The overview is computed
+   *  at most once a minute per API process (see PlatformAnalyticsService), so a
+   *  response can be up to a minute old; the dashboard states this time rather
+   *  than presenting a cached figure as live. */
+  asOf: Date;
   /** Customer schools (the platform org is never counted). */
   schools: { total: number; active: number; disabled: number };
   /** Customer-school counts keyed by effective plan (STANDARD|PREMIUM|ULTIMATE|ENTERPRISE). */

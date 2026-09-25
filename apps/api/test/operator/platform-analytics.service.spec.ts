@@ -8,6 +8,7 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { PLAN_PRICING, PLAN_PRICING_BY_CURRENCY } from "@sms/types";
 import { PlatformAnalyticsService } from "../../src/operator/platform-analytics.service";
+import { OperatorController } from "../../src/operator/operator.controller";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
 const owner: Principal = { schoolId: "platform", userId: "owner", roles: ["super_admin"], permissions: ["platform.operate"] };
@@ -328,6 +329,105 @@ describe("PlatformAnalyticsService", () => {
       expect(q.values?.some((v) => v instanceof Date && v.getTime() === first.getTime())).toBe(true);
     }
     expect(out.growth).toHaveLength(6);
+  });
+
+  describe("the one-minute copy", () => {
+    // Every computation is three full scans of the fleet (~3.6 s at 5,000
+    // schools), so the overview is kept for a minute. What the copy must and
+    // must not do, each proven below.
+    const T0 = new Date("2026-09-25T09:00:00Z");
+    beforeEach(() => {
+      // Only the CLOCK is faked; setImmediate and friends stay real.
+      jest.useFakeTimers({
+        now: T0,
+        doNotFake: ["hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate",
+          "setInterval", "clearInterval", "setTimeout", "clearTimeout"],
+      });
+    });
+    afterEach(() => {
+      // CLEARED, not merely switched off — a leftover handle kills the worker
+      // for whichever file runs next (CLAUDE.md, "Fake timers must be CLEARED").
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    });
+
+    it("serves one computation for a minute, and says when it was made", async () => {
+      const client = makeClient();
+      const { service } = makeService(client);
+      const first = await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 59_000));
+      const second = await service.overview(owner);
+      expect(client.school.findMany).toHaveBeenCalledTimes(1);
+      expect(second.asOf).toEqual(T0); // the time of the READ, not of this request
+      expect(second).toBe(first);
+    });
+
+    it("recomputes once the minute is up", async () => {
+      const client = makeClient();
+      const { service } = makeService(client);
+      await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 60_001));
+      const later = await service.overview(owner);
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+      expect(later.asOf.getTime()).toBe(T0.getTime() + 60_001);
+    });
+
+    it("recomputes on request — the Refresh button", async () => {
+      const client = makeClient();
+      const { service } = makeService(client);
+      await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const fresh = await service.overview(owner, { fresh: true });
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+      expect(fresh.asOf.getTime()).toBe(T0.getTime() + 5_000);
+    });
+
+    it("shares a computation already running instead of starting a second", async () => {
+      const client = makeClient();
+      const { service } = makeService(client);
+      const [a, b] = await Promise.all([service.overview(owner), service.overview(owner, { fresh: true })]);
+      expect(client.school.findMany).toHaveBeenCalledTimes(1);
+      expect(b).toBe(a);
+    });
+
+    it("never keeps a FAILED computation", async () => {
+      // An error cached for a minute would be a minute of outage from one blip.
+      const client = makeClient();
+      const real = client.$queryRaw as jest.Mock;
+      client.$queryRaw = jest.fn().mockRejectedValueOnce(new Error("pool busy")).mockImplementation(real) as never;
+      const { service } = makeService(client);
+      await expect(service.overview(owner)).rejects.toThrow("pool busy");
+      const retry = await service.overview(owner);
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+      expect(retry.schools.total).toBe(2);
+    });
+  });
+
+  describe("the route", () => {
+    // Only the analytics service is supplied: the handler touches nothing else,
+    // and constructing the whole controller would test its wiring, not this.
+    const handler = (svc: unknown) => (fresh?: string) =>
+      OperatorController.prototype.analytics.call({ analyticsSvc: svc } as never, owner, fresh);
+
+    it("passes ?fresh=1 through, and nothing else counts as fresh", async () => {
+      const svc = { overview: jest.fn().mockResolvedValue({}), auditView: jest.fn().mockResolvedValue(undefined) };
+      await handler(svc)("1");
+      await handler(svc)(undefined);
+      await handler(svc)("true");
+      expect(svc.overview.mock.calls.map((c) => c[1])).toEqual([{ fresh: true }, { fresh: false }, { fresh: false }]);
+    });
+
+    it("audits EVERY view, including one served from the copy", async () => {
+      // The log records who looked. How the figures were produced is not a
+      // reason to leave a cross-tenant read out of it.
+      const client = makeClient();
+      const { service, audit } = makeService(client);
+      const view = handler(service);
+      await view(undefined);
+      await view(undefined); // served from the copy
+      expect(client.school.findMany).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("503s when the privileged client is not configured", async () => {

@@ -69,9 +69,41 @@ import { toMinor } from "../common/money";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How long a computed fleet overview is served before it is recomputed.
+ *
+ * WHY CACHE AT ALL: every computation is three full scans of the fleet's role,
+ * user and profile rows (about 3.6 s at 5,000 schools / 2.5M pupils), on the
+ * same database the schools' own registers and fee payments use. Without a
+ * cache that cost scales with how often platform staff click — five people
+ * refreshing a few times is a dozen full scans in a minute. With it, at most
+ * one per minute per API process, however many times the page is opened.
+ *
+ * WHAT IT COSTS, and how each is answered:
+ *  - a figure up to a minute old — the response carries `asOf`, the dashboard
+ *    prints it, and `fresh` bypasses the cache (the Refresh button);
+ *  - each API process keeps its OWN copy, so two reloads landing on different
+ *    tasks can show different `asOf` times within the minute — visible, because
+ *    the time is printed, and bounded by the TTL;
+ *  - a FAILED computation is never stored, so an error is never served for a
+ *    minute.
+ */
+export const OVERVIEW_CACHE_TTL_MS = 60_000;
+
 @Injectable()
 export class PlatformAnalyticsService {
   private readonly logger = new Logger("PlatformAnalytics");
+
+  // SECURITY: ONE copy shared by every operator, which is safe ONLY because the
+  // overview is not scoped to the caller — every platform user with the route's
+  // permission sees the same fleet-wide figures, and `p` is not read below. If
+  // this response is ever narrowed per person (a manager limited to certain
+  // schools), key the cache by that scope, or one person's view is served to
+  // another.
+  private cached: { value: PlatformAnalyticsDto; at: number } | null = null;
+  /** A computation already under way, shared by anyone who asks meanwhile, so
+   *  two people opening the page together start ONE set of scans, not two. */
+  private inflight: Promise<PlatformAnalyticsDto> | null = null;
 
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
@@ -80,9 +112,41 @@ export class PlatformAnalyticsService {
     private readonly planPricing: PlanPricingService,
   ) {}
 
-  async overview(p: Principal): Promise<PlatformAnalyticsDto> {
+  /**
+   * The fleet overview, served from a copy at most OVERVIEW_CACHE_TTL_MS old.
+   * `fresh` recomputes (the dashboard's Refresh button). A computation already
+   * running is shared even by a `fresh` request rather than starting a second
+   * set of scans: it began at most one computation's length earlier (seconds),
+   * and its `asOf` says exactly when.
+   *
+   * The AUDIT is not here and not skipped: the controller records every view,
+   * cached or not, because the log says who looked, not how it was computed.
+   */
+  async overview(_p: Principal, opts: { fresh?: boolean } = {}): Promise<PlatformAnalyticsDto> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Platform analytics are not configured");
+    if (!opts.fresh && this.cached && Date.now() - this.cached.at < OVERVIEW_CACHE_TTL_MS) {
+      return this.cached.value;
+    }
+    if (this.inflight) return this.inflight;
+    const run = this.computeOverview(client)
+      .then((value) => {
+        this.cached = { value, at: value.asOf.getTime() };
+        return value;
+      })
+      .finally(() => {
+        this.inflight = null;
+      });
+    this.inflight = run;
+    return run;
+  }
+
+  private async computeOverview(
+    client: NonNullable<PrivilegedDatabaseService["client"]>,
+  ): Promise<PlatformAnalyticsDto> {
+    // Stamped BEFORE the reads begin, so it never claims the figures are newer
+    // than the oldest row they were built from.
+    const asOf = new Date();
 
     // The growth chart draws SIX months, from the start of the month five
     // before this one. Both monthly reads below are bounded to that window.
@@ -424,6 +488,7 @@ export class PlatformAnalyticsService {
     const topSchools = perSchool.sort((a, b) => b.students - a.students).slice(0, 6);
 
     return {
+      asOf,
       schools: schoolStatus,
       schoolsByPlan,
       schoolsByStatus,

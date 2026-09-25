@@ -19187,3 +19187,49 @@ that both parts read the one on-roll fragment. `platform-analytics.service.spec`
 gained: every read issued before any settles; both monthly reads bounded to the
 chart; the platform org excluded from the subscription and payment reads too.
 Each mutation-validated.
+
+### A one-minute copy of the fleet overview, and the three ways a cache lies
+
+After the query work above, each `/operator/analytics` computation was still
+three full passes over the fleet's rows (~3.6 s at 5,000 schools), on the
+database the schools use, and its cost scaled with how often platform staff
+clicked. It is now computed at most once a minute per API process
+(`OVERVIEW_CACHE_TTL_MS`), and an open that arrives while one is running shares
+it. Only the operator console is affected: no school page reads this method,
+and the shared `headcountBySchool` behind the registry and directory stays live.
+
+A cache has three characteristic ways of lying, and each is answered in code:
+- **A figure presented as live when it is not.** The response carries `asOf`,
+  the time the rows were READ, stamped before the reads begin, never the time it
+  was served. The dashboard prints it to the second, because two readings a
+  minute apart must look different, and a **Refresh figures** button asks for
+  `?fresh=1`. The button pushes a new URL each press (`?fresh=<ms>`): a constant
+  one would land on the URL already open and navigate nowhere, the recorded
+  "Take register" defect.
+- **An error kept for a minute.** A failed computation is never stored; the
+  next open recomputes.
+- **One person's view served to another.** A single copy is shared by every
+  operator, which is safe only because the overview is not scoped to the
+  caller. The field carries a SECURITY comment saying to key it by scope the
+  day that changes.
+
+Kept deliberately: every view is audited, cached or not. The log records who
+looked, not how the figures were produced.
+
+Stated, not fixed: each API process holds its own copy, so two reloads landing
+on different tasks can show different `asOf` times within the minute. It is
+visible because the time is printed, and bounded by the TTL. A shared copy in
+Redis would remove it, at the cost of a network hop and a serialisation format
+for Dates.
+
+// GOTCHA in validating it: the first mutation (`if (false && …)`) did not
+// COMPILE, and the run reported `Tests: 0 total` rather than a failure. That
+// proves nothing either way; rewritten as `< 0`, it failed the two tests it
+// should.
+
+Verified live: two opens two seconds apart shared one `asOf`; `fresh=1`
+produced a new one that the next ordinary open was then served; four views
+wrote four audit rows; the page shows the time in the operator's own zone.
+Tests: six cache cases and two route cases in `platform-analytics.service.spec`,
+plus `a-refresh-that-asks-for-new-figures` for the button, each
+mutation-validated.

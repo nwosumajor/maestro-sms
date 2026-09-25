@@ -146,7 +146,7 @@ function Action({ icon: Icon, label, href, hint }: { icon: LucideIcon; label: st
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: { fresh?: string } }) {
   const session = await auth();
   const user = session!.user;
   // Dates follow the SCHOOL's timezone, not the platform's.
@@ -159,7 +159,9 @@ export default async function DashboardPage() {
   // business overview (management lives on the Operator console).
   if (can("platform.tenants.read")) {
     const [analytics, games] = await Promise.all([
-      apiGet<Serialized<PlatformAnalyticsDto>>("/operator/analytics"),
+      // `?fresh=` comes from the Refresh button: recompute rather than serve the
+      // copy, which can be up to a minute old.
+      apiGet<Serialized<PlatformAnalyticsDto>>(searchParams.fresh ? "/operator/analytics?fresh=1" : "/operator/analytics"),
       apiGet<Serialized<GamesAnalyticsDto>>("/operator/games-analytics"),
     ]);
     return (
@@ -171,7 +173,7 @@ export default async function DashboardPage() {
             subtitle={<>Business health across every customer school — management lives on the Operator console.</>}
             actions={<Link href="/operator"><Button variant="outline">Operator console →</Button></Link>}
           />
-          <PlatformAnalytics data={analytics ?? null} />
+          <PlatformAnalytics data={analytics ?? null} region={region} />
           <GamesAnalytics data={games ?? null} />
         </div>
       </AppShell>
