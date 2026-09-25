@@ -17,6 +17,14 @@ name: sms
 services:
   postgres:
     image: postgres:16-alpine
+    # Docker gives a container 64 MB of /dev/shm, and Postgres puts the shared
+    # memory of PARALLEL queries there. Under concurrent heavy reads it runs
+    # out: measured in a 3-server simulation of the operator dashboard at
+    # 5,000 schools, a 4 MB request failed with error 53100 ("could not resize
+    # shared memory segment") because the 64 MB was already in use, and the API
+    # returned a 500. It also stopped a parallel VACUUM. Local and compose only:
+    # RDS is not a container with this default.
+    shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
