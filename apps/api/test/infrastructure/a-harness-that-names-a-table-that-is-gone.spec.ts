@@ -15,6 +15,7 @@
 // =============================================================================
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "../support/strip-comments";
 
 const repo = join(__dirname, "../../../..");
 const schemaDir = join(repo, "packages/db/prisma/schema");
@@ -25,11 +26,11 @@ for (const f of readdirSync(schemaDir).filter((f) => f.endsWith(".prisma"))) {
   for (const m of readFileSync(join(schemaDir, f), "utf8").matchAll(/@@map\("([a-z0-9_]+)"\)/g)) tables.add(m[1]);
 }
 
-/** SQL lives in template literals; comments are stripped so an explanation that
- *  NAMES a retired table (as this repo's comments do) cannot trip the gate. */
+/** SQL lives in template literals; comments are stripped (with the repo's one
+ *  definition, which is right about a `/*` inside a string) so an explanation
+ *  that NAMES a retired table cannot trip the gate. */
 function sqlIn(source: string): string[] {
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  return [...code.matchAll(/`([^`]*)`/g)].map((m) => m[1]);
+  return [...stripComments(source).matchAll(/`([^`]*)`/g)].map((m) => m[1]);
 }
 
 // Not tables: Postgres catalogs and set-returning functions a query may name.
