@@ -27,11 +27,18 @@ locals {
   # pooling is safe — the tenant GUC is transaction-local; `?pgbouncer=true`
   # keeps Prisma from leaning on persistent prepared statements). Migrations
   # ALWAYS connect direct to the writer (DDL/advisory locks need a real session).
-  db_app_url     = var.enable_rds_proxy ? "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_proxy.main[0].endpoint}:5432/${var.db_name}?pgbouncer=true" : "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
+  #
+  # The pool is sized HERE, explicitly, per task (see db_app_connection_limit):
+  # left to Prisma's cpus x 2 + 1 it followed whatever the task reported.
+  db_pool_params = "connection_limit=${var.db_app_connection_limit}&pool_timeout=${var.db_pool_timeout_seconds}"
+  db_app_url     = var.enable_rds_proxy ? "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_proxy.main[0].endpoint}:5432/${var.db_name}?pgbouncer=true&${local.db_pool_params}" : "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.main.address}:5432/${var.db_name}?${local.db_pool_params}"
   db_migrate_url = "postgresql://${var.db_master_username}:${random_password.db_master.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
-  # Read path: the replica endpoint when one exists, else the primary (so the
-  # app's read-only tenant path is always valid and identical in single-DB mode).
-  db_replica_url = var.db_read_replica_count > 0 ? "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.replica[0].address}:5432/${var.db_name}" : local.db_app_url
+  # Read path: the replica endpoint when one exists. With NO replica the API is
+  # not given this at all (ecs.tf) — handed the primary's URL, it opened a
+  # SECOND pool against the primary and ran replica bookkeeping (an extra
+  # query per write, a lag probe every second) for a replica that was not
+  # there. The secret still holds the primary's URL so the key always exists.
+  db_replica_url = var.db_read_replica_count > 0 ? "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.replica[0].address}:5432/${var.db_name}?${local.db_pool_params}" : local.db_app_url
 
   # Base secrets, plus the Redis auth token only when transit encryption is on.
   secret_values = merge(

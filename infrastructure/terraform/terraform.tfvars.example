@@ -16,6 +16,12 @@ github_repo     = "your-org/sms"
 # Sizing (defaults are prod-lean; bump for load).
 # db_instance_class = "db.t4g.small"
 # db_multi_az       = true
+# The app's pool is PER API TASK: at full scale-out the database sees
+# api_max_count x db_app_connection_limit, and the plan fails if that exceeds
+# db_app_connection_budget. Raise the budget only with a larger instance class.
+# db_app_connection_limit  = 8
+# db_pool_timeout_seconds  = 10
+# db_app_connection_budget = 150  # db.t4g.small's ~190 max_connections, less headroom
 # api_desired_count = 2
 # web_desired_count = 2
 

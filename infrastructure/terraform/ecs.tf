@@ -105,7 +105,6 @@ resource "aws_ecs_task_definition" "api" {
     ] : [])
     secrets = concat([
       { name = "DATABASE_URL", valueFrom = local.secret_arns["db-app-url"] },
-      { name = "DATABASE_REPLICA_URL", valueFrom = local.secret_arns["db-replica-url"] },
       { name = "AUTH_SECRET", valueFrom = local.secret_arns["auth-secret"] },
       { name = "AUTH_SECRET_PREVIOUS", valueFrom = local.secret_arns["auth-secret-previous"] },
       { name = "DATA_ENCRYPTION_KEY", valueFrom = local.secret_arns["data-encryption-key"] },
@@ -117,6 +116,9 @@ resource "aws_ecs_task_definition" "api" {
       { name = "METRICS_TOKEN", valueFrom = local.secret_arns["metrics-token"] },
       ], var.redis_transit_encryption ? [
       { name = "REDIS_PASSWORD", valueFrom = local.secret_arns["redis-auth-token"] },
+      ] : [], var.db_read_replica_count > 0 ? [
+      # ONLY with a real replica — see db_replica_url in secrets.tf.
+      { name = "DATABASE_REPLICA_URL", valueFrom = local.secret_arns["db-replica-url"] },
     ] : [])
     logConfiguration = {
       logDriver = "awslogs"
@@ -258,6 +260,15 @@ resource "aws_ecs_service" "api" {
   # without this, every terraform apply would snap the fleet back to the floor.
   lifecycle {
     ignore_changes = [desired_count]
+
+    # Each task holds its own pool, so the database sees api_max_count x the
+    # limit at full scale-out. Past max_connections Postgres refuses new
+    # connections for EVERYONE, so this fails the plan rather than the day
+    # autoscaling reaches the top.
+    precondition {
+      condition     = var.enable_rds_proxy || var.api_max_count * var.db_app_connection_limit <= var.db_app_connection_budget
+      error_message = "api_max_count x db_app_connection_limit exceeds db_app_connection_budget: at full scale-out the API would hold more connections than the database is budgeted for. Lower the limit, raise the budget with a larger db_instance_class, or enable_rds_proxy."
+    }
   }
 
   # Must exist before the service can register targets (load_balancer).
