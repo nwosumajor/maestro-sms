@@ -19313,3 +19313,59 @@ Tests: six cache cases, eight shared-copy cases (two service instances over one
 contract-modelling Redis stand-in) and two route cases in
 `platform-analytics.service.spec`, plus `a-refresh-that-asks-for-new-figures`
 for the button; every case mutation-validated.
+
+### A fresh production database whose registers could not be taken
+
+Found by the pre-production rehearsal, by installing a database the way
+PRODUCTION does rather than the way CI does. The two paths differ in one step:
+CI applies the RLS files with the `pnpm rls` loop, and the production
+container's `docker-entrypoint.sh` applies each file only if its MARKER policy
+does not exist yet.
+
+`08_attendance_rls.sql`'s marker was `attendance_record_update`. Migration
+`20270110000000_attendance_record_partition` re-declares that very policy when
+it partitions the table, and on a fresh database the migrations run first. So
+the marker existed before 08 ever ran, and the entrypoint skipped the whole
+file. Measured on a throwaway database installed the production way:
+
+    attendance_session    RLS off, 0 policies, app role grants: NONE
+
+Every register (taking attendance, the register board, the reports, the gate
+check-in) failing with "permission denied" for every school on day one of a new
+production database. It had never been seen because `deploy.yml` has never run
+successfully, and CI's loop DID apply the top of 08: its bare
+`CREATE POLICY attendance_record_select` hit "already exists" at line 39,
+`ON_ERROR_STOP` stopped that file there, and the loop carried on, exit 0. The
+fresh-install log's one ERROR line was the only trace, on a run that reported
+success.
+
+Fixed three ways, as CLAUDE.md already required for 02's audit_log policies:
+08 now DROP-then-CREATEs every policy it makes (safe to re-run, since its marker
+cannot be its last policy: the last three are the migration's), its marker is
+`attendance_session_update` (only 08 creates it), and a gate computes the rule
+for every file. Verified four ways on throwaway databases: fresh via the
+production entrypoint (correct, 0 errors); fresh via `pnpm rls` (0 ERROR lines,
+was 1); an already-complete database re-applying 08 (no error, no change); and
+a database the OLD entrypoint had already broken, which the next deploy now
+REPAIRS (RLS on and forced, 3 policies, SELECT/INSERT/UPDATE, no DELETE). Both
+install paths now agree on all 193 tenant tables, down to the three exceptions
+that are deliberate (ultimate_participant; agent_commission and
+school_group_member, RLS on with no policy = deny-all).
+
+Affected: any database initialised from EMPTY by the container entrypoint since
+2026-08-26, which includes a fresh local compose volume. The fix repairs it on
+the next start. The two local databases here predate the migration and were
+correct.
+
+// GOTCHA in the gate itself: its first version read only LITERAL policy
+// names and reported 33 correct files as wrong, because most RLS files create
+// policies in a `FOREACH t IN ARRAY[...] LOOP … CREATE POLICY %1$s_select`
+// loop. It expands those now. The one file with no policies at all
+// (91_fulltext_indexes.sql, a marker that never exists, re-applied every boot)
+// is allowed by RULE, only while every statement is IF NOT EXISTS, rather
+// than exempted by name.
+
+Gate: `a-marker-a-migration-already-made.spec.ts`: every RLS file applied
+exactly once; each marker created by its own file and by NO migration; any
+policy a migration also creates is DROP-IF-EXISTS'd first. Mutation-validated
+five ways, including putting the original marker back.

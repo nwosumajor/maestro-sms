@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **390 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **391 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -917,7 +917,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **390 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **391 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -1302,10 +1302,10 @@ visitor-controlled target; gateway callbacks are built from `publicWebUrl()`.
   on tables that HAVE a `schoolId`.
 - RLS files use bare `CREATE POLICY` (Postgres has no IF NOT EXISTS for it), so
   they are order-sensitive, not idempotent — the entrypoint applies them per-file
-  against a sentinel. `02_foundation_rls.sql` is the ONE exception: its two
-  `audit_log` policies DROP-then-CREATE, because `20260824000000_audit_log_
-  partition` re-declares those same names. Without that, 02 aborted partway on
-  any migrate-deploy DB and silently left the rest of the file unapplied.
+  against a sentinel. A policy a MIGRATION also creates (02's audit_log, 08's
+  attendance_record) must DROP-then-CREATE, and must never BE a sentinel: 08's
+  was, so a fresh prod DB skipped 08 and attendance_session had no RLS or grants.
+  Gate: `a-marker-a-migration-already-made` (computed from all three sources).
 - New tenant table: add `prisma/rls/NN_*.sql` and a cross-tenant case to
   `apps/api/test/rls.e2e-spec.ts` (and its afterAll cleanup, child rows BEFORE
   parents — FK order matters). Register the file in

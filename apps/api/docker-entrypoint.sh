@@ -75,7 +75,10 @@ apply_rls packages/db/prisma/rls/04_gradebook_rls.sql           grade_update
 apply_rls packages/db/prisma/rls/05_workflow_rls.sql            wal_insert
 apply_rls packages/db/prisma/rls/06_integrity_retention_rls.sql integrity_retention_run_select
 apply_rls packages/db/prisma/rls/07_sis_rls.sql                 medical_record_update
-apply_rls packages/db/prisma/rls/08_attendance_rls.sql          attendance_record_update
+# 08's marker is attendance_SESSION_update, a policy only this file creates.
+# attendance_record_update is also created by a migration, so as the marker it
+# read "already applied" on every fresh database and the file never ran.
+apply_rls packages/db/prisma/rls/08_attendance_rls.sql          attendance_session_update
 apply_rls packages/db/prisma/rls/09_notifications_rls.sql       notification_delivery_update
 apply_rls packages/db/prisma/rls/10_fees_rls.sql                payment_update
 apply_rls packages/db/prisma/rls/11_documents_rls.sql           document_delete
