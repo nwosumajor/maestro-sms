@@ -9,12 +9,12 @@
 // =============================================================================
 
 import jwt from "jsonwebtoken";
-import { signingSecret, verifyHs256, verifyingSecrets } from "./secrets";
+import { signingKey, verifyHs256, verifyingSecrets } from "./secrets";
 
 const TTL_SECONDS = 300;
 
 export function signStepUp(userId: string, schoolId: string): { token: string; expiresIn: number } {
-  const token = jwt.sign({ sub: userId, schoolId, typ: "stepup" }, signingSecret(), {
+  const token = jwt.sign({ sub: userId, schoolId, typ: "stepup" }, signingKey(), {
     algorithm: "HS256",
     expiresIn: TTL_SECONDS,
   });

@@ -14,6 +14,7 @@ import bcrypt from "bcryptjs";
 import { NON_STAFF_ROLE_NAMES, SECURITY_PERMISSIONS, isElevatable, type AuditLogPageDto } from "@sms/types";
 import { generateSecret, otpauthUri, verifyTotp } from "../auth/totp";
 import { signStepUp } from "../auth/stepup";
+import { GrantAbsenceCache } from "../foundation/grant-absence-cache.service";
 import { decodeAuditCursor, encodeAuditCursor } from "../common/audit-cursor";
 import {
   AUDIT_LOG_SERVICE,
@@ -70,6 +71,7 @@ export class SecurityService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly noGrants: GrantAbsenceCache,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -137,7 +139,7 @@ export class SecurityService {
     const minutes = Math.min(Math.max(input.minutes ?? 60, 1), MAX_MINUTES);
     const expiresAt = new Date(Date.now() + minutes * 60_000);
 
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const created = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const grant = await tx.privilegeGrant.create({
         data: {
           schoolId: p.schoolId,
@@ -162,6 +164,10 @@ export class SecurityService {
       );
       return grant;
     });
+    // Break-glass is ACTIVE on creation. AFTER the commit, so no request can
+    // read "none" from before it and store that past this clear (see the cache).
+    if (created.status === "ACTIVE") this.noGrants.granted();
+    return created;
   }
 
   /**
@@ -204,7 +210,7 @@ export class SecurityService {
     }
     const expiresAt = new Date(Date.now() + hours * 3_600_000);
 
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const delegated = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       // RLS confines this to the granter's own school, so someone in another
       // tenant is simply not found — 404, never a cross-tenant disclosure.
       const target = await tx.user.findFirst({ where: { id: input.userId }, select: { id: true, name: true } });
@@ -235,10 +241,12 @@ export class SecurityService {
       });
       return grant;
     });
+    this.noGrants.granted(); // ACTIVE at once — after the commit
+    return delegated;
   }
 
   async approveElevation(p: Principal, id: string) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const approved = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const grant = await tx.privilegeGrant.findFirst({ where: { id } });
       if (!grant) throw new NotFoundException("Elevation request not found");
       if (grant.status !== "PENDING") {
@@ -255,6 +263,8 @@ export class SecurityService {
       await this.log(tx, p, "security.elevation.approve", id, { permission: grant.permission });
       return updated;
     });
+    this.noGrants.granted(); // PENDING -> ACTIVE — after the commit
+    return approved;
   }
 
   async revokeElevation(p: Principal, id: string) {

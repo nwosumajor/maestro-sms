@@ -19,7 +19,7 @@
 // NULL), so a used link is dead even inside its 7-day window.
 
 import jwt from "jsonwebtoken";
-import { signingSecret, verifyHs256 } from "./secrets";
+import { signingKey, verifyHs256 } from "./secrets";
 
 const INVITE_PURPOSE = "invite";
 const INVITE_TTL = "7d";
@@ -27,7 +27,7 @@ const RESET_PURPOSE = "pwreset";
 const RESET_TTL = "30m";
 
 export function mintInviteToken(userId: string, schoolId: string): string {
-  return jwt.sign({ sub: userId, school_id: schoolId, purpose: INVITE_PURPOSE }, signingSecret(), {
+  return jwt.sign({ sub: userId, school_id: schoolId, purpose: INVITE_PURPOSE }, signingKey(), {
     algorithm: "HS256",
     expiresIn: INVITE_TTL,
   });
@@ -62,7 +62,7 @@ export function mintPasswordResetToken(
 ): string {
   return jwt.sign(
     { sub: userId, school_id: schoolId, purpose: RESET_PURPOSE, pca: passwordChangedAt?.getTime() ?? 0 },
-    signingSecret(),
+    signingKey(),
     { algorithm: "HS256", expiresIn: RESET_TTL },
   );
 }

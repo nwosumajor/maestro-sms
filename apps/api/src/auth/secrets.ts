@@ -12,14 +12,49 @@
 // only VERIFY, never sign — a leak of the old secret is closed by clearing it.
 // =============================================================================
 
+import { createSecretKey, type KeyObject } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { isPublishedSecret } from "./published-secrets";
+
+/**
+ * A secret as a KEY OBJECT, built once per distinct secret.
+ *
+ * Handed a plain string, jsonwebtoken 9 first tries it as a PUBLIC key
+ * (`createPublicKey`), which throws for a shared HS256 secret, and only then
+ * builds a secret key — a failed key parse, an exception and a second key build
+ * on EVERY verification. A CPU profile of the API under load put that one call
+ * at 19% of all busy time: the largest single cost on the request path, ahead
+ * of every query. Passing a ready KeyObject skips it; the key is byte-for-byte
+ * the one jsonwebtoken built itself (`createSecretKey(Buffer.from(secret))`),
+ * so every existing token verifies exactly as before.
+ *
+ * Keyed by the secret's VALUE, because the secrets are read from the
+ * environment on every call (that is what makes rotation work): a rotated
+ * secret simply gets its own entry. Bounded, so tests that set many secrets
+ * cannot grow it without limit.
+ */
+const keyCache = new Map<string, KeyObject>();
+function keyFor(secret: string): KeyObject {
+  let key = keyCache.get(secret);
+  if (!key) {
+    key = createSecretKey(Buffer.from(secret, "utf8"));
+    if (keyCache.size >= 8) keyCache.delete(keyCache.keys().next().value as string);
+    keyCache.set(secret, key);
+  }
+  return key;
+}
 
 /** The signing secret (current only). Throws when auth is not configured. */
 export function signingSecret(): string {
   const secret = process.env.AUTH_SECRET;
   if (!secret) throw new Error("AUTH_SECRET is not configured");
   return secret;
+}
+
+/** The signing secret as a ready key object — pass THIS to `jwt.sign`, not the
+ *  string, for the reason `keyFor` records. */
+export function signingKey(): KeyObject {
+  return keyFor(signingSecret());
 }
 
 /** Secrets accepted for VERIFICATION: current first, then previous (if set). */
@@ -40,7 +75,7 @@ export function verifyHs256(token: string): Record<string, unknown> {
   let lastErr: unknown = new Error("verification failed");
   for (const secret of secrets) {
     try {
-      return jwt.verify(token, secret, { algorithms: ["HS256"] }) as Record<string, unknown>;
+      return jwt.verify(token, keyFor(secret), { algorithms: ["HS256"] }) as Record<string, unknown>;
     } catch (err) {
       lastErr = err;
     }

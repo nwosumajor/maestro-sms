@@ -29,6 +29,7 @@ import { SecurityService } from "../../src/security/security.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
+import { GrantAbsenceCache } from "../../src/foundation/grant-absence-cache.service";
 
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
@@ -88,7 +89,7 @@ d("sign-in signals reach the security console (real Postgres)", () => {
     // Outside the 30-day window: must not be counted.
     await event(UNTROUBLED, "auth.login.failed", { failedLoginCount: 1 }, 40 * 86_400_000);
 
-    security = new SecurityService(new PrismaTenantService() as never, new AuditLogService());
+    security = new SecurityService(new PrismaTenantService() as never, new AuditLogService(), new GrantAbsenceCache());
   });
 
   afterAll(async () => {

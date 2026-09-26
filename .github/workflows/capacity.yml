@@ -1,0 +1,156 @@
+name: Capacity
+
+# The API's capacity fell from 770 to 216 req/s across months of changes that
+# were each fine on their own, because the load harness was only ever run by
+# hand. This runs it on a schedule against a production-built API and judges
+# each result against the ones before it (apps/api/scripts/capacity-trend.mjs):
+# a drop of more than 20% against recent runs, or 30% against the best since
+# the last rebaseline, fails the run.
+#
+# NOT on pull requests: a shared runner's throughput varies too much to fail a
+# PR on. The deterministic half of this guard — how many database calls the
+# layers every request crosses may make — runs in CI as an ordinary test
+# (test/auth/a-request-that-costs-a-round-trip-it-need-not.spec.ts).
+#
+# The bar is THIS RUNNER's history, never a laptop's figure: the two are not
+# comparable, and a baseline from elsewhere would fail or pass for no reason.
+
+on:
+  schedule:
+    # Daily. Also what keeps the history cache alive: GitHub evicts a cache
+    # nobody has read for 7 days, and a weekly run would sit on that edge.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      accept:
+        description: "Accept a slower result as the new normal (writes a rebaseline marker)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: capacity
+  cancel-in-progress: false
+
+jobs:
+  capacity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sms_capacity
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --shm-size 256mb
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      ADMIN_URL: postgresql://postgres:postgres@localhost:5432/sms_capacity
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Create least-privilege app role
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d sms_capacity \
+            -c "CREATE ROLE major_user LOGIN PASSWORD 'major_pw';" \
+            -c "GRANT CONNECT ON DATABASE sms_capacity TO major_user;" \
+            -c "GRANT USAGE ON SCHEMA public TO major_user;"
+
+      # The same path production takes: migrate deploy, then RLS, then the seed
+      # (platform essentials only — the harness seeds its own tenants).
+      - name: Build the database
+        run: |
+          pnpm db:generate
+          pnpm --filter @sms/db exec prisma migrate deploy
+          pnpm --filter @sms/db rls
+          pnpm --filter @sms/db exec prisma db seed
+        env:
+          DATABASE_URL: ${{ env.ADMIN_URL }}
+          DATABASE_MIGRATE_URL: ${{ env.ADMIN_URL }}
+
+      - name: Build the API
+        run: pnpm --filter @sms/api... build
+
+      - name: Start the API (production mode, RLS-enforced app role)
+        run: |
+          # Fresh secrets per run: nothing here is ever reused, and a published
+          # key would be refused at boot anyway.
+          AUTH_SECRET=$(openssl rand -hex 32)
+          echo "::add-mask::$AUTH_SECRET"
+          echo "AUTH_SECRET=$AUTH_SECRET" >> "$GITHUB_ENV"
+          DATA_ENCRYPTION_KEY=$(openssl rand -base64 32)
+          echo "::add-mask::$DATA_ENCRYPTION_KEY"
+          NODE_ENV=production API_PORT=3001 \
+          WEB_ORIGIN=http://localhost PUBLIC_WEB_URL=http://localhost \
+          AUTH_SECRET="$AUTH_SECRET" DATA_ENCRYPTION_KEY="$DATA_ENCRYPTION_KEY" \
+          REDIS_HOST=127.0.0.1 REDIS_PORT=6379 \
+          DATABASE_URL="postgresql://major_user:major_pw@localhost:5432/sms_capacity?connection_limit=20" \
+          DATABASE_MIGRATE_URL="$ADMIN_URL" \
+            nohup node apps/api/dist/main.js > api.log 2>&1 &
+          for i in $(seq 60); do
+            curl -fsS -o /dev/null http://127.0.0.1:3001/health && exit 0
+            sleep 2
+          done
+          echo "API did not become healthy"; tail -50 api.log; exit 1
+
+      - name: Restore the capacity history
+        uses: actions/cache/restore@v4
+        with:
+          path: capacity-history.jsonl
+          key: capacity-history-${{ github.run_id }}
+          restore-keys: capacity-history-
+
+      - name: Load test
+        run: |
+          node apps/api/scripts/loadtest.mjs --schools 20 --users 5 --concurrency 50 --duration 60 --json capacity-result.json
+        env:
+          API_URL: http://127.0.0.1:3001
+          LOADTEST_ADMIN_URL: ${{ env.ADMIN_URL }}
+
+      - name: Judge against the trend
+        run: |
+          node apps/api/scripts/capacity-trend.mjs --result capacity-result.json \
+            --history capacity-history.jsonl ${{ inputs.accept && '--accept' || '' }}
+
+      # Saved even when the judge failed: a failing result is NOT in the file
+      # (the judge refuses to record it), so this only ever keeps good history.
+      - name: Save the capacity history
+        if: always() && hashFiles('capacity-history.jsonl') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: capacity-history.jsonl
+          key: capacity-history-${{ github.run_id }}
+
+      - name: Upload the result and history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-${{ github.run_id }}
+          path: |
+            capacity-result.json
+            capacity-history.jsonl
+            api.log
+          retention-days: 90
