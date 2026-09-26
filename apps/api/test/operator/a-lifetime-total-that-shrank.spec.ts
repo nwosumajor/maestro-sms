@@ -83,6 +83,8 @@ function harness() {
     { record: jest.fn() } as never,
     { client } as never,
     { effectiveAll: jest.fn().mockResolvedValue({}) } as never,
+    // No Redis: the overview is computed in-process, which is what this tests.
+    { available: false } as never,
   );
   return { svc, client };
 }

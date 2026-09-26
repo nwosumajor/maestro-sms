@@ -8,6 +8,9 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { PLAN_PRICING, PLAN_PRICING_BY_CURRENCY } from "@sms/types";
 import { PlatformAnalyticsService } from "../../src/operator/platform-analytics.service";
+import { OperatorController } from "../../src/operator/operator.controller";
+import { OVERVIEW_SHARED_KEY, reviveOverview } from "../../src/operator/platform-analytics.service";
+import { randomUUID } from "node:crypto";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
 const owner: Principal = { schoolId: "platform", userId: "owner", roles: ["super_admin"], permissions: ["platform.operate"] };
@@ -149,7 +152,68 @@ function makeClient() {
   }
 }
 
-function makeService(client: ReturnType<typeof makeClient> | null) {
+/**
+ * An in-memory stand-in for Redis that models the CONTRACT the service relies
+ * on, not just its method names: values EXPIRE (on the faked clock), a lock is
+ * EXCLUSIVE until it expires, only the token that took a lock can release it,
+ * `offline` is a connection that is known to be down (`available` false), and
+ * `failing` is one that looks up and fails every command — a Redis that is
+ * reachable but broken, the case a fallback is actually for.
+ */
+function fakeRedis() {
+  const store = new Map<string, { v: string; until: number }>();
+  const live = (k: string) => {
+    const e = store.get(k);
+    if (!e) return null;
+    if (Date.now() >= e.until) {
+      store.delete(k);
+      return null;
+    }
+    return e;
+  };
+  const r = {
+    store,
+    offline: false,
+    failing: false,
+    get available() {
+      return !r.offline;
+    },
+    guard() {
+      if (r.offline || r.failing) throw new Error("redis unavailable");
+    },
+    async get(k: string) {
+      r.guard();
+      return live(k)?.v ?? null;
+    },
+    async set(k: string, v: string, ttl: number) {
+      r.guard();
+      store.set(k, { v, until: Date.now() + ttl });
+    },
+    async tryLock(k: string, ttl: number) {
+      r.guard();
+      if (live(k)) return null;
+      const t = randomUUID();
+      store.set(k, { v: t, until: Date.now() + ttl });
+      return t;
+    },
+    async unlock(k: string, t: string) {
+      r.guard();
+      if (live(k)?.v === t) store.delete(k);
+    },
+    async isLocked(k: string) {
+      r.guard();
+      return live(k) !== null;
+    },
+  };
+  return r;
+}
+
+/** Wait for the recalculation a stale read started in the background. */
+async function backgroundOf(service: unknown): Promise<void> {
+  await (service as { revalidating: Promise<void> | null }).revalidating;
+}
+
+function makeService(client: ReturnType<typeof makeClient> | null, shared: unknown = { available: false }) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = { runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn({}) };
   const privileged = { client };
@@ -157,7 +221,7 @@ function makeService(client: ReturnType<typeof makeClient> | null) {
   // school's own currency rather than an invented table.
   const planPricing = { effectiveAll: async () => PLAN_PRICING_BY_CURRENCY };
   return {
-    service: new PlatformAnalyticsService(db as never, audit as never, privileged as never, planPricing as never),
+    service: new PlatformAnalyticsService(db as never, audit as never, privileged as never, planPricing as never, shared as never),
     audit,
   };
 }
@@ -328,6 +392,316 @@ describe("PlatformAnalyticsService", () => {
       expect(q.values?.some((v) => v instanceof Date && v.getTime() === first.getTime())).toBe(true);
     }
     expect(out.growth).toHaveLength(6);
+  });
+
+  describe("the one-minute copy", () => {
+    // Every computation is three full scans of the fleet (~3.6 s at 5,000
+    // schools), so the overview is kept for a minute. What the copy must and
+    // must not do, each proven below.
+    const T0 = new Date("2026-09-25T09:00:00Z");
+    beforeEach(() => {
+      // Only the CLOCK is faked; setImmediate and friends stay real.
+      jest.useFakeTimers({
+        now: T0,
+        doNotFake: ["hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate",
+          "setInterval", "clearInterval", "setTimeout", "clearTimeout"],
+      });
+    });
+    afterEach(() => {
+      // CLEARED, not merely switched off — a leftover handle kills the worker
+      // for whichever file runs next (CLAUDE.md, "Fake timers must be CLEARED").
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    });
+
+    it("serves one computation for a minute, and says when it was made", async () => {
+      const client = makeClient();
+      const { service } = makeService(client);
+      const first = await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 59_000));
+      const second = await service.overview(owner);
+      expect(client.school.findMany).toHaveBeenCalledTimes(1);
+      expect(second.asOf).toEqual(T0); // the time of the READ, not of this request
+      expect(second).toBe(first);
+    });
+
+    it("past its minute, serves the previous copy AT ONCE and recalculates behind it", async () => {
+      // Nobody waits on an expiry. The first open after the minute gets the
+      // previous copy immediately; the next copy is calculated in the
+      // background, and the open after it is served that.
+      const client = makeClient();
+      const { service } = makeService(client);
+      const first = await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 60_001));
+      const atExpiry = await service.overview(owner);
+      expect(atExpiry.asOf.getTime()).toBe(first.asOf.getTime()); // served, not waited for
+      await backgroundOf(service);
+      const next = await service.overview(owner);
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+      expect(next.asOf.getTime()).toBe(T0.getTime() + 60_001);
+    });
+
+    it("past its grace, the copy is GONE and an open waits for a new one", async () => {
+      // A dashboard nobody has looked at recalculates on demand; a stale copy is
+      // not kept alive for ever.
+      const client = makeClient();
+      const { service } = makeService(client);
+      await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 120_001));
+      const later = await service.overview(owner);
+      expect(later.asOf.getTime()).toBe(T0.getTime() + 120_001);
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+    });
+
+    it("recomputes on request — the Refresh button", async () => {
+      const client = makeClient();
+      const { service } = makeService(client);
+      await service.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const fresh = await service.overview(owner, { fresh: true });
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+      expect(fresh.asOf.getTime()).toBe(T0.getTime() + 5_000);
+    });
+
+    it("shares a computation already running instead of starting a second", async () => {
+      const client = makeClient();
+      const { service } = makeService(client);
+      const [a, b] = await Promise.all([service.overview(owner), service.overview(owner, { fresh: true })]);
+      expect(client.school.findMany).toHaveBeenCalledTimes(1);
+      expect(b).toBe(a);
+    });
+
+    it("never keeps a FAILED computation", async () => {
+      // An error cached for a minute would be a minute of outage from one blip.
+      const client = makeClient();
+      const real = client.$queryRaw as jest.Mock;
+      client.$queryRaw = jest.fn().mockRejectedValueOnce(new Error("pool busy")).mockImplementation(real) as never;
+      const { service } = makeService(client);
+      await expect(service.overview(owner)).rejects.toThrow("pool busy");
+      const retry = await service.overview(owner);
+      expect(client.school.findMany).toHaveBeenCalledTimes(2);
+      expect(retry.schools.total).toBe(2);
+    });
+  });
+
+  describe("one copy shared by every API task", () => {
+    // Production runs at least two API tasks. A copy in process memory is a copy
+    // PER TASK: reloads could disagree, and after Refresh the "as of" time could
+    // go BACKWARDS when the next reload lands on a task still holding its older
+    // copy. Two service instances over one Redis stand in for two tasks.
+    const T0 = new Date("2026-09-25T09:00:00Z");
+    beforeEach(() => {
+      jest.useFakeTimers({
+        now: T0,
+        doNotFake: ["hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate",
+          "setInterval", "clearInterval", "setTimeout", "clearTimeout"],
+      });
+    });
+    afterEach(() => {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    });
+
+    const twoTasks = () => {
+      const redis = fakeRedis();
+      const a = makeClient();
+      const b = makeClient();
+      return { redis, a, b, taskA: makeService(a, redis).service, taskB: makeService(b, redis).service };
+    };
+
+    it("serves one task's computation from every task", async () => {
+      const { a, b, taskA, taskB } = twoTasks();
+      const first = await taskA.overview(owner);
+      const second = await taskB.overview(owner);
+      expect(a.school.findMany).toHaveBeenCalledTimes(1);
+      expect(b.school.findMany).not.toHaveBeenCalled();
+      expect(second.asOf.getTime()).toBe(first.asOf.getTime());
+    });
+
+    it("never shows an OLDER time after Refresh, whichever task the next reload lands on", async () => {
+      const { taskA, taskB } = twoTasks();
+      await taskB.overview(owner); // B holds the 09:00:00 figures
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const refreshed = await taskA.overview(owner, { fresh: true }); // Refresh lands on A
+      const reload = await taskB.overview(owner); // the next reload lands on B
+      expect(refreshed.asOf.getTime()).toBe(T0.getTime() + 5_000);
+      expect(reload.asOf.getTime()).toBe(refreshed.asOf.getTime());
+    });
+
+    it("recomputes on ONE task while the other waits for its result", async () => {
+      const { a, b, taskA, taskB } = twoTasks();
+      const [x, y] = await Promise.all([taskA.overview(owner, { fresh: true }), taskB.overview(owner, { fresh: true })]);
+      const computations = a.school.findMany.mock.calls.length + b.school.findMany.mock.calls.length;
+      expect(computations).toBe(1);
+      expect(y.asOf.getTime()).toBe(x.asOf.getTime());
+    });
+
+    it("never publishes a FAILED computation — the waiting task computes for itself", async () => {
+      const { redis, a, taskA, taskB } = twoTasks();
+      const real = a.$queryRaw as jest.Mock;
+      a.$queryRaw = jest.fn().mockRejectedValueOnce(new Error("pool busy")).mockImplementation(real) as never;
+      const [x, y] = await Promise.allSettled([taskA.overview(owner), taskB.overview(owner)]);
+      expect(x.status).toBe("rejected");
+      expect(y.status).toBe("fulfilled");
+      const published = redis.store.get(OVERVIEW_SHARED_KEY);
+      expect(published).toBeDefined();
+      expect(reviveOverview(published!.v).schools.total).toBe(2); // B's good result, not an error
+      expect(redis.store.has(`${OVERVIEW_SHARED_KEY}:lock`)).toBe(false); // A released it on failure
+    });
+
+    it("falls back to this task's own copy when Redis is known to be down", async () => {
+      const redis = fakeRedis();
+      redis.offline = true;
+      const c = makeClient();
+      const { service } = makeService(c, redis);
+      await service.overview(owner);
+      await service.overview(owner);
+      expect(c.school.findMany).toHaveBeenCalledTimes(1); // local copy served the second
+    });
+
+    it("falls back, rather than failing, when Redis looks up but every command fails", async () => {
+      const redis = fakeRedis();
+      redis.failing = true;
+      const c = makeClient();
+      const { service } = makeService(c, redis);
+      const out = await service.overview(owner);
+      expect(out.schools.total).toBe(2);
+    });
+
+    it("does not retry a failed COMPUTATION as if Redis were the problem", async () => {
+      // A database failure must propagate. Mistaking it for a cache outage would
+      // run the whole failing computation a second time on every request.
+      const redis = fakeRedis();
+      const c = makeClient();
+      c.$queryRaw = jest.fn().mockRejectedValue(new Error("pool busy")) as never;
+      const { service } = makeService(c, redis);
+      await expect(service.overview(owner)).rejects.toThrow("pool busy");
+      expect(c.school.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("after a Redis outage, publishes a NEWER copy held locally instead of serving the older shared one", async () => {
+      // During an outage each task runs on its own copy; a task that
+      // recomputed then holds figures newer than the copy still in Redis.
+      // Serving the shared one would take anyone who saw the newer figures
+      // backwards. The run before this fix: 11 of 49 requests in the ten
+      // seconds after Redis returned saw an older copy than one already shown.
+      const { redis, taskA, taskB } = twoTasks();
+      const before = await taskA.overview(owner); // T0, shared
+      redis.failing = true;
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const duringOutage = await taskB.overview(owner, { fresh: true }); // T0+5, local only
+      expect(duringOutage.asOf.getTime()).toBeGreaterThan(before.asOf.getTime());
+      redis.failing = false;
+      jest.setSystemTime(new Date(T0.getTime() + 6_000));
+      const fromB = await taskB.overview(owner); // B notices the shared copy is older
+      const fromA = await taskA.overview(owner); // and A now serves B's newer copy
+      expect(fromB.asOf.getTime()).toBe(duringOutage.asOf.getTime());
+      expect(fromA.asOf.getTime()).toBe(duringOutage.asOf.getTime());
+      // Published with what was LEFT of its minute, not a fresh minute.
+      const entry = redis.store.get(OVERVIEW_SHARED_KEY)!;
+      expect(entry.until).toBe(duringOutage.asOf.getTime() + 120_000); // its minute + the grace
+    });
+
+    it("serves an ordinary open the CURRENT copy while a Refresh recalculates on the same task", async () => {
+      // It used to join whatever was running on the task — including someone
+      // else's Refresh — and wait seconds for figures it had not asked for.
+      // The simulation: 50 of 70 slow ordinary opens were exactly that.
+      const redis = fakeRedis();
+      const c = makeClient();
+      const { service } = makeService(c, redis);
+      const current = await service.overview(owner); // a copy exists (T0)
+
+      // Hold the Refresh's database read open until we say so.
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const realFind = c.school.findMany;
+      c.school.findMany = jest.fn(async (...a: unknown[]) => {
+        await gate;
+        return (realFind as jest.Mock)(...a);
+      }) as never;
+      jest.setSystemTime(new Date(T0.getTime() + 5_000));
+      const refresh = service.overview(owner, { fresh: true });
+
+      const ordinary = await service.overview(owner); // must NOT wait for the gate
+      expect(ordinary.asOf.getTime()).toBe(current.asOf.getTime());
+
+      release();
+      expect((await refresh).asOf.getTime()).toBe(T0.getTime() + 5_000);
+    });
+
+    it("at the minute, ONE task recalculates in the background while every task serves the previous copy", async () => {
+      const { a, b, taskA, taskB } = twoTasks();
+      const first = await taskA.overview(owner);
+      jest.setSystemTime(new Date(T0.getTime() + 61_000));
+      const [x, y] = await Promise.all([taskA.overview(owner), taskB.overview(owner)]);
+      expect(x.asOf.getTime()).toBe(first.asOf.getTime()); // neither waited
+      expect(y.asOf.getTime()).toBe(first.asOf.getTime());
+      await Promise.all([backgroundOf(taskA), backgroundOf(taskB)]);
+      const computations = a.school.findMany.mock.calls.length + b.school.findMany.mock.calls.length;
+      expect(computations).toBe(2); // the first, then ONE background recalculation
+      const [x2, y2] = await Promise.all([taskA.overview(owner), taskB.overview(owner)]);
+      expect(x2.asOf.getTime()).toBe(T0.getTime() + 61_000);
+      expect(y2.asOf.getTime()).toBe(T0.getTime() + 61_000);
+    });
+
+    it("a FAILED background recalculation publishes nothing and keeps serving the previous copy", async () => {
+      const { redis, a, taskA } = twoTasks();
+      const first = await taskA.overview(owner);
+      const real = a.$queryRaw as jest.Mock;
+      a.$queryRaw = jest.fn().mockRejectedValueOnce(new Error("pool busy")).mockImplementation(real) as never;
+      jest.setSystemTime(new Date(T0.getTime() + 61_000));
+      const stale = await taskA.overview(owner);
+      await backgroundOf(taskA);
+      expect(stale.asOf.getTime()).toBe(first.asOf.getTime());
+      expect(reviveOverview(redis.store.get(OVERVIEW_SHARED_KEY)!.v).asOf.getTime()).toBe(first.asOf.getTime());
+      expect(redis.store.has(`${OVERVIEW_SHARED_KEY}:lock`)).toBe(false); // released
+      const again = await taskA.overview(owner); // still served, and it tries again
+      expect(again.asOf.getTime()).toBe(first.asOf.getTime());
+    });
+
+    it("brings back every Date in the response as a Date", async () => {
+      // A DTO read back from Redis has ISO strings where the type says Date.
+      // This walks a REAL computed response, so a Date field added to the DTO
+      // later without being revived fails here.
+      const { service } = makeService(makeClient());
+      const computed = await service.overview(owner);
+      const datesIn = (x: unknown, path = ""): Array<[string, number]> =>
+        x instanceof Date
+          ? [[path, x.getTime()]]
+          : x && typeof x === "object"
+            ? Object.entries(x).flatMap(([k, v]) => datesIn(v, `${path}.${k}`))
+            : [];
+      const before = datesIn(computed);
+      expect(before.length).toBeGreaterThanOrEqual(2); // asOf and a payment's createdAt at least
+      expect(datesIn(reviveOverview(JSON.stringify(computed)))).toEqual(before);
+    });
+  });
+
+  describe("the route", () => {
+    // Only the analytics service is supplied: the handler touches nothing else,
+    // and constructing the whole controller would test its wiring, not this.
+    const handler = (svc: unknown) => (fresh?: string) =>
+      OperatorController.prototype.analytics.call({ analyticsSvc: svc } as never, owner, fresh);
+
+    it("passes ?fresh=1 through, and nothing else counts as fresh", async () => {
+      const svc = { overview: jest.fn().mockResolvedValue({}), auditView: jest.fn().mockResolvedValue(undefined) };
+      await handler(svc)("1");
+      await handler(svc)(undefined);
+      await handler(svc)("true");
+      expect(svc.overview.mock.calls.map((c) => c[1])).toEqual([{ fresh: true }, { fresh: false }, { fresh: false }]);
+    });
+
+    it("audits EVERY view, including one served from the copy", async () => {
+      // The log records who looked. How the figures were produced is not a
+      // reason to leave a cross-tenant read out of it.
+      const client = makeClient();
+      const { service, audit } = makeService(client);
+      const view = handler(service);
+      await view(undefined);
+      await view(undefined); // served from the copy
+      expect(client.school.findMany).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("503s when the privileged client is not configured", async () => {

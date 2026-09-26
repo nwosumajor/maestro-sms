@@ -5,6 +5,8 @@
 // owner's /dashboard next to the business overview; data from
 // GET /operator/games-analytics (platform.tenants.read).
 
+import { CardReadProblem } from "./CardReadProblem";
+import type { CardRead } from "@/lib/card-read";
 import type { GamesAnalyticsDto, Serialized } from "@sms/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Kpi } from "@/components/charts/charts";
@@ -57,21 +59,9 @@ function ModeTable({ stats }: { stats: Serialized<GamesAnalyticsDto>["guessing"]
   );
 }
 
-export function GamesAnalytics({ data }: { data: Serialized<GamesAnalyticsDto> | null }) {
-  if (!data) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Games across the fleet</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Games analytics are unavailable — the privileged database connection is not configured.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+export function GamesAnalytics({ read }: { read: CardRead<Serialized<GamesAnalyticsDto>> }) {
+  if (read.state !== "ok") return <CardReadProblem title="Games across the fleet" read={read} />;
+  const data = read.data;
 
   const totalGames =
     Object.values(data.guessing).reduce((n, s) => n + s.total, 0) +

@@ -19187,3 +19187,129 @@ that both parts read the one on-roll fragment. `platform-analytics.service.spec`
 gained: every read issued before any settles; both monthly reads bounded to the
 chart; the platform org excluded from the subscription and payment reads too.
 Each mutation-validated.
+
+### A one-minute copy of the fleet overview, and the three ways a cache lies
+
+After the query work above, each `/operator/analytics` computation was still
+three full passes over the fleet's rows (~3.6 s at 5,000 schools), on the
+database the schools use, and its cost scaled with how often platform staff
+clicked. It is now computed at most once a minute per API process
+(`OVERVIEW_CACHE_TTL_MS`), and an open that arrives while one is running shares
+it. Only the operator console is affected: no school page reads this method,
+and the shared `headcountBySchool` behind the registry and directory stays live.
+
+A cache has three characteristic ways of lying, and each is answered in code:
+- **A figure presented as live when it is not.** The response carries `asOf`,
+  the time the rows were READ, stamped before the reads begin, never the time it
+  was served. The dashboard prints it to the second, because two readings a
+  minute apart must look different, and a **Refresh figures** button asks for
+  `?fresh=1`. The button pushes a new URL each press (`?fresh=<ms>`): a constant
+  one would land on the URL already open and navigate nowhere, the recorded
+  "Take register" defect.
+- **An error kept for a minute.** A failed computation is never stored; the
+  next open recomputes.
+- **One person's view served to another.** A single copy is shared by every
+  operator, which is safe only because the overview is not scoped to the
+  caller. The field carries a SECURITY comment saying to key it by scope the
+  day that changes.
+
+Kept deliberately: every view is audited, cached or not. The log records who
+looked, not how the figures were produced.
+
+**A copy per SERVER is its own lie.** Production runs at least two API tasks
+(`api_desired_count = 2`, scaling to 10), and a copy in process memory is a copy
+per task: reloads disagree, and after Refresh the time goes BACKWARDS when the
+next reload lands on a task still holding its older copy. The copy therefore
+lives in Redis (`SharedCacheService`), with a short lock so one task recomputes
+while the others wait for ITS result (after Refresh, only a copy newer than the
+one they had counts). The lock is released on failure, so a waiting task sees
+nothing new and computes for itself: a failure is never published. Every Redis
+failure falls back to the process-local copy, and a DATABASE failure is told
+apart from a Redis one, so a failing computation is never run twice.
+// GOTCHA: the pub/sub connection WAITS through a Redis outage
+// (`maxRetriesPerRequest: null`, right for pub/sub). Reused for a cache, an
+// outage becomes a dashboard that hangs. The cache has its own connection that
+// fails fast: one retry, no offline queue, a 1 s command timeout.
+// GOTCHA: a DTO read back from Redis has ISO strings where the type says Date.
+// Revived by name, and a test walks a REAL computed response so a Date field
+// added later without being revived fails.
+
+Verified on TWO real API containers behind nginx, driving each by its own
+address. Through nginx alone all 25 requests reached one container (the web
+tier reuses its connection), which proves nothing about two, so that run was
+not counted. Direct, with Redis up: both served one copy; Refresh on one, then
+a reload on the other, showed the refreshed figures; a simultaneous Refresh on
+both was ONE computation. With Redis STOPPED, the same probe went red exactly as
+predicted (the reload went backwards, two computations), while every request
+still answered promptly and the page loaded in 0.37 s. Redis restarted: sharing
+resumed with no restart of either API, each having logged the outage once.
+
+// GOTCHA in validating it, THREE times: mutations that did not COMPILE report
+// `Tests: 0 total`, not a failure, and prove nothing either way. Each was
+// rewritten in a compiling form and then failed the tests it should.
+
+THE SIMULATION, and what it found that no unit test had. 5,000 schools and
+2.5M pupils; THREE API containers; 15 simulated staff opening the dashboard
+every 1-4 s on a random server for three minutes; Redis stopped for 20 s
+mid-run with a Refresh forced on one server inside the outage. A checker
+written BEFORE the run: every request succeeds; nobody sees the time go
+backwards (strict, across every reader, Redis up); recalculation per Refresh
+and per minute, not per server (counted from the database's own statement
+log); copies fast; every view audited (counted from audit_log); every response
+carrying the SAME figures as a fresh calculation (a fingerprint of the body
+minus `asOf`). Three runs; the third passed all seven:
+- **An ordinary open waited on somebody else's Refresh.** `overview()` joined a
+  computation already running on the task before looking for a copy, so an
+  open that arrived during a Refresh on the same server waited seconds for
+  figures it had not asked for. 50 of 70 slow opens. Now an ordinary open is
+  served the current copy first: p95 2,854 ms -> 41 ms.
+- **After Redis returned, a task could hold a copy NEWER than Redis's** (it
+  recomputed during the outage) and the others served the older one. It now
+  publishes its own, with what was left of its minute, and the cache
+  connection retries at most 1 s apart (was 5 s): the last backwards view after
+  recovery went 3.4 s -> 1.9 s. Not zero, and cannot be: while Redis is down the
+  tasks cannot coordinate, and they reconnect at slightly different moments.
+- **A 500 that was not the cache**: Postgres error 53100, the 64 MB `/dev/shm`
+  Docker gives a container, exhausted by concurrent parallel queries while the
+  tasks recomputed on their own during the outage. Local/compose only (RDS is
+  not a container); fixed separately with `shm_size`.
+- **Both dashboard cards asserted a cause they could not know** ("the privileged
+  database connection is not configured") and one failing read blanked the
+  whole dashboard. Each card is now read on its own (`readForCard`) and says
+  what is known.
+// GOTCHA, four in the HARNESS, each of which would have reported something
+// untrue: readiness checked through nginx reached only the old container, so
+// 15 requests failed against containers still booting; `date +%s%3N` prints
+// NANOSECONDS on this machine, so the outage window was a million times too
+// large and silently excluded every request from the outage checks; counting
+// statements with `docker logs --since` returned an earlier run's lines; and
+// `compose up` without `--no-deps` would have recreated Postgres with its old
+// 64 MB. A green run from a broken harness is the most convincing wrong answer
+// there is.
+- **Whoever opened as the minute ran out waited ~4 s** for the next copy. Past
+  its minute a copy is now served for up to a further minute while ONE task
+  recalculates behind it (same Redis lock). Checked directly at full scale,
+  because the fourth simulation's Refresh presses kept every copy under a
+  minute old and never reached the boundary: a fresh copy took 3,527 ms; an
+  open 62 s later was served the previous copy in 118 ms (labelled 66 s old);
+  an open 8 s after that got the new copy in 55 ms. Past the grace the copy is
+  gone, so a quiet dashboard recalculates on demand and a background run that
+  keeps failing cannot hide behind an ever-older copy.
+Remaining, measured and stated: the very first open when NO copy exists
+waits for one (14 of the fourth run's 19 slow opens, because the harness wipes
+Redis first; in production the copy survives API restarts and deploys). The
+other 5 were a Postgres COMMIT stall on the laptop's disk — eight COMMITs
+finishing within 3 ms of each other after 0.8-1.4 s — which the view's own
+audit-row insert waited on. That is the disk, not the cache.
+// GOTCHA: a run that PASSES can still not have EXERCISED the thing added.
+// The fourth run was all-green and its copies never passed 43 s old, so the
+// stale-copy path never ran. Check what a run actually reached, not only
+// what it asserted.
+
+Verified live: two opens two seconds apart shared one `asOf`; `fresh=1`
+produced a new one that the next ordinary open was then served; four views
+wrote four audit rows; the page shows the time in the operator's own zone.
+Tests: six cache cases, eight shared-copy cases (two service instances over one
+contract-modelling Redis stand-in) and two route cases in
+`platform-analytics.service.spec`, plus `a-refresh-that-asks-for-new-figures`
+for the button; every case mutation-validated.

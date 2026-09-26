@@ -119,7 +119,11 @@ export function dateTime(value: string | Date | null | undefined, region: Partia
  * A time with no date is only ever an instant, so there is no `isCalendarDate`
  * case here: a `@db.Date` has no meaningful time of day to show.
  */
-export function timeOfDay(value: string | Date | null | undefined, region: Partial<DisplayRegion> = {}): string {
+export function timeOfDay(
+  value: string | Date | null | undefined,
+  region: Partial<DisplayRegion> = {},
+  opts: { seconds?: boolean } = {},
+): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
@@ -128,9 +132,13 @@ export function timeOfDay(value: string | Date | null | undefined, region: Parti
       timeZone: region.timezone || PLATFORM_REGION.timezone,
       hour: "2-digit",
       minute: "2-digit",
+      // Seconds where two readings a minute apart must look different — an
+      // "as of" time that did not move after pressing Refresh reads as a
+      // button that did nothing.
+      ...(opts.seconds ? { second: "2-digit" as const } : {}),
     });
   } catch {
-    return d.toISOString().slice(11, 16);
+    return d.toISOString().slice(11, opts.seconds ? 19 : 16);
   }
 }
 

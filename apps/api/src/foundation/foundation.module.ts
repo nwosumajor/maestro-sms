@@ -18,6 +18,7 @@ import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { RedisPubSubService } from "../common/redis-pubsub.service";
 import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
+import { SharedCacheService } from "../common/shared-cache.service";
 
 /**
  * The real foundation: tenant-scoped DB runner, durable audit log, NDPR consent,
@@ -36,6 +37,7 @@ import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
     { provide: CONSENT_SERVICE, useClass: ConsentService },
     RedisPubSubService,
     TenantRateLimitService,
+    SharedCacheService,
     ModuleEntitlementService,
     RolePermissionsService,
     // Global: every service that decides what day it is must ask the SCHOOL.
@@ -44,6 +46,6 @@ import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
     // EMBEDDING_PROVIDER intentionally unbound — prose similarity is skipped
     // when absent (the integrity service injects it @Optional()).
   ],
-  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE, ModuleEntitlementService, RolePermissionsService, RedisPubSubService, SchoolRegionService, ReplicaRouterService, SchoolStatusService],
+  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE, ModuleEntitlementService, RolePermissionsService, RedisPubSubService, SharedCacheService, SchoolRegionService, ReplicaRouterService, SchoolStatusService],
 })
 export class FoundationModule {}

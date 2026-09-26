@@ -56,6 +56,7 @@ interface PlatformDemographicRow extends PlatformAgeBandRow {
 import { Prisma } from "@sms/db";
 import { PlanPricingService } from "../billing/plan-pricing.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { SharedCacheService } from "../common/shared-cache.service";
 import { ALL_CUSTOMER_SCHOOLS, inSchoolScope } from "./operator-fleet";
 import { headcountBySchool } from "./operator-people";
 import {
@@ -69,20 +70,314 @@ import { toMinor } from "../common/money";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+type PrivilegedClient = NonNullable<PrivilegedDatabaseService["client"]>;
+
+/**
+ * How long a computed fleet overview is served before it is recomputed.
+ *
+ * WHY CACHE AT ALL: every computation is three full scans of the fleet's role,
+ * user and profile rows (about 3.6 s at 5,000 schools / 2.5M pupils), on the
+ * same database the schools' own registers and fee payments use. Without a
+ * cache that cost scales with how often platform staff click — five people
+ * refreshing a few times is a dozen full scans in a minute. With it, at most
+ * one per minute per API process, however many times the page is opened.
+ *
+ * WHAT IT COSTS, and how each is answered:
+ *  - a figure up to a minute old (two, with OVERVIEW_STALE_GRACE_MS) — the
+ *    response carries `asOf`, the dashboard prints it, and `fresh` bypasses
+ *    the cache (the Refresh button);
+ *  - production runs several API tasks, so a copy in PROCESS memory would be a
+ *    copy per task: two reloads could disagree, and after Refresh the time
+ *    could go BACKWARDS (refresh on one task, reload lands on another still
+ *    holding its older copy). The copy therefore lives in REDIS, shared by every
+ *    task, and a short lock means one task recomputes while the others wait for
+ *    its result. The process-local copy remains only as the FALLBACK for when
+ *    Redis is unavailable, which degrades to per-task copies, never to a hang;
+ *  - a FAILED computation is never stored, so an error is never served for a
+ *    minute.
+ */
+export const OVERVIEW_CACHE_TTL_MS = 60_000;
+
+/**
+ * How long past its minute a copy is still SERVED while the next one is
+ * calculated in the background ("stale while revalidating").
+ *
+ * Without it, whoever opened the dashboard as the minute ran out waited for a
+ * full recalculation — about 4 s at 5,000 schools, 2% of opens and the whole of
+ * the p99 in the 3-server simulation. With it, that open gets the previous copy
+ * at once and ONE task recalculates behind it (under the same Redis lock), so
+ * nobody waits on an expiry. The cost is age: a copy can be served up to
+ * TTL + grace old (two minutes) to the first open after a quiet minute — which
+ * the page states, because it prints `asOf`. Past the grace the copy is gone,
+ * so a dashboard nobody has looked at recalculates on demand rather than
+ * keeping a stale copy alive, and a background recalculation that keeps
+ * failing surfaces as a failure once the grace runs out instead of hiding
+ * behind an ever-older copy.
+ */
+export const OVERVIEW_STALE_GRACE_MS = 60_000;
+/** How long a copy is kept at all: its fresh minute plus the grace. */
+const OVERVIEW_KEEP_MS = OVERVIEW_CACHE_TTL_MS + OVERVIEW_STALE_GRACE_MS;
+
+/** The shared copy's key. Versioned because the value is a serialised DTO: if
+ *  its SHAPE changes, bump this so a new task never reads an old task's shape.
+ *  (The TTL bounds any overlap to a minute regardless.) */
+export const OVERVIEW_SHARED_KEY = "operator:analytics:overview:v1";
+const OVERVIEW_LOCK_KEY = `${OVERVIEW_SHARED_KEY}:lock`;
+/** Longest a task may hold the recompute lock. Far above a real computation
+ *  (seconds); it only bounds how long a task that DIES mid-computation blocks
+ *  the others. */
+const OVERVIEW_LOCK_TTL_MS = 30_000;
+/** How a task that finds the lock taken waits for the holder's result: polls
+ *  counted, not a wall-clock deadline, so a frozen or skewed clock cannot turn
+ *  the wait into a spin. 60 x 250 ms = 15 s, then it computes for itself. */
+const OVERVIEW_WAIT_POLL_MS = 250;
+const OVERVIEW_WAIT_POLLS = 60;
+
+/** Raised for ANY failure talking to the shared cache, so the caller can tell
+ *  "Redis is unavailable, use the local copy" from "the computation failed",
+ *  which must propagate and must NOT be retried locally. */
+class SharedCacheUnavailable extends Error {}
+
+/** A DTO read back from Redis has ISO strings where the type says Date. The
+ *  response serialises either way, but code in this process reads `asOf` as a
+ *  Date. Every Date field in PlatformAnalyticsDto is revived here, and a test
+ *  walks a real computed DTO to fail if one is added without being revived. */
+export function reviveOverview(json: string): PlatformAnalyticsDto {
+  const v = JSON.parse(json) as PlatformAnalyticsDto;
+  v.asOf = new Date(v.asOf);
+  for (const r of v.recentPayments) r.createdAt = new Date(r.createdAt);
+  return v;
+}
+
 @Injectable()
 export class PlatformAnalyticsService {
   private readonly logger = new Logger("PlatformAnalytics");
+
+  // SECURITY: ONE copy shared by every operator, which is safe ONLY because the
+  // overview is not scoped to the caller — every platform user with the route's
+  // permission sees the same fleet-wide figures, and `p` is not read below. If
+  // this response is ever narrowed per person (a manager limited to certain
+  // schools), key the cache by that scope, or one person's view is served to
+  // another.
+  // Applies equally to the shared copy in Redis: it is ONE value for every
+  // operator on every task.
+  /** The process-local copy: the FALLBACK when Redis is unavailable. */
+  private cached: { value: PlatformAnalyticsDto; at: number } | null = null;
+  /** A request already under way on THIS task, shared by anyone who asks
+   *  meanwhile, so two opens on one task make one trip, not two. */
+  private inflight: Promise<PlatformAnalyticsDto> | null = null;
+  /** A background recalculation started by a stale read on THIS task, so one
+   *  task never starts two. (Across tasks, the Redis lock does the same.) */
+  private revalidating: Promise<void> | null = null;
 
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly planPricing: PlanPricingService,
+    private readonly shared: SharedCacheService,
   ) {}
 
-  async overview(p: Principal): Promise<PlatformAnalyticsDto> {
+  /**
+   * The fleet overview, served from a copy — fresh for OVERVIEW_CACHE_TTL_MS,
+   * then served for up to OVERVIEW_STALE_GRACE_MS more while the next copy is
+   * calculated in the background, so no ordinary open waits on an expiry.
+   * `fresh` recomputes (the dashboard's Refresh button). A computation already
+   * running is shared even by a `fresh` request rather than starting a second
+   * set of scans: it began at most one computation's length earlier (seconds),
+   * and its `asOf` says exactly when.
+   *
+   * The AUDIT is not here and not skipped: the controller records every view,
+   * cached or not, because the log says who looked, not how it was computed.
+   */
+  async overview(_p: Principal, opts: { fresh?: boolean } = {}): Promise<PlatformAnalyticsDto> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Platform analytics are not configured");
+    const fresh = opts.fresh === true;
+    // AN ORDINARY OPEN IS SERVED THE CURRENT COPY FIRST, before looking at any
+    // computation already running on this task. It used to join whatever was
+    // in flight — including somebody else's Refresh — and wait seconds for
+    // figures it had not asked for while a perfectly good copy existed.
+    // Measured in the 3-server simulation: 50 of 70 slow ordinary opens were
+    // exactly that.
+    if (!fresh) {
+      const current = await this.currentCopy(client);
+      if (current) return current;
+    }
+    if (this.inflight) return this.inflight;
+    const run = (async () => {
+      if (!this.shared.available) return this.viaLocal(client);
+      try {
+        return await this.viaShared(client, fresh);
+      } catch (e) {
+        if (!(e instanceof SharedCacheUnavailable)) throw e; // a failed COMPUTATION propagates
+        this.logger.warn(`Shared overview cache unavailable, using this task's copy: ${e.message}`);
+        return !fresh && this.ownUsable() ? this.cached!.value : this.viaLocal(client);
+      }
+    })().finally(() => {
+      this.inflight = null;
+    });
+    this.inflight = run;
+    return run;
+  }
+
+  /**
+   * The copy an ordinary open should be served, or null when there is none to
+   * serve (nothing yet, or older than its grace). Never waits on a computation.
+   * With Redis, the shared copy — after publishing this task's own copy if a
+   * Redis outage left it NEWER (see viaShared). Without Redis, or if Redis
+   * fails here, this task's own copy. A copy past its fresh minute is still
+   * served, and starts the next recalculation in the background.
+   */
+  private async currentCopy(client: PrivilegedClient): Promise<PlatformAnalyticsDto | null> {
+    const own = this.ownUsable() ? this.cached!.value : null;
+    let chosen: PlatformAnalyticsDto | null = own;
+    if (this.shared.available) {
+      try {
+        const raw = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
+        const shared = raw ? reviveOverview(raw) : null;
+        if (own && (!shared || own.asOf.getTime() > shared.asOf.getTime())) {
+          await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(own), this.remainingLifeMs(own)));
+        } else {
+          chosen = shared ? this.remember(shared) : null;
+        }
+      } catch (e) {
+        if (!(e instanceof SharedCacheUnavailable)) throw e;
+        chosen = own;
+      }
+    }
+    if (chosen && !this.isFresh(chosen)) this.revalidateInBackground(client);
+    return chosen;
+  }
+
+  private isFresh(v: PlatformAnalyticsDto): boolean {
+    return Date.now() - v.asOf.getTime() < OVERVIEW_CACHE_TTL_MS;
+  }
+
+  /**
+   * Start the next copy WITHOUT making anyone wait for it. One per task, and
+   * across tasks the Redis lock: a task that cannot take it leaves the work to
+   * whoever holds it. A failure is logged and never published; the previous
+   * copy goes on being served until its grace runs out.
+   */
+  private revalidateInBackground(client: PrivilegedClient): void {
+    if (this.inflight || this.revalidating) return;
+    this.revalidating = (async () => {
+      try {
+        if (!this.shared.available) {
+          await this.viaLocal(client);
+          return;
+        }
+        const token = await this.shared.tryLock(OVERVIEW_LOCK_KEY, OVERVIEW_LOCK_TTL_MS);
+        if (!token) return; // another task is already recalculating
+        try {
+          await this.computeAndPublish(client);
+        } finally {
+          await this.shared.unlock(OVERVIEW_LOCK_KEY, token).catch(() => undefined);
+        }
+      } catch (e) {
+        this.logger.warn(`Background recalculation failed; the previous copy is still served: ${(e as Error).message}`);
+      } finally {
+        this.revalidating = null;
+      }
+    })();
+  }
+
+  /** This task's own copy is still within its fresh minute or its grace. */
+  private ownUsable(): boolean {
+    return this.cached !== null && Date.now() - this.cached.at < OVERVIEW_KEEP_MS;
+  }
+
+  /** What is left of a copy's life, so republishing it after an outage does
+   *  not extend it: it expires in Redis when it would have expired here. */
+  private remainingLifeMs(v: PlatformAnalyticsDto): number {
+    return Math.max(1, OVERVIEW_KEEP_MS - (Date.now() - v.asOf.getTime()));
+  }
+
+  private remember(value: PlatformAnalyticsDto): PlatformAnalyticsDto {
+    this.cached = { value, at: value.asOf.getTime() };
+    return value;
+  }
+
+  /** Redis unavailable: this task's own copy, as the whole platform used to. */
+  private async viaLocal(client: PrivilegedClient): Promise<PlatformAnalyticsDto> {
+    return this.remember(await this.computeOverview(client));
+  }
+
+  /** Any shared-cache call, with its failures made distinguishable. */
+  private async sh<T>(op: Promise<T>): Promise<T> {
+    try {
+      return await op;
+    } catch (e) {
+      throw new SharedCacheUnavailable((e as Error).message);
+    }
+  }
+
+  /** Compute, publish to every task, and keep a local copy for a later outage. */
+  private async computeAndPublish(client: PrivilegedClient): Promise<PlatformAnalyticsDto> {
+    const value = await this.computeOverview(client);
+    // A failed WRITE does not waste the computation: this caller still gets it.
+    await this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(value), OVERVIEW_KEEP_MS).catch(() => undefined);
+    return this.remember(value);
+  }
+
+  private async viaShared(client: PrivilegedClient, fresh: boolean): Promise<PlatformAnalyticsDto> {
+    const raw = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
+    let previous = raw ? reviveOverview(raw) : null;
+    // AFTER A REDIS OUTAGE this task may hold a copy NEWER than the shared one:
+    // during the outage it recomputed on its own (a Refresh, or an expiry), and
+    // the shared copy still in Redis is from before. Serving the shared one
+    // would take anyone who saw this task's figures BACKWARDS, so the newer copy
+    // is published instead and every task converges on it. Measured before
+    // this: 11 of 49 requests in the ten seconds after Redis returned saw an
+    // older copy than one already shown.
+    const mine = this.ownUsable() ? this.cached!.value : null;
+    if (mine && (!previous || mine.asOf.getTime() > previous.asOf.getTime())) {
+      await this.sh(this.shared.set(OVERVIEW_SHARED_KEY, JSON.stringify(mine), this.remainingLifeMs(mine)));
+      previous = mine;
+    }
+    if (previous && !fresh) return this.remember(previous);
+
+    const token = await this.sh(this.shared.tryLock(OVERVIEW_LOCK_KEY, OVERVIEW_LOCK_TTL_MS));
+    if (token) {
+      try {
+        return await this.computeAndPublish(client);
+      } finally {
+        // Released on failure too, so a task waiting below sees the lock go
+        // with nothing new written and computes for itself: a failure is
+        // never published.
+        await this.shared.unlock(OVERVIEW_LOCK_KEY, token).catch(() => undefined);
+      }
+    }
+
+    // Another task is computing. Wait for ITS result rather than start a second
+    // set of scans. After Refresh, only a copy NEWER than the one we had counts.
+    const isNew = (v: PlatformAnalyticsDto) => !previous || v.asOf.getTime() > previous.asOf.getTime();
+    for (let i = 0; i < OVERVIEW_WAIT_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, OVERVIEW_WAIT_POLL_MS));
+      const now = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
+      if (now) {
+        const v = reviveOverview(now);
+        if (isNew(v)) return this.remember(v);
+      }
+      if (!(await this.sh(this.shared.isLocked(OVERVIEW_LOCK_KEY)))) {
+        // The holder finished. One last look, in case it wrote as it released.
+        const last = await this.sh(this.shared.get(OVERVIEW_SHARED_KEY));
+        if (last) {
+          const v = reviveOverview(last);
+          if (isNew(v)) return this.remember(v);
+        }
+        break; // it failed, or its lock expired: nothing to wait for
+      }
+    }
+    // Without the lock, so a task that died holding it can never block this.
+    return this.computeAndPublish(client);
+  }
+
+  private async computeOverview(client: PrivilegedClient): Promise<PlatformAnalyticsDto> {
+    // Stamped BEFORE the reads begin, so it never claims the figures are newer
+    // than the oldest row they were built from.
+    const asOf = new Date();
 
     // The growth chart draws SIX months, from the start of the month five
     // before this one. Both monthly reads below are bounded to that window.
@@ -424,6 +719,7 @@ export class PlatformAnalyticsService {
     const topSchools = perSchool.sort((a, b) => b.students - a.students).slice(0, 6);
 
     return {
+      asOf,
       schools: schoolStatus,
       schoolsByPlan,
       schoolsByStatus,

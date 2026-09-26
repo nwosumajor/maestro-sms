@@ -9,7 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Kpi } from "@/components/charts/charts";
 import { RCArea, RCBars, RCColumns, RCDonut } from "@/components/charts/rc";
 import { RC } from "@/components/charts/colors";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, timeOfDay, type DisplayRegion } from "@/lib/format";
+import { AnalyticsRefresh } from "./AnalyticsRefresh";
+import { CardReadProblem } from "./CardReadProblem";
+import type { CardRead } from "@/lib/card-read";
 
 const PLAN_PALETTE = [RC.primary, RC.primarySoft, RC.primaryFaint, RC.amber, RC.muted];
 const STATUS_COLOR: Record<string, string> = { ACTIVE: RC.primary, PAST_DUE: RC.amber, CANCELED: RC.red, CANCELLED: RC.red };
@@ -20,21 +23,16 @@ function planColors(keys: string[]): Record<string, string> {
   return out;
 }
 
-export function PlatformAnalytics({ data }: { data: Serialized<PlatformAnalyticsDto> | null }) {
-  if (!data) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Platform analytics</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Analytics are unavailable — the privileged database connection is not configured.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+export function PlatformAnalytics({
+  read,
+  region,
+}: {
+  read: CardRead<Serialized<PlatformAnalyticsDto>>;
+  /** The operator's own display region, for the "as of" time. */
+  region?: Partial<DisplayRegion>;
+}) {
+  if (read.state !== "ok") return <CardReadProblem title="Platform analytics" read={read} />;
+  const data = read.data;
 
   const planKeys = [...new Set([...Object.keys(data.schoolsByPlan), ...Object.keys(data.mrr.byPlan)])];
   const planColor = planColors(planKeys);
@@ -58,6 +56,16 @@ export function PlatformAnalytics({ data }: { data: Serialized<PlatformAnalytics
 
   return (
     <div className="space-y-6">
+      {/* WHEN these figures are from. They are computed at most once a minute,
+          so a number is never presented as live when it may be a minute old. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <p>
+          Figures as of <span className="font-medium text-foreground">{timeOfDay(data.asOf, region ?? {}, { seconds: true })}</span>
+          {" "}· recalculated at most once a minute
+        </p>
+        <AnalyticsRefresh />
+      </div>
+
       {/* Headline KPIs */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Kpi label="Monthly recurring revenue" value={money(data.mrr.totalMinor)} sub={`${data.mrr.payingSchools} paying schools`} />
