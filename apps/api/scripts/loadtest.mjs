@@ -173,16 +173,15 @@ async function seedHistoryInDb(db, schoolIds, batchSize = 100) {
     const list = batch.map((id) => `'${id}'::uuid`).join(",");
     const s = await db.query(`
       INSERT INTO attendance_session (id, "schoolId", "classId", date, "takenById", "createdAt", "updatedAt")
-      SELECT gen_random_uuid(), c."schoolId", c.id, d::date, ct."teacherId", now(), now()
+      SELECT gen_random_uuid(), c."schoolId", c.id, d::date, c."supervisorId", now(), now()
       FROM class c
-      JOIN class_teacher ct ON ct."classId" = c.id
       CROSS JOIN generate_series(CURRENT_DATE - ${DAYS}, CURRENT_DATE - 1, interval '1 day') d
-      WHERE c."schoolId" IN (${list})
+      WHERE c."schoolId" IN (${list}) AND c."supervisorId" IS NOT NULL
     `);
     const r = await db.query(`
-      INSERT INTO attendance_record (id, "schoolId", "sessionId", "studentId", status, "createdAt", "updatedAt")
+      INSERT INTO attendance_record (id, "schoolId", "sessionId", "studentId", status, date, "createdAt", "updatedAt")
       SELECT gen_random_uuid(), s."schoolId", s.id, e."studentId",
-             (CASE WHEN random() < 0.08 THEN 'ABSENT' ELSE 'PRESENT' END)::"AttendanceStatus", now(), now()
+             (CASE WHEN random() < 0.08 THEN 'ABSENT' ELSE 'PRESENT' END)::"AttendanceStatus", s.date, now(), now()
       FROM attendance_session s
       JOIN enrollment e ON e."classId" = s."classId"
       WHERE s."schoolId" IN (${list})
@@ -202,7 +201,6 @@ async function seed(db) {
   const userRows = [];
   const roleRows = [];
   const classRows = [];
-  const classTeacherRows = [];
   const enrollRows = [];
   const feeItemRows = [];
   const invoiceRows = [];
@@ -240,8 +238,10 @@ async function seed(db) {
       const classId = randomUUID();
       classIds.push(classId);
       classStudents[classId] = [];
-      classRows.push(`('${classId}','${schoolId}','Class ${c}',now())`);
-      classTeacherRows.push(`('${randomUUID()}','${schoolId}','${classId}','${teacherId}')`);
+      // The class teacher is the class's supervisorId: `class_teacher` was
+      // retired on 2026-08-30 ("one column for one class teacher"), and a seed
+      // still writing to it failed on every run from then on.
+      classRows.push(`('${classId}','${schoolId}','Class ${c}','${teacherId}',now())`);
     }
 
     const studentIds = [];
@@ -285,8 +285,7 @@ async function seed(db) {
   await bulk(db, `INSERT INTO "user" (id,"schoolId",email,name,"passwordHash","updatedAt") VALUES `, userRows);
   if (WORKLOAD) {
     await bulk(db, `INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES `, roleRows);
-    await bulk(db, `INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES `, classRows);
-    await bulk(db, `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES `, classTeacherRows);
+    await bulk(db, `INSERT INTO class (id,"schoolId",name,"supervisorId","updatedAt") VALUES `, classRows);
     await bulk(db, `INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES `, enrollRows);
     // The big one — generated server-side, in batches (students × days rows).
     const hist = await seedHistoryInDb(db, schools.map((s) => s.schoolId));
@@ -317,7 +316,6 @@ async function cleanup(db) {
     `DELETE FROM invoice WHERE "schoolId" IN ${ids}`,
     `DELETE FROM fee_item WHERE "schoolId" IN ${ids}`,
     `DELETE FROM enrollment WHERE "schoolId" IN ${ids}`,
-    `DELETE FROM class_teacher WHERE "schoolId" IN ${ids}`,
     `DELETE FROM class WHERE "schoolId" IN ${ids}`,
     `DELETE FROM notification WHERE "schoolId" IN ${ids}`,
     `DELETE FROM audit_log WHERE "schoolId" IN ${ids}`,
@@ -471,18 +469,21 @@ function report({ stats, wallMs, peakConns }) {
 
   const db = new Client({ connectionString: ADMIN_URL });
   await db.connect().catch((e) => fail(`cannot connect LOADTEST_ADMIN_URL: ${e.message}`));
-  let seeded = false;
   try {
     console.log(`\n  seeding ${SCHOOLS} synthetic tenants (run ${RUN_ID}, ${WORKLOAD ? "WORKLOAD" : "overhead"} mode)…`);
     const schools = await seed(db);
-    seeded = true;
     console.log("  warming up endpoints…");
     const endpoints = await warmup(schools);
     console.log(`  driving load: ${CONCURRENCY} workers for ${DURATION}s across ${endpoints.length} endpoints…`);
     const result = await run(db, schools, endpoints);
     report(result);
   } finally {
-    if (seeded && !KEEP) {
+    // ALWAYS, unless --keep — including when SEEDING failed part-way. It used
+    // to run only after a completed seed, so a seed that threw left every row
+    // it had written behind: 30 schools and 3,060 users in the dev database
+    // after the class_teacher failure. Cleanup deletes by this run's tag only,
+    // so it is safe with nothing seeded.
+    if (!KEEP) {
       await cleanup(db);
       console.log("  cleaned up synthetic tenants.");
     } else if (KEEP) {
