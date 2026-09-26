@@ -79,11 +79,17 @@ jobs:
             -c "GRANT CONNECT ON DATABASE sms_capacity TO major_user;" \
             -c "GRANT USAGE ON SCHEMA public TO major_user;"
 
+      # BEFORE the database: the seed imports @sms/types from its BUILT output
+      # (dist/), which a fresh runner does not have. The first run failed here
+      # while a local dry run passed, because the laptop had dist/ from earlier
+      # builds. The db package's build also runs `prisma generate`.
+      - name: Build the API and its packages
+        run: pnpm --filter @sms/api... build
+
       # The same path production takes: migrate deploy, then RLS, then the seed
       # (platform essentials only — the harness seeds its own tenants).
       - name: Build the database
         run: |
-          pnpm db:generate
           pnpm --filter @sms/db exec prisma migrate deploy
           pnpm --filter @sms/db rls
           pnpm --filter @sms/db exec prisma db seed
@@ -91,13 +97,14 @@ jobs:
           DATABASE_URL: ${{ env.ADMIN_URL }}
           DATABASE_MIGRATE_URL: ${{ env.ADMIN_URL }}
 
-      - name: Build the API
-        run: pnpm --filter @sms/api... build
-
       - name: Start the API (production mode, RLS-enforced app role)
         run: |
           # Fresh secrets per run: nothing here is ever reused, and a published
           # key would be refused at boot anyway.
+          # The per-school rate limit is lifted: the harness drives each synthetic
+          # school at ~30 req/s, far past a real school's 1,200/min, and this
+          # measures the API rather than the limiter (whose Redis round trip is
+          # still paid on every request). The first run hit it: 5,310 429s.
           AUTH_SECRET=$(openssl rand -hex 32)
           echo "::add-mask::$AUTH_SECRET"
           echo "AUTH_SECRET=$AUTH_SECRET" >> "$GITHUB_ENV"
@@ -107,6 +114,7 @@ jobs:
           WEB_ORIGIN=http://localhost PUBLIC_WEB_URL=http://localhost \
           AUTH_SECRET="$AUTH_SECRET" DATA_ENCRYPTION_KEY="$DATA_ENCRYPTION_KEY" \
           REDIS_HOST=127.0.0.1 REDIS_PORT=6379 \
+          TENANT_RATE_LIMIT_PER_MIN=1000000 \
           DATABASE_URL="postgresql://major_user:major_pw@localhost:5432/sms_capacity?connection_limit=20" \
           DATABASE_MIGRATE_URL="$ADMIN_URL" \
             nohup node apps/api/dist/main.js > api.log 2>&1 &

@@ -86,7 +86,12 @@ const problems = [];
 let verdict;
 let bar = null;
 if (result.errorPct > MAX_ERROR_PCT) {
-  problems.push(`${result.errorPct}% of requests failed (limit ${MAX_ERROR_PCT}%) — this run measured errors, not capacity`);
+  problems.push(
+    `${result.errorPct}% of requests failed (limit ${MAX_ERROR_PCT}%) — this run measured errors, not capacity` +
+      (result.rateLimited
+        ? `; ${result.rateLimited} were 429s from the per-school limit — raise TENANT_RATE_LIMIT_PER_MIN for the API under test`
+        : ""),
+  );
 }
 if (prior.length < MIN_HISTORY) {
   verdict = `BASELINE ${prior.length + 1}/${MIN_HISTORY} — no bar yet for this config`;

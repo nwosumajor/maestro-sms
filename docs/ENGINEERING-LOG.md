@@ -19427,6 +19427,17 @@ run is never recorded (it would lower the bar); `--accept` makes a slowdown the
 new normal with a rebaseline marker. Dry-run of the workflow's steps on a
 fresh database: 691 / 709 / 714 / 722 req/s, the fourth judged OK against a
 median of 709. Every rule and both budgets mutation-validated.
+// GOTCHA: **the dry run was not a dry run of THIS machine's absence.** The
+// first real run died at the seed — it imports `@sms/types` from `dist/`, which
+// a fresh runner has not built; the laptop had `dist/` from earlier builds. The
+// packages are built before the database now. Dispatching the workflow on the
+// fix BRANCH (possible once the file exists on `main`) is the faithful test.
+// GOTCHA: the second run served 658 req/s with 15% "errors" — all 5,310 were
+// 429s from the per-school limiter (1,200/min), which ~30 req/s per synthetic
+// school outgrows in 60 s but not in the 30 s dry run. The run lifts
+// `TENANT_RATE_LIMIT_PER_MIN`; the harness counts 429s apart and the judge
+// names the limiter. The third run: **804 req/s on a GitHub runner, 0 errors**,
+// recorded as the first point of that runner's history.
 
 ### The capacity harness had been dead since August, and a failed run left 3,060 users behind
 

@@ -379,7 +379,7 @@ function pctl(sorted, p) {
 }
 
 async function run(db, schools, endpoints) {
-  const stats = new Map(endpoints.map((e) => [e.key, { ms: [], ok: 0, err: 0, write: !!e.write }]));
+  const stats = new Map(endpoints.map((e) => [e.key, { ms: [], ok: 0, err: 0, limited: 0, write: !!e.write }]));
   const bag = weightedEndpoints(endpoints);
   const deadline = performance.now() + DURATION * 1000;
   let peakConns = 0;
@@ -405,6 +405,10 @@ async function run(db, schools, endpoints) {
       s.ms.push(r.ms);
       if (r.ok) s.ok++;
       else s.err++;
+      // A 429 is the per-school limiter doing its job, not the API failing —
+      // counted apart so a run that outgrew TENANT_RATE_LIMIT_PER_MIN says so
+      // instead of reporting "errors" (the first CI run: 5,310 of them).
+      if (r.status === 429) s.limited++;
     }
   }
 
@@ -420,12 +424,14 @@ function report({ stats, wallMs, peakConns }) {
   let total = 0;
   let errors = 0;
   let writes = 0;
+  let limited = 0;
   const rows = [];
   for (const [key, s] of stats) {
     const sorted = [...s.ms].sort((a, b) => a - b);
     const n = s.ok + s.err;
     total += n;
     errors += s.err;
+    limited += s.limited;
     if (s.write) writes += n;
     rows.push({
       key: s.write ? `${key} (W)` : key,
@@ -457,6 +463,12 @@ function report({ stats, wallMs, peakConns }) {
   console.log("-".repeat(72));
   console.log(`  TOTAL       : ${total} reqs   ${rps.toFixed(0)} req/s   ${((100 * errors) / (total || 1)).toFixed(2)}% errors`);
   if (writes) console.log(`  writes      : ${writes} (${((100 * writes) / total).toFixed(0)}% of traffic)`);
+  if (limited) {
+    console.log(
+      `  RATE-LIMITED: ${limited} of the errors were 429s — the API's per-school limit, not a fault. ` +
+        "To measure capacity, start the API under test with a high TENANT_RATE_LIMIT_PER_MIN.",
+    );
+  }
   console.log(`  peak DB connections during run : ${peakConns}`);
   console.log("=".repeat(72) + "\n");
   return {
@@ -475,6 +487,7 @@ function report({ stats, wallMs, peakConns }) {
     rps: Number(rps.toFixed(1)),
     total,
     errorPct: Number(((100 * errors) / (total || 1)).toFixed(3)),
+    rateLimited: limited,
     peakConns,
     endpoints: rows.map((r) => ({
       key: r.key,

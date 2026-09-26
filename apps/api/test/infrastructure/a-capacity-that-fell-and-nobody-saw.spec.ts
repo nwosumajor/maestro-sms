@@ -81,6 +81,13 @@ describe("capacity-trend", () => {
     expect(r.out).toMatch(/requests failed/);
   });
 
+  it("names the rate limiter when the errors were 429s, so nobody chases a fault that is not there", () => {
+    const r = judge(result(650, { errorPct: 15, rateLimited: 5310 }));
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/5310 were 429s/);
+    expect(r.out).toMatch(/TENANT_RATE_LIMIT_PER_MIN/);
+  });
+
   it("compares only runs of the SAME config", () => {
     for (const r of [1000, 1000, 1000]) judge(result(r, { config: { ...CONFIG, schools: 5000 } }));
     const r = judge(result(400));
