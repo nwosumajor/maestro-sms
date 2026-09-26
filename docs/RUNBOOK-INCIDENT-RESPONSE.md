@@ -365,6 +365,9 @@ fell **more than 20% below the median of the last five**, **more than 30% below
 the best rolling median since the last rebaseline**, or **failed more than 1%
 of its requests**. The job summary says which.
 
+0. **Errors, not slowness?** If the summary says the failures were 429s, the
+   per-school rate limit reached the API under test — the workflow sets
+   `TENANT_RATE_LIMIT_PER_MIN` high for exactly this; check it still does.
 1. **Re-run it once** (Actions → Capacity → Re-run). Shared runners are noisy;
    a single red with a green re-run is noise. A failing run is never recorded,
    so the bar was not lowered by it.
