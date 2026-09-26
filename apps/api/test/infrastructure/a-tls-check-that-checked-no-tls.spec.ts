@@ -13,14 +13,25 @@
 // every network check fails fast and nothing leaves the machine.
 // =============================================================================
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 const script = join(__dirname, "../../../../infrastructure/scripts/go-live-rehearsal.sh");
 
 function rehearse(url: string): string {
-  const env: NodeJS.ProcessEnv = { ...process.env, REHEARSAL_URL: url, I_KNOW_THIS_IS_A_THROWAWAY_ACCOUNT: "yes" };
+  // The script writes a report file into its working directory unless told
+  // otherwise; the first version of this test left one in apps/api on every run.
+  const report = join(mkdtempSync(join(tmpdir(), "golive-")), "report.md");
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    REHEARSAL_URL: url,
+    I_KNOW_THIS_IS_A_THROWAWAY_ACCOUNT: "yes",
+    REHEARSAL_LOG: report,
+  };
   for (const k of ["DOCS_BUCKET", "DB_URL", "RDS_INSTANCE_ID", "AWS_PROFILE"]) delete env[k];
   const r = spawnSync("bash", [script, "--phase", "app"], { env, encoding: "utf8", timeout: 60_000 });
+  rmSync(dirname(report), { recursive: true, force: true });
   // Colour codes stripped, so the assertions read the words.
   return `${r.stdout}\n${r.stderr}`.replace(/\x1b\[[0-9;]*m/g, "");
 }
