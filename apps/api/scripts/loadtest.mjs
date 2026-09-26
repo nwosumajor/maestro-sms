@@ -37,6 +37,7 @@
 //   --concurrency C in-flight workers                     (default 50)
 //   --duration S    seconds of load                       (default 20)
 //   --keep          leave seeded data behind for inspection
+//   --json FILE     ALSO write the result as JSON (what capacity-trend.mjs reads)
 // Env: API_URL (default http://localhost:3001), AUTH_SECRET (mint tokens),
 //      LOADTEST_ADMIN_URL (superuser DSN — seed/cleanup/connection sampling).
 // =============================================================================
@@ -44,6 +45,7 @@
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { writeFileSync } from "node:fs";
 
 // pg + jsonwebtoken live in apps/api/node_modules; resolve from there.
 const require = createRequire(new URL("../package.json", import.meta.url));
@@ -68,6 +70,7 @@ const WRITE_PCT = Number(arg("write-pct", "0"));
 const CONCURRENCY = Number(arg("concurrency", "50"));
 const DURATION = Number(arg("duration", "20")); // seconds
 const KEEP = flag("keep");
+const JSON_OUT = arg("json", "");
 const WORKLOAD = STUDENTS > 0;
 
 const API = process.env.API_URL ?? "http://localhost:3001";
@@ -456,6 +459,32 @@ function report({ stats, wallMs, peakConns }) {
   if (writes) console.log(`  writes      : ${writes} (${((100 * writes) / total).toFixed(0)}% of traffic)`);
   console.log(`  peak DB connections during run : ${peakConns}`);
   console.log("=".repeat(72) + "\n");
+  return {
+    at: new Date().toISOString(),
+    // The CONFIG is part of the result: a trend compares like with like, and a
+    // run at 20 schools says nothing about one at 5,000.
+    config: {
+      mode: WORKLOAD ? "workload" : "overhead",
+      schools: SCHOOLS,
+      users: USERS,
+      students: STUDENTS,
+      writePct: WRITE_PCT,
+      concurrency: CONCURRENCY,
+      duration: DURATION,
+    },
+    rps: Number(rps.toFixed(1)),
+    total,
+    errorPct: Number(((100 * errors) / (total || 1)).toFixed(3)),
+    peakConns,
+    endpoints: rows.map((r) => ({
+      key: r.key,
+      n: r.n,
+      errPct: Number(r.errPct.toFixed(3)),
+      p50: Number(r.p50.toFixed(1)),
+      p95: Number(r.p95.toFixed(1)),
+      p99: Number(r.p99.toFixed(1)),
+    })),
+  };
 }
 
 // ---- main -------------------------------------------------------------------
@@ -476,7 +505,11 @@ function report({ stats, wallMs, peakConns }) {
     const endpoints = await warmup(schools);
     console.log(`  driving load: ${CONCURRENCY} workers for ${DURATION}s across ${endpoints.length} endpoints…`);
     const result = await run(db, schools, endpoints);
-    report(result);
+    const summary = report(result);
+    if (JSON_OUT) {
+      writeFileSync(JSON_OUT, JSON.stringify(summary, null, 2) + "\n");
+      console.log(`  wrote ${JSON_OUT}`);
+    }
   } finally {
     // ALWAYS, unless --keep — including when SEEDING failed part-way. It used
     // to run only after a completed seed, so a seed that threw left every row

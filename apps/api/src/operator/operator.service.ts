@@ -8,6 +8,7 @@
 // the same HS256 shape the web BFF issues, so the API accepts it as a Bearer.
 // =============================================================================
 
+import { signingKey } from "../auth/secrets";
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import { Prisma } from "@sms/db";
@@ -648,7 +649,9 @@ export class OperatorService {
         modules,
         imp: { by: p.userId },
       },
-      secret,
+      // The shared key object (see auth/secrets keyFor); the check above keeps
+      // this route answering 404, not 500, when auth is not configured.
+      signingKey(),
       { algorithm: "HS256", expiresIn: IMPERSONATION_TTL },
     );
 

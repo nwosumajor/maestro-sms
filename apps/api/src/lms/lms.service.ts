@@ -1366,22 +1366,13 @@ export class LmsService {
         return tx.class.findMany({ orderBy: { name: "asc" } });
       }
       const classIds = new Set<string>();
-      const taught = await classIdsTaughtBy(tx, p.userId).then((ids: string[]) => ids.map((classId) => ({ classId })));
-      taught.forEach((t: { classId: string }) => classIds.add(t.classId));
-      // A subject teacher who isn't the form teacher still "has" the class.
-      const subjectTaught = await tx.classSubjectTeacher.findMany({
-        where: { teacherId: p.userId },
-        select: { classId: true },
-      });
-      subjectTaught.forEach((t: { classId: string }) => classIds.add(t.classId));
-      // The class's named supervisor (form teacher) — so a supervisor sees the
+      // BOTH halves of "teaches": a subject teacher who isn't the form teacher
+      // still "has" the class, and the named supervisor (form teacher) sees the
       // class they oversee even when they teach none of its subjects (needed for
-      // the class broadsheet / score sheet).
-      const supervised = await tx.class.findMany({
-        where: { supervisorId: p.userId },
-        select: { id: true },
-      });
-      supervised.forEach((c: { id: string }) => classIds.add(c.id));
+      // the class broadsheet / score sheet). `classIdsTaughtBy` is that union —
+      // the two queries used to be repeated here after it, asking the same two
+      // questions a second time on every request.
+      for (const id of await classIdsTaughtBy(tx, p.userId)) classIds.add(id);
       const enrolled = await tx.enrollment.findMany({
         where: { studentId: p.userId },
         select: { classId: true },

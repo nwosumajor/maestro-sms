@@ -12,6 +12,7 @@ import { SchoolStatusService } from "./school-status.service";
 import { AuditLogService } from "./audit-log.service";
 import { ConsentService } from "./consent.service";
 import { ModuleEntitlementService } from "./module-entitlement.service";
+import { GrantAbsenceCache } from "./grant-absence-cache.service";
 import { RolePermissionsService } from "./role-permissions.service";
 import { SchoolRegionService } from "./school-region.service";
 import { AuthService } from "./auth.service";
@@ -39,6 +40,7 @@ import { SharedCacheService } from "../common/shared-cache.service";
     TenantRateLimitService,
     SharedCacheService,
     ModuleEntitlementService,
+    GrantAbsenceCache,
     RolePermissionsService,
     // Global: every service that decides what day it is must ask the SCHOOL.
     SchoolRegionService,
@@ -46,6 +48,6 @@ import { SharedCacheService } from "../common/shared-cache.service";
     // EMBEDDING_PROVIDER intentionally unbound — prose similarity is skipped
     // when absent (the integrity service injects it @Optional()).
   ],
-  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE, ModuleEntitlementService, RolePermissionsService, RedisPubSubService, SharedCacheService, SchoolRegionService, ReplicaRouterService, SchoolStatusService],
+  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE, ModuleEntitlementService, GrantAbsenceCache, RolePermissionsService, RedisPubSubService, SharedCacheService, SchoolRegionService, ReplicaRouterService, SchoolStatusService],
 })
 export class FoundationModule {}

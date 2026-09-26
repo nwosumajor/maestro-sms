@@ -8,6 +8,20 @@ import type {
 import { ReplicaRouterService, SINGLE_DATABASE_ROUTER } from "./replica-router.service";
 
 /**
+ * Both RLS GUCs in ONE statement. They were two, and this runs at the start of
+ * EVERY tenant transaction — every authenticated request — so the second was a
+ * whole extra database round trip, and a whole extra trip through Prisma's
+ * client, on the hottest path in the API. `set_config(..., true)` is LOCAL to the
+ * transaction either way; the values and their parameterisation are unchanged.
+ */
+async function setTenantGucs(
+  tx: { $executeRaw: (q: TemplateStringsArray, ...v: unknown[]) => Promise<number> },
+  ctx: TenantContext,
+): Promise<void> {
+  await tx.$executeRaw`SELECT set_config('app.current_school_id', ${ctx.schoolId}, true), set_config('app.current_user_id', ${ctx.userId}, true)`;
+}
+
+/**
  * Concrete TenantDatabase: opens a transaction and sets the request-scoped GUCs
  * RLS reads, so EVERY statement inside `fn` is tenant-isolated — including in the
  * BullMQ worker, which has no HTTP request. // SECURITY: this is the only path to
@@ -36,8 +50,7 @@ export class PrismaTenantService implements TenantDatabase {
     let wrote = false;
     const out = await prisma.$transaction(async (tx) => {
       // set_config(..., true) => LOCAL to this transaction. Parameterized.
-      await tx.$executeRaw`SELECT set_config('app.current_school_id', ${ctx.schoolId}, true)`;
-      await tx.$executeRaw`SELECT set_config('app.current_user_id', ${ctx.userId}, true)`;
+      await setTenantGucs(tx, ctx);
       const result = await fn(tx as unknown as TenantTx);
       if (this.router.configured) {
         const rows = (await tx.$queryRawUnsafe(
@@ -99,8 +112,7 @@ export class PrismaTenantService implements TenantDatabase {
     return client.$transaction(
       async (tx) => {
         await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
-        await tx.$executeRaw`SELECT set_config('app.current_school_id', ${ctx.schoolId}, true)`;
-        await tx.$executeRaw`SELECT set_config('app.current_user_id', ${ctx.userId}, true)`;
+        await setTenantGucs(tx, ctx);
         return fn(tx as unknown as TenantTx);
       },
       opts?.timeoutMs

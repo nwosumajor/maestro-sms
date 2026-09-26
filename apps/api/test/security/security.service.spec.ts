@@ -4,6 +4,7 @@
 
 import { SecurityService } from "../../src/security/security.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
+import { GrantAbsenceCache } from "../../src/foundation/grant-absence-cache.service";
 
 function makeService(grant?: Record<string, unknown> | null) {
   const created = { id: "g-1", status: "PENDING", requestedById: "u-1", permission: "fee.manage" };
@@ -22,7 +23,7 @@ function makeService(grant?: Record<string, unknown> | null) {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const service = new SecurityService(db as never, audit as never);
+  const service = new SecurityService(db as never, audit as never, new GrantAbsenceCache());
   return { service, tx, audit };
 }
 
@@ -215,7 +216,7 @@ describe("SecurityService recertification scope", () => {
       privilegeGrant: { findMany: jest.fn().mockResolvedValue([]) },
     } as unknown as TenantTx;
     const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-    return new SecurityService(db as never, { record: jest.fn() } as never);
+    return new SecurityService(db as never, { record: jest.fn() } as never, new GrantAbsenceCache());
   };
   const u = (id: string, role: string) => ({ user: { id, name: id, email: `${id}@s` }, role: { name: role } });
 

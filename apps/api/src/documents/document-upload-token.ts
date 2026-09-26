@@ -29,7 +29,7 @@
 
 import jwt from "jsonwebtoken";
 import { UPLOAD_TOKEN_TTL_DAYS } from "@sms/types";
-import { signingSecret, verifyHs256 } from "../auth/secrets";
+import { signingKey, verifyHs256 } from "../auth/secrets";
 
 const UPLOAD_PURPOSE = "docupload";
 
@@ -40,7 +40,7 @@ export type UploadTokenSubject = {
 };
 
 export function mintDocumentUploadToken(applicationId: string, schoolId: string): string {
-  return jwt.sign({ sub: applicationId, school_id: schoolId, purpose: UPLOAD_PURPOSE }, signingSecret(), {
+  return jwt.sign({ sub: applicationId, school_id: schoolId, purpose: UPLOAD_PURPOSE }, signingKey(), {
     algorithm: "HS256",
     expiresIn: `${UPLOAD_TOKEN_TTL_DAYS}d`,
   });

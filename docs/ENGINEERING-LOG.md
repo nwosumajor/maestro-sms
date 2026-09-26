@@ -19369,3 +19369,105 @@ Gate: `a-marker-a-migration-already-made.spec.ts`: every RLS file applied
 exactly once; each marker created by its own file and by NO migration; any
 policy a migration also creates is DROP-IF-EXISTS'd first. Mutation-validated
 five ways, including putting the original marker back.
+
+### Capacity fell from 770 to 216 req/s, and no single change did it
+
+The load harness had not been run since July. Run again, one API process served
+216-225 req/s where the recorded baseline said 770, CPU-bound in the API at
+~9.5 ms of CPU per request with the database idle. A CPU profile under load
+(`node --cpu-prof`, the process exiting cleanly on SIGUSR2 so the profile is
+written) named the causes, and each was per-request work in a layer EVERY
+request crosses — which is why no feature's test could have seen it:
+- **jsonwebtoken 9 rebuilt the HS256 secret on every verification**, first
+  trying it as a PUBLIC key: `createPublicKey` throws for a shared secret, is
+  caught, then `createSecretKey` runs. 19.2% of busy CPU in one call. A
+  `KeyObject` built once per secret value (`keyFor` in `auth/secrets.ts`) is
+  byte-identical to the one the library built, so every token signed by the
+  web BFF with the plain string still verifies; all five signing sites use
+  `signingKey()`.
+- **The PermissionGuard opened a transaction per request to read elevation
+  grants**, which almost nobody holds. `GrantAbsenceCache` remembers only the
+  NEGATIVE answer. A holder is read every request, so a revoke still applies on
+  the next one — the cache can only make a new grant LATE, which denies. Every
+  activation (break-glass, handover, approval) clears it on every task over
+  pub/sub, AFTER its commit; an epoch stops a read that began before the commit
+  from storing "none" after the clear; a 30 s TTL bounds a Redis outage.
+- The tenant runner set its two RLS GUCs in TWO statements — one statement now.
+- `/classes/mine` asked `classIdsTaughtBy`'s two questions and then asked them
+  again, inline, on every request.
+// GOTCHA: **the spy saw nothing.** jsonwebtoken DESTRUCTURES `createPublicKey`
+// from `crypto` when it loads, so `jest.spyOn(crypto, "createPublicKey")`
+// passed with the fix reverted. The test wraps it with `jest.doMock` in an
+// isolated registry BEFORE the library loads — reverted, it counts 15.
+// GOTCHA: **the baseline was not like-for-like.** July's 770 was a HOST-run
+// API; September's 216 was the container. Measured the same way (host-run,
+// pool 20, same harness): main 425-446, this change **691-722 (+62%)**, within
+// ~8% of July. Containerised: 216-225 -> 397-418 (+85%). Compare a capacity
+// figure only with one taken the same way, and record HOW with the number.
+// GOTCHA: `pkill -f "<pattern>"` inside a shell whose own command line holds
+// the pattern kills that shell — the step dies at its first line with 144.
+// Track the process by PID.
+Pool size is not the limit: 10 -> 20 connections gained ~10%, 20 -> 40
+nothing. What remains is Prisma's per-query client work (42% of self time),
+spread across every handler — no single cause left, so the next gain is fewer
+queries per request, one endpoint at a time.
+**Two guards, because the harness was the only thing that could see this and
+nobody ran it.** `a-request-that-costs-a-round-trip-it-need-not.spec.ts` pins a
+DETERMINISTIC budget in CI: the guard, built from its REAL caching
+collaborators over a counting database, makes zero calls per warm request (and
+the cold request is asserted to have reached every read, or zero proves
+nothing); the runner issues one statement before the handler's first query.
+`.github/workflows/capacity.yml` runs the harness daily against a
+production-built API and `capacity-trend.mjs` judges it against THAT runner's
+own history: >20% below the median of the last five, or >30% below the best
+rolling median since the last rebaseline, fails. // GOTCHA: a rolling bar
+alone SLIDES — 15% per step never trips 20% and the window follows it down
+(400 -> 340 -> 290 -> 250, each a pass) — hence the high-water check. A failing
+run is never recorded (it would lower the bar); `--accept` makes a slowdown the
+new normal with a rebaseline marker. Dry-run of the workflow's steps on a
+fresh database: 691 / 709 / 714 / 722 req/s, the fourth judged OK against a
+median of 709. Every rule and both budgets mutation-validated.
+
+### The capacity harness had been dead since August, and a failed run left 3,060 users behind
+
+Found by the pre-production rehearsal. `apps/api/scripts/loadtest.mjs` seeds
+with raw SQL, so nothing type-checked it and nothing in CI ran it — it was the
+one tool that could see a capacity regression, and it could not start:
+- It inserted into `class_teacher`, retired on 2026-08-30 when the class
+  teacher became one column (`class.supervisorId`).
+- Its attendance history omitted `date`, required since `attendance_record` was
+  partitioned by it — the next failure waiting behind the first.
+- It cleaned up only after a COMPLETED seed, so the failed seed left 30 schools
+  and 3,060 users in the dev database (removed by tag). Cleanup now runs in a
+  `finally` unless `--keep`, deleting by this run's tag only, so it is safe with
+  nothing seeded.
+Gate: `a-harness-that-names-a-table-that-is-gone` reads the SQL inside every
+query string under `apps/api/scripts` and fails on a table the Prisma schema
+does not `@@map`. Restoring the old harness fails it naming `class_teacher`.
+// GOTCHA: the gate's first version hand-rolled a comment-stripping regex and
+// CI failed it on the repo's own rule that no gate may — the regex hides code
+// after a `/*` inside a string. `stripComments` from `test/support` is the one.
+// **A TOOL NOTHING RUNS ROTS LIKE PROSE.** Raw SQL in a script is invisible to
+// the type system that protects every service, so a schema change breaks it
+// silently. Its only defences are a gate that reads it and somebody running
+// it — which is why it now runs nightly (`capacity.yml`).
+Measured with the fixed harness: WORKLOAD 30 schools x 100 pupils, 50
+concurrent, 20% writes — 8,975 requests, 0.00% errors, cleaned up.
+
+### The go-live rehearsal passed "over TLS" without checking any TLS
+
+Found by running `go-live-rehearsal.sh` against `http://localhost`. The check
+"homepage answers over TLS" only asked for an HTTP 200, so given a plain
+`http://` address it PASSED having verified no TLS at all — in a script whose
+whole contract is that PASS means verified and SKIP is a finding. With
+`https://`, curl validates the certificate by default, so that case is
+unchanged; anything else now SKIPs, naming why.
+Test `a-tls-check-that-checked-no-tls` drives the REAL script against
+`http://127.0.0.1:9` (a closed port, so nothing leaves the machine) and requires
+SKIP, not PASS. Mutation-validated.
+// GOTCHA: **a check's NAME is a claim** — "over TLS" was asserted by the label
+// and by nothing the check did. Read what a PASS actually established.
+// GOTCHA: the script writes its report into the working directory unless
+// `REHEARSAL_LOG` says otherwise, so the first version of the test left a
+// `go-live-rehearsal-<time>.md` in `apps/api` on every run. A test that drives
+// a script must also redirect what the script WRITES.

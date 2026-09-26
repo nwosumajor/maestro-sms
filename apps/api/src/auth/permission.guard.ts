@@ -13,6 +13,7 @@ import { Reflector } from "@nestjs/core";
 import type { Request, Response } from "express";
 import { isDelegatablePlatformPermission, type ModuleKey } from "@sms/types";
 import { activeGrantPermissions } from "./active-grants";
+import { GrantAbsenceCache } from "../foundation/grant-absence-cache.service";
 import { PERMISSION_KEY } from "./require-permission.decorator";
 import { PER_CANDIDATE_RATE_LIMIT_KEY } from "./per-candidate-rate-limit.decorator";
 import { MODULE_KEY } from "./require-module.decorator";
@@ -61,6 +62,7 @@ export class PermissionGuard implements CanActivate {
     private readonly rolePerms: RolePermissionsService,
     private readonly rateLimit: TenantRateLimitService,
     private readonly schoolStatus: SchoolStatusService,
+    private readonly noGrants: GrantAbsenceCache,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -294,11 +296,21 @@ export class PermissionGuard implements CanActivate {
    * merge would otherwise be a way around `isElevatable`.
    */
   private async activeGrantPermissions(principal: Principal): Promise<string[]> {
+    // Only "holds none" is remembered (see GrantAbsenceCache): a user WITH a
+    // grant is read every request, so a revoke still applies on the next one.
+    if (this.noGrants.knownToHoldNone(principal.schoolId, principal.userId)) return [];
+    const epoch = this.noGrants.epoch();
     try {
-      return await this.db.runAsTenant(
+      const granted = await this.db.runAsTenant(
         { schoolId: principal.schoolId, userId: principal.userId },
         (tx) => activeGrantPermissions(tx, principal.userId),
       );
+      // Remembered only from a SUCCESSFUL read that found nothing — a failure
+      // below denies this request and is asked again on the next.
+      if (Array.isArray(granted) && granted.length === 0) {
+        this.noGrants.rememberNone(principal.schoolId, principal.userId, epoch);
+      }
+      return granted;
     } catch {
       // Fail closed: an error resolving elevation grants nothing.
       return [];

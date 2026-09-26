@@ -31,6 +31,7 @@ import { PUBLIC_KEY } from "../../src/auth/public.decorator";
 import { MODULE_KEY } from "../../src/auth/require-module.decorator";
 import { PERMISSION_KEY, RequirePermission } from "../../src/auth/require-permission.decorator";
 import { STEPUP_KEY } from "../../src/auth/require-stepup.decorator";
+import { GrantAbsenceCache } from "../../src/foundation/grant-absence-cache.service";
 
 /**
  * A school that is switched ON. The guard refuses every request from a DISABLED
@@ -76,6 +77,7 @@ function guardFor(declared: unknown, grants: string[] = []) {
     { forRoles: jest.fn().mockResolvedValue([]) } as never,
     allowRate as never,
         activeSchool(),
+        new GrantAbsenceCache(),
       );
 }
 

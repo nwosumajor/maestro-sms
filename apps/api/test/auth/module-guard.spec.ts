@@ -16,6 +16,7 @@ import { PUBLIC_KEY } from "../../src/auth/public.decorator";
 import { MODULE_KEY } from "../../src/auth/require-module.decorator";
 import { PERMISSION_KEY } from "../../src/auth/require-permission.decorator";
 import { STEPUP_KEY } from "../../src/auth/require-stepup.decorator";
+import { GrantAbsenceCache } from "../../src/foundation/grant-absence-cache.service";
 
 /**
  * A school that is switched ON. The guard refuses every request from a DISABLED
@@ -59,6 +60,7 @@ describe("PermissionGuard — module entitlement gate", () => {
       { forRoles: jest.fn().mockResolvedValue([]) } as never,
       allowRate as never,
         activeSchool(),
+        new GrantAbsenceCache(),
       );
     await expect(guard.canActivate(makeCtx())).rejects.toThrow(NotFoundException);
     expect(modules.isEnabled).toHaveBeenCalledWith("s", "fees");
@@ -79,6 +81,7 @@ describe("PermissionGuard — module entitlement gate", () => {
         { forRoles: jest.fn().mockResolvedValue([]) } as never,
         allowRate as never,
         activeSchool(),
+        new GrantAbsenceCache(),
       );
       await expect(guard.canActivate(makeCtx())).resolves.toBe(true);
       expect(modules.isEnabled).not.toHaveBeenCalled();
@@ -97,6 +100,7 @@ describe("PermissionGuard — module entitlement gate", () => {
       { forRoles: jest.fn().mockResolvedValue([]) } as never,
       allowRate as never,
         activeSchool(),
+        new GrantAbsenceCache(),
       );
     await expect(guard.canActivate(makeCtx())).resolves.toBe(true);
   });
@@ -112,6 +116,7 @@ describe("PermissionGuard — module entitlement gate", () => {
       { forRoles: jest.fn().mockResolvedValue([]) } as never,
       denyRate as never,
         activeSchool(),
+        new GrantAbsenceCache(),
       );
     await expect(guard.canActivate(makeCtx())).rejects.toMatchObject({ status: 429 });
     // Rejected cheaply — the module gate never ran.
