@@ -19597,3 +19597,34 @@ leaver 0, joiner 1, never-marked 4 including a March with no marks, per-term 1/2
 scan-only register not taken, a partial register refused naming the pupil. Four
 mutations — ignore `endedAt`, count a scan as taken, drop completeness, drop the
 month merge — each fail exactly their own case; the scan's overwrite likewise.
+
+### A handled error logged as a crash — found by simulating attendance
+
+A simulation of the attendance fixes (one synthetic school, a month of school
+days through the real API and web, 24 checks against an independent model — all
+passing) had a bug of its own: with no pupil to pick it sent
+`POST /reportcards/undefined/generate`. The API answered correctly — 404, the
+malformed-id rule — and the log recorded `unhandled_exception` at ERROR, status
+500, with a stack. A right answer and a log saying the API had crashed.
+The `ErrorLoggingInterceptor` runs BEFORE the global `MalformedIdFilter` and
+judged any non-`HttpException` a 500: ERROR, plus a Sentry capture. The filter
+then translated the same Prisma errors into what the caller is actually told —
+malformed id 404, duplicate 409, unknown reference 400, busy pool 503. Two
+places classified one error and disagreed. The busy pool was the worst of it:
+the filter logs it at WARN precisely so that "1,358 stack traces for one busy
+minute" do not bury the faults that ARE faults, and the interceptor sent one
+Sentry event per refused request — at exactly the moment the operator needs the
+error feed to mean something.
+`translatedStatus` (in `malformed-id.filter.ts`) is now the ONE decision; the
+filter's branches and the interceptor both ask it. A translated error is logged
+at WARN with its REAL status and never reaches Sentry; a genuine fault — and a
+P2023 that is corrupt data, not a malformed id — stays a loud 500 at ERROR.
+`a-handled-error-logged-as-a-crash.spec.ts` drives the interceptor with each
+translated code and with a real crash; making it classify translated errors as
+faults again fails four cases.
+// GOTCHA: **a check with nothing to check must FAIL, not skip.** The same
+// simulation's first run passed its web half in silence: every simulated parent's
+// child happened to have complete registers, so "if (a family with gaps exists)"
+// was false and nothing ran. It now asserts the scenario produced its subject.
+// And the report card's own figures are reconciled, not just found: recorded +
+// not recorded = times school opened (27 + 1 = 28), read off the PDF.

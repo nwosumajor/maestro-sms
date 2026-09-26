@@ -26,6 +26,7 @@ import { catchError } from "rxjs/operators";
 import type { Request } from "express";
 import type { Principal } from "../auth/principal";
 import { isAnonymityBearing } from "./anonymity";
+import { translatedStatus } from "../common/malformed-id.filter";
 
 interface ObservedRequest extends Request {
   principal?: Principal;
@@ -40,7 +41,11 @@ export class ErrorLoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       catchError((err: unknown) => {
         const req = context.switchToHttp().getRequest<ObservedRequest>();
-        const status = err instanceof HttpException ? err.getStatus() : 500;
+        // A Prisma error the global filter TRANSLATES (malformed id 404,
+        // duplicate 409, unknown reference 400, busy pool 503) is answered, not
+        // crashed — asked of the filter's own function so the two cannot drift.
+        const translated = err instanceof HttpException ? null : translatedStatus(err);
+        const status = err instanceof HttpException ? err.getStatus() : (translated ?? 500);
         const fields = {
           request_id: req.id,
           method: req.method,
@@ -55,7 +60,7 @@ export class ErrorLoggingInterceptor implements NestInterceptor {
             ? { user_withheld: "anonymous route" }
             : { user_id: req.principal?.userId }),
         };
-        if (status >= 500) {
+        if (status >= 500 && translated === null) {
           if (process.env.SENTRY_DSN) {
             Sentry.withScope((scope) => {
               scope.setTags({ route: fields.route, request_id: String(req.id ?? "") });
@@ -69,7 +74,8 @@ export class ErrorLoggingInterceptor implements NestInterceptor {
             err instanceof Error ? err.stack : undefined,
           );
         } else {
-          // 4xx are expected (validation, not-found, forbidden) — log without a stack.
+          // 4xx are expected (validation, not-found, forbidden), and a translated
+          // 503 is load, not a fault — log without a stack, never to Sentry.
           this.logger.warn({ ...fields, msg: "handled_exception" });
         }
         return throwError(() => err); // unchanged — response semantics preserved
