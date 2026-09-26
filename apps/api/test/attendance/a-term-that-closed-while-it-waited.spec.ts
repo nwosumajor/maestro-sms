@@ -139,6 +139,10 @@ function reactorWith(opts: { currentTermStartsOn: string | null; holidayNamed?: 
     // `registerClosedReason` — so a stub with only `term` models something the
     // database cannot produce. Default: no holiday declared.
     schoolHoliday: { findFirst: async () => opts.holidayNamed ?? null },
+    // The reactor re-asks the ROLL too (the register must match that day's
+    // roll): p1 was on it, and nothing was recorded before.
+    enrollment: { findMany: async () => [{ student: { id: "p1", name: "Pupil One" } }] },
+    attendanceSession: { findFirst: async () => null },
     term: {
       findFirst: async (a: { where?: { isCurrent?: boolean } }) =>
         a.where?.isCurrent && opts.currentTermStartsOn

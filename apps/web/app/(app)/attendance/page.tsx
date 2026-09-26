@@ -44,6 +44,8 @@ type Summary = {
   excused: number;
   total: number;
   percent: number | null;
+  /** Registers taken for the pupil's class with no mark for them. */
+  unrecorded: number;
 };
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -255,11 +257,13 @@ export default async function AttendancePage({
           {/* Totals before the log. Nobody reads 200 rows to work out whether a
               child is attending, and this figure is term-scoped the same way the
               report card is, so the two cannot disagree. */}
-          {summary && summary.total > 0 && (
+          {/* Shown when anything is known — including a pupil the registers
+              were taken WITHOUT, who has no marks at all and used to get no card. */}
+          {summary && (summary.total > 0 || summary.unrecorded > 0) && (
             <Card>
               <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 py-4 text-sm">
                 <span>
-                  <span className="text-2xl font-semibold tabular-nums">{summary.percent}%</span>{" "}
+                  <span className="text-2xl font-semibold tabular-nums">{summary.percent === null ? "—" : `${summary.percent}%`}</span>{" "}
                   <span className="text-muted-foreground">attended</span>
                 </span>
                 <span className="text-muted-foreground tabular-nums">
@@ -271,6 +275,15 @@ export default async function AttendancePage({
                   {" · "}
                   {summary.total} day{summary.total === 1 ? "" : "s"} recorded
                 </span>
+                {/* THE DAYS NOBODY RECORDED, beside the rate and never in it: the
+                    rate is over the recorded days, and without this a rate over
+                    part of the term reads exactly like one over all of it. */}
+                {summary.unrecorded > 0 && (
+                  <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                    {summary.unrecorded} day{summary.unrecorded === 1 ? "" : "s"} not recorded — a register was taken for
+                    the class with no mark for this pupil
+                  </span>
+                )}
               </CardContent>
             </Card>
           )}

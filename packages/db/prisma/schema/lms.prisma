@@ -201,6 +201,12 @@ model Enrollment {
   /// Reason captured on a transfer/withdrawal (lifecycle audit context).
   statusReason String?
   enrolledAt   DateTime @default(now())
+  /// When the pupil LEFT this class — null while ACTIVE. Maintained by the
+  /// `enrollment_track_span` TRIGGER (migration 20270326000000), never by the
+  /// app: every writer that closes or reopens an enrolment is covered, raw SQL
+  /// included. Reopening also resets `enrolledAt` (one row, one span).
+  /// Read it through `onRollWhere` — the one definition of "in this class that day".
+  endedAt      DateTime?
 
   school  School @relation(fields: [schoolId], references: [id])
   class   Class  @relation(fields: [classId], references: [id])

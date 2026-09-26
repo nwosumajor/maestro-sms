@@ -29,6 +29,10 @@ model AttendanceSession {
   date      DateTime @db.Date
   /// FK -> User(id) of the staff member who took it.
   takenById String   @db.Uuid
+  /// When the REGISTER was saved — null for a register the scan desk started
+  /// (one pupil checked in) and nobody has taken. "Taken" means this, never
+  /// "a row exists": one early scan used to silence the teacher's reminder.
+  takenAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -10,6 +10,7 @@
 // so it is audit-logged (Golden Rule #5). Inside a tenant tx (RLS backstop).
 // =============================================================================
 
+import { currentTermWindow, unrecordedCount } from "../attendance/roll";
 import { Inject, Injectable } from "@nestjs/common";
 import { averageOf } from "@sms/types";
 import type {
@@ -61,6 +62,11 @@ export class ParentService {
           })
         : [];
 
+      const termWindow = await currentTermWindow(tx);
+      // One per child, bounded by the family — never by the school.
+      const unrecordedByChild = new Map(
+        await Promise.all(childIds.map(async (id) => [id, await unrecordedCount(tx, id, termWindow)] as const)),
+      );
       const [children, enrollments, attendance, results, complaints, assignments, invoices] =
         await Promise.all([
           // `exitedAt` too: a departed pupil has no ACTIVE enrolment, so their class
@@ -73,9 +79,12 @@ export class ParentService {
             where: { studentId: { in: childIds }, status: "ACTIVE" },
             select: { studentId: true, classId: true },
           }),
+          // THE CURRENT TERM, as the report card and the attendance page count it.
+          // This was all-time, so a parent read one percentage here and another
+          // on the report card for the same child.
           tx.attendanceRecord.groupBy({
             by: ["studentId", "status"],
-            where: { studentId: { in: childIds } },
+            where: { studentId: { in: childIds }, ...(termWindow ? { date: { gte: termWindow.from, lte: termWindow.to } } : {}) },
             _count: { _all: true },
           }),
           session
@@ -121,7 +130,7 @@ export class ParentService {
       const out: ChildOverviewDto[] = children
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((child) => {
-          // Attendance counts (all-time register history for this child).
+          // Attendance counts for the current term (all history when none is set).
           const count = (status: string) =>
             attendance.find((a) => a.studentId === child.id && a.status === status)?._count._all ?? 0;
           const present = count("PRESENT");
@@ -175,6 +184,9 @@ export class ParentService {
               // parent's own child is a small denominator and a whole number
               // rounds too hard.
               pct: total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : null,
+              unrecorded: unrecordedByChild.get(child.id) ?? 0,
+              from: termWindow ? termWindow.from.toISOString().slice(0, 10) : null,
+              to: termWindow ? termWindow.to.toISOString().slice(0, 10) : null,
             },
             grades,
             discipline: complaints

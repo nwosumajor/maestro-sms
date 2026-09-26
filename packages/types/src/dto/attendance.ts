@@ -77,6 +77,8 @@ export interface AttendanceHistoryPageDto {
 export interface RegisterStatusRowDto {
   classId: string;
   className: string;
+  /** The register was SAVED today. False while only the scan desk has marked
+   *  pupils in (`marked` then counts the gate check-ins). */
   taken: boolean;
   /** Pupils marked, against those on roll — a register saved half way through
    *  reads as "done" everywhere else. */
@@ -176,6 +178,13 @@ export interface AttendanceBucketDto {
    *  because a rate over no registers is not 0% — it is unknown. */
   percent: number | null;
   /**
+   * Registers taken for a class this pupil was on the roll of, with NO mark for
+   * them — shown, never folded into the rate. The rate cannot know whether the
+   * child was there, so it is computed over what was recorded and this says how
+   * much was not (`unrecordedCount` in the API's attendance/roll.ts).
+   */
+  unrecorded: number;
+  /**
    * PROVENANCE, which is the point of the thing in an audit.
    *
    * ROLLUP — read from `attendance_term_rollup`, computed once when the term
@@ -206,7 +215,7 @@ export interface AttendanceCompiledDto {
   pageSize: number;
   /** Totals across the pupil's WHOLE history, independent of the page — an audit
    *  that reports only what fitted on a page is worse than one that says nothing. */
-  lifetime: { present: number; absent: number; late: number; excused: number; total: number; percent: number | null };
+  lifetime: { present: number; absent: number; late: number; excused: number; total: number; percent: number | null; unrecorded: number };
   /**
    * Registers that fall in NO bucket at this grain — days the school took a
    * register outside every term it has configured.

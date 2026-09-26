@@ -437,6 +437,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /classes/:p/attendance/roll": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "GET /classes/:p/awards": {
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/classes/:p\")"

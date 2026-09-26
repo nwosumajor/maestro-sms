@@ -64,6 +64,9 @@ export function PupilAttendanceCompiled({ studentId, initial }: { studentId: str
             : `${life.total} registers on record — ${life.present} present, ${life.late} late, ${life.absent} absent, ${life.excused} excused${
                 life.percent == null ? "" : ` (${life.percent}% attendance)`
               }.`}
+          {/* Beside the rate, never in it: the rate is over what was recorded. */}
+          {life.unrecorded > 0 &&
+            ` ${life.unrecorded} more register${life.unrecorded === 1 ? " was" : "s were"} taken for this pupil's class with no mark for them — not recorded, and not in the rate.`}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -86,6 +89,9 @@ export function PupilAttendanceCompiled({ studentId, initial }: { studentId: str
                 <th className="py-1 pr-3 font-medium">Absent</th>
                 <th className="py-1 pr-3 font-medium">Excused</th>
                 <th className="py-1 pr-3 font-medium">Registers</th>
+                <th className="py-1 pr-3 font-medium" title="Registers taken for the class with no mark for this pupil — not in the rate">
+                  Not recorded
+                </th>
                 <th className="py-1 pr-3 font-medium">Attendance</th>
                 <th className="py-1 font-medium">Figure</th>
               </tr>
@@ -102,6 +108,9 @@ export function PupilAttendanceCompiled({ studentId, initial }: { studentId: str
                   <td className="py-1.5 pr-3 tabular-nums">{b.absent || "—"}</td>
                   <td className="py-1.5 pr-3 tabular-nums">{b.excused || "—"}</td>
                   <td className="py-1.5 pr-3 tabular-nums">{b.total}</td>
+                  <td className={`py-1.5 pr-3 tabular-nums ${b.unrecorded > 0 ? "font-medium text-amber-700 dark:text-amber-400" : ""}`}>
+                    {b.unrecorded || "—"}
+                  </td>
                   {/* NULL is not 0%: a rate over no registers is unknown, and
                       0% reads as truancy. */}
                   <td className="py-1.5 pr-3 tabular-nums">{b.percent == null ? "—" : `${b.percent}%`}</td>

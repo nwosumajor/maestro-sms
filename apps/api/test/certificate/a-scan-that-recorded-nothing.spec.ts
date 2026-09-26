@@ -35,8 +35,11 @@ function makeService(over: {
   enrolment?: { classId: string; class: { name: string } } | null;
   holiday?: { name: string } | null;
   term?: { startDate: Date } | null;
+  /** The pupil ALREADY has a mark on today's register (the insert conflicts). */
+  existing?: { status: string } | null;
 }) {
-  const execRaw = jest.fn().mockResolvedValue(1);
+  // A conflict inserts NOTHING: `ON CONFLICT DO NOTHING` reports 0 rows.
+  const execRaw = jest.fn().mockResolvedValue(over.existing ? 0 : 1);
   const scanEventCreate = jest.fn().mockResolvedValue({ id: "se-1" });
   const tx = {
     user: { findFirst: jest.fn().mockResolvedValue(STUDENT) },
@@ -49,6 +52,7 @@ function makeService(over: {
     attendanceSession: { upsert: jest.fn().mockResolvedValue({ id: "sess-1" }) },
     schoolHoliday: { findFirst: jest.fn().mockResolvedValue(over.holiday ?? null) },
     term: { findFirst: jest.fn().mockResolvedValue(over.term ?? null) },
+    attendanceRecord: { findFirst: jest.fn().mockResolvedValue(over.existing ?? null) },
     $executeRaw: execRaw,
   };
   const db = { runAsTenant: (_c: unknown, fn: (t: unknown) => unknown) => fn(tx) };
@@ -119,5 +123,23 @@ describe("a scan that recorded nothing", () => {
     expect(execRaw).toHaveBeenCalledTimes(1);
     expect(res.attendanceMarkedClass).toBe("JSS1");
     expect(res.attendanceNote).toBeNull();
+  });
+
+  // A SCAN NEVER OVERWRITES THE REGISTER. It set PRESENT on conflict, so a pupil
+  // the teacher had marked LATE or EXCUSED became PRESENT on passing the gate.
+  it("fills a blank but never changes a mark the register already holds", async () => {
+    const { service, execRaw } = makeService({
+      term: { startDate: new Date("2026-01-01T00:00:00.000Z") },
+      existing: { status: "EXCUSED" },
+    });
+    const res = await service.record(P, "ABC00001", "CHECK_IN", null);
+
+    const sql = sqlOf(execRaw.mock.calls[0]);
+    expect(sql).toMatch(/ON CONFLICT\s*\([^)]*\)\s*DO NOTHING/);
+    expect(sql).not.toMatch(/SET\s+"status"/);
+    // And it SAYS so, rather than reporting a check-in it did not make.
+    expect(res.attendanceMarkedClass).toBeNull();
+    expect(res.attendanceNote).toMatch(/already marked excused/i);
+    expect(res.attendanceNote).toMatch(/did not change it/);
   });
 });

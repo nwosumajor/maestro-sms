@@ -43,6 +43,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { dateWindow } from "../common/status-filter";
+import { currentTermWindow, rollOn, unrecordedByMonth, unrecordedByTerm, unrecordedCount, unrecordedSpan } from "./roll";
 
 // junior_admin is the operational tier that owns attendance (CLAUDE.md) and holds
 // attendance.write; without a class relationship to fall back on it would be
@@ -185,6 +186,9 @@ export class AttendanceService {
             : `${closed.reason} That was declared while this amendment was awaiting approval, so the correction was not applied.`,
         );
       }
+      // THE ROLL IS RE-ASKED TOO, for the same reason: it can change while the
+      // amendment waits. The refusal names what is wrong.
+      await this.assertRegisterMatchesRoll(tx, pl.classId, pl.records, date, today);
       await this.applyRegister(tx, req.schoolId, req.initiatorId, pl.classId, date, pl.records, {
         makerChecker: true,
         requestId: req.id,
@@ -269,7 +273,7 @@ export class AttendanceService {
             "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
           );
         }
-        await this.assertAllEnrolled(tx, classId, input.records, date, schoolNow);
+        await this.assertRegisterMatchesRoll(tx, classId, input.records, date, schoolNow);
       });
       const req = (await this.workflow.createRequest(p, {
         type: "ATTENDANCE_AMENDMENT",
@@ -292,7 +296,7 @@ export class AttendanceService {
           "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
         );
       }
-      await this.assertAllEnrolled(tx, classId, input.records, date, schoolNow);
+      await this.assertRegisterMatchesRoll(tx, classId, input.records, date, schoolNow);
       return this.applyRegister(tx, p.schoolId, p.userId, classId, date, input.records, { makerChecker: false });
     });
 
@@ -351,6 +355,14 @@ export class AttendanceService {
 
   // --- reads -----------------------------------------------------------------
   /** A class's register for a date (or the most recent sessions if no date). */
+  /** The class's roll for a day (`rollOn`), gated exactly like reading its register. */
+  async getRoll(p: Principal, classId: string, date: string): Promise<{ date: string; students: Array<{ id: string; name: string }> }> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      await this.assertTeacherOfClass(tx, p, classId);
+      return { date, students: await rollOn(tx, classId, new Date(date)) };
+    });
+  }
+
   async getClassAttendance(p: Principal, classId: string, date?: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, classId);
@@ -580,50 +592,64 @@ export class AttendanceService {
   }
 
   /** Every marked student must be enrolled in the class. */
-  private async assertAllEnrolled(
+  /**
+   * THE REGISTER MUST MATCH THAT DAY'S ROLL — both ways.
+   *
+   * Nobody may be marked who was not on the class's roll that day, and nobody
+   * on it may be LEFT OFF. The second half is new. A register used to accept
+   * any subset of the class, so a pupil the form did not show — or a teacher
+   * did not reach — simply had no mark: counted in "times school opened" for
+   * the class and absent from their own figures, with their rate quietly
+   * computed without that day. Every register is complete now; a pupil the
+   * teacher did not see is marked ABSENT, which is what a register attests.
+   *
+   * "That day's roll" is `onRollWhere` (roll.ts), the one definition — it
+   * replaced an ACTIVE-only check for today and an "enrolled on or before"
+   * check for past dates, neither of which knew when a pupil LEFT: a leaver
+   * could be marked on a class they had already left, and a joiner blocked a
+   * past register they could not have been on.
+   *
+   * A pupil already recorded on this register stays correctable even if the
+   * roll now says otherwise (a move backdated after the register was taken):
+   * refusing to correct a mark that exists would make a wrong mark permanent.
+   *
+   * Checked when a register is SAVED, when an amendment is RAISED, and again
+   * when it is APPLIED, which happens later.
+   */
+  private async assertRegisterMatchesRoll(
     tx: TenantTx,
     classId: string,
     records: MarkInput["records"],
     date: Date,
-    schoolNow: Date,
+    today: Date,
   ) {
-    // WHO WAS IN THIS CLASS **ON THE DAY THE REGISTER IS FOR**.
-    //
-    // ACTIVE-only is right for TODAY: a pupil who has left — WITHDRAWN,
-    // TRANSFERRED, PROMOTED out or GRADUATED — must not appear on today's
-    // register for a teacher to mark present.
-    //
-    // It is WRONG for a PAST date, and the register is writable up to the term
-    // lock. A pupil who moves class mid-term takes their enrolment row with
-    // them, so the days they DID attend became uncorrectable. Measured live on
-    // one pupil and one date: 201 while ACTIVE, then
-    // `400 "Student … is not enrolled in this class"` after the move — about a
-    // child who was in that class on that day and was marked present.
-    //
-    // That is also a refusal making an untrue POSITIVE claim about the past, the
-    // same shape as the discipline filing that told a pupil their classmate was
-    // "not in this school".
-    //
-    // `enrolledAt <= the register's day` is the most the schema can answer:
-    // an enrolment records when it BEGAN and never when it ended, so a pupil who
-    // joined AFTER that day is still correctly refused, and one who has since
-    // left is not.
-    const isPast = dayUtc(date) < dayUtc(schoolNow);
-    const enrolled = await tx.enrollment.findMany({
-      where: isPast
-        ? { classId, enrolledAt: { lte: new Date(dayUtc(date) + 86_400_000 - 1) } }
-        : { classId, status: "ACTIVE" },
-      select: { studentId: true },
-    });
-    const ids = new Set(enrolled.map((e: { studentId: string }) => e.studentId));
+    const [roll, session] = await Promise.all([
+      rollOn(tx, classId, date),
+      tx.attendanceSession.findFirst({
+        where: { classId, date },
+        select: { records: { select: { studentId: true } } },
+      }) as Promise<{ records: Array<{ studentId: string }> } | null>,
+    ]);
+    const onRoll = new Set(roll.map((r) => r.id));
+    const already = new Set((session?.records ?? []).map((r) => r.studentId));
     for (const r of records) {
-      if (!ids.has(r.studentId)) {
+      if (!onRoll.has(r.studentId) && !already.has(r.studentId)) {
         throw new BadRequestException(
-          isPast
+          dayUtc(date) < dayUtc(today)
             ? `Student ${r.studentId} was not in this class on that date`
             : `Student ${r.studentId} is not enrolled in this class`,
         );
       }
+    }
+    const submitted = new Set(records.map((r) => r.studentId));
+    const missing = roll.filter((r) => !submitted.has(r.id) && !already.has(r.id));
+    if (missing.length > 0) {
+      const shown = missing.slice(0, 5).map((m) => m.name).join(", ");
+      const more = missing.length > 5 ? ` and ${missing.length - 5} more` : "";
+      throw new BadRequestException(
+        `This register leaves out ${missing.length} pupil${missing.length === 1 ? "" : "s"} on the class's roll for that day ` +
+          `(${shown}${more}). Mark every pupil — Absent if they were not there.`,
+      );
     }
   }
 
@@ -643,8 +669,10 @@ export class AttendanceService {
   ) {
     const session = await tx.attendanceSession.upsert({
       where: { classId_date: { classId, date } },
-      update: { takenById: actorId },
-      create: { schoolId, classId, date, takenById: actorId },
+      // TAKEN is this save, never "a row exists": the scan desk creates the row
+      // the moment one pupil checks in (see `takenAt` on the model).
+      update: { takenById: actorId, takenAt: new Date() },
+      create: { schoolId, classId, date, takenById: actorId, takenAt: new Date() },
     });
     // WHAT EACH PUPIL WAS MARKED BEFORE, so an alert can be about a CHANGE.
     //
@@ -1015,9 +1043,13 @@ export class AttendanceService {
       // grouped count of marks, and a grouped count of enrolments. Never per class.
       const sessions = (await tx.attendanceSession.findMany({
         where: { classId: { in: classIds }, date },
-        select: { id: true, classId: true },
-      })) as Array<{ id: string; classId: string }>;
+        select: { id: true, classId: true, takenAt: true },
+      })) as Array<{ id: string; classId: string; takenAt: Date | null }>;
       const sessionByClass = new Map(sessions.map((s) => [s.classId, s.id]));
+      // TAKEN means the register was SAVED, not that a row exists: the scan desk
+      // creates the row when the first pupil checks in, and one early scan used
+      // to file a class of thirty under Taken with one mark.
+      const takenClasses = new Set(sessions.filter((s) => s.takenAt).map((s) => s.classId));
       const [markCounts, enrolCounts] = await Promise.all([
         sessions.length
           ? (tx.attendanceRecord.groupBy({
@@ -1083,7 +1115,7 @@ export class AttendanceService {
           return {
             classId: c.id,
             className: c.name,
-            taken: !!sessionId,
+            taken: takenClasses.has(c.id),
             marked: sessionId ? markBySession.get(sessionId) ?? 0 : 0,
             enrolled: enrolByClass.get(c.id) ?? 0,
             teacherId: c.supervisorId ?? null,
@@ -1115,22 +1147,20 @@ export class AttendanceService {
   async getStudentSummary(
     p: Principal,
     studentId: string,
-  ): Promise<{ from: string | null; to: string | null; present: number; absent: number; late: number; excused: number; total: number; percent: number | null }> {
+  ): Promise<{ from: string | null; to: string | null; present: number; absent: number; late: number; excused: number; total: number; percent: number | null; unrecorded: number }> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       await this.assertCanAccessStudent(tx, p, studentId);
-      const term = (await tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true, endDate: true } })) as
-        | { startDate: Date | null; endDate: Date | null }
-        | null;
-      // No configured term: fall back to ALL history rather than reporting zero,
-      // which would read as "never attended".
-      const window =
-        term?.startDate && term.endDate ? { gte: term.startDate, lte: term.endDate } : undefined;
-
-      const grouped = (await tx.attendanceRecord.groupBy({
-        by: ["status"],
-        where: { studentId, ...(window ? { date: window } : {}) },
-        _count: { _all: true },
-      } as never)) as unknown as Array<{ status: string; _count: { _all: number } }>;
+      // No configured term: ALL history rather than zero, which would read as
+      // "never attended". Shared with the parent dashboard (`currentTermWindow`).
+      const term = await currentTermWindow(tx);
+      const [grouped, unrecorded] = await Promise.all([
+        tx.attendanceRecord.groupBy({
+          by: ["status"],
+          where: { studentId, ...(term ? { date: { gte: term.from, lte: term.to } } : {}) },
+          _count: { _all: true },
+        } as never) as unknown as Promise<Array<{ status: string; _count: { _all: number } }>>,
+        unrecordedCount(tx, studentId, term),
+      ]);
 
       const n = (s: string) => grouped.find((g) => g.status === s)?._count._all ?? 0;
       const present = n("PRESENT");
@@ -1139,8 +1169,8 @@ export class AttendanceService {
       const excused = n("EXCUSED");
       const total = present + absent + late + excused;
       return {
-        from: term?.startDate ? term.startDate.toISOString().slice(0, 10) : null,
-        to: term?.endDate ? term.endDate.toISOString().slice(0, 10) : null,
+        from: term ? term.from.toISOString().slice(0, 10) : null,
+        to: term ? term.to.toISOString().slice(0, 10) : null,
         present,
         absent,
         late,
@@ -1155,6 +1185,9 @@ export class AttendanceService {
         // (54 present, 9 late, 2 absent, 5 excused of 70) the card printed 90%
         // and this returned 97%.
         percent: attendanceRatePct({ present, late, absent, excused }),
+        // Registers this pupil was on the roll for with NO mark — beside the
+        // rate, never inside it: the rate cannot know if the child was there.
+        unrecorded,
       };
     });
   }
@@ -1290,7 +1323,14 @@ export class AttendanceService {
         WHERE "studentId" = ${studentId}::uuid
       `)) as Array<{ present: number; absent: number; late: number; excused: number; first_day: Date | null; last_day: Date | null }>;
       const l = life[0] ?? { present: 0, absent: 0, late: 0, excused: 0, first_day: null, last_day: null };
-      const lifetime = this.counts(l.present, l.absent, l.late, l.excused);
+      // UNRECORDED registers widen the span too. Anchored on the last RECORDED
+      // day alone, a register taken without this pupil AFTER their last mark
+      // fell outside every page: counted in the lifetime line, reachable at no
+      // page. Measured live on a demo pupil — lifetime said 1, no month showed it.
+      const gap = await unrecordedSpan(tx, studentId);
+      const lifetime = this.counts(l.present, l.absent, l.late, l.excused, gap.n);
+      const firstDay = [l.first_day, gap.first].filter((x): x is Date => !!x).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+      const lastDay = [l.last_day, gap.last].filter((x): x is Date => !!x).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
 
       // THE PAGE IS A DATE WINDOW for months, not a slice of everything.
       //
@@ -1310,7 +1350,7 @@ export class AttendanceService {
       // shape a record kept for audit must never take. `last_day` is already in
       // hand from the lifetime pass, so this costs nothing.
       const anchor =
-        l.last_day ?? schoolToday((await this.region.inTx(tx, p.schoolId)).timezone);
+        lastDay ?? schoolToday((await this.region.inTx(tx, p.schoolId)).timezone);
       const newest = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
       const from = new Date(Date.UTC(newest.getUTCFullYear(), newest.getUTCMonth() - page * pageSize + 1, 1));
       const to = new Date(Date.UTC(newest.getUTCFullYear(), newest.getUTCMonth() - (page - 1) * pageSize + 1, 1));
@@ -1338,9 +1378,9 @@ export class AttendanceService {
         // total.
         total:
           grain === "month"
-            ? l.first_day && l.last_day
-              ? (l.last_day.getUTCFullYear() - l.first_day.getUTCFullYear()) * 12 +
-                (l.last_day.getUTCMonth() - l.first_day.getUTCMonth()) +
+            ? firstDay && lastDay
+              ? (lastDay.getUTCFullYear() - firstDay.getUTCFullYear()) * 12 +
+                (lastDay.getUTCMonth() - firstDay.getUTCMonth()) +
                 1
               : 0
             : all.length,
@@ -1353,11 +1393,11 @@ export class AttendanceService {
   }
 
   /** Shared shaping so every bucket and the lifetime row agree on the rate. */
-  private counts(present: number, absent: number, late: number, excused: number) {
+  private counts(present: number, absent: number, late: number, excused: number, unrecorded: number) {
     const total = present + absent + late + excused;
     // ONE definition of the rate, shared with the term summary and the report
-    // card: LATE attends, EXCUSED does not.
-    return { present, absent, late, excused, total, percent: attendanceRatePct({ present, late, absent, excused }) };
+    // card: LATE attends, EXCUSED does not. Unrecorded registers sit BESIDE it.
+    return { present, absent, late, excused, total, percent: attendanceRatePct({ present, late, absent, excused }), unrecorded };
   }
 
   /** Per-MONTH, aggregated in one pass over the (month-partitioned) records. */
@@ -1400,16 +1440,30 @@ export class AttendanceService {
       GROUP BY 1
       ORDER BY 1 DESC
     `)) as Array<{ key: string; from_date: Date; to_date: Date; present: number; absent: number; late: number; excused: number }>;
-    return rows.map((r) => ({
-      key: r.key,
-      label: monthLabel(r.key),
-      from: r.from_date.toISOString().slice(0, 10),
-      to: r.to_date.toISOString().slice(0, 10),
-      ...this.counts(r.present, r.absent, r.late, r.excused),
-      // Months are always recounted: there is no month-grained rollup, and
-      // saying ROLLUP here would claim a provenance this figure does not have.
-      source: "LIVE" as const,
-    }));
+    // The window's last day is `to` EXCLUSIVE for records; inclusive for this.
+    const gaps = await unrecordedByMonth(tx, studentId, { from: window.from, to: new Date(window.to.getTime() - 86_400_000) });
+    // A MONTH WITH NO MARKS AT ALL still exists if registers were taken without
+    // this pupil on them — built from the records alone, it vanished, and a month
+    // nobody recorded read exactly like a month the school was shut.
+    const byKey = new Map(rows.map((r) => [r.key, r]));
+    for (const [key, g] of gaps) {
+      if (!byKey.has(key)) byKey.set(key, { key, from_date: g.from, to_date: g.to, present: 0, absent: 0, late: 0, excused: 0 });
+    }
+    return [...byKey.values()]
+      .sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0))
+      .map((r) => {
+        const g = gaps.get(r.key);
+        return {
+          key: r.key,
+          label: monthLabel(r.key),
+          from: (g && g.from < r.from_date ? g.from : r.from_date).toISOString().slice(0, 10),
+          to: (g && g.to > r.to_date ? g.to : r.to_date).toISOString().slice(0, 10),
+          ...this.counts(r.present, r.absent, r.late, r.excused, g?.n ?? 0),
+          // Months are always recounted: there is no month-grained rollup, and
+          // saying ROLLUP here would claim a provenance this figure does not have.
+          source: "LIVE" as const,
+        };
+      });
   }
 
   /** Per-TERM from the rollup where it exists, live where it does not — and per
@@ -1432,6 +1486,9 @@ export class AttendanceService {
       _sum: { present: number | null; absent: number | null; late: number | null; excused: number | null };
     }>;
     const byTerm = new Map(rollups.map((r) => [r.termId, r._sum]));
+    // Unrecorded registers are always counted LIVE — the rollup holds marks, and
+    // a gap is by definition not a mark. One grouped query for every term.
+    const gapsByTerm = await unrecordedByTerm(tx, studentId);
 
     // Only terms with NO rollup are recounted, and only those are read from the
     // register at all — so a settled term costs one row, however old.
@@ -1457,7 +1514,7 @@ export class AttendanceService {
         label: t.name,
         from: t.startDate ? t.startDate.toISOString().slice(0, 10) : null,
         to: t.endDate ? t.endDate.toISOString().slice(0, 10) : null,
-        ...this.counts(c.present, c.absent, c.late, c.excused),
+        ...this.counts(c.present, c.absent, c.late, c.excused, gapsByTerm.get(t.id) ?? 0),
         source: roll ? ("ROLLUP" as const) : ("LIVE" as const),
       };
     });
@@ -1479,7 +1536,7 @@ export class AttendanceService {
         label: sess.name,
         from: sess.startDate ? sess.startDate.toISOString().slice(0, 10) : null,
         to: sess.endDate ? sess.endDate.toISOString().slice(0, 10) : null,
-        ...this.counts(sum((b) => b.present), sum((b) => b.absent), sum((b) => b.late), sum((b) => b.excused)),
+        ...this.counts(sum((b) => b.present), sum((b) => b.absent), sum((b) => b.late), sum((b) => b.excused), sum((b) => b.unrecorded)),
         // A session is only as settled as its LEAST settled term: if any term in
         // it is still being counted, the year total is still moving, and saying
         // ROLLUP would overstate what this figure is.

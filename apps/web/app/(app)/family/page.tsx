@@ -117,7 +117,12 @@ export default async function FamilyPage() {
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Attendance</p>
                   {c.attendance.total === 0 ? (
-                    <p className="mt-1 text-sm text-muted-foreground">No registers taken yet.</p>
+                    // "No registers taken yet" was said even when registers WERE
+                    // taken without this child on them — untrue, and the one case
+                    // a family most needs to hear about.
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {c.attendance.unrecorded > 0 ? "No attendance recorded for your child yet." : "No registers taken yet."}
+                    </p>
                   ) : (
                     <>
                       <p className="mt-1 text-2xl font-semibold">{c.attendance.pct}%</p>
@@ -127,6 +132,19 @@ export default async function FamilyPage() {
                       </p>
                     </>
                   )}
+                  {c.attendance.unrecorded > 0 && (
+                    <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                      {c.attendance.unrecorded} day{c.attendance.unrecorded === 1 ? "" : "s"} not recorded — the class register
+                      was taken without a mark for your child. Ask the class teacher.
+                    </p>
+                  )}
+                  {/* The SAME period as the report card, said, so the two figures
+                      are read as one. */}
+                  <p className="text-xs text-muted-foreground">
+                    {c.attendance.from && c.attendance.to
+                      ? `This term (${shortDate(c.attendance.from, region)} – ${shortDate(c.attendance.to, region)})`
+                      : "All recorded days"}
+                  </p>
                 </div>
 
                 <div>

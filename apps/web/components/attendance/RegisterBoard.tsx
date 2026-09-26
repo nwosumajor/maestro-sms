@@ -175,7 +175,12 @@ export function RegisterBoard({ canConfigure = false }: { canConfigure?: boolean
                       <tr key={r.classId} className="border-b border-border/40 last:border-0">
                         <td className="py-1 pr-3 font-medium">{r.className}</td>
                         <td className="py-1 pr-3"><Teacher r={r} /></td>
-                        <td className="py-1 pr-3 text-right text-xs text-muted-foreground">{r.enrolled} on roll</td>
+                        <td className="py-1 pr-3 text-right text-xs text-muted-foreground">
+                          {r.enrolled} on roll
+                          {/* Gate check-ins start a register without taking it: say
+                              so, or a part-scanned class reads as untouched. */}
+                          {r.marked > 0 ? ` · ${r.marked} checked in at the gate` : ""}
+                        </td>
                         <td className="py-1 text-right">
                           {/* THE REGISTER, not the class. This pointed at
                               `/classes/<id>`, which is NOT a route — the class
