@@ -344,18 +344,19 @@ schools fails nothing. It is a handful of LARGE tenants arriving together that
 empties the pool — 30 concurrent large-school reads failed 24 of 40 in
 measurement, and 1,500 schools at 30-way concurrency failed 1,358 of 1,500.
 
-**The fix is configuration, not code.** The default pool is `cpus × 2 + 1` and
-**no `connection_limit` is set explicitly**. Set it in the deployment's
-`DATABASE_URL` against the task's CPU count and the RDS `max_connections`
-budget:
-
-```
-postgresql://…/sms?connection_limit=<n>&pool_timeout=10
-```
+**The fix is configuration, not code.** Terraform builds `DATABASE_URL` with
+`connection_limit=<db_app_connection_limit>&pool_timeout=<db_pool_timeout_seconds>`
+(defaults 8 and 10) — PER TASK. Change those variables and re-apply; never edit
+the secret by hand, the next apply overwrites it.
 
 Do not simply raise it to the ceiling: every task multiplies it, and exhausting
 `max_connections` on RDS turns a slow request into a refused one for everybody.
-Count tasks × limit first.
+The plan checks `api_max_count × db_app_connection_limit ≤
+db_app_connection_budget` (150, for `db.t4g.small`'s ~190) and fails when it
+does not fit — raise the budget only with a larger `db_instance_class`, or turn
+on `enable_rds_proxy`, which decouples the two. A task at 0.5 vCPU is
+CPU-bound long before 8 connections are busy, so a bigger pool rarely helps
+there; more tasks, or more vCPU per task, does.
 
 #### The daily Capacity workflow went red
 

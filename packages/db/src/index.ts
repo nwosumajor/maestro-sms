@@ -24,6 +24,24 @@ export const prisma =
   new PrismaClient({ log: logLevels });
 
 /**
+ * The replica to read from, or null when there is none to use.
+ *
+ * A replica URL IDENTICAL to the primary's is not a replica. The Terraform used
+ * to hand every single-database deployment exactly that (so the key always
+ * existed), and a separate client was opened for it: a SECOND connection pool
+ * per task against the same primary, and the replica router, seeing two
+ * clients, ran its bookkeeping — a lag probe every second, an extra query per
+ * write — for a replica that was not there. Empty is unset too (an env var set
+ * to "" is not a value).
+ */
+export function replicaUrlOf(env: Record<string, string | undefined>): string | null {
+  const replica = env.DATABASE_REPLICA_URL?.trim();
+  if (!replica) return null;
+  if (replica === env.DATABASE_URL?.trim()) return null;
+  return replica;
+}
+
+/**
  * READ-REPLICA client for scaling read load off the primary writer. When
  * `DATABASE_REPLICA_URL` is set (e.g. an Aurora reader endpoint), the API's
  * read-only tenant path (`runAsTenantReadOnly`) routes aggregate/list queries
@@ -33,9 +51,9 @@ export const prisma =
  */
 export const readPrisma: PrismaClient =
   globalForPrisma.readPrisma ??
-  (process.env.DATABASE_REPLICA_URL
-    ? new PrismaClient({ datasourceUrl: process.env.DATABASE_REPLICA_URL, log: logLevels })
-    : prisma);
+  ((replica) => (replica ? new PrismaClient({ datasourceUrl: replica, log: logLevels }) : prisma))(
+    replicaUrlOf(process.env),
+  );
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;

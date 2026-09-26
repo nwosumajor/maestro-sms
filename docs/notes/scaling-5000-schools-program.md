@@ -246,6 +246,11 @@ Causes (detail in the engineering log): jsonwebtoken re-parsing the secret as a 
 key per verify (19% CPU), a grant-read transaction per request in the guard, two GUC
 statements where one does, a duplicated membership lookup. Pool size is not the limit
 (10 -> 20 conns +10%, 20 -> 40 nothing); what remains is Prisma client CPU per query.
-**Set `?connection_limit=20` in deployment** — the default is ~9 on this hardware.
+The pool: CORRECTED — "set connection_limit=20" (written here first) was this LAPTOP's
+knee, not a deployment number. Production defaults are 0.5 vCPU per task x up to 10
+tasks on db.t4g.small (~190 max_connections); at 20, full scale-out holds 200. Terraform
+now sets 8 per task (`db_app_connection_limit`) and the plan fails if api_max_count x
+limit exceeds `db_app_connection_budget` (150). The same fix stopped a single-DB
+deployment opening a SECOND pool per task to the primary via DATABASE_REPLICA_URL.
 Guards: the per-request DB budget test (CI) and the daily `capacity.yml` workflow, which
 judges each run against its OWN runner's history — never against these laptop figures.

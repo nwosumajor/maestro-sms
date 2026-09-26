@@ -19482,3 +19482,46 @@ SKIP, not PASS. Mutation-validated.
 // `REHEARSAL_LOG` says otherwise, so the first version of the test left a
 // `go-live-rehearsal-<time>.md` in `apps/api` on every run. A test that drives
 // a script must also redirect what the script WRITES.
+
+### A replica that was the primary, and a pool sized for somebody else's laptop
+
+Asked why the pool should be 20 — the figure the capacity write-up told
+deployment to set — the honest answer was that it should not. 20 was THIS
+LAPTOP's knee (8 threads: 10 -> 20 connections gained ~10%, 20 -> 40 nothing).
+Production is `ecs.tf`'s defaults: 0.5 vCPU per API task, up to `api_max_count`
+= 10, against `db.t4g.small` (~190 `max_connections`), RDS Proxy off. At 20 per
+task, full scale-out holds 200 — past the ceiling, where Postgres refuses new
+connections for EVERYBODY, not just the busy school. A tuning figure is a fact
+about the machine it was measured on; carried to another, it is a guess with a
+number on it.
+- **The pool is sized in Terraform now**: `db_app_connection_limit` (8) and
+  `db_pool_timeout_seconds` (10) go onto the URL `secrets.tf` builds, so it no
+  longer follows whatever `cpus x 2 + 1` a Fargate task reports.
+- **The PLAN fails** when `api_max_count x db_app_connection_limit` exceeds
+  `db_app_connection_budget` (150: the instance's ~190 less headroom for
+  migrations, the privileged retention/dunning clients and an operator's psql),
+  unless RDS Proxy decouples the two. Evaluated in `terraform console`: the
+  defaults pass, a limit of 20 fails, 20 with the proxy passes.
+**And looking at what the URL feeds found a real defect.** With no replica (the
+default), `secrets.tf` set `db-replica-url` to the PRIMARY's URL "so the key
+always exists", `ecs.tf` passed it as `DATABASE_REPLICA_URL`, and `@sms/db`
+opened a separate client for any non-empty value. So every single-database task
+held TWO pools against one primary — doubling what the budget above has to fit —
+and the replica router, which decides "is there a replica?" by
+`readPrisma !== prisma`, believed there was one: a lag probe every second
+(answered "not a standby", so reads stayed correct), an extra
+`txid_current_if_assigned()` in EVERY write transaction, and a
+`pg_current_wal_lsn()` plus a Redis write after each one. Correct answers, paid
+for twice, for a replica that did not exist.
+- `replicaUrlOf` in `@sms/db`: a replica URL identical to the primary's (or
+  empty) is NO replica, and the read client IS the primary client. It protects
+  any deployment, not only this Terraform.
+- `ecs.tf` passes `DATABASE_REPLICA_URL` only when `db_read_replica_count > 0`.
+Test `a-replica-that-is-the-primary` loads the REAL module under each
+environment rather than testing the helper (which would not show the client
+uses it); dropping the identity check fails it.
+// GOTCHA: **a default chosen "so the key always exists" is a value, and code
+// downstream treats a value as a decision.** `?? prisma` looked safe because an
+// UNSET variable fell through to it; the Terraform made the variable SET.
+// GOTCHA: the capacity workflow's own `connection_limit=20` stays: it measures a
+// 4-vCPU GitHub runner against its own history, never a deployment.

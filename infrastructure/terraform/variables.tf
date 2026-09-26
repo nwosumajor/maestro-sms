@@ -74,6 +74,38 @@ variable "db_multi_az" {
   default     = true
 }
 
+# --- The app's connection pool ------------------------------------------------
+# Every API task holds its OWN Prisma pool, so what the database sees is
+# tasks x limit. Prisma's default is cpus x 2 + 1 and it is not set anywhere
+# else, which left the number to whatever a Fargate task happens to report.
+#
+# 8 is sized for the defaults here, not measured on them: a 0.5 vCPU task is
+# CPU-bound long before 8 connections are busy (on an 8-thread laptop, 10 -> 20
+# connections gained ~10% and 20 -> 40 nothing), and 10 tasks x 8 = 80 leaves
+# db.t4g.small's ~190 ample headroom. Raise it with api_cpu, and raise
+# db_app_connection_budget with the instance class.
+variable "db_app_connection_limit" {
+  description = "Prisma connection pool size PER API TASK (the URL's connection_limit)."
+  type        = number
+  default     = 8
+  validation {
+    condition     = var.db_app_connection_limit >= 1 && var.db_app_connection_limit <= 100
+    error_message = "db_app_connection_limit must be between 1 and 100."
+  }
+}
+
+variable "db_pool_timeout_seconds" {
+  description = "How long a request waits for a pooled connection before the API answers 503 + Retry-After (the URL's pool_timeout)."
+  type        = number
+  default     = 10
+}
+
+variable "db_app_connection_budget" {
+  description = "Connections the API fleet may hold on the primary at full scale-out (api_max_count x db_app_connection_limit must fit). Default is for db.t4g.small (~190 max_connections) less headroom for migrations, the privileged retention/dunning clients and an operator session; raise it with db_instance_class. Not checked when enable_rds_proxy is on — the proxy decouples the two."
+  type        = number
+  default     = 150
+}
+
 variable "enable_rds_proxy" {
   description = "Provision an RDS Proxy connection pooler and route the app (DATABASE_URL) through it. Off by default (small deployments connect direct); turn on to decouple Postgres connection count from ECS task count at scale."
   type        = bool
