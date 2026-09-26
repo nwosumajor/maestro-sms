@@ -16,7 +16,7 @@ evidence live beside it, and are worth opening rather than re-deriving:
 
 | Document | What it answers |
 |---|---|
-| `docs/ENGINEERING-LOG.md` | **395 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
+| `docs/ENGINEERING-LOG.md` | **396 written-up fixes** — what was wrong, how it was measured, what was decided and why, and the `// GOTCHA` lines. Distilled into "Defect classes that keep recurring" below. **Grep it for a defect's shape before fixing one.** |
 | `API.md` | Every route the API declares — GENERATED (`pnpm --filter @sms/api build:api-doc`), gated by `api-doc-is-current.spec.ts`. |
 | `docs/RUNBOOK-INCIDENT-RESPONSE.md` | On-call: triage, per-symptom playbooks, rollback, the isolation/scope/permission probes. |
 | `docs/RUNBOOK-BACKUP-RESTORE.md` | Backups, PITR and the verified restore drill. |
@@ -917,7 +917,7 @@ Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; th
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 
 ## Defect classes that keep recurring
-Distilled from **395 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
+Distilled from **396 written-up fixes in `docs/ENGINEERING-LOG.md`** — the case
 law behind every rule below, with the measurement, the alternatives rejected and
 the `// GOTCHA` lines. **Grep the log for a defect's SHAPE before fixing it**:
 most defects here are the second or third instance of a class already recorded.
@@ -2344,8 +2344,8 @@ Three tiers gate a register write (`AttendanceService.markAttendance`):
 - **Past/ended term**: fully LOCKED (409), no edit even with approval — boundary
   is the `isCurrent` term's startDate (fail-open when unconfigured);
   `GET /attendance/term-lock` exposes it. `STALE_REGISTER_DAYS = 7`.
-`attendance.amend.review` is a NEW permission → re-run the seed on a live DB (the
-guard reads role→perms from the DB).
+- **A register covers the day's ROLL** (`onRollWhere`, attendance/roll.ts; `endedAt` by trigger);
+  unrecorded days sit BESIDE the rate; TAKEN = `takenAt`. NEW perms need a seed re-run.
 
 ## August 2026 correctness pass — what changed, and the rules behind it
 Twenty-five fixes found by asking, of each control, "is it applied on every path

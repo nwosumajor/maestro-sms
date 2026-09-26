@@ -46,7 +46,11 @@ function makeService(f: Fakes) {
     },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     enrollment: {
-      findMany: jest.fn().mockResolvedValue(f.enrollmentRows ?? []),
+      // Both shapes: `rollOn` reads the pupil through the relation
+      // ({ student: { id, name } }), other callers read `studentId`.
+      findMany: jest.fn().mockResolvedValue(
+        (f.enrollmentRows ?? []).map((r) => ({ ...r, student: { id: r.studentId, name: r.studentId } })),
+      ),
       findFirst: jest.fn().mockResolvedValue(f.enrollmentForStudent ?? null),
     },
     parentChild: {

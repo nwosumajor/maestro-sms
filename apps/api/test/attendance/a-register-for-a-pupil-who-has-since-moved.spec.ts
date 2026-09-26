@@ -22,25 +22,45 @@ import { AttendanceService } from "../../src/attendance/attendance.service";
 
 const TODAY = new Date("2026-08-28T00:00:00.000Z");
 
-function makeService(rows: Array<{ studentId: string; status: string; enrolledAt: Date }>) {
+/**
+ * A double that applies the REAL roll predicate (`onRollWhere`): began on or
+ * before the day, and not ended by it. `endedAt` is what the trigger stamps when
+ * an enrolment closes — the fact the old check could not see.
+ */
+function makeService(
+  rows: Array<{ studentId: string; status: string; enrolledAt: Date; endedAt?: Date | null }>,
+  alreadyRecorded: string[] = [],
+) {
   const findMany = jest.fn().mockImplementation((a: { where: Record<string, unknown> }) => {
-    const w = a.where as { status?: string; enrolledAt?: { lte: Date } };
+    const w = a.where as { enrolledAt: { lt: Date }; OR: Array<{ endedAt: null | { gte: Date } }> };
+    const next = w.enrolledAt.lt;
     return rows
-      .filter((r) => (w.status ? r.status === w.status : true))
-      .filter((r) => (w.enrolledAt ? r.enrolledAt <= w.enrolledAt.lte : true))
-      .map((r) => ({ studentId: r.studentId }));
+      .filter((r) => r.enrolledAt < next)
+      .filter((r) => !r.endedAt || r.endedAt >= next)
+      .map((r) => ({ student: { id: r.studentId, name: r.studentId } }));
   });
   const svc = Object.create(AttendanceService.prototype) as AttendanceService;
-  return { svc, tx: { enrollment: { findMany } }, findMany };
+  const tx = {
+    enrollment: { findMany },
+    attendanceSession: {
+      findFirst: jest.fn().mockResolvedValue(
+        alreadyRecorded.length ? { records: alreadyRecorded.map((studentId) => ({ studentId })) } : null,
+      ),
+    },
+  };
+  return { svc, tx, findMany };
 }
 
 const call = (svc: AttendanceService, tx: unknown, date: Date) =>
   (svc as unknown as {
-    assertAllEnrolled: (t: unknown, c: string, r: unknown, d: Date, n: Date) => Promise<void>;
-  }).assertAllEnrolled(tx, "cls-1", [{ studentId: "stu-1", status: "PRESENT" }], date, TODAY);
+    assertRegisterMatchesRoll: (t: unknown, c: string, r: unknown, d: Date, n: Date) => Promise<void>;
+  }).assertRegisterMatchesRoll(tx, "cls-1", [{ studentId: "stu-1", status: "PRESENT" }], date, TODAY);
 
 describe("a register for a pupil who has since moved", () => {
-  const MOVED = [{ studentId: "stu-1", status: "PROMOTED", enrolledAt: new Date("2026-07-09") }];
+  // Left the class on 20 Aug: on its roll for the 10th, off it for today.
+  const MOVED = [
+    { studentId: "stu-1", status: "PROMOTED", enrolledAt: new Date("2026-07-09"), endedAt: new Date("2026-08-20T11:00:00.000Z") },
+  ];
 
   it("allows a PAST correction for a pupil who has since left the class", async () => {
     const { svc, tx } = makeService(MOVED);
@@ -55,8 +75,7 @@ describe("a register for a pupil who has since moved", () => {
   });
 
   it("refuses a pupil who joined AFTER the day being corrected", async () => {
-    // The most the schema can answer: an enrolment records when it BEGAN and
-    // never when it ended, so this half stays exact.
+    // The start half of the roll rule; the end half is `endedAt`.
     const { svc, tx } = makeService([
       { studentId: "stu-1", status: "ACTIVE", enrolledAt: new Date("2026-08-20") },
     ]);

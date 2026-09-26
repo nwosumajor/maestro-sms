@@ -19525,3 +19525,75 @@ uses it); dropping the identity check fails it.
 // UNSET variable fell through to it; the Terraform made the variable SET.
 // GOTCHA: the capacity workflow's own `connection_limit=20` stays: it measures a
 // 4-vCPU GitHub runner against its own history, never a deployment.
+
+### The days nobody recorded, and the four ways a register could leave a pupil out
+
+Asked how attendance is calculated for a day the teacher forgot and for weekends,
+the answer was honest and incomplete: the platform infers nothing — a day with no
+register does not exist to any figure, so a forgotten day and a Saturday both
+count neither for nor against a child. What it did NOT do was say when a register
+WAS taken without a particular pupil on it. That pupil's day counted in "times
+school opened" for the class and appeared nowhere in their own figures; their rate
+was computed over fewer days than the term had, and nothing on any screen said so.
+Following that thread found four ways it happened:
+1. **A register could be any subset of the class.** `assertAllEnrolled` checked
+   that everyone MARKED belonged, never that everyone BELONGING was marked.
+2. **The form offered TODAY's class list for any date.** On a past register a
+   pupil who had since LEFT was missing (so went unrecorded) and one who JOINED
+   later was present — and the server then refused the whole register, so a
+   teacher filling in a forgotten day was blocked by a new arrival.
+3. **One gate scan "took" the register.** The scan desk creates the class's
+   register row the moment one pupil checks in, and the reminder and the board
+   both read "a row exists" as "taken": the teacher was never chased, the class
+   sat under Taken at 1 of 30, and the 29 who did not scan were never recorded.
+4. **A scan overwrote the register.** `ON CONFLICT DO UPDATE SET status =
+   'PRESENT'` turned a teacher's LATE, ABSENT or EXCUSED into PRESENT the moment
+   the pupil passed the gate.
+**The schema could not say who was on a roll on a given day**: an enrolment
+recorded when it BEGAN and never when it ENDED. `enrollment.endedAt` now does,
+kept by a TRIGGER (`enrollment_track_span`) — five writers close or reopen an
+enrolment, a rule written five times is right four times, and a trigger covers raw
+SQL and writers not yet written. Reopening resets `enrolledAt` (one row, one
+span): it can only under-count, and happens at a session boundary behind the term
+lock. Backfill: a closed enrolment ends the day after its last recorded day.
+**ONE definition of "on the roll that day"** (`onRollWhere` / `rollOn` in
+`attendance/roll.ts`) now serves the register check, the form's new
+`GET /classes/:id/attendance/roll?date=`, and the unrecorded SQL:
+- a register must cover the day's roll — refused, naming the pupils, otherwise;
+  a pupil already recorded stays correctable even if the roll has moved;
+  re-checked when an amendment is APPLIED, as the term lock and holidays are;
+- `attendance_session.takenAt` is set by the register's save and never by a scan;
+  the board and the reminder read it; the board says "N checked in at the gate";
+- a scan fills a blank and never changes a mark, and says what it found;
+- **unrecorded days are shown BESIDE the rate, never in it** — on the report card
+  ("Not recorded: N — the rate covers the M recorded days"), the student summary,
+  every compiled bucket (month / term / session / lifetime) and the parent
+  dashboard. The rate cannot know whether the child was there, so it stays over
+  what was recorded; the count says how much was not.
+Two consistency fixes rode along: the parent dashboard counted ALL-TIME attendance
+while the report card and the attendance page used the CURRENT term — one child,
+two percentages — and now all three share `currentTermWindow`; and the dashboard
+said "No registers taken yet" to a family whose child had simply been left off
+registers that WERE taken, which was untrue. The help page and the manual said a
+gate check-in "is the fastest register a large school can take"; it never was one.
+// GOTCHA: **a month nobody recorded vanished from the month view.** Buckets were
+// built from the pupil's RECORDS, so a month of registers taken without them had
+// no row at all — indistinguishable from a month the school was shut. The
+// unrecorded query can now create a bucket, not only annotate one.
+// GOTCHA: **the `pg` driver and Prisma disagree about `timestamp without time
+// zone`**: Prisma reads UTC, `pg` reads the machine's local zone, so the trigger's
+// correct UTC value read an hour out on a UTC+1 box. The test compares IN SQL.
+// GOTCHA: an admin `UPDATE ... SET status, "endedAt"` in a fixture fires the
+// trigger, which overwrites the endedAt being set — insert the row closed instead.
+// GOTCHA, found only by DRIVING a live pupil: the month page was anchored on the
+// pupil's last RECORDED day, so an unrecorded register AFTER their last mark
+// fell outside every page — counted in the lifetime line ("1 not recorded"),
+// shown in no month. The window now spans recorded and unrecorded days alike.
+// GOTCHA, found only by RENDERING the card: the "not recorded" sentence was cut
+// off mid-way ("covers the 46·") in a cell too short for its wrap — the report
+// card's own recorded trap. A text assertion on the whole sentence caught it.
+Verified on the real database as the app role (`days-nobody-recorded.e2e-spec`):
+leaver 0, joiner 1, never-marked 4 including a March with no marks, per-term 1/2,
+scan-only register not taken, a partial register refused naming the pupil. Four
+mutations — ignore `endedAt`, count a scan as taken, drop completeness, drop the
+month merge — each fail exactly their own case; the scan's overwrite likewise.

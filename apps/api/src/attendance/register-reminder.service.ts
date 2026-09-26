@@ -319,7 +319,10 @@ export class RegisterReminderService {
     const ids = classes.map((c) => c.id);
 
     const [sessions, enrolled] = await Promise.all([
-      client.attendanceSession.findMany({ where: { schoolId, classId: { in: ids }, date }, select: { classId: true } }) as Promise<
+      // TAKEN registers only (`takenAt`): a register the scan desk started when
+      // one pupil checked in is still OUTSTANDING, and one early scan used to
+      // stop the class teacher being reminded at all.
+      client.attendanceSession.findMany({ where: { schoolId, classId: { in: ids }, date, takenAt: { not: null } }, select: { classId: true } }) as Promise<
         Array<{ classId: string }>
       >,
       client.enrollment.groupBy({

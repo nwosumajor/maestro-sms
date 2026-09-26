@@ -67,6 +67,19 @@ export class AttendanceController {
     return this.attendance.getTermLock(p);
   }
 
+  /** Who was on the class's roll on ?date=YYYY-MM-DD — the pupils a register for
+   *  that day must cover. The register form reads THIS rather than today's class
+   *  list, which left out a leaver and included a joiner on a past register. */
+  @Get("classes/:classId/attendance/roll")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  roll(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Query(new ZodValidationPipe(z.object({ date: isoDay }))) q: { date: string },
+  ) {
+    return this.attendance.getRoll(p, classId, q.date);
+  }
+
   @Get("classes/:classId/attendance")
   @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
   classAttendance(

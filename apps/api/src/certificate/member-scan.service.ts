@@ -142,13 +142,32 @@ export class MemberScanService {
               // was a copy of the register's own, named neither, and every student
               // check-in failed 42P10 — inside runAsTenant, so the scan_event and
               // the audit row rolled back with it and the desk recorded nothing.
-              await tx.$executeRaw`
+              //
+              // A SCAN NEVER OVERWRITES THE REGISTER. It used to set PRESENT on
+              // conflict, so a pupil the teacher had marked ABSENT, LATE or
+              // EXCUSED became PRESENT the moment they passed the gate — a late
+              // arrival erased as on time, an authorised absence erased
+              // entirely, and nothing said so. The register is the teacher's
+              // attestation of the room; the scan only fills a blank, and the
+              // scan_event above keeps the movement whatever happens here.
+              const inserted = await tx.$executeRaw`
               INSERT INTO "attendance_record" ("id","schoolId","sessionId","studentId","status","note","date","createdAt","updatedAt")
               VALUES (${randomUUID()}::uuid, ${p.schoolId}::uuid, ${session.id}::uuid, ${member.userId}::uuid, 'PRESENT'::"AttendanceStatus", 'scan check-in', ${today}::date, now(), now())
-              ON CONFLICT ("sessionId","studentId","date")
-              DO UPDATE SET "status" = 'PRESENT', "updatedAt" = now()
+              ON CONFLICT ("sessionId","studentId","date") DO NOTHING
             `;
-              attendanceMarkedClass = enrolment.class?.name ?? null;
+              if (inserted > 0) {
+                attendanceMarkedClass = enrolment.class?.name ?? null;
+              } else {
+                const existing = (await tx.attendanceRecord.findFirst({
+                  where: { sessionId: session.id, studentId: member.userId, date: today },
+                  select: { status: true },
+                })) as { status: string } | null;
+                attendanceNote =
+                  existing?.status === "PRESENT"
+                    ? "Already marked present today — nothing changed."
+                    : `Already marked ${(existing?.status ?? "on the register").toLowerCase()} on today's register — ` +
+                      "the scan did not change it. The class teacher can correct the register.";
+              }
             }
           }
         }

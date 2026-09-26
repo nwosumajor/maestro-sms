@@ -109,6 +109,7 @@ const BASE = {
   termEnds: new Date("2026-12-12T00:00:00Z"),
   nextTermBegins: new Date("2027-01-06T00:00:00Z"),
   daysOpened: 49,
+  unrecorded: 0,
   traitRatings: [
     { traitKey: "obedience", score: 4 },
     { traitKey: "punctuality", score: 5 },
@@ -256,6 +257,20 @@ describe("attendance", () => {
     expect(t).toContain("Present: 1");
     expect(t).toContain("Attendance rate: 100%");
     expect(t).not.toContain("No attendance");
+  });
+
+  it("says how many days were NOT recorded, and what the rate therefore covers", async () => {
+    // A register taken without this pupil left no mark: the rate is over the
+    // recorded days, so the card must say how many were not — or a rate over
+    // part of the term reads exactly like one over all of it.
+    const t = textOf(await render({ att: { PRESENT: 40, ABSENT: 3, LATE: 2, EXCUSED: 1 }, daysOpened: 49, unrecorded: 3 }));
+    expect(t).toMatch(/Not recorded: 3 days/);
+    expect(t).toMatch(/The rate covers the 46 recorded days/);
+  });
+
+  it("prints no 'not recorded' line when every register has this pupil on it", async () => {
+    const t = textOf(await render({ att: { PRESENT: 46, ABSENT: 2, LATE: 1, EXCUSED: 0 }, unrecorded: 0 }));
+    expect(t).not.toMatch(/Not recorded/);
   });
 
   it("counts LATE as attended, and EXCUSED as neither", async () => {

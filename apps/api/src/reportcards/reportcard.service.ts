@@ -13,6 +13,7 @@
 // upload path notifies the guardians once the vault copy is confirmed live.
 // =============================================================================
 
+import { unrecordedCount } from "../attendance/roll";
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { classIdsTaughtBy } from "../common/teaches";
 import { assertDocumentsReleasable } from "../lms/leaver-documents";
@@ -73,6 +74,8 @@ type ReportCardData = {
       nextTermBegins: Date | null;
       /** Days the register was actually taken — the denominator for attendance. */
       daysOpened: number;
+      /** Registers taken for this pupil's class with no mark for them. */
+      unrecorded: number;
       /** Behavioural ratings, printed beside the marks and never mixed in. */
       traitRatings: Array<{ traitKey: string; score: number }>;
       totalTermScore: number;
@@ -418,6 +421,13 @@ export class ReportCardService {
         select: { status: true },
       });
       const att = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 } as Record<string, number>;
+      // REGISTERS TAKEN WITHOUT THIS PUPIL ON THEM, over the same window. Printed
+      // beside the rate, never inside it: the rate cannot know if they were there.
+      const unrecorded = await unrecordedCount(
+        tx,
+        studentId,
+        term?.startDate && term?.endDate ? { from: term.startDate, to: term.endDate } : undefined,
+      );
       for (const r of recs as Array<{ status: string }>) att[r.status] = (att[r.status] ?? 0) + 1;
 
       await this.audit.record(
@@ -581,6 +591,7 @@ export class ReportCardService {
         termEnds,
         nextTermBegins,
         daysOpened,
+        unrecorded,
         traitRatings,
         totalTermScore,
         admissionNumber: profile?.admissionNumber ?? null,
@@ -864,6 +875,15 @@ export class ReportCardService {
           `Excused: ${d.att.EXCUSED}`,
           `Attendance rate: ${attendanceRatePct({ present: d.att.PRESENT, late: d.att.LATE, absent: d.att.ABSENT, excused: d.att.EXCUSED })}%`,
         ], { size: 6.4, h: 11 });
+        // THE DAYS NOBODY RECORDED, said out loud. The rate is over the days
+        // that were recorded, and without this line a reader cannot tell a rate
+        // over the whole term from one over part of it.
+        if (d.unrecorded > 0) {
+          ry = row(rx, ry, [rightW], [
+            `Not recorded: ${d.unrecorded} day${d.unrecorded === 1 ? "" : "s"} (register taken, no mark for this pupil). ` +
+              `The rate covers the ${attTotal} recorded day${attTotal === 1 ? "" : "s"}.`,
+          ], { size: 6.2, h: 22, wrap: true });
+        }
       } else if (d.daysOpened > 0) {
         // The register WAS taken and this pupil is in none of it — a different
         // fact from the one below, and one the school can act on. The opened

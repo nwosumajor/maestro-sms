@@ -109,7 +109,12 @@ export function TakeRegister({
       setRoster(null);
       try {
         const [clsRes, regRes] = await Promise.all([
-          fetch(`/api/sms/classes/${classId}`, { cache: "no-store" }),
+          // THE ROLL FOR THAT DAY, not today's class list. Today's list left a
+          // pupil who has since LEFT off a past register (so they went
+          // unrecorded) and put a pupil who joined LATER on it (so the server
+          // refused the whole register). The server now requires every pupil
+          // on the day's roll, so the form must offer exactly them.
+          fetch(`/api/sms/classes/${classId}/attendance/roll?date=${date}`, { cache: "no-store" }),
           fetch(`/api/sms/classes/${classId}/attendance?date=${date}`, { cache: "no-store" }),
         ]);
         if (cancelled) return;
@@ -124,7 +129,7 @@ export function TakeRegister({
         // setState calls below never ran: the teacher got the form with no
         // pupils and no Save button. `readJson` is the client half of the rule
         // `apiGet` already applies on the server.
-        const cls = await readJson<{ students: Student[] }>(clsRes);
+        const cls = await readJson<{ date: string; students: Student[] }>(clsRes);
         const students = cls?.students ?? [];
         const session = await readJson<NonNullable<Session>>(regRes);
         const existing = new Map((session?.records ?? []).map((r) => [r.studentId, r.status]));
@@ -317,7 +322,7 @@ export function TakeRegister({
       )}
 
       {roster && roster.length === 0 && (
-        <p className="text-sm text-muted-foreground">No students enrolled in this class.</p>
+        <p className="text-sm text-muted-foreground">No pupils were on this class's roll on {date}.</p>
       )}
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
 

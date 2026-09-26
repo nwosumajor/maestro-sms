@@ -23,7 +23,12 @@ function makeService(over: {
   const tx = {
     parentChild: { findMany: parentChildFindMany },
     academicSession: { findFirst: jest.fn().mockResolvedValue(over.session ?? null) },
-    term: { findMany: jest.fn().mockResolvedValue(over.terms ?? []) },
+    // No CURRENT term configured: attendance falls back to all history, which
+    // is what these cases were written against. `findFirst` is what the shared
+    // `currentTermWindow` asks; a real TenantTx always has it.
+    term: { findMany: jest.fn().mockResolvedValue(over.terms ?? []), findFirst: jest.fn().mockResolvedValue(null) },
+    // `unrecordedCount` — no register was taken without these children.
+    $queryRaw: jest.fn().mockResolvedValue([{ n: 0 }]),
     user: { findMany: jest.fn().mockResolvedValue(over.children ?? []) },
     enrollment: { findMany: jest.fn().mockResolvedValue(over.enrollments ?? []) },
     attendanceRecord: { groupBy: jest.fn().mockResolvedValue(over.attendance ?? []) },

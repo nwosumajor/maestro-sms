@@ -12,6 +12,13 @@ export interface ChildAttendanceSummaryDto {
   total: number;
   /** Present+late as a % of taken registers (null when nothing taken yet). */
   pct: number | null;
+  /** Registers this child was on the roll for with NO mark — beside the rate,
+   *  never inside it. */
+  unrecorded: number;
+  /** The window these figures cover: the CURRENT term, as on the report card and
+   *  the attendance page. Both null = no term configured, so ALL history. */
+  from: string | null;
+  to: string | null;
 }
 
 export interface ChildGradesSummaryDto {
