@@ -149,6 +149,27 @@ export function isMalformedUuidError(e: unknown): boolean {
   return detail.includes("Error creating UUID");
 }
 
+/**
+ * The status a Prisma error is ANSWERED with, or null for one that stays a real
+ * 500. ONE decision, asked by this filter AND by the ErrorLoggingInterceptor.
+ *
+ * The interceptor runs first and saw only "not an HttpException", so it logged
+ * every one of these at ERROR as "unhandled_exception" with status 500 — and
+ * sent it to Sentry as a crash — while the caller was correctly answered 404,
+ * 409, 400 or 503. The busy-pool 503 was the worst of it: logged at WARN here
+ * precisely so a busy minute does not bury real faults, and at ERROR there, one
+ * Sentry event per refused request. Found by a simulation that sent a malformed
+ * id: the response was right and the log said the API had crashed.
+ */
+export function translatedStatus(e: unknown): 503 | 409 | 400 | 404 | null {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError)) return null;
+  if (POOL_EXHAUSTED.has(e.code)) return 503;
+  if (e.code === UNIQUE_VIOLATION) return 409;
+  if (e.code === FOREIGN_KEY_VIOLATION) return 400;
+  if (isMalformedUuidError(e)) return 404;
+  return null;
+}
+
 @Catch(Prisma.PrismaClientKnownRequestError)
 export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger("MalformedId");
@@ -175,7 +196,8 @@ export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionF
     // Logged at WARN, not ERROR: sustained pool exhaustion is a real operational
     // signal an operator should see, but 1,358 stack traces for one busy minute
     // buries the faults that ARE faults.
-    if (POOL_EXHAUSTED.has(exception.code)) {
+    const status = translatedStatus(exception);
+    if (status === 503) {
       const req = host.switchToHttp().getRequest<{ method?: string; url?: string }>();
       this.logger.warn(`connection pool exhausted (${exception.code}) on ${req?.method} ${req?.url} -> 503`);
       const res = host.switchToHttp().getResponse<{ setHeader?: (k: string, v: string) => void }>();
@@ -188,7 +210,7 @@ export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionF
       );
       return;
     }
-    if (exception.code === UNIQUE_VIOLATION) {
+    if (status === 409) {
       const req = host.switchToHttp().getRequest<{ method?: string; url?: string }>();
       // Not debug: a duplicate reaching here means no call site checked for it,
       // which is worth seeing when deciding where a per-site message would read
@@ -211,7 +233,7 @@ export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionF
     // here). This is the floor for every other body-supplied id in the product,
     // for the same reason the P2002 translation lives here: fixing the sites we
     // know about leaves the next one.
-    if (exception.code === FOREIGN_KEY_VIOLATION) {
+    if (status === 400) {
       const req = host.switchToHttp().getRequest<{ method?: string; url?: string }>();
       // WARN, like the duplicate: reaching here means no call site validated an
       // id it was handed, which is worth seeing.
@@ -219,7 +241,7 @@ export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionF
       super.catch(new BadRequestException(missingReferenceMessage(exception)), host);
       return;
     }
-    if (!isMalformedUuidError(exception)) {
+    if (status !== 404) {
       // Anything else keeps its existing behaviour — including a genuine
       // P2023 from corrupt data, which must stay a loud 500.
       super.catch(exception, host);
