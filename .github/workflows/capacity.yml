@@ -101,6 +101,10 @@ jobs:
         run: |
           # Fresh secrets per run: nothing here is ever reused, and a published
           # key would be refused at boot anyway.
+          # The per-school rate limit is lifted: the harness drives each synthetic
+          # school at ~30 req/s, far past a real school's 1,200/min, and this
+          # measures the API rather than the limiter (whose Redis round trip is
+          # still paid on every request). The first run hit it: 5,310 429s.
           AUTH_SECRET=$(openssl rand -hex 32)
           echo "::add-mask::$AUTH_SECRET"
           echo "AUTH_SECRET=$AUTH_SECRET" >> "$GITHUB_ENV"
@@ -110,6 +114,7 @@ jobs:
           WEB_ORIGIN=http://localhost PUBLIC_WEB_URL=http://localhost \
           AUTH_SECRET="$AUTH_SECRET" DATA_ENCRYPTION_KEY="$DATA_ENCRYPTION_KEY" \
           REDIS_HOST=127.0.0.1 REDIS_PORT=6379 \
+          TENANT_RATE_LIMIT_PER_MIN=1000000 \
           DATABASE_URL="postgresql://major_user:major_pw@localhost:5432/sms_capacity?connection_limit=20" \
           DATABASE_MIGRATE_URL="$ADMIN_URL" \
             nohup node apps/api/dist/main.js > api.log 2>&1 &
