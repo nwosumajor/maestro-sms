@@ -357,6 +357,33 @@ Do not simply raise it to the ceiling: every task multiplies it, and exhausting
 `max_connections` on RDS turns a slow request into a refused one for everybody.
 Count tasks × limit first.
 
+#### The daily Capacity workflow went red
+
+`.github/workflows/capacity.yml` load-tests a production-built API every night
+and judges the result against that runner's own history. Red means one run
+fell **more than 20% below the median of the last five**, **more than 30% below
+the best rolling median since the last rebaseline**, or **failed more than 1%
+of its requests**. The job summary says which.
+
+1. **Re-run it once** (Actions → Capacity → Re-run). Shared runners are noisy;
+   a single red with a green re-run is noise. A failing run is never recorded,
+   so the bar was not lowered by it.
+2. **Red twice: find the commit.** Compare the last green run's commit with
+   this one — `git log <green-sha>..<red-sha> -- apps/api packages`. Look first
+   at anything on the path EVERY request crosses: the PermissionGuard and its
+   caches, `runAsTenant`, JWT verification, middleware. That is where the last
+   regression lived (770 → 216 req/s: a key re-parsed per verification and a
+   transaction per request, each invisible to every feature test).
+3. **Profile rather than guess:** run the API under `node --cpu-prof` (exit it
+   with `process.exit` on a signal so the profile is written), drive
+   `apps/api/scripts/loadtest.mjs` at it, and read self time by package.
+4. **A deliberate slowdown** (a new security check that must cost something)
+   is accepted by re-running with **accept = true**, which records a
+   rebaseline marker. That is a decision — say why in the PR that caused it.
+
+Never compare the workflow's figures with a laptop's: they are different
+machines, and a host-run API and a container differ by ~40% on the same one.
+
 ### 5.3 Database problems
 
 **Storage <5 GB — treat as urgent.** A full disk makes Postgres reject writes:

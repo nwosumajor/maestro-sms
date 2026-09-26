@@ -231,3 +231,21 @@ Seeded 5,000 real synthetic tenants and drove load. Findings:
 
 Staging (now MEASURED, not guessed): pooling + replicas + partitioning + entitlement-cache fix
 carry 5,000 schools with the DB idle. Sharding is a ~50k-school concern.
+
+**CAPACITY BASELINE, re-recorded (2026-09-26, branch perf/per-request-cpu).**
+The July 770 had fallen to 216-225 req/s; profiled, fixed, re-measured. RECORD HOW A
+FIGURE WAS TAKEN — July's was a HOST-run API and September's first reading the
+container, which are not comparable:
+
+| how measured (20 schools, 50 concurrent, overhead mode) | before | after |
+|---|---|---|
+| host-run API (`node apps/api/dist/main.js`, pool 20) | 425-446 | **691-722** |
+| compose container (default pool ~9) | 216-225 | **397-418** |
+
+Causes (detail in the engineering log): jsonwebtoken re-parsing the secret as a public
+key per verify (19% CPU), a grant-read transaction per request in the guard, two GUC
+statements where one does, a duplicated membership lookup. Pool size is not the limit
+(10 -> 20 conns +10%, 20 -> 40 nothing); what remains is Prisma client CPU per query.
+**Set `?connection_limit=20` in deployment** — the default is ~9 on this hardware.
+Guards: the per-request DB budget test (CI) and the daily `capacity.yml` workflow, which
+judges each run against its OWN runner's history — never against these laptop figures.
