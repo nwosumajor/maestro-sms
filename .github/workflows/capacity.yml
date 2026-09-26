@@ -79,20 +79,23 @@ jobs:
             -c "GRANT CONNECT ON DATABASE sms_capacity TO major_user;" \
             -c "GRANT USAGE ON SCHEMA public TO major_user;"
 
+      # BEFORE the database: the seed imports @sms/types from its BUILT output
+      # (dist/), which a fresh runner does not have. The first run failed here
+      # while a local dry run passed, because the laptop had dist/ from earlier
+      # builds. The db package's build also runs `prisma generate`.
+      - name: Build the API and its packages
+        run: pnpm --filter @sms/api... build
+
       # The same path production takes: migrate deploy, then RLS, then the seed
       # (platform essentials only — the harness seeds its own tenants).
       - name: Build the database
         run: |
-          pnpm db:generate
           pnpm --filter @sms/db exec prisma migrate deploy
           pnpm --filter @sms/db rls
           pnpm --filter @sms/db exec prisma db seed
         env:
           DATABASE_URL: ${{ env.ADMIN_URL }}
           DATABASE_MIGRATE_URL: ${{ env.ADMIN_URL }}
-
-      - name: Build the API
-        run: pnpm --filter @sms/api... build
 
       - name: Start the API (production mode, RLS-enforced app role)
         run: |
