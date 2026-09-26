@@ -173,7 +173,14 @@ phase_app() {
   local code
   code() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$@"; }
 
-  expect "homepage answers over TLS" "200" "$(code "$U/")"
+  # Over TLS only if the address IS https: curl validates the certificate by
+  # default, so an https 200 proves it. Given a plain http:// address this used
+  # to PASS "over TLS" having checked no TLS at all — found by running the
+  # rehearsal against http://localhost.
+  case "$U" in
+    https://*) expect "homepage answers over TLS" "200" "$(code "$U/")" ;;
+    *) skip "homepage answers over TLS" "REHEARSAL_URL is not https:// — TLS was not checked" ;;
+  esac
 
   # THE REAL API PROBE. /api/health is the WEB tier's liveness check and answers
   # 200 with the API down — this codebase records that as a GOTCHA, so the
