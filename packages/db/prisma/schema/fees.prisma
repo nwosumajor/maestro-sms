@@ -237,6 +237,12 @@ model Payment {
   /// manual payment with no gateway reference still inserts freely, and a bank
   /// slip covering two invoices differs by `invoiceId`.
   @@unique([invoiceId, reference])
+  /// NOTE: also a PARTIAL COVERING index, payment_posted_invoice_net_idx —
+  /// ("invoiceId") INCLUDE ("schoolId", kind, "amountMinor") WHERE status =
+  /// 'POSTED' — created in migration 20270401000000_payment_posted_net_cover.
+  /// Prisma cannot express partial or INCLUDE indexes, so it lives in SQL only;
+  /// it serves every "net paid per invoice" aggregate (finance report, group
+  /// console, ledger integrity). Declared here so it is not read as missing.
   @@map("payment")
 }
 
