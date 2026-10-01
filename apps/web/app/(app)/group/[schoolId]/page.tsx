@@ -5,6 +5,7 @@
 // group they direct.
 
 import type { GroupSchoolDetailDto, Serialized } from "@sms/types";
+import { GROUP_FLAG_LABELS, GROUP_LOW_ATTENDANCE_PCT, GROUP_NO_SUBSCRIPTION } from "@sms/types";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -18,10 +19,28 @@ import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
-export default async function GroupSchoolPage({ params }: { params: { schoolId: string } }) {
+export default async function GroupSchoolPage({
+  params,
+  searchParams,
+}: {
+  params: { schoolId: string };
+  searchParams: { groupId?: string; period?: string };
+}) {
   const session = await auth();
   const user = session!.user;
-  const s = await apiGet<Serialized<GroupSchoolDetailDto>>(`/group/schools/${params.schoolId}`);
+  // The period the overview row was computed over. The API has accepted it all
+  // along; this page never sent it, so its flags were computed over "this month"
+  // whatever the director had been looking at.
+  const q = new URLSearchParams();
+  if (searchParams.period) q.set("period", searchParams.period);
+  // A plain `?${q}` — an empty query is harmless, and a nested template here
+  // hides the call from the wire-shape gate, which then cannot check it.
+  const s = await apiGet<Serialized<GroupSchoolDetailDto>>(`/group/schools/${params.schoolId}?${q.toString()}`);
+  // Back to the SAME view: the same group and the same period.
+  const back = new URLSearchParams();
+  if (searchParams.groupId) back.set("groupId", searchParams.groupId);
+  if (searchParams.period) back.set("period", searchParams.period);
+  const backHref = `/group${back.toString() ? `?${back.toString()}` : ""}`;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="group" permissions={user.permissions}>
@@ -29,9 +48,17 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <PageHeader
             title={<>{s ? s.name : "Campus"}</>}
-            subtitle={s ? <>{s.groupName} · figures only, never pupil records.</> : <>Not available.</>}
+            subtitle={
+              s ? (
+                <>
+                  {s.groupName} · {s.period.label.toLowerCase()} · figures only, never pupil records.
+                </>
+              ) : (
+                <>Not available.</>
+              )
+            }
           />
-          <Link href="/group" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Link href={backHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
             ← All campuses
           </Link>
         </div>
@@ -49,11 +76,44 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
               <div className="flex flex-wrap gap-1.5">
                 {s.flags.map((f) => (
                   <Badge key={f} variant={f === "DISABLED" || f === "BILLING" ? "destructive" : "outline"}>
-                    {f.toLowerCase().replace(/_/g, " ")}
+                    {GROUP_FLAG_LABELS[f]}
                   </Badge>
                 ))}
               </div>
             )}
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {/* The figures the flags above were computed from, over the stated
+                  period — a flag with nothing to judge it by is half an answer. */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Attendance · {s.period.label.toLowerCase()}</CardDescription>
+                  <CardTitle className="tnum text-2xl">
+                    {s.registersTaken === 0 ? (
+                      <span className="text-muted-foreground">none taken</span>
+                    ) : s.attendancePct == null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className={s.attendancePct < GROUP_LOW_ATTENDANCE_PCT ? "text-destructive" : ""}>
+                        {s.attendancePct}%
+                      </span>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="tnum">{s.registersTaken.toLocaleString()} registers taken</CardDescription>
+                </CardHeader>
+              </Card>
+              {s.money.map((m) => (
+                <Card key={m.currency}>
+                  <CardHeader className="pb-2">
+                    <CardDescription>
+                      Collected {s.money.length > 1 ? `(${m.currency}) ` : ""}· {s.period.label.toLowerCase()}
+                    </CardDescription>
+                    <CardTitle className="tnum text-2xl">{money(m.collectedMinor, m.currency)}</CardTitle>
+                    <CardDescription className="tnum">{money(m.outstandingMinor, m.currency)} owed now</CardDescription>
+                  </CardHeader>
+                </Card>
+              ))}
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {(
@@ -104,7 +164,7 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
                           {t.attendancePct == null ? (
                             <span className="text-muted-foreground">—</span>
                           ) : (
-                            <span className={t.attendancePct < 85 ? "font-medium text-destructive" : ""}>
+                            <span className={t.attendancePct < GROUP_LOW_ATTENDANCE_PCT ? "font-medium text-destructive" : ""}>
                               {t.attendancePct}%
                             </span>
                           )}
@@ -120,7 +180,10 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Where the money is</CardTitle>
-                  <CardDescription>Invoices by status — outstanding is what has been issued but not paid.</CardDescription>
+                  <CardDescription>
+                    Invoices by status. Owed now is each open invoice&apos;s unpaid balance — the same figure as the
+                    campus&apos;s own finance report.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
                   {Object.entries(s.invoicesByStatus).length === 0 ? (
@@ -135,7 +198,7 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
                   )}
                   {s.money.map((m) => (
                     <div key={m.currency} className="flex justify-between border-t pt-2">
-                      <span className="text-muted-foreground">Outstanding ({m.currency})</span>
+                      <span className="text-muted-foreground">Owed now ({m.currency})</span>
                       <span className="tnum">{money(m.outstandingMinor, m.currency)}</span>
                     </div>
                   ))}
@@ -157,7 +220,9 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
                       {s.subscriptionStatus === "ACTIVE" ? (
                         s.subscriptionStatus
                       ) : (
-                        <Badge variant="destructive">{s.subscriptionStatus}</Badge>
+                        <Badge variant="destructive">
+                          {s.subscriptionStatus === GROUP_NO_SUBSCRIPTION ? "No subscription" : s.subscriptionStatus}
+                        </Badge>
                       )}
                     </span>
                   </div>

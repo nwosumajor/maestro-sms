@@ -21,9 +21,7 @@ export default async function GroupPage({
   const q = new URLSearchParams();
   if (searchParams.groupId) q.set("groupId", searchParams.groupId);
   if (searchParams.period) q.set("period", searchParams.period);
-  const data = await apiGet<Serialized<GroupOverviewDto>>(
-    `/group/overview${q.toString() ? `?${q.toString()}` : ""}`,
-  );
+  const data = await apiGet<Serialized<GroupOverviewDto>>(`/group/overview?${q.toString()}`);
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="group" permissions={user.permissions}>

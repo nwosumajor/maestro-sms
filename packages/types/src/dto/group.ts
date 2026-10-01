@@ -17,11 +17,53 @@
 export interface GroupMoneyDto {
   /** ISO code — NGN, USD. */
   currency: string;
-  /** POSTED payments received in the selected period. */
+  /**
+   * NET settled against invoices in the selected period: POSTED payments, with
+   * a REFUND subtracting — the same "paid" the campus's own finance report and
+   * every invoice balance use (`netPaidOf`). It used to count kind PAYMENT only,
+   * so a refund never came off and credit or scholarship never went on.
+   */
   collectedMinor: number;
-  /** Issued and part-paid invoices, less what has been paid against them. */
+  /**
+   * What families owe NOW: the sum of each open invoice's POSITIVE balance
+   * (total less net paid). Not windowed — a debt does not stop being owed
+   * because it was billed last term. It used to subtract PAYMENT-kind money
+   * only, and netted the whole campus at once, so one overpaid invoice hid
+   * another family's debt.
+   */
   outstandingMinor: number;
 }
+
+/**
+ * The windows a director can pick. ONE list, read by the API and the page, so
+ * the label on the button and the label on the figures cannot drift apart.
+ * Each campus is measured over the window in its OWN calendar — "today" in
+ * Lagos and "today" in Toronto are different days.
+ */
+export const GROUP_PERIODS = [
+  { key: "today", label: "Today", short: "Today" },
+  { key: "week", label: "Last 7 days", short: "7 days" },
+  { key: "month", label: "This month", short: "This month" },
+  // A term is per-school and need not align across campuses, so the group view
+  // uses a fixed 90-day window and SAYS so rather than pretending otherwise.
+  { key: "term", label: "Last 90 days", short: "90 days" },
+] as const;
+export type GroupPeriodKey = (typeof GROUP_PERIODS)[number]["key"];
+export const DEFAULT_GROUP_PERIOD: GroupPeriodKey = "month";
+
+/**
+ * Below this, a campus's attendance rate is flagged. One constant: the service
+ * raised the flag at 85 and both pages coloured the figure red at a separately
+ * typed 85, which is a threshold waiting to disagree with its own flag.
+ */
+export const GROUP_LOW_ATTENDANCE_PCT = 85;
+
+/**
+ * `subscriptionStatus` for a campus with NO subscription row. It used to read
+ * as "ACTIVE", hiding the gap; the platform resolves such a school to the
+ * STANDARD floor (fail-closed), so the console must say it is not paid up.
+ */
+export const GROUP_NO_SUBSCRIPTION = "NONE";
 
 /** Why a campus is flagged for the director's attention. */
 export const GROUP_FLAGS = [
@@ -38,6 +80,17 @@ export const GROUP_FLAGS = [
 ] as const;
 export type GroupFlag = (typeof GROUP_FLAGS)[number];
 
+/** What each flag says on screen — ONE wording for the list and the campus page,
+ *  which used to print the raw enum lower-cased on one and a label on the other.
+ *  A `Record` over the union, so a new flag without a label fails to compile. */
+export const GROUP_FLAG_LABELS: Record<GroupFlag, string> = {
+  DISABLED: "Disabled",
+  BILLING: "Billing",
+  NO_STAFF: "No staff",
+  NO_REGISTERS: "No registers",
+  LOW_ATTENDANCE: "Low attendance",
+};
+
 export interface GroupSchoolStatsDto {
   schoolId: string;
   name: string;
@@ -50,7 +103,9 @@ export interface GroupSchoolStatsDto {
    *  It used to count `employee` rows — employment RECORDS — so a campus that had
    *  not filled in its HR register reported zero staff while employing forty. */
   staff: number;
-  /** Present % across the selected period; null when no register was taken. */
+  /** Attendance rate across the selected period by the platform's ONE rule
+   *  (`attendanceRatePct`: present + late, EXCUSED is an absence); null when no
+   *  register was taken. */
   attendancePct: number | null;
   /** Registers actually taken in the period — distinguishes "poor attendance"
    *  from "nobody recorded anything", which are different problems. */
@@ -73,11 +128,13 @@ export interface GroupRefDto {
 
 /** The window the figures cover. */
 export interface GroupPeriodDto {
+  /** Earliest campus start, as an instant. Each campus is measured from
+   *  midnight in its OWN zone, so across a group this is the envelope. */
   from: Date;
   to: Date;
-  /** Plain-language name for the header: "This term", "This month", "Today". */
+  /** Plain-language name for the header: "This month", "Last 7 days", "Today". */
   label: string;
-  key: string;
+  key: GroupPeriodKey;
 }
 
 export interface GroupOverviewDto {
@@ -126,6 +183,9 @@ export interface GroupTrendPointDto {
  * or a record — those stay behind that school's own permissions.
  */
 export interface GroupSchoolDetailDto {
+  /** The window the flags and figures cover — the SAME one the overview row was
+   *  computed over, so the page can say which and the two can be compared. */
+  period: GroupPeriodDto;
   /**
    * The figures the FLAGS below were computed from, over the selected period.
    *

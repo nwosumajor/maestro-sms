@@ -12,6 +12,26 @@ import { StaffReminderService } from "../../src/hr/staff-reminder.service";
 
 const OCT = new Date("2026-10-01T00:00:00.000Z");
 const AUG = new Date("2026-08-01T00:00:00.000Z");
+/**
+ * The day the sweep runs on. FROZEN, because "October is still ahead" is only
+ * true before October: on the real clock this file went red on 1 October 2026,
+ * the day its fixture date arrived, with the service behaving correctly.
+ * Only `Date` is faked — the sweep awaits real promises.
+ */
+const NOW = new Date("2026-08-27T12:00:00.000Z");
+
+beforeEach(() => {
+  jest.useFakeTimers({
+    now: NOW,
+    doNotFake: ["hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate",
+      "setInterval", "clearInterval", "setTimeout", "clearTimeout"],
+  });
+});
+afterEach(() => {
+  // CLEARED, not merely switched off: a residual handle force-exits the worker.
+  jest.clearAllTimers();
+  jest.useRealTimers();
+});
 
 function makeSweep(opts: { due: Array<{ id: string; effectiveDate: Date }>; claimed?: number }) {
   const salaryUpdateMany = jest.fn().mockResolvedValue({ count: opts.claimed ?? 1 });
