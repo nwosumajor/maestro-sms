@@ -19877,3 +19877,41 @@ report's receivables and the ledger check, which aggregate the same shape.
 // lifetime from scratch on every page load: a short cache per group, or a
 // maintained per-invoice paid figure written by the ONE settlement path.
 // Decide when a real group gets there; do not pre-build it.
+
+### The walk that found five defects, written down so it runs every time
+
+Driving the group console by hand found five defects after every automated
+test was green: a rounded zero read as "none", an unpaid PAID invoice, two
+refusals that named one cause of two, and a stale search answer. A drive done
+once by hand is a check that runs once. `apps/web/scripts/group-console-walkthrough.mjs`
+replays it over HTTP against the RUNNING stack (nginx → web → API → DB), so
+nothing below the browser is mocked:
+- The operator creates a group, adds schools (one bogus id) and appoints
+  directors (a pupil, an unknown email, the principal). Each refusal must come
+  back named, with its reason. The candidate search must find staff and never
+  a pupil.
+- The director opens every period and every campus page. Each campus page
+  must EQUAL its row on the overview (coverage counts, money, flags), and the
+  rendered board must carry the period in its campus links — the defect that
+  hid longest. The CSV must carry the new columns.
+- The ledger-integrity page renders, and the group is deleted.
+It switches the Group Console ON for the demo school (the director's school
+must have it) and restores the school's exact modules in a `finally`, verified
+on a failing run as well as a passing one. Run against the rebuilt stack: 53/53.
+Mutation: making one agreement check expect covered+1 fails 8 checks (one per
+campus per period) and exits 1.
+
+The sign-in client and the "did this page render" rule lived privately inside
+`route-smoke.mjs`. They now live in `scripts/lib/stack-client.mjs`, shared by
+both scripts, plus a `send()` that performs the same password → token →
+`x-stepup` retry as the web's `sendWithStepUp`. A walkthrough with its own copy
+of the login would be the second spelling this log keeps finding drifted.
+// NOT a browser: it does not click React controls. The client-side behaviour
+// (pickers, refresh in place) was driven in Chrome when it was built. Putting
+// the clicks under test needs a browser runner (Playwright), which is a
+// dependency and CI decision for the owner, not one to add in passing.
+// GOTCHA, and it cost an hour: adding one line to `apps/web/package.json` (an
+// npm script) invalidated the web image's dependency layer, and on a slow
+// network `pnpm install` re-downloaded 947 packages for over 30 minutes before
+// the build timed out. Reverted; the script runs as `node scripts/…`. A
+// package.json edit is not free in this repo's Dockerfiles.
