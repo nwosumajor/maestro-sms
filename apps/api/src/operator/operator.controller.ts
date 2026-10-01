@@ -1,7 +1,7 @@
 import {
-  Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile, BadRequestException} from "@nestjs/common";
+  Delete, Body, Controller, Get, Param, Patch, Post, Put, Query, Res, StreamableFile, BadRequestException} from "@nestjs/common";
 import type { Response } from "express";
-import type { AttentionQueueDto, MessageCreditBalancePageDto, MessageCreditLedgerEntryDto, ModuleAddonPriceDto, OnboardingRequestDto, OperatorAdminAppointmentDto, OperatorBillingAlertDto, OperatorPaymentPageDto, OperatorStudentDto, OperatorUserDto, PlanPriceDto, PlatformAnalyticsDto, PlatformAuditPageDto, PlatformDelegationDto, PlatformStaffInviteDto, SubscriptionDto, TenantNameDto, TenantPageDto, AgentCommissionPageDto } from "@sms/types";
+import type { AttentionQueueDto, MessageCreditBalancePageDto, MessageCreditLedgerEntryDto, ModuleAddonPriceDto, OnboardingRequestDto, OperatorAdminAppointmentDto, OperatorBillingAlertDto, OperatorPaymentPageDto, OperatorStudentDto, OperatorUserDto, PlanPriceDto, PlatformAnalyticsDto, PlatformAuditPageDto, PlatformDelegationDto, PlatformStaffInviteDto, SubscriptionDto, TenantNameDto, TenantPageDto, AgentCommissionPageDto, GroupAdminDto, GroupDirectorCandidatePageDto, GroupWriteResultDto } from "@sms/types";
 import {
   CURRENCIES,
   type Currency,
@@ -1040,8 +1040,36 @@ export class OperatorController {
   // --- multi-school groups (franchise tier; owner-only writes) ----------------
   @Get("groups")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
-  listGroups() {
+  listGroups(): Promise<GroupAdminDto[]> {
     return this.groups.listGroups();
+  }
+
+  /** Rename a group. A group could be created and never renamed. */
+  @Patch("groups/:id")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  renameGroup(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(groupSchema)) body: z.infer<typeof groupSchema>,
+  ) {
+    return this.groups.renameGroup(p, id, body.name);
+  }
+
+  /** Delete a group: every director loses the cross-campus read. No school's
+   *  own data is touched. Step-up, like every other group write. */
+  @Delete("groups/:id")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  deleteGroup(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.groups.deleteGroup(p, id);
+  }
+
+  /** Who may be named a director: ACTIVE staff at a member school, searched. */
+  @Get("groups/:id/director-candidates")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  directorCandidates(@Param("id") id: string, @Query("q") q?: string): Promise<GroupDirectorCandidatePageDto> {
+    return this.groups.directorCandidates(id, q);
   }
 
   @Post("groups")
@@ -1062,7 +1090,7 @@ export class OperatorController {
     @CurrentPrincipal() p: Principal,
     @Param("id") id: string,
     @Body(new ZodValidationPipe(groupMembersSchema)) body: z.infer<typeof groupMembersSchema>,
-  ) {
+  ): Promise<GroupWriteResultDto> {
     return this.groups.setMembers(p, id, body.schoolIds);
   }
 
@@ -1074,7 +1102,7 @@ export class OperatorController {
     @CurrentPrincipal() p: Principal,
     @Param("id") id: string,
     @Body(new ZodValidationPipe(groupDirectorsSchema)) body: z.infer<typeof groupDirectorsSchema>,
-  ) {
+  ): Promise<GroupWriteResultDto> {
     return this.groups.setDirectors(p, id, body.emails);
   }
 

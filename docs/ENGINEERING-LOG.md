@@ -19677,3 +19677,67 @@ real queries. Reintroducing each of the four defects fails the test aimed at it.
 // GOTCHA: `a-money-total-says-what-currency-it-is` caught the trend query
 // FILTERING on currency without RETURNING it. Right: a figure that knows its
 // currency must say it.
+
+### A register count with nothing to measure it against, and a director nobody could choose
+
+Phase two of the group console. The first pass made the console's figures
+AGREE; this one asked whether each figure could answer the question a director
+brings to it. Four could not, and the screen that manages groups failed in four
+places that read as success.
+- **"12 registers" said nothing.** The console counted registers with no
+  denominator, and counted SESSIONS — including one a gate scan opened that
+  nobody took. That is the distinction `attendance_session.takenAt` was added to
+  draw. A campus now reports registers taken against registers DUE. A register is
+  due for every class with a pupil on its roll (`onRollOnDaySql`, now the roll's
+  ONE SQL spelling, shared with the unrecorded-register counts), on each day that
+  is a school day in the campus's country, inside one of its terms and not a
+  holiday. Those are the days the register reminder chases, so the console and
+  the reminder agree. With no dated term nothing says which days were due, and
+  coverage is NULL, not zero. The flag now fires against what was due: "today"
+  on a Saturday used to flag every campus in the group as NO_REGISTERS.
+- **A school with no current term is invisible from inside it** — the reminder
+  skips it every day, for ever, and only an operator console the school never
+  opens records it. The group console is the one place somebody above the
+  school can see it: `NO_TERM`.
+- **Owed is not late.** What a director acts on is the OVERDUE, so owed-now is
+  split on the finance report's ladder (not yet due / 1–30 / 31–60 / 60+),
+  measured from the campus's own today.
+- **A figure with no comparison cannot say whether it is good.** Each campus
+  carries the same figures over the equivalent earlier window: the same span,
+  ending at the same point of the previous period. Month-to-date on the 15th
+  compares with the 1st–15th of last month, never the whole of it, and never
+  overlaps it.
+- **"This term" was 90 days for everybody.** It is now each campus's OWN current
+  term, since terms do not align across a group. A campus without one falls back
+  to 90 days, and its window's `basis` says so on screen.
+
+The management screen:
+- Director emails that matched nobody, a PUPIL, a LEAVER or another school's
+  staff were dropped in silence under "Directors saved". SECURITY: directorship
+  opens a cross-campus read, and any account with a matching email qualified.
+  Directors are now chosen from a search of the people who MAY direct: ACTIVE
+  staff at a member school. Every write returns what it did not apply, and why.
+- A director outlived their school leaving the group. The same transaction now
+  removes them and reports it.
+- Member schools were one toggle per school on the PLATFORM. They are now a
+  search, with the picks held in state.
+- A group could be created and never renamed or removed. Both are added,
+  step-up gated and audited.
+- Each save reloaded the page, throwing away the message saying what happened.
+  // GOTCHA, mine: the first fix keyed each editor on its saved state so a
+  refresh would re-seed it. That REMOUNTED it and threw the message away again.
+  It now re-seeds by value in an effect, and a delete reports through the parent,
+  because the editor unmounts with its group.
+
+`campus-figures.e2e-spec.ts` gained a campus with a fixed two-week term built so
+each rule has one right answer: 13 due, 12 covered (92%), 13 taken. The register
+a gate scan opened on 5 June is not one, the one taken on Saturday was not due,
+and the holiday and the empty class are not due. It also checks the aging rungs
+and every refusal reason. Five mutations, one per rule, each fail the test aimed
+at them.
+// GOTCHA: my first holiday mutation wrote a second WHERE, so the SQL failed and
+// three tests went red for the wrong reason. A mutation that does not run proves
+// nothing. Re-done as `AND false`, it fails exactly the coverage case.
+// GOTCHA: the board first rebuilt "12 of 13" from the ROUNDED percentage. The
+// count now travels as `registersCovered`: never reconstruct a numerator from a
+// rounded ratio.

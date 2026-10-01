@@ -5,7 +5,19 @@
 // group they direct.
 
 import type { GroupSchoolDetailDto, Serialized } from "@sms/types";
-import { GROUP_FLAG_LABELS, GROUP_LOW_ATTENDANCE_PCT, GROUP_NO_SUBSCRIPTION } from "@sms/types";
+import {
+  GROUP_FLAG_LABELS,
+  GROUP_LOW_ATTENDANCE_PCT,
+  GROUP_LOW_REGISTER_COVERAGE_PCT,
+  GROUP_NO_SUBSCRIPTION,
+} from "@sms/types";
+import {
+  deltaClass,
+  moneyDelta,
+  pointsDelta,
+  previousCollected,
+  windowNote,
+} from "@/components/group/group-format";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -18,6 +30,12 @@ import { money, shortDate } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
+
+/** A change against the previous period, coloured by whether it is good news. */
+function Change({ d }: { d: { text: string; dir: -1 | 0 | 1 } | null }) {
+  if (!d) return null;
+  return <p className={`text-xs ${deltaClass(d.dir)}`}>{d.text} on the period before</p>;
+}
 
 export default async function GroupSchoolPage({
   params,
@@ -51,7 +69,8 @@ export default async function GroupSchoolPage({
             subtitle={
               s ? (
                 <>
-                  {s.groupName} · {s.period.label.toLowerCase()} · figures only, never pupil records.
+                  {s.groupName} · {s.period.label.toLowerCase()} ({windowNote(s.window, (d) => shortDate(d))}) ·
+                  figures only, never pupil records.
                 </>
               ) : (
                 <>Not available.</>
@@ -82,16 +101,49 @@ export default async function GroupSchoolPage({
               </div>
             )}
 
+            {!s.hasCurrentTerm && (
+              <Alert variant="destructive">
+                <AlertTitle>No current term is set at this campus</AlertTitle>
+                <AlertDescription>
+                  Until one is, the daily register reminder does not run there and its figures cannot be measured
+                  against a term. The campus&apos;s administrators set it under the academic calendar.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* The figures the flags above were computed from, over the stated
+                period, each beside the same span of the previous period — a
+                flag with nothing to judge it by is half an answer. */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {/* The figures the flags above were computed from, over the stated
-                  period — a flag with nothing to judge it by is half an answer. */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Registers taken · {s.period.label.toLowerCase()}</CardDescription>
+                  <CardTitle className="tnum text-2xl">
+                    {s.registersExpected == null ? (
+                      <span className="text-muted-foreground">{s.registersTaken}</span>
+                    ) : s.registersExpected === 0 ? (
+                      <span className="text-muted-foreground">none due</span>
+                    ) : (
+                      <span
+                        className={(s.registerCoveragePct ?? 0) < GROUP_LOW_REGISTER_COVERAGE_PCT ? "text-destructive" : ""}
+                      >
+                        {s.registerCoveragePct}%
+                      </span>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="tnum">
+                    {s.registersExpected == null
+                      ? "taken — no dated term, so none can be called due"
+                      : `${s.registersCovered} of ${s.registersExpected} due`}
+                  </CardDescription>
+                  <Change d={pointsDelta(s.registerCoveragePct, s.previous.registerCoveragePct)} />
+                </CardHeader>
+              </Card>
               <Card>
                 <CardHeader className="pb-2">
                   <CardDescription>Attendance · {s.period.label.toLowerCase()}</CardDescription>
                   <CardTitle className="tnum text-2xl">
-                    {s.registersTaken === 0 ? (
-                      <span className="text-muted-foreground">none taken</span>
-                    ) : s.attendancePct == null ? (
+                    {s.attendancePct == null ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
                       <span className={s.attendancePct < GROUP_LOW_ATTENDANCE_PCT ? "text-destructive" : ""}>
@@ -99,7 +151,8 @@ export default async function GroupSchoolPage({
                       </span>
                     )}
                   </CardTitle>
-                  <CardDescription className="tnum">{s.registersTaken.toLocaleString()} registers taken</CardDescription>
+                  <CardDescription>present or late; an excused absence is an absence</CardDescription>
+                  <Change d={pointsDelta(s.attendancePct, s.previous.attendancePct)} />
                 </CardHeader>
               </Card>
               {s.money.map((m) => (
@@ -109,7 +162,10 @@ export default async function GroupSchoolPage({
                       Collected {s.money.length > 1 ? `(${m.currency}) ` : ""}· {s.period.label.toLowerCase()}
                     </CardDescription>
                     <CardTitle className="tnum text-2xl">{money(m.collectedMinor, m.currency)}</CardTitle>
-                    <CardDescription className="tnum">{money(m.outstandingMinor, m.currency)} owed now</CardDescription>
+                    <CardDescription className="tnum">
+                      {money(previousCollected(s.previous, m.currency), m.currency)} the period before
+                    </CardDescription>
+                    <Change d={moneyDelta(m.collectedMinor, previousCollected(s.previous, m.currency))} />
                   </CardHeader>
                 </Card>
               ))}
@@ -197,9 +253,25 @@ export default async function GroupSchoolPage({
                     ))
                   )}
                   {s.money.map((m) => (
-                    <div key={m.currency} className="flex justify-between border-t pt-2">
-                      <span className="text-muted-foreground">Owed now ({m.currency})</span>
-                      <span className="tnum">{money(m.outstandingMinor, m.currency)}</span>
+                    <div key={m.currency} className="space-y-1 border-t pt-2">
+                      <div className="flex justify-between font-medium">
+                        <span>Owed now ({m.currency})</span>
+                        <span className="tnum">{money(m.outstandingMinor, m.currency)}</span>
+                      </div>
+                      {/* The finance report's ladder, from the campus's own today. */}
+                      {(
+                        [
+                          ["Not yet due", m.aging.currentMinor, false],
+                          ["1–30 days overdue", m.aging.d1_30Minor, true],
+                          ["31–60 days overdue", m.aging.d31_60Minor, true],
+                          ["Over 60 days overdue", m.aging.d60plusMinor, true],
+                        ] as const
+                      ).map(([label, v, late]) => (
+                        <div key={label} className="flex justify-between">
+                          <span className="text-muted-foreground">{label}</span>
+                          <span className={`tnum ${late && v > 0 ? "text-destructive" : ""}`}>{money(v, m.currency)}</span>
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </CardContent>

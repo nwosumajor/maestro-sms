@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **922 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **925 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -99,6 +99,9 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **922 routes across 90
 | GET | `/operator/games-analytics` | 🔑 `platform.tenants.read` | Fleet-wide GAMES adoption/engagement — aggregate counts only, PII-free. |
 | GET | `/operator/groups` | 🔑 `platform.tenants.read` | List Groups |
 | POST | `/operator/groups` | 🔑 `platform.subscription.manage` · ⬆️ step-up | Create Group |
+| PATCH | `/operator/groups/:id` | 🔑 `platform.subscription.manage` · ⬆️ step-up | Rename a group. |
+| DELETE | `/operator/groups/:id` | 🔑 `platform.subscription.manage` · ⬆️ step-up | Delete a group: every director loses the cross-campus read. |
+| GET | `/operator/groups/:id/director-candidates` | 🔑 `platform.subscription.manage` | Who may be named a director: ACTIVE staff at a member school, searched. |
 | PUT | `/operator/groups/:id/directors` | 🔑 `platform.subscription.manage` · ⬆️ step-up | Replace a group's directors (by email; must belong to a member school). |
 | PUT | `/operator/groups/:id/members` | 🔑 `platform.subscription.manage` · ⬆️ step-up | Replace a group's member schools. |
 | POST | `/operator/impersonate` | 🔑 `platform.impersonate` · ⬆️ step-up | Mint an audited, scoped impersonation token |

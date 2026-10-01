@@ -129,6 +129,10 @@
       "kind": "ui",
       "note": "reviewed: reached from components/workflow/OtherApprovals.tsx"
     },
+    "DELETE /operator/groups/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "DELETE /operator/platform-role-audit/:p/:p": {
       "kind": "ui",
       "note": "FIXED: now reached from components/operator/PlatformRoleAudit.tsx"
@@ -1169,6 +1173,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /operator/groups/:p/director-candidates": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "GET /operator/jobs": {
       "kind": "ui",
       "note": "Background jobs console at /operator/jobs \u2014 every scheduled job, when it last ran, what it reported, and whether it is late. Thirteen jobs ran on timers with nothing recording that they had; a scheduler that stops does not error, it goes quiet."
@@ -1720,6 +1728,10 @@
     "PATCH /fees/items/:p": {
       "kind": "ui",
       "note": "reviewed: a call in components/fees/FeesAdmin.tsx builds this path"
+    },
+    "PATCH /operator/groups/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
     },
     "PATCH /students/:p/contacts/:p": {
       "kind": "ui",

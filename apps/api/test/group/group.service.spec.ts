@@ -46,6 +46,14 @@ function makeService(over: Over = {}) {
       findFirst: jest.fn().mockResolvedValue({ plan: "PREMIUM", status: "ACTIVE", currentPeriodEnd: null }),
     },
     attendanceSession: {},
+    // Both campuses run a current term with dates, so registers can be measured
+    // against the days that were due.
+    term: {
+      findMany: jest.fn().mockResolvedValue([
+        { schoolId: A, isCurrent: true, startDate: new Date("2020-01-01T00:00:00Z"), endDate: new Date("2099-12-31T00:00:00Z") },
+        { schoolId: B, isCurrent: true, startDate: new Date("2020-01-01T00:00:00Z"), endDate: new Date("2099-12-31T00:00:00Z") },
+      ]),
+    },
     invoice: { groupBy: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { count: jest.fn().mockResolvedValue(12) },
@@ -63,6 +71,13 @@ function makeService(over: Over = {}) {
       }
       // The campus page's six-month trend.
       if (sql.includes("to_char")) return [];
+      // Expected registers and how many were taken: A took all 20 due, B 8 of 10.
+      if (sql.includes("generate_series")) {
+        return [
+          { schoolId: A, expected: 20, covered: 20 },
+          { schoolId: B, expected: 10, covered: 8 },
+        ];
+      }
       if (sql.includes("attendance_session")) return [{ schoolId: A, n: 20 }, { schoolId: B, n: 8 }];
       if (sql.includes("attendance_record")) {
         return [
@@ -75,8 +90,8 @@ function makeService(over: Over = {}) {
       // What is owed now — each open invoice's positive balance.
       if (sql.includes("WITH open")) {
         return [
-          { schoolId: A, currency: "NGN", total: 3_000_00 },
-          { schoolId: B, currency: "USD", total: 800_00 },
+          { schoolId: A, currency: "NGN", current: 1_000_00, d1_30: 2_000_00, d31_60: 0, d60plus: 0 },
+          { schoolId: B, currency: "USD", current: 800_00, d1_30: 0, d31_60: 0, d60plus: 0 },
         ];
       }
       // Net collected in the window.
@@ -115,7 +130,7 @@ describe("GroupService.overview", () => {
     expect(out.totals.byCurrency.USD.collectedMinor).toBe(100_00);
     // Each campus reports in its own currency.
     expect(out.schools.find((s) => s.name === "Beta Campus")!.money).toEqual([
-      { currency: "USD", collectedMinor: 100_00, outstandingMinor: 800_00 },
+      expect.objectContaining({ currency: "USD", collectedMinor: 100_00, outstandingMinor: 800_00, overdueMinor: 0 }),
     ]);
   });
 
