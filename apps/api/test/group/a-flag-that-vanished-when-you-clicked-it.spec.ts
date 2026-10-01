@@ -18,83 +18,53 @@
 // could not fire on any campus page for the first days of every month. A
 // partial period read as a fact.
 //
-// The drill-down takes the same `period` now and asks the same two questions, so
-// the two agree by construction rather than by coincidence.
+// // GOTCHA, and the reason this file was rewritten: the FIRST fix made the API
+// take a `period` and this spec checked the API's SPELLING of it — and passed
+// for as long as it existed while the WEB never sent one. The overview linked
+// to `/group/<id>` bare, and the campus page called `/group/schools/<id>` with
+// no query, so the server's half was inert. The figures themselves are now
+// held to agreement BEHAVIOURALLY (group.service.spec — "the campus page
+// reports the row it was clicked from", one `campusFigures` for both); what is
+// left to check here is the half no API test can see: that the period is
+// actually carried from the list, through the link, to the request.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "../support/strip-comments";
 
-const SRC = join(__dirname, "../../src/group");
-const service = stripComments(readFileSync(join(SRC, "group.service.ts"), "utf8"));
-const controller = stripComments(readFileSync(join(SRC, "group.controller.ts"), "utf8"));
+const WEB = join(__dirname, "../../../web");
+const board = stripComments(readFileSync(join(WEB, "components/group/GroupBoard.tsx"), "utf8"));
+const campusPage = stripComments(readFileSync(join(WEB, "app/(app)/group/[schoolId]/page.tsx"), "utf8"));
 
-/** The body of one method, so an assertion cannot be satisfied by the other. */
-function methodBody(src: string, signature: string): string {
-  const at = src.indexOf(signature);
-  if (at === -1) return "";
-  let i = src.indexOf("(", at);
-  let depth = 0;
-  for (; i < src.length; i += 1) {
-    if (src[i] === "(") depth += 1;
-    else if (src[i] === ")") { depth -= 1; if (depth === 0) { i += 1; break; } }
-  }
-  let angle = 0;
-  for (; i < src.length; i += 1) {
-    const ch = src[i];
-    if (ch === "<") angle += 1;
-    else if (ch === ">") angle -= 1;
-    else if (ch === "{" && angle === 0) break;
-  }
-  const start = i;
-  depth = 0;
-  for (; i < src.length; i += 1) {
-    if (src[i] === "{") depth += 1;
-    else if (src[i] === "}") { depth -= 1; if (depth === 0) break; }
-  }
-  return src.slice(start, i + 1);
-}
-
-describe("the campus page agrees with the list it was clicked from", () => {
-  const detail = methodBody(service, "async schoolDetail(");
-
+describe("the period travels from the list to the campus page", () => {
   it("found the sources it is about", () => {
-    expect(service.length).toBeGreaterThan(8000);
-    expect(detail.length).toBeGreaterThan(2000);
-    expect(controller.length).toBeGreaterThan(1000);
+    expect(board.length).toBeGreaterThan(2000);
+    expect(campusPage.length).toBeGreaterThan(2000);
   });
 
-  it("takes the same period the overview took", () => {
-    expect(controller).toMatch(/@Query\("period"\)/);
-    expect(controller).toMatch(/schoolDetail\(p, schoolId, \{ period \}\)/);
-    expect(detail).toMatch(/this\.resolvePeriod\(opts\.period\)/);
+  it("links every campus WITH the list's period, never bare", () => {
+    // Every link into a campus page. A bare `/group/${…}` with no query is the
+    // defect; anchored to the PROPERTY (a query follows the id), not to the
+    // helper's name.
+    const links = [...board.matchAll(/`\/group\/\$\{[^}]+\}([^`]*)`/g)];
+    expect(links.length).toBeGreaterThan(0);
+    for (const [, rest] of links) expect(rest).toMatch(/^\?\$\{qs\(/);
+    // And `qs` itself carries the current period.
+    expect(board).toMatch(/period: data\.period\.key/);
+    // No campus link may bypass it.
+    expect(board).not.toMatch(/href=\{`\/group\/\$\{s\.schoolId\}`\}/);
   });
 
-  it("computes its flags over that period, not over the last month of the trend", () => {
-    // Anchored to WHERE THE NUMBER COMES FROM, not to how the old line was
-    // spelled: `not.toMatch(/latest\?\.attendancePct/)` named one variable and
-    // let a mutation using `trend.at(-1)?.attendancePct` straight through.
-    expect(detail).toMatch(/attendancePct: attTotal > 0/);
-    expect(detail).not.toMatch(/attendancePct:\s*(trend|latest)/);
-    expect(detail).toMatch(/period\.from/);
-    expect(detail).toMatch(/period\.to/);
+  it("asks the API for the period it was given", () => {
+    expect(campusPage).toMatch(/searchParams\.period/);
+    const call = campusPage.match(/apiGet<[^>]*>\>?\(\s*`([^`]*)`/);
+    expect(call).not.toBeNull();
+    expect(call![1]).toMatch(/\/group\/schools\/\$\{params\.schoolId\}\?\$\{q\.toString\(\)\}/);
+    expect(campusPage).toMatch(/q\.set\("period", searchParams\.period\)/);
   });
 
-  it("counts SESSIONS taken, the way the overview does", () => {
-    // It summed attendance RECORDS across six months, so a campus that had
-    // stopped taking the register still looked as though it had.
-    expect(detail).toMatch(/attendanceSession\.count/);
-    expect(detail).not.toMatch(/monthlyAtt\.reduce/);
-  });
-
-  it("shows the figures the flags were computed from", () => {
-    // A LOW_ATTENDANCE flag with no percentage tells a director a campus needs
-    // attention and gives them nothing to judge it by.
-    expect(detail).toMatch(/attendancePct: base\.attendancePct/);
-    expect(detail).toMatch(/registersTaken: base\.registersTaken/);
-  });
-
-  it("still keeps the six-month trend, which is its own question", () => {
-    expect(detail).toMatch(/trend/);
-    expect(detail).toMatch(/trendCurrency/);
+  it("goes back to the same group and period, not to a reset list", () => {
+    expect(campusPage).toMatch(/back\.set\("period", searchParams\.period\)/);
+    expect(campusPage).toMatch(/back\.set\("groupId", searchParams\.groupId\)/);
+    expect(campusPage).not.toMatch(/href="\/group"/);
   });
 });

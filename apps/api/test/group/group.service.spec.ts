@@ -16,6 +16,7 @@
 import { NotFoundException } from "@nestjs/common";
 import { GroupService } from "../../src/group/group.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
+import { GROUP_NO_SUBSCRIPTION, GROUP_PERIODS, resolveRegion, schoolDateString, schoolMidnight } from "@sms/types";
 
 const DIRECTOR = "d-1";
 const A = "aaaaaaaa-1111-1111-1111-111111111111";
@@ -44,26 +45,13 @@ function makeService(over: Over = {}) {
       ]),
       findFirst: jest.fn().mockResolvedValue({ plan: "PREMIUM", status: "ACTIVE", currentPeriodEnd: null }),
     },
-    attendanceRecord: {
-      // Keyed on the WHERE clause rather than call order: a sequential mock breaks
-      // the moment a test calls overview() twice, and it would hide a real change
-      // in query order behind a fixture failure.
-      groupBy: jest.fn(async (args: { where?: { status?: unknown } }) =>
-        args?.where?.status
-          ? [{ schoolId: A, _count: { _all: 95 } }, { schoolId: B, _count: { _all: 30 } }]
-          : [{ schoolId: A, _count: { _all: 100 } }, { schoolId: B, _count: { _all: 50 } }],
-      ),
-    },
-    attendanceSession: {
-      groupBy: jest.fn().mockResolvedValue([{ schoolId: A, _count: { _all: 20 } }, { schoolId: B, _count: { _all: 8 } }]),
-      // The campus page counts SESSIONS over the selected period, the same
-      // question the overview asks. A double missing it fails as a TypeError,
-      // which reads as a code fault rather than a gap in the stub.
-      count: jest.fn().mockResolvedValue(20),
-    },
+    attendanceSession: {},
     invoice: { groupBy: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
     class: { count: jest.fn().mockResolvedValue(12) },
+    // Routed on the SQL each figure is computed with, never on call order: a
+    // sequential mock breaks the moment a test calls overview() twice, and it
+    // would hide a real change in query order behind a fixture failure.
     $queryRaw: jest.fn(async (q: unknown) => {
       const sql = JSON.stringify(q);
       // headcountBySchool
@@ -73,14 +61,25 @@ function makeService(over: Over = {}) {
           { schoolId: B, students: 400, staff: 0, parents: 350 },
         ];
       }
-      if (sql.includes("date_trunc")) return [];
-      if (sql.includes("FROM invoice i")) {
+      // The campus page's six-month trend.
+      if (sql.includes("to_char")) return [];
+      if (sql.includes("attendance_session")) return [{ schoolId: A, n: 20 }, { schoolId: B, n: 8 }];
+      if (sql.includes("attendance_record")) {
         return [
-          { schoolId: A, currency: "NGN", total: 5_000_00 },
-          { schoolId: B, currency: "USD", total: 900_00 },
+          // 80 present + 10 late of 100 = 90%. Counting the 5 EXCUSED as
+          // attending would make it 95 — the rule the overview used to apply.
+          { schoolId: A, present: 80, late: 10, absent: 5, excused: 5 },
+          { schoolId: B, present: 25, late: 5, absent: 10, excused: 10 },
         ];
       }
-      // payment joins (collected in period, then collected against open invoices)
+      // What is owed now — each open invoice's positive balance.
+      if (sql.includes("WITH open")) {
+        return [
+          { schoolId: A, currency: "NGN", total: 3_000_00 },
+          { schoolId: B, currency: "USD", total: 800_00 },
+        ];
+      }
+      // Net collected in the window.
       return [
         { schoolId: A, currency: "NGN", total: 2_000_00 },
         { schoolId: B, currency: "USD", total: 100_00 },
@@ -154,25 +153,54 @@ describe("GroupService.overview", () => {
     expect(out.flagged).toBe(1);
   });
 
-  it("counts LATE and EXCUSED as attending — the report card's rule", async () => {
-    // 95 of 100 at Alpha, where the 95 includes late and excused. A stricter rule
-    // here would contradict what that campus's own staff see.
+  it("counts LATE as attending and EXCUSED as an absence — the platform's ONE rule", async () => {
+    // `attendanceRatePct`, the rule the report card prints. This test used to
+    // assert the opposite ("LATE and EXCUSED count as attending — the report
+    // card's rule"), which the report card has never used, and the campus page
+    // applied the real rule — so one campus showed two rates.
     const { svc } = makeService();
     const out = await svc.overview(director);
-    expect(out.schools.find((s) => s.name === "Alpha Campus")!.attendancePct).toBe(95);
+    expect(out.schools.find((s) => s.name === "Alpha Campus")!.attendancePct).toBe(90);
+    const detail = await svc.schoolDetail(director, A);
+    expect(detail.attendancePct).toBe(90);
   });
 
-  it("defaults to a MONTH, not a single day", async () => {
-    // It used to report attendance for today only, so the page was blank on a
-    // weekend, on a holiday, and every morning before registers were taken.
+  it("defaults to a MONTH, cut at midnight in the CAMPUS's own zone", async () => {
+    // It used to report today only (blank every weekend), and later cut the
+    // month at the SERVER's midnight — an hour late in Lagos.
     const { svc } = makeService();
     const out = await svc.overview(director);
     expect(out.period.key).toBe("month");
-    // Asserted on the WINDOW's start, not its length: on the 1st of a month the
-    // month-to-date window is only a few hours long, so a duration assertion here
-    // fails once a month for a reason that has nothing to do with the behaviour.
-    expect(out.period.from.getDate()).toBe(1);
-    expect(out.period.from.getHours()).toBe(0);
+    // The fixture campuses carry no region, so they resolve to the platform's
+    // home country. Asserted on the window's START, never its length: on the 1st
+    // the month-to-date window is a few hours long.
+    const tz = resolveRegion({}).timezone;
+    const firstOfMonth = `${schoolDateString(tz).slice(0, 7)}-01`;
+    expect(new Date(out.period.from).toISOString()).toBe(schoolMidnight(firstOfMonth, tz).toISOString());
+  });
+
+  it("treats an unknown period as the default rather than failing", async () => {
+    const { svc } = makeService();
+    const out = await svc.overview(director, { period: "fortnight" });
+    expect(out.period.key).toBe("month");
+  });
+
+  it("flags a campus with NO subscription instead of reporting it ACTIVE", async () => {
+    // A campus with no row is on the STANDARD floor, not paid up. It used to
+    // default to "ACTIVE" here and hide the gap.
+    const { svc } = makeService({
+      client: {
+        schoolSubscription: {
+          findMany: jest.fn().mockResolvedValue([{ schoolId: B, plan: "STANDARD", status: "ACTIVE", currentPeriodEnd: null }]),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+      },
+    });
+    const out = await svc.overview(director);
+    const alpha = out.schools.find((s) => s.name === "Alpha Campus")!;
+    expect(alpha.subscriptionStatus).toBe(GROUP_NO_SUBSCRIPTION);
+    expect(alpha.flags).toContain("BILLING");
+    expect((await svc.schoolDetail(director, A)).flags).toContain("BILLING");
   });
 
   it("returns an empty group without querying campuses", async () => {
@@ -213,6 +241,33 @@ describe("GroupService.schoolDetail", () => {
       expect.anything(),
     );
   });
+});
+
+describe("the campus page reports the row it was clicked from", () => {
+  // The overview computed its figures one way and the campus page another, and
+  // the web never even sent the campus page a period. Both now call one
+  // `campusFigures`; this holds them to it for every period a director can pick.
+  for (const { key } of GROUP_PERIODS) {
+    it(`agrees on every figure and flag over "${key}"`, async () => {
+      const { svc } = makeService();
+      const row = (await svc.overview(director, { period: key })).schools.find((s) => s.schoolId === A)!;
+      const detail = await svc.schoolDetail(director, A, { period: key });
+      expect(detail.period.key).toBe(key);
+      expect({
+        attendancePct: detail.attendancePct,
+        registersTaken: detail.registersTaken,
+        money: detail.money,
+        subscriptionStatus: detail.subscriptionStatus,
+        flags: detail.flags,
+      }).toEqual({
+        attendancePct: row.attendancePct,
+        registersTaken: row.registersTaken,
+        money: row.money,
+        subscriptionStatus: row.subscriptionStatus,
+        flags: row.flags,
+      });
+    });
+  }
 });
 
 describe("GroupService.overviewCsv", () => {

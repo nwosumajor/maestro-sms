@@ -12,7 +12,8 @@
 import * as React from "react";
 import { useFormat } from "@/components/shell/RegionProvider";
 import Link from "next/link";
-import type { GroupFlag, GroupOverviewDto, Serialized } from "@sms/types";
+import type { GroupOverviewDto, Serialized } from "@sms/types";
+import { GROUP_FLAG_LABELS, GROUP_LOW_ATTENDANCE_PCT, GROUP_NO_SUBSCRIPTION, GROUP_PERIODS } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,27 +21,16 @@ import { money } from "@/lib/format";
 
 type Data = Serialized<GroupOverviewDto>;
 
-const FLAG_LABEL: Record<GroupFlag, string> = {
-  DISABLED: "Disabled",
-  BILLING: "Billing",
-  NO_STAFF: "No staff",
-  NO_REGISTERS: "No registers",
-  LOW_ATTENDANCE: "Low attendance",
-};
-
-const PERIODS = [
-  { key: "today", label: "Today" },
-  { key: "week", label: "7 days" },
-  { key: "month", label: "This month" },
-  { key: "term", label: "90 days" },
-] as const;
-
 export function GroupBoard({ data }: { data: Data }) {
   // Dates follow the SCHOOL's timezone, not the platform's.
   const { shortDate } = useFormat();
   const currencies = Object.keys(data.totals.byCurrency).sort();
   const qs = (over: Record<string, string>) =>
     new URLSearchParams({ groupId: data.groupId, period: data.period.key, ...over }).toString();
+  // The campus page is asked the SAME period this list was computed over. It
+  // used to be linked bare, so a director on "90 days" clicked through to "this
+  // month" and the flag they clicked on could vanish on arrival.
+  const campusHref = (schoolId: string) => `/group/${schoolId}?${qs({})}`;
 
   return (
     <div className="space-y-6">
@@ -59,10 +49,10 @@ export function GroupBoard({ data }: { data: Data }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 rounded-md border p-1">
-            {PERIODS.map((p) => (
+            {GROUP_PERIODS.map((p) => (
               <Link key={p.key} href={`/group?${qs({ period: p.key })}`}>
                 <Button size="sm" variant={p.key === data.period.key ? "default" : "ghost"}>
-                  {p.label}
+                  {p.short}
                 </Button>
               </Link>
             ))}
@@ -106,7 +96,7 @@ export function GroupBoard({ data }: { data: Data }) {
                 </CardDescription>
                 <CardTitle className="tnum text-2xl">{money(data.totals.byCurrency[c].collectedMinor, c)}</CardTitle>
                 <CardDescription className="tnum">
-                  {money(data.totals.byCurrency[c].outstandingMinor, c)} outstanding
+                  {money(data.totals.byCurrency[c].outstandingMinor, c)} owed now
                 </CardDescription>
               </CardHeader>
             </Card>
@@ -134,7 +124,7 @@ export function GroupBoard({ data }: { data: Data }) {
                   <th className="px-4 py-2 text-right font-medium">Staff</th>
                   <th className="px-4 py-2 text-right font-medium">Attendance</th>
                   <th className="px-4 py-2 text-right font-medium">Collected</th>
-                  <th className="px-4 py-2 text-right font-medium">Outstanding</th>
+                  <th className="px-4 py-2 text-right font-medium">Owed now</th>
                   <th className="px-4 py-2 font-medium">Plan</th>
                   <th className="px-4 py-2"></th>
                 </tr>
@@ -143,14 +133,14 @@ export function GroupBoard({ data }: { data: Data }) {
                 {data.schools.map((s) => (
                   <tr key={s.schoolId} className="border-b last:border-0 align-top hover:bg-accent/40">
                     <td className="px-4 py-2.5">
-                      <Link href={`/group/${s.schoolId}`} className="font-medium text-primary hover:underline">
+                      <Link href={campusHref(s.schoolId)} className="font-medium text-primary hover:underline">
                         {s.name}
                       </Link>
                       {s.flags.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1">
                           {s.flags.map((f) => (
                             <Badge key={f} variant={f === "DISABLED" || f === "BILLING" ? "destructive" : "outline"}>
-                              {FLAG_LABEL[f]}
+                              {GROUP_FLAG_LABELS[f]}
                             </Badge>
                           ))}
                         </div>
@@ -166,7 +156,7 @@ export function GroupBoard({ data }: { data: Data }) {
                       ) : s.attendancePct == null ? (
                         <span className="text-muted-foreground">—</span>
                       ) : (
-                        <span className={s.attendancePct < 85 ? "font-medium text-destructive" : ""}>
+                        <span className={s.attendancePct < GROUP_LOW_ATTENDANCE_PCT ? "font-medium text-destructive" : ""}>
                           {s.attendancePct}%
                         </span>
                       )}
@@ -191,7 +181,7 @@ export function GroupBoard({ data }: { data: Data }) {
                       {s.plan}
                       {s.subscriptionStatus !== "ACTIVE" && (
                         <Badge variant="destructive" className="ml-1.5">
-                          {s.subscriptionStatus}
+                          {s.subscriptionStatus === GROUP_NO_SUBSCRIPTION ? "No subscription" : s.subscriptionStatus}
                         </Badge>
                       )}
                       {s.currentPeriodEnd && (
@@ -199,7 +189,7 @@ export function GroupBoard({ data }: { data: Data }) {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      <Link href={`/group/${s.schoolId}`} className="text-xs text-primary hover:underline">
+                      <Link href={campusHref(s.schoolId)} className="text-xs text-primary hover:underline">
                         Open
                       </Link>
                     </td>

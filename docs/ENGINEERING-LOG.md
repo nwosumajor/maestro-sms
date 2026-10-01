@@ -19628,3 +19628,52 @@ faults again fails four cases.
 // was false and nothing ran. It now asserts the scenario produced its subject.
 // And the report card's own figures are reconciled, not just found: recorded +
 // not recorded = times school opened (27 + 1 = 28), read off the PDF.
+
+### The group console told one campus three ways — and the fix it already had was inert
+
+A proprietor's console has three readers of the same campus: the overview row,
+the campus page, and the CSV. Each computed its own figures and they disagreed.
+- **The period never reached the campus page.** The overview linked to
+  `/group/<id>` bare and the page called the API with no query, so a director on
+  "90 days" clicked through to "this month". An earlier fix had made the API
+  ACCEPT a period, and `a-flag-that-vanished-when-you-clicked-it` checked the
+  API's spelling of it, so it passed for as long as it existed while the web
+  never sent one. Same class as the subject picker that never sent a
+  `subjectId`: the server half was INERT.
+- **Two attendance rules, both claiming the report card's.** The overview counted
+  EXCUSED as attending and the campus page did not, so one campus showed two
+  rates. The platform rule is `attendanceRatePct` (present + late), and the
+  overview's unit test asserted the WRONG one. This is the third comment in this
+  codebase to claim agreement with the report card while computing something else.
+- **Money that was not the finance report's money.** Collected counted kind
+  PAYMENT only, so a refund never came off and credit or scholarship never went
+  on. Outstanding subtracted that from the campus's open invoice total in one
+  sum, so a scholarship on one bill left the bill looking fully owed. The
+  campus page's money ignored the period entirely.
+- **The server's midnight.** Windows were cut with `setHours(0)` on the server,
+  so a Toronto campus's month started four hours early and a Lagos one an hour
+  late. A campus with no subscription row reported "ACTIVE".
+
+Every figure now comes from ONE `campusFigures` (`group/campus-metrics.ts`),
+which runs one grouped query per figure across a SET of campuses, each over its
+own window in its own zone. The campus page is the overview's question asked
+about one campus, so they agree by construction. "Owed now" is each open
+invoice's positive balance net of refunds — the receivables figure on the
+campus's own finance report. It reads ISSUED/PARTIALLY_PAID only, which is
+exact because every writer derives PAID from net paid, and keeps the read
+bounded by open work rather than billing history. `schoolMidnight` (region.ts)
+is the new inverse of `schoolDateString`, for a school-local day that bounds a
+timestamp. Period list, threshold, flag labels and the no-subscription status
+are shared constants, so the page cannot colour a figure red at a different
+line from the flag.
+`campus-figures.e2e-spec.ts` drives the real SQL over rows where each old
+defect gives a different number (80% not 90; 135,000 collected not 130,000;
+75,000 owed not 80,000; a payment at 02:00Z on the 1st is last month in
+Toronto). It checks overview and campus page agree for every period through the
+real queries. Reintroducing each of the four defects fails the test aimed at it.
+// GOTCHA: **the unit double could not have caught the inert period.** It
+// ignores the date window, so a campus page asking for the wrong period still
+// "agreed". Agreement across a window is a property of the SQL; prove it there.
+// GOTCHA: `a-money-total-says-what-currency-it-is` caught the trend query
+// FILTERING on currency without RETURNING it. Right: a figure that knows its
+// currency must say it.

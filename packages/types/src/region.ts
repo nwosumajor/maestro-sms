@@ -322,3 +322,42 @@ export function schoolMinutesOfDay(timezone: string, at: Date = new Date()): num
 export function daysBetweenSchoolDates(a: Date, b: Date): number {
   return Math.floor((b.getTime() - a.getTime()) / 86_400_000);
 }
+
+/**
+ * The INSTANT at which the school's own clock reads 00:00 on `localDate`
+ * (`YYYY-MM-DD`) — the inverse of `schoolDateString`.
+ *
+ * Needed wherever a school-local DAY bounds a TIMESTAMP column. `schoolToday`
+ * answers the day; a payment's `paidAt` is an instant, and "paid since the
+ * start of this month" means since midnight AT THE SCHOOL, not midnight UTC
+ * (an hour late in Lagos, eight hours early in Toronto). Computed from the
+ * zone's offset at that moment via Intl, twice, so a daylight-saving change on
+ * the day itself lands on the right side.
+ */
+export function schoolMidnight(localDate: string, timezone: string): Date {
+  const target = Date.parse(`${localDate}T00:00:00.000Z`);
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const offsetAt = (t: number): number => {
+      const parts = fmt.formatToParts(new Date(t));
+      const n = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? "0");
+      const wall = Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute"), n("second"));
+      return wall - (t - (t % 1000));
+    };
+    let t = target - offsetAt(target);
+    t = target - offsetAt(t);
+    return new Date(t);
+  } catch {
+    // Same fail-safe as the day: an invalid zone falls back to UTC.
+    return new Date(target);
+  }
+}
