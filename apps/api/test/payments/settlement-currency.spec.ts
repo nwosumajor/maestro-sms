@@ -54,7 +54,13 @@ function makeService(invoiceCurrency = "GHS") {
     school: { findFirst: jest.fn().mockResolvedValue({ paystackSubaccountCode: "ACCT_test" }) },
   } as unknown as TenantTx;
 
-  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+  // BOTH halves of the real database. A refusal looks up finance on the
+  // read-only path; without it here the alert threw, was swallowed by the
+  // service's own catch, and every case passed with the alert never sent.
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const svc = new InvoiceSettlementService(db as never, audit as never, notifications as never, { isActive: async () => true } as never);
@@ -87,6 +93,19 @@ describe("currency guard", () => {
     await svc.applyOnlinePayment({ ...base, currency: "NGN" });
     expect(notifications.enqueue).not.toHaveBeenCalled();
     expect(tx.invoice.update).not.toHaveBeenCalled();
+  });
+
+  it("TELLS finance, by name, that money arrived and was not posted", async () => {
+    // A refusal is money at a gateway that is not on the ledger — somebody has
+    // to refund it or re-bill. A log line alone is recorded where nobody reads.
+    const { svc, notifications, tx } = makeService("GHS");
+    (tx.userRole.findMany as jest.Mock).mockResolvedValue([{ userId: "u-bursar" }]);
+    await svc.applyOnlinePayment({ ...base, currency: "NGN" });
+    const alerts = (notifications.enqueue as jest.Mock).mock.calls.map((c) => c[1]);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ recipientId: "u-bursar", type: "OPERATOR_ALERT" });
+    expect(alerts[0].body).toContain("PSK-REF-1");
+    expect(alerts[0].body).toContain("NOT recorded");
   });
 
   it("posts normally when the currencies agree", async () => {
