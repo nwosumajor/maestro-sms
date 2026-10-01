@@ -50,6 +50,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { publicWebUrl } from "../common/public-url";
+import { invoiceStatusForNet } from "./net-paid";
 
 // SECURITY: no super_admin. A platform user has NO standing role scope over a
 // tenant's data — the supported route to it is impersonation, which is step-up
@@ -487,7 +488,7 @@ export class PaymentPlansService {
       const newPaid = paid + apply;
       await tx.invoice.update({
         where: { id: invoiceId },
-        data: { status: newPaid >= inv.totalMinor ? "PAID" : "PARTIALLY_PAID" },
+        data: { status: invoiceStatusForNet(newPaid, inv.totalMinor) },
       });
       await this.audit.record(
         {

@@ -74,6 +74,16 @@ const ALLOWED: Record<string, string> = {
   "POST /hr/recruitment/applicants/:id/stage": "Moves a candidate through the pipeline; grants them nothing.",
   "POST /hr/employment/changes/:id/decide": "Maker-checker already: a different person decides, and the pay change itself goes through the salary path, which IS step-up gated at both ends.",
   "POST /operator/payment-channels/health/run": "Read-only probe of the payment gateways; changes nothing.",
+  // `fee.reconcile.run` gained a step-up route — re-deriving ONE invoice's
+  // status is a targeted write to a school's financial record. Its siblings run
+  // the nightly sweeps on demand: the same work the timer does unattended, which
+  // re-authenticating to repeat by hand would protect nothing.
+  "POST /operator/ledger-integrity/run": "Runs the nightly ledger check now; it reports and changes nothing.",
+  "POST /fees/reconciliation/run":
+    "Runs the nightly reconciliation now; it posts only charges a gateway already settled, idempotent on the gateway reference.",
+  "POST /payments/mobile-money/recovery/run":
+    "Runs the hourly mobile-money recovery now; it settles only from OUR intent amounts, as the timer does.",
+  "POST /notifications/credits/reconcile/run": "Runs the message-credit reconciliation the timer runs; it moves no money.",
   "POST /operator/payment-channels/:channel/test": "Sends a test call to a gateway; moves no money.",
   "POST /billing/addons/:module/cancel":
     "STOPS a recurring charge. Buying an add-on is step-up gated because it costs money; " +

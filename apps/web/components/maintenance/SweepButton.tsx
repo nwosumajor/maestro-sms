@@ -84,6 +84,27 @@ const DESCRIBE: Record<string, (r: unknown) => string> = {
           .join(" "),
   ),
 
+  "operator/ledger-integrity/run": fmt<{
+    scanned: number;
+    mismatched: number;
+    paidButOwing: number;
+    openButSettled: number;
+    partialMislabelled: number;
+    schools: number;
+  }>((r) =>
+    r.mismatched === 0
+      ? `Checked ${r.scanned.toLocaleString()} ${plural(r.scanned, "invoice")} — every status agrees with its payments.`
+      : [
+          `Checked ${r.scanned.toLocaleString()}; ${r.mismatched} disagree with their payments, across ${r.schools} ${plural(r.schools, "school")}.`,
+          r.paidButOwing > 0 ? `${r.paidButOwing} marked paid but still owed.` : "",
+          r.openButSettled > 0 ? `${r.openButSettled} marked open but already settled.` : "",
+          r.partialMislabelled > 0 ? `${r.partialMislabelled} with the wrong part-paid label.` : "",
+          "Reload to see them listed.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+  ),
+
   "documents/retention/run": fmt<{
     applications: number;
     filesPurged: number;

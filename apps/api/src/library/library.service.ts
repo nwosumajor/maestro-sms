@@ -43,6 +43,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { dateWindow } from "../common/status-filter";
 import { netPaidMinor } from "../fees/net-paid";
+import { invoiceStatusForNet } from "../fees/net-paid";
 
 type Json = Record<string, string>;
 
@@ -730,7 +731,8 @@ export class LibraryService {
     // `kind: "PAYMENT"` excluded refunds entirely, so a refunded invoice read as
     // more settled than it is — and this decides whether it is marked PAID.
     const settled = await netPaidMinor(tx, invoiceId);
-    const status = settled >= invoice.totalMinor ? "PAID" : settled > 0 ? "PARTIALLY_PAID" : invoice.status;
+    // Nothing settled keeps the CURRENT status: a fine must not issue a DRAFT.
+    const status = invoiceStatusForNet(settled, invoice.totalMinor, invoice.status);
     if (status !== invoice.status) {
       await tx.invoice.update({ where: { id: invoiceId }, data: { status } });
     }

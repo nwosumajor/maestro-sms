@@ -26,6 +26,7 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { SchoolStatusService } from "../foundation/school-status.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { invoiceStatusForNet } from "./net-paid";
 
 /** Who is told when money reached a gateway and we declined to post it. Same
  *  set the dispute alerts use — whoever reconciles the bank. */
@@ -299,7 +300,7 @@ export class InvoiceSettlementService {
         (n: number, x: { amountMinor: number; kind: string }) => n + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor),
         0,
       );
-      const status = paid >= inv.totalMinor ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : "ISSUED";
+      const status = invoiceStatusForNet(paid, inv.totalMinor);
       await tx.invoice.update({ where: { id: invoiceId }, data: { status } });
       await this.audit.record(
         {

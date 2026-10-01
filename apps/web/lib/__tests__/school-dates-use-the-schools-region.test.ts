@@ -46,6 +46,7 @@ const PLATFORM_TIMED: Record<string, string> = {
   "app/(app)/operator/tenants/page.tsx": "cross-tenant registry read by the platform owner",
   "app/(app)/group/[schoolId]/page.tsx": "a director comparing campuses needs one clock, not one per campus",
   "components/operator/PlatformAnalytics.tsx": "platform-wide analytics, rendered for the owner",
+  "components/operator/LedgerMismatchTable.tsx": "cross-tenant ledger-integrity list read by the platform owner — one clock across every school",
 };
 
 function sources(dir: string, out: string[] = []): string[] {

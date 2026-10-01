@@ -60,6 +60,7 @@ import { currencyDecimals, formatMoney, resolveRegion, schoolDateString, schoolT
 import { BrandingService } from "../branding/branding.service";
 import { dateWindow } from "../common/status-filter";
 import { createPdfDocument } from "../common/pdf-document";
+import { invoiceStatusForNet } from "./net-paid";
 
 export const FEE_OPS_QUEUE = "fee-ops";
 export const LATE_FEE_JOB = "fee-late-fee-sweep";
@@ -302,7 +303,7 @@ export class FeeOpsService {
       const newTotal = afterAdjustment.totalMinor;
       await tx.invoice.update({
         where: { id: row.invoiceId },
-        data: { status: paid >= newTotal ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : "ISSUED" },
+        data: { status: invoiceStatusForNet(paid, newTotal) },
       });
       const updated = await tx.invoiceAdjustment.findFirstOrThrow({ where: { id: adjustmentId } });
       await this.audit.record(

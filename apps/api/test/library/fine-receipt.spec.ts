@@ -225,7 +225,9 @@ describe("a fine reaches the ledger", () => {
   it("moves the invoice out of DRAFT so receivables stop reporting a settled debt", () => {
     expect(src).toMatch(/settleInvoiceIfPaid/);
     const settle = src.slice(src.indexOf("private async settleInvoiceIfPaid"));
-    expect(settle).toMatch(/"PAID"/);
-    expect(settle).toMatch(/"PARTIALLY_PAID"/);
+    // Through THE rule (`invoiceStatusForNet`), never a private spelling of it —
+    // and keeping the current status when nothing is settled, so a fine does not
+    // issue a DRAFT. The rule itself is pinned in one-rule-for-paid.spec.
+    expect(settle).toMatch(/invoiceStatusForNet\(settled, invoice\.totalMinor, invoice\.status\)/);
   });
 });

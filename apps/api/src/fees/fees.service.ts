@@ -39,6 +39,7 @@ import { PaystackService } from "../payments/paystack.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { dateWindow } from "../common/status-filter";
 import { netPaidByInvoice } from "./net-paid";
+import { invoiceStatusForNet } from "./net-paid";
 
 /** Roles that see ALL billing rows in the tenant. */
 /** Invoices per page. One issue run for a class is ~30-40 rows, so a page shows a
@@ -1372,7 +1373,7 @@ export class FeesService {
 
   /** Recompute invoice status from a net-paid figure (PAID / PARTIALLY_PAID / ISSUED). */
   private async applyToInvoiceStatus(tx: TenantTx, inv: { id: string; totalMinor: number }, net: number) {
-    const status: InvoiceStatusValue = net >= inv.totalMinor ? "PAID" : net > 0 ? "PARTIALLY_PAID" : "ISSUED";
+    const status: InvoiceStatusValue = invoiceStatusForNet(net, inv.totalMinor);
     return tx.invoice.update({ where: { id: inv.id }, data: { status } });
   }
 

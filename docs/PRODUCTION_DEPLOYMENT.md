@@ -674,6 +674,14 @@ or a scaling loop (cap max task count).
 [ ] CloudTrail ON (account-wide, all regions) — it's ~$0 at this volume and
     the first thing forensics needs
 [ ] GuardDuty ON (~$5–15/mo at launch volume) — cheap managed threat detection
+[ ] Database audit for the PRIVILEGED roles: pgaudit in the RDS parameter group
+    (shared_preload_libraries=pgaudit, pgaudit.log='write,ddl', pgaudit.role
+    covering the migrate/retention roles), so a direct write that bypasses the
+    app is attributable. The app audits its own writes; a payment deleted by
+    SQL is invisible to it (it is how an invoice was found PAID with money
+    owed). NOT YET VERIFIED on RDS — apply and confirm a test DELETE is logged.
+[ ] Nobody holds the superuser/migrate credential day to day: break-glass only,
+    every use recorded. Run /operator/ledger-integrity after any manual SQL.
 [ ] Owner + all platform staff: TOTP enforced; step-up-guarded endpoints tested
 [ ] Demo/seed accounts removed or repassworded (Step 6)
 [ ] Quarterly access review: who can assume the admin role, who's in GitHub

@@ -1181,6 +1181,10 @@
       "kind": "ui",
       "note": "Background jobs console at /operator/jobs \u2014 every scheduled job, when it last ran, what it reported, and whether it is late. Thirteen jobs ran on timers with nothing recording that they had; a scheduler that stops does not error, it goes quiet."
     },
+    "GET /operator/ledger-integrity": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "GET /operator/message-credits": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2750,6 +2754,14 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /operator/impersonate": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/ledger-integrity/:p/rederive": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/ledger-integrity/run": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },

@@ -135,6 +135,7 @@ export * from "./elevation";
 export * from "./dto/assessment";
 export * from "./dto/branding";
 export * from "./dto/group";
+export * from "./dto/ledger-integrity";
 export * from "./dto/cbt";
 export * from "./demographics";
 export * from "./sis-limits";

@@ -43,11 +43,33 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** Is position `at` inside an object literal introduced by `data:` (at any depth)? */
+export function insideDataBlock(src: string, at: number): boolean {
+  let depth = 0;
+  for (let i = at - 1; i >= 0 && at - i < 4000; i -= 1) {
+    const ch = src[i];
+    if (ch === "}") depth += 1;
+    else if (ch === "{") {
+      if (depth > 0) depth -= 1;
+      else if (/\bdata:\s*$/.test(src.slice(Math.max(0, i - 20), i))) return true;
+    }
+  }
+  return false;
+}
+
 describe("an invoice total is never assigned from an earlier read", () => {
   const files = sourceFiles(join(__dirname, "../../src"));
 
   it("scanned a believable number of sources", () => {
     expect(files.length).toBeGreaterThan(200);
+  });
+
+  it("tells a write from a copy", () => {
+    // The narrowing must not blind it: a write is still caught, a copy is not.
+    const write = `await tx.invoice.update({ where: { id }, data: { totalMinor: inv.totalMinor + extra } });`;
+    const copy = `return { invoiceId, totalMinor: invoice.totalMinor };`;
+    expect(insideDataBlock(write, write.indexOf("totalMinor"))).toBe(true);
+    expect(insideDataBlock(copy, copy.indexOf("totalMinor"))).toBe(false);
   });
 
   it("no write assigns a total derived from a `.totalMinor` already in hand", () => {
@@ -61,7 +83,11 @@ describe("an invoice total is never assigned from an earlier read", () => {
       // a freshly-summed local.
       for (const m of src.matchAll(/totalMinor:\s*([^,\n}]+)/g)) {
         const expr = m[1];
-        if (/\.totalMinor/.test(expr)) {
+        // Only a WRITE: the field must sit inside a `data: { … }` block. A
+        // response DTO or audit metadata carrying `totalMinor: invoice.totalMinor`
+        // copies a figure for display and writes nothing — flagging it made the
+        // gate over-wide, which teaches its next reader to add an exemption.
+        if (/\.totalMinor/.test(expr) && insideDataBlock(src, m.index ?? 0)) {
           const line = src.slice(0, m.index ?? 0).split("\n").length;
           offenders.push(`${rel}:${line} -> totalMinor: ${expr.trim()}`);
         }

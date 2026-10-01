@@ -85,6 +85,15 @@ export const SCHEDULED_JOBS = [
     manual: { path: "fees/reminders/run", permission: "fee.manage", scope: "SCHOOL", where: "Fees → reports" },
   },
   {
+    key: "fees.ledgerIntegrity",
+    label: "Invoice status vs ledger",
+    // DAILY at 04:40 (`DEFAULT_LEDGER_INTEGRITY_CRON`), after reconciliation has
+    // posted anything it recovered. Finds invoices whose status label disagrees
+    // with their payments; reports, never moves money.
+    everyMinutes: 1440,
+    manual: { path: "operator/ledger-integrity/run", permission: "fee.reconcile.run", scope: "PLATFORM" },
+  },
+  {
     key: "payments.mobileMoneyRecovery",
     label: "Mobile-money recovery",
     everyMinutes: 60,
