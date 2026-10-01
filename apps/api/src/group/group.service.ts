@@ -11,6 +11,9 @@
 import { Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { csvCell } from "../common/csv";
 import type {
+  GroupAdminDto,
+  GroupDirectorCandidatePageDto,
+  GroupWriteResultDto,
   GroupOverviewDto,
   GroupPeriodDto,
   GroupPeriodKey,
@@ -21,7 +24,16 @@ import type {
 } from "@sms/types";
 // VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
 import { Prisma } from "@sms/db";
-import { attendanceRatePct, DEFAULT_PLAN, resolveRegion, schoolDateString } from "@sms/types";
+import {
+  attendanceRatePct,
+  currencyDecimals,
+  DEFAULT_PLAN,
+  MODULES,
+  NON_SCHOOL_STAFF_ROLE_NAMES,
+  resolveRegion,
+  schoolDateString,
+  toMajor,
+} from "@sms/types";
 import { headcountBySchool } from "../operator/operator-people";
 import {
   AUDIT_LOG_SERVICE,
@@ -31,15 +43,21 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import {
   campusFigures,
   campusWindow,
   flagsFor,
+  loadCampuses,
   periodKeyOf,
   periodLabelOf,
   subscriptionStatusOf,
   type Campus,
+  type CampusFigures,
 } from "./campus-metrics";
+
+/** How many director candidates one search returns; the total says if there are more. */
+const DIRECTOR_CANDIDATE_PAGE = 20;
 
 /** The registry columns every campus read needs: identity, status and region. */
 const CAMPUS_SELECT = {
@@ -58,6 +76,7 @@ export class GroupService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly entitlements: ModuleEntitlementService,
   ) {}
 
   private client() {
@@ -75,9 +94,26 @@ export class GroupService {
     });
   }
 
-  /** The campus in its OWN zone — `resolveRegion` falls back to the country's. */
-  private campusOf(school: { id: string; country: string | null; timezone: string | null; currency: string | null }): Campus {
-    return { id: school.id, timezone: resolveRegion(school).timezone };
+  /** The figures the flags are computed from — one shape for both pages. */
+  private flagInputs(
+    school: { status: string },
+    sub: { status: string } | null | undefined,
+    head: { students: number; staff: number },
+    fig: CampusFigures,
+    campus: Campus,
+  ) {
+    return {
+      active: school.status === "ACTIVE",
+      subscriptionStatus: subscriptionStatusOf(sub),
+      students: head.students,
+      staff: head.staff,
+      registersTaken: fig.registersTaken,
+      registersExpected: fig.registersExpected,
+      registersCovered: fig.registersCovered,
+      registerCoveragePct: fig.registerCoveragePct,
+      hasCurrentTerm: campus.currentTerm != null,
+      attendancePct: fig.attendancePct,
+    };
   }
 
   /**
@@ -86,8 +122,9 @@ export class GroupService {
    * label is what every campus shares.
    */
   private periodOf(key: GroupPeriodKey, campuses: Campus[], now: Date): GroupPeriodDto {
-    const starts = campuses.map((c) => campusWindow(key, c.timezone, now).fromInstant.getTime());
-    const from = starts.length > 0 ? new Date(Math.min(...starts)) : campusWindow(key, "UTC", now).fromInstant;
+    const starts = campuses.map((c) => campusWindow(key, c, now).fromInstant.getTime());
+    const utc: Campus = { id: "", timezone: "UTC", schoolDays: [], currentTerm: null, datedTerms: [] };
+    const from = starts.length > 0 ? new Date(Math.min(...starts)) : campusWindow(key, utc, now).fromInstant;
     return { from, to: now, label: periodLabelOf(key), key };
   }
 
@@ -148,7 +185,8 @@ export class GroupService {
       // operator console and the school analytics use.
       headcountBySchool(client, schoolIds),
     ]);
-    const campuses = schools.map((s) => this.campusOf(s));
+    const campuses = await loadCampuses(client, schools);
+    const campusOf = new Map(campuses.map((c) => [c.id, c]));
     const figures = await campusFigures(client, campuses, key, now);
 
     const subOf = new Map(subs.map((s) => [s.schoolId, s]));
@@ -158,19 +196,14 @@ export class GroupService {
       const sub = subOf.get(school.id);
       const head = headcounts.get(school.id) ?? { students: 0, staff: 0, parents: 0 };
       const fig = figures.get(school.id)!;
-      const base = {
-        active: school.status === "ACTIVE",
-        subscriptionStatus: subscriptionStatusOf(sub),
-        students: head.students,
-        staff: head.staff,
-        registersTaken: fig.registersTaken,
-        attendancePct: fig.attendancePct,
-      };
+      const base = this.flagInputs(school, sub, head, fig, campusOf.get(school.id)!);
       return {
         schoolId: school.id,
         name: school.name,
         slug: school.slug,
         ...base,
+        window: fig.window,
+        previous: fig.previous,
         money: fig.money,
         plan: sub?.plan ?? DEFAULT_PLAN,
         currentPeriodEnd: sub?.currentPeriodEnd ?? null,
@@ -187,12 +220,13 @@ export class GroupService {
         a.name.localeCompare(b.name),
     );
 
-    const byCurrency: Record<string, { collectedMinor: number; outstandingMinor: number }> = {};
+    const byCurrency: Record<string, { collectedMinor: number; outstandingMinor: number; overdueMinor: number }> = {};
     for (const s of perSchool) {
       for (const m of s.money) {
-        const slot = (byCurrency[m.currency] ??= { collectedMinor: 0, outstandingMinor: 0 });
+        const slot = (byCurrency[m.currency] ??= { collectedMinor: 0, outstandingMinor: 0, overdueMinor: 0 });
         slot.collectedMinor += m.collectedMinor;
         slot.outstandingMinor += m.outstandingMinor;
+        slot.overdueMinor += m.overdueMinor;
       }
     }
 
@@ -246,7 +280,7 @@ export class GroupService {
 
     const now = new Date();
     const key = periodKeyOf(opts.period);
-    const campus = this.campusOf(school);
+    const [campus] = await loadCampuses(client, [school]);
     const trendCurrency = resolveRegion(school).currency;
 
     // The six-month trend, in the CAMPUS's calendar: the months are its months
@@ -310,14 +344,7 @@ export class GroupService {
       };
     });
 
-    const base = {
-      active: school.status === "ACTIVE",
-      subscriptionStatus: subscriptionStatusOf(sub),
-      students: head.students,
-      staff: head.staff,
-      registersTaken: fig.registersTaken,
-      attendancePct: fig.attendancePct,
-    };
+    const base = this.flagInputs(school, sub, head, fig, campus);
 
     await this.logRead(p, "group.school.read", schoolId, {
       group: owning.group.name,
@@ -334,6 +361,12 @@ export class GroupService {
       groupName: owning.group.name,
       attendancePct: base.attendancePct,
       registersTaken: base.registersTaken,
+      registersExpected: base.registersExpected,
+      registersCovered: base.registersCovered,
+      registerCoveragePct: base.registerCoveragePct,
+      hasCurrentTerm: base.hasCurrentTerm,
+      window: fig.window,
+      previous: fig.previous,
       students: head.students,
       staff: head.staff,
       parents: head.parents,
@@ -362,26 +395,50 @@ export class GroupService {
    */
   async overviewCsv(p: Principal, opts: { groupId?: string; period?: string } = {}): Promise<string> {
     const data = await this.overview(p, opts);
+    // MAJOR units, written with the currency's own decimals: a board pack is read
+    // by people, and "450000000" kobo beside "4500" dollars-in-cents was a column
+    // nobody could read without a calculator. Each row names its currency.
+    const amount = (minor: number, currency: string) =>
+      currency ? toMajor(minor, currency).toFixed(currencyDecimals(currency)) : "";
     const header = [
-      "School", "Status", "Students", "Staff", "Attendance %", "Registers taken",
-      "Currency", "Collected (minor)", "Outstanding (minor)", "Plan", "Billing", "Flags",
+      "School", "Status", "From", "To", "Window", "Students", "Staff",
+      "Attendance %", "Previous attendance %", "Registers taken", "Registers expected", "Registers covered",
+      "Register coverage %",
+      "Currency", "Collected", "Previous collected", "Owed now", "Overdue", "Overdue 60+ days",
+      "Plan", "Billing", "Flags",
     ];
+    const blank = (n: number | null) => (n == null ? "" : String(n));
     const rows: string[][] = [];
     for (const s of data.schools) {
-      // A campus with no invoices still gets a row — an absent school reads as a
+      // A campus with no money still gets a row — an absent school reads as a
       // problem, not as one with nothing to report.
-      const money = s.money.length > 0 ? s.money : [{ currency: "", collectedMinor: 0, outstandingMinor: 0 }];
+      const money =
+        s.money.length > 0
+          ? s.money
+          : [{ currency: "", collectedMinor: 0, outstandingMinor: 0, overdueMinor: 0, aging: { currentMinor: 0, d1_30Minor: 0, d31_60Minor: 0, d60plusMinor: 0 } }];
       for (const m of money) {
+        const before = s.previous.collected.find((c) => c.currency === m.currency)?.collectedMinor ?? 0;
         rows.push([
           s.name,
           s.active ? "ACTIVE" : "DISABLED",
+          s.window.fromDay,
+          s.window.toDay,
+          s.window.basis,
           String(s.students),
           String(s.staff),
-          s.attendancePct == null ? "" : String(s.attendancePct),
+          blank(s.attendancePct),
+          blank(s.previous.attendancePct),
           String(s.registersTaken),
+          blank(s.registersExpected),
+          // The count beside the %, so 2 of 589 is not read as none at all.
+          blank(s.registersCovered),
+          blank(s.registerCoveragePct),
           m.currency,
-          String(m.collectedMinor),
-          String(m.outstandingMinor),
+          amount(m.collectedMinor, m.currency),
+          amount(before, m.currency),
+          amount(m.outstandingMinor, m.currency),
+          amount(m.overdueMinor, m.currency),
+          amount(m.aging.d60plusMinor, m.currency),
           s.plan,
           s.subscriptionStatus,
           s.flags.join(" "),
@@ -407,7 +464,23 @@ export class GroupService {
 
   // --- operator management (privileged, audited) ------------------------------
 
-  async listGroups() {
+  /**
+   * Who may be named a director: an ACTIVE member of STAFF at one of the
+   * group's member schools — the staff definition the headcount uses.
+   *
+   * SECURITY: directorship opens a cross-campus read. It used to accept any
+   * user whose email matched at a member school — a pupil or a parent included —
+   * and a leaver kept it. A director is one of the group's own staff, still here.
+   */
+  private eligibleDirectorWhere(memberSchoolIds: string[]): Prisma.UserWhereInput {
+    return {
+      schoolId: { in: memberSchoolIds },
+      status: "ACTIVE",
+      roles: { some: { role: { name: { notIn: [...NON_SCHOOL_STAFF_ROLE_NAMES] } } } },
+    };
+  }
+
+  async listGroups(): Promise<GroupAdminDto[]> {
     const client = this.client();
     const groups = await client.schoolGroup.findMany({
       include: { members: true, directors: true },
@@ -417,15 +490,36 @@ export class GroupService {
     const userIds = [...new Set(groups.flatMap((g) => g.directors.map((d) => d.userId)))];
     const [schools, users] = await Promise.all([
       client.school.findMany({ where: { id: { in: schoolIds } }, select: { id: true, name: true } }),
-      client.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true, name: true } }),
+      client.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, email: true, name: true, schoolId: true, school: { select: { name: true } } },
+      }),
     ]);
     const schoolOf = new Map(schools.map((s) => [s.id, s.name]));
-    const userOf = new Map(users.map((u) => [u.id, `${u.name} <${u.email}>`]));
+    const userOf = new Map(users.map((u) => [u.id, u]));
+    // One entitlement read per DISTINCT director school (cached by the service).
+    const directorSchools = [...new Set(users.map((u) => u.schoolId))];
+    const enabled = new Map(
+      await Promise.all(
+        directorSchools.map(async (id) => [id, await this.entitlements.isEnabled(id, MODULES.GROUP)] as const),
+      ),
+    );
     return groups.map((g) => ({
       id: g.id,
       name: g.name,
-      members: g.members.map((m) => ({ schoolId: m.schoolId, name: schoolOf.get(m.schoolId) ?? m.schoolId })),
-      directors: g.directors.map((d) => ({ userId: d.userId, label: userOf.get(d.userId) ?? d.userId })),
+      members: g.members
+        .map((m) => ({ schoolId: m.schoolId, name: schoolOf.get(m.schoolId) ?? m.schoolId }))
+        .sort((x, y) => x.name.localeCompare(y.name)),
+      directors: g.directors.map((d) => {
+        const u = userOf.get(d.userId);
+        return {
+          userId: d.userId,
+          name: u?.name ?? "",
+          email: u?.email ?? d.userId,
+          schoolName: u?.school?.name ?? "",
+          consoleEnabled: u ? (enabled.get(u.schoolId) ?? false) : false,
+        };
+      }),
     }));
   }
 
@@ -435,41 +529,168 @@ export class GroupService {
     return group;
   }
 
-  /** Replace the member-school set (ids validated against real schools). */
-  async setMembers(p: Principal, groupId: string, schoolIds: string[]) {
+  /** A group could be created and never renamed — a typo was permanent. */
+  async renameGroup(p: Principal, groupId: string, name: string) {
     const client = this.client();
     const group = await client.schoolGroup.findFirst({ where: { id: groupId } });
     if (!group) throw new NotFoundException("Group not found");
+    const updated = await client.schoolGroup.update({ where: { id: groupId }, data: { name: name.trim() } });
+    await this.opAudit(p, "operator.group.rename", groupId, { from: group.name, to: updated.name });
+    return updated;
+  }
+
+  /**
+   * Remove a group — and with it every director's cross-campus read. Members
+   * and directors cascade; no school's own data is touched.
+   */
+  async deleteGroup(p: Principal, groupId: string) {
+    const client = this.client();
+    const group = await client.schoolGroup.findFirst({
+      where: { id: groupId },
+      include: { members: true, directors: true },
+    });
+    if (!group) throw new NotFoundException("Group not found");
+    await client.schoolGroup.delete({ where: { id: groupId } });
+    await this.opAudit(p, "operator.group.delete", groupId, {
+      name: group.name,
+      members: group.members.length,
+      directors: group.directors.map((d) => d.userId),
+    });
+    return { deleted: true };
+  }
+
+  /**
+   * Replace the member-school set, and say what was NOT applied.
+   *
+   * A director whose school leaves the group is removed in the SAME transaction:
+   * directorship requires belonging to a member school, and it used to outlive
+   * the school's membership — a proprietor who sold a campus kept reading the
+   * rest of the chain.
+   */
+  async setMembers(p: Principal, groupId: string, schoolIds: string[]): Promise<GroupWriteResultDto> {
+    const client = this.client();
+    const group = await client.schoolGroup.findFirst({ where: { id: groupId }, include: { directors: true } });
+    if (!group) throw new NotFoundException("Group not found");
+    const wanted = [...new Set(schoolIds)];
     const valid = await client.school.findMany({
-      where: { id: { in: schoolIds }, isPlatform: false },
+      where: { id: { in: wanted }, isPlatform: false },
       select: { id: true },
     });
+    const validIds = new Set(valid.map((s) => s.id));
+    const notApplied = wanted
+      .filter((id) => !validIds.has(id))
+      .map((value) => ({ value, reason: "No such school (or it is the platform's own organisation)." }));
+
+    // Directors who no longer belong to any member school.
+    const directorUsers = await client.user.findMany({
+      where: { id: { in: group.directors.map((d) => d.userId) } },
+      select: { id: true, name: true, email: true, schoolId: true },
+    });
+    const orphaned = directorUsers.filter((u) => !validIds.has(u.schoolId));
+
     await client.$transaction([
       client.schoolGroupMember.deleteMany({ where: { groupId } }),
       client.schoolGroupMember.createMany({ data: valid.map((s) => ({ groupId, schoolId: s.id })) }),
+      client.schoolGroupDirector.deleteMany({ where: { groupId, userId: { in: orphaned.map((u) => u.id) } } }),
     ]);
-    await this.opAudit(p, "operator.group.members", groupId, { schoolIds: valid.map((s) => s.id) });
-    return { members: valid.length };
+    await this.opAudit(p, "operator.group.members", groupId, {
+      schoolIds: [...validIds],
+      notApplied: notApplied.map((n) => n.value),
+      removedDirectors: orphaned.map((u) => u.id),
+    });
+    return {
+      applied: valid.length,
+      notApplied,
+      removedDirectors: orphaned.map((u) => ({ name: u.name, email: u.email })),
+    };
   }
 
-  /** Replace the director set: users identified by EMAIL (must exist, and must
-   *  belong to one of the group's member schools — a director is always one of
-   *  the group's own people, never an outsider). */
-  async setDirectors(p: Principal, groupId: string, emails: string[]) {
+  /**
+   * Replace the director set: users identified by EMAIL, each an ACTIVE member
+   * of staff at a member school. Every email that is not applied is returned
+   * with the reason, because "Directors saved" over a mistyped address left a
+   * proprietor without access and nobody the wiser.
+   */
+  async setDirectors(p: Principal, groupId: string, emails: string[]): Promise<GroupWriteResultDto> {
     const client = this.client();
     const group = await client.schoolGroup.findFirst({ where: { id: groupId }, include: { members: true } });
     if (!group) throw new NotFoundException("Group not found");
     const memberSchoolIds = group.members.map((m) => m.schoolId);
-    const users = await client.user.findMany({
-      where: { email: { in: emails.map((e) => e.trim().toLowerCase()) }, schoolId: { in: memberSchoolIds } },
-      select: { id: true, email: true },
-    });
+    const wanted = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+
+    const [eligible, known] = await Promise.all([
+      client.user.findMany({
+        where: { email: { in: wanted }, ...this.eligibleDirectorWhere(memberSchoolIds) },
+        select: { id: true, email: true },
+      }),
+      // Only to EXPLAIN a refusal; never applied.
+      client.user.findMany({
+        where: { email: { in: wanted } },
+        select: { email: true, schoolId: true, status: true },
+      }),
+    ]);
+    const eligibleEmails = new Set(eligible.map((u) => u.email.toLowerCase()));
+    const knownBy = new Map(known.map((u) => [u.email.toLowerCase(), u]));
+    const members = new Set(memberSchoolIds);
+    const notApplied = wanted
+      .filter((e) => !eligibleEmails.has(e))
+      .map((value) => {
+        const u = knownBy.get(value);
+        const reason = !u
+          ? "No account has this email."
+          : !members.has(u.schoolId)
+            ? "This person's school is not a member of the group."
+            : u.status !== "ACTIVE"
+              ? "This account is no longer active."
+              : "Only staff may direct a group — this account is a pupil or a parent.";
+        return { value, reason };
+      });
+
     await client.$transaction([
       client.schoolGroupDirector.deleteMany({ where: { groupId } }),
-      client.schoolGroupDirector.createMany({ data: users.map((u) => ({ groupId, userId: u.id })) }),
+      client.schoolGroupDirector.createMany({ data: eligible.map((u) => ({ groupId, userId: u.id })) }),
     ]);
-    await this.opAudit(p, "operator.group.directors", groupId, { emails: users.map((u) => u.email) });
-    return { directors: users.length };
+    await this.opAudit(p, "operator.group.directors", groupId, {
+      emails: eligible.map((u) => u.email),
+      notApplied: notApplied.map((n) => n.value),
+    });
+    return { applied: eligible.length, notApplied, removedDirectors: [] };
+  }
+
+  /**
+   * People who may be named a director of this group, searched by name or
+   * email — the picker an operator chooses from instead of typing an address
+   * from memory. Capped, with the TOTAL, so a short list never reads as all.
+   */
+  async directorCandidates(groupId: string, q: string | undefined): Promise<GroupDirectorCandidatePageDto> {
+    const client = this.client();
+    const group = await client.schoolGroup.findFirst({ where: { id: groupId }, include: { members: true } });
+    if (!group) throw new NotFoundException("Group not found");
+    const term = (q ?? "").trim();
+    const where: Prisma.UserWhereInput = {
+      ...this.eligibleDirectorWhere(group.members.map((m) => m.schoolId)),
+      ...(term
+        ? {
+            OR: [
+              { name: { contains: term, mode: "insensitive" as const } },
+              { email: { contains: term, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    };
+    const [rows, total] = await Promise.all([
+      client.user.findMany({
+        where,
+        select: { id: true, name: true, email: true, school: { select: { name: true } } },
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        take: DIRECTOR_CANDIDATE_PAGE,
+      }),
+      client.user.count({ where }),
+    ]);
+    return {
+      rows: rows.map((u) => ({ userId: u.id, name: u.name, email: u.email, schoolName: u.school?.name ?? "" })),
+      total,
+    };
   }
 
   private async opAudit(p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {

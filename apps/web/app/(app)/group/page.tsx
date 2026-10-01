@@ -40,9 +40,15 @@ export default async function GroupPage({
         {!data ? (
           <Alert variant="info">
             <AlertTitle>No group access</AlertTitle>
+            {/* TWO causes answer the same 404, and the page cannot tell them
+                apart: not a director, or a director whose own school's plan
+                does not include the Group Console. It used to name only the
+                first — telling an appointed director to ask for an
+                appointment they already held. */}
             <AlertDescription>
-              This console is for designated group directors. If you run several schools on the platform,
-              ask the platform operator to set up your group and name you as a director.
+              This console is for designated group directors, and it opens only when your own school&apos;s plan
+              includes the Group Console. If you run several schools on the platform, ask the platform operator
+              to name you as a director of your group and to enable the Group Console for your school.
             </AlertDescription>
           </Alert>
         ) : (

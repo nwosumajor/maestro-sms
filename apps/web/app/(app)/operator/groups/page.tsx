@@ -11,7 +11,7 @@
 // onto the platform, which is not a daily event, and it was costing the hub a fetch
 // on every visit.
 
-import type { TenantNameDto } from "@sms/types";
+import type { GroupAdminDto, TenantNameDto } from "@sms/types";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { hasPermission } from "@/lib/permissions";
@@ -34,7 +34,7 @@ export default async function OperatorGroupsPage() {
   if (!hasPermission(user.permissions, "platform.subscription.manage")) redirect("/operator");
 
   const [groups, names] = await Promise.all([
-    apiGet<never[]>("/operator/groups"),
+    apiGet<GroupAdminDto[]>("/operator/groups"),
     apiGet<TenantNameDto[]>("/operator/tenant-names"),
   ]);
 

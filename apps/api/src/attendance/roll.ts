@@ -55,6 +55,17 @@ export async function rollOn(
 }
 
 /**
+ * The same rule as `onRollWhere`, as a SQL predicate: enrolment `e` (an alias)
+ * is on its class's roll on the day `day` (a SQL expression of type date).
+ * Shared by every raw query that asks it — the unrecorded-register counts below
+ * and the group console's expected registers — so "on the roll" is spelled once.
+ */
+export function onRollOnDaySql(e: string, day: Prisma.Sql): Prisma.Sql {
+  const a = Prisma.raw(e);
+  return Prisma.sql`${day} >= ${a}."enrolledAt"::date AND (${a}."endedAt" IS NULL OR ${day} < ${a}."endedAt"::date)`;
+}
+
+/**
  * The registers this pupil was on the roll for and has NO mark on — the same
  * rule as `onRollWhere`, in SQL, anti-joined to the pupil's own records.
  * Includes a register the scan desk started that nobody then took: nobody
@@ -72,8 +83,7 @@ function unrecordedFrom(
     FROM "enrollment" e
     JOIN "attendance_session" s
       ON s."classId" = e."classId"
-     AND s."date" >= e."enrolledAt"::date
-     AND (e."endedAt" IS NULL OR s."date" < e."endedAt"::date)
+     AND ${onRollOnDaySql("e", Prisma.sql`s."date"`)}
     ${opts.byTerm ? Prisma.sql`JOIN "term" t ON s."date" >= t."startDate"::date AND s."date" <= t."endDate"::date` : Prisma.empty}
     WHERE e."studentId" = ${studentId}::uuid
       ${opts.window ? Prisma.sql`AND s."date" >= ${opts.window.from}::date AND s."date" <= ${opts.window.to}::date` : Prisma.empty}
