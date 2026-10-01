@@ -190,6 +190,8 @@ d("group console figures (real Postgres)", () => {
       { runAsTenant: async (_c: unknown, fn: (tx: unknown) => Promise<unknown>) => fn({}) } as never,
       { record: jest.fn() } as never,
       { client } as never,
+      // Only campus A's plan includes the Group Console in this fixture.
+      { isEnabled: async (schoolId: string) => schoolId === SA } as never,
     );
 
     // --- campus C: a fixed term, so register coverage has ONE right answer ----
@@ -264,6 +266,15 @@ d("group console figures (real Postgres)", () => {
     await cInvoice(2_000, 10); // 1–30
     await cInvoice(3_000, 45); // 31–60
     await cInvoice(4_000, 90, 500); // 60+, part paid
+    // An invoice marked PAID that is NOT paid — found on a live database, with no
+    // audit entry for the change. The finance report counts its balance, so the
+    // console must too. GHS, so it sits apart from the NGN ladder above.
+    const lying = randomUUID();
+    await admin.query(
+      `INSERT INTO invoice (id,"schoolId","studentId",reference,"dueDate","createdById","totalMinor",status,currency,"updatedAt")
+       VALUES ($1,$2,$3,$4,$5::date,$6,1000,'PAID','GHS',now())`,
+      [lying, SC, C_PUPIL_1, `GFC-${lying.slice(0, 8)}`, daysAgo(LAGOS, 0), TEACHER_C],
+    );
 
     // A second group, only so it can be deleted.
     await admin.query(`INSERT INTO school_group (id,name,"updatedAt") VALUES ($1,'GF Doomed',now())`, [DOOMED]);
@@ -392,7 +403,15 @@ d("group console figures (real Postgres)", () => {
         overdueMinor: 8_500,
         aging: { currentMinor: 1_000, d1_30Minor: 2_000, d31_60Minor: 3_000, d60plusMinor: 3_500 },
       },
-    ]);
+      // The invoice marked PAID with nothing paid: owed, as the finance report says.
+      {
+        currency: "GHS",
+        collectedMinor: 0,
+        outstandingMinor: 1_000,
+        overdueMinor: 0,
+        aging: { currentMinor: 1_000, d1_30Minor: 0, d31_60Minor: 0, d60plusMinor: 0 },
+      },
+    ].sort((a, b) => a.currency.localeCompare(b.currency)));
   });
 
   it("reports NULL coverage, not zero, where no dated term says which days were due", async () => {
@@ -421,6 +440,13 @@ d("group console figures (real Postgres)", () => {
     expect(why["nobody@gf.test"]).toMatch(/No account/);
     const { rows } = await admin.query(`SELECT "userId" FROM school_group_director WHERE "groupId" = $1`, [GROUP]);
     expect(rows.map((r) => r.userId)).toEqual([TEACHER_A]);
+  });
+
+  it("tells the operator which directors cannot open the console — their school lacks the module", async () => {
+    await svc.setDirectors(operator, GROUP, [`${TEACHER_A}@gf.test`, `${TEACHER_B}@gf.test`]);
+    const g = (await svc.listGroups()).find((x) => x.id === GROUP)!;
+    const by = Object.fromEntries(g.directors.map((d) => [d.userId, d.consoleEnabled]));
+    expect(by).toEqual({ [TEACHER_A]: true, [TEACHER_B]: false });
   });
 
   it("offers as candidates only active staff at member schools, with a total", async () => {

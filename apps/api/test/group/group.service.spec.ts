@@ -88,7 +88,7 @@ function makeService(over: Over = {}) {
         ];
       }
       // What is owed now — each open invoice's positive balance.
-      if (sql.includes("WITH open")) {
+      if (sql.includes("WITH billable")) {
         return [
           { schoolId: A, currency: "NGN", current: 1_000_00, d1_30: 2_000_00, d31_60: 0, d60plus: 0 },
           { schoolId: B, currency: "USD", current: 800_00, d1_30: 0, d31_60: 0, d60plus: 0 },
@@ -104,7 +104,8 @@ function makeService(over: Over = {}) {
   };
   const db = { runAsTenant: async (_c: unknown, fn: (tx: unknown) => Promise<unknown>) => fn({}) };
   const audit = { record: jest.fn() };
-  const svc = new GroupService(db as never, audit as never, { client } as never);
+  const entitlements = { isEnabled: jest.fn().mockResolvedValue(true) };
+  const svc = new GroupService(db as never, audit as never, { client } as never, entitlements as never);
   return { svc, client, audit };
 }
 

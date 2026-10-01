@@ -229,7 +229,10 @@ export function flagsFor(x: FlagInputs): GroupFlag[] {
   if (x.registersExpected != null) {
     // Measured against what was DUE, so a weekend, a holiday or a day between
     // terms is not "no registers" — it used to flag every campus on a Saturday.
-    if (x.registersExpected > 0 && x.registerCoveragePct === 0) flags.push("NO_REGISTERS");
+    // The COUNT, never the rounded percentage: 2 of 589 rounds to 0%, and
+    // reading that as "none taken" told a campus that had taken registers that
+    // it had taken none — found driving the live console.
+    if (x.registersExpected > 0 && x.registersCovered === 0) flags.push("NO_REGISTERS");
     else if (x.registerCoveragePct != null && x.registerCoveragePct < GROUP_LOW_REGISTER_COVERAGE_PCT) {
       flags.push("LOW_REGISTER_COVERAGE");
     }
@@ -414,10 +417,14 @@ export interface CampusBalance {
  * figure on the campus's own finance report — split on that report's ladder,
  * measured from the campus's OWN today.
  *
- * Only ISSUED / PARTIALLY_PAID are read: every writer derives status from net
- * paid (PAID iff net >= total), so a PAID invoice has nothing owing, and reading
- * open work only keeps this bounded by what is outstanding rather than by the
- * campus's whole billing history.
+ * PAID invoices are read TOO, exactly as the finance report reads them. An
+ * earlier version read only ISSUED / PARTIALLY_PAID, on the reasoning that every
+ * writer derives PAID from net paid — and a live database held an invoice marked
+ * PAID with ₦1,000 of ₦1,500 unpaid and no audit entry for the change. A
+ * convention the database does not enforce is not an invariant, so this console
+ * showed ₦98,750 owed where the school's own report showed ₦99,750. Matching the
+ * report's definition costs a scan of the campus's billable invoices; see the
+ * measurement in the engineering log.
  */
 export async function campusBalances(
   client: PrivilegedClient,
@@ -433,26 +440,28 @@ export async function campusBalances(
   const rows = await client.$queryRaw<
     Array<{ schoolId: string; currency: string; current: number; d1_30: number; d31_60: number; d60plus: number }>
   >(Prisma.sql`
-    WITH open AS (
+    WITH billable AS (
       SELECT id, "schoolId", currency, "totalMinor", "dueDate"
         FROM invoice
-       WHERE "schoolId" = ANY(${idList}) AND status IN ('ISSUED', 'PARTIALLY_PAID')
+       WHERE "schoolId" = ANY(${idList}) AND status IN ('ISSUED', 'PARTIALLY_PAID', 'PAID')
     ),
+    -- UNCORRELATED, as the finance report's is: an IN (SELECT … billable) here
+    -- nested-loops the payment index once per invoice (measured there at 2.4 s
+    -- against 0.57 s on ten years of a school).
     net AS (
       SELECT p."invoiceId",
              SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor"::numeric ELSE p."amountMinor"::numeric END) AS paid
         FROM payment p
        WHERE p."schoolId" = ANY(${idList}) AND p.status = 'POSTED'
-         AND p."invoiceId" IN (SELECT id FROM open)
        GROUP BY 1
     ),
     bal AS (
-      SELECT o."schoolId", o.currency,
-             GREATEST(o."totalMinor" - COALESCE(n.paid, 0), 0) AS balance,
-             (t.today - o."dueDate") AS days
-        FROM open o
-        LEFT JOIN net n ON n."invoiceId" = o.id
-        JOIN (VALUES ${todays}) AS t(sid, today) ON t.sid = o."schoolId"
+      SELECT b."schoolId", b.currency,
+             GREATEST(b."totalMinor" - COALESCE(n.paid, 0), 0) AS balance,
+             (t.today - b."dueDate") AS days
+        FROM billable b
+        LEFT JOIN net n ON n."invoiceId" = b.id
+        JOIN (VALUES ${todays}) AS t(sid, today) ON t.sid = b."schoolId"
     )
     SELECT "schoolId", currency,
            COALESCE(SUM(balance) FILTER (WHERE days <= 0), 0)::float8                AS current,

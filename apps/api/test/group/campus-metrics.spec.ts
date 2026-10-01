@@ -106,6 +106,14 @@ describe("when a campus is flagged", () => {
     ]);
   });
 
+  it("does not call 2 of 589 'no registers' because 2/589 rounds to 0%", () => {
+    // Found on the live console: a campus that had taken registers was told it
+    // had taken none, because the flag read the ROUNDED percentage.
+    expect(
+      flagsFor({ ...healthy, registersTaken: 2, registersExpected: 589, registersCovered: 2, registerCoveragePct: 0 }),
+    ).toEqual(["LOW_REGISTER_COVERAGE"]);
+  });
+
   it("flags registers MISSED, not merely taken — 30 of 40 is not fine", () => {
     expect(flagsFor({ ...healthy, registersCovered: 30, registerCoveragePct: 75 })).toEqual(["LOW_REGISTER_COVERAGE"]);
   });

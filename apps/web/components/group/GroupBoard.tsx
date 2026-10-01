@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
 import {
+  coverageText,
   deltaClass,
   moneyDelta,
   overdueShare,
@@ -285,7 +286,7 @@ export function GroupBoard({ data }: { data: Data }) {
                               (s.registerCoveragePct ?? 0) < GROUP_LOW_REGISTER_COVERAGE_PCT ? "font-medium text-destructive" : ""
                             }
                           >
-                            {s.registerCoveragePct}%
+                            {coverageText(s.registerCoveragePct, s.registersCovered)}
                           </span>
                           <div className="text-xs text-muted-foreground">
                             {s.registersCovered} of {s.registersExpected}
@@ -318,6 +319,7 @@ export function GroupBoard({ data }: { data: Data }) {
                       )}
                     </td>
                     <td className="tnum px-4 py-2.5 text-right">
+                      {s.money.length === 0 && <span className="text-muted-foreground">—</span>}
                       {s.money.map((m) => (
                         <div key={m.currency}>
                           {money(m.outstandingMinor, m.currency)}

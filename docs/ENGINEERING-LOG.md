@@ -19741,3 +19741,37 @@ at them.
 // GOTCHA: the board first rebuilt "12 of 13" from the ROUNDED percentage. The
 // count now travels as `registersCovered`: never reconstruct a numerator from a
 // rounded ratio.
+**Found by driving the live console, after every test was green:**
+- **A rounded zero read as none.** 2 of 589 registers is 0.34%, which rounds to
+  0. The NO_REGISTERS flag tested `registerCoveragePct === 0`, so a campus that
+  HAD taken registers was told it had taken none, and the board printed "0%".
+  The flag now tests the COUNT, and the board prints "<1%". This is the same
+  mistake as rebuilding "12 of 13" from a rounded ratio, one layer down: a
+  decision taken on a rounded figure is taken on a figure nobody computed.
+- **A convention is not an invariant.** "Owed now" read only ISSUED and
+  PARTIALLY_PAID invoices, reasoning that every writer derives PAID from net
+  paid. The live database held an invoice marked PAID with ₦1,000 of ₦1,500
+  unpaid. Its status change has NO audit entry, after a scripted probe created it.
+  The console showed ₦98,750 owed where the school's own finance report showed
+  ₦99,750. It now reads PAID invoices exactly as the report does, with the
+  report's uncorrelated net-paid CTE.
+  // OPEN: how that invoice became PAID with no audit row is not established.
+  // No audited writer produced it; a direct SQL write is the likeliest
+  // explanation, and nothing in the database would refuse one.
+- **The refusal named one cause of two.** /group answers 404 both to a
+  non-director and to a director whose OWN school's plan lacks the Group
+  Console. The page told an appointed director to ask for an appointment.
+  The campus page already named both; the overview now does too. The operator
+  screen also says which directors cannot open the console and why
+  (`consoleEnabled`, from the entitlement service): appointing a director at a
+  school without the module was silent on both sides.
+- **A stale answer to a new question.** The director search kept the previous
+  search's "Nobody matches" on screen while the next request was in flight, so
+  a quick reader saw a false "nobody" for the name they had just typed. Results
+  are cleared when the term changes, and "Searching…" shows until the answer
+  arrives. In the same picker, "Showing 20 of 75" sat over 19 buttons because a
+  chosen director was hidden. Chosen rows are now shown disabled.
+// Tooling: the browser automation's synthetic clicks and keys did not reach
+// inputs on signed-in pages (focus never landed). The run drove the page
+// through its own DOM events instead, which still exercises the React handlers,
+// the BFF and the API.

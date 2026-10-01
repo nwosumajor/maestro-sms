@@ -304,7 +304,19 @@ export interface GroupAdminDto {
   id: string;
   name: string;
   members: Array<{ schoolId: string; name: string }>;
-  directors: Array<{ userId: string; name: string; email: string; schoolName: string }>;
+  directors: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    schoolName: string;
+    /**
+     * Whether this director's OWN school has the Group Console module. The
+     * console is gated on the director's school, so a director appointed at a
+     * school without it can never open the page — and the page tells them to
+     * ask for a directorship they already hold. The operator is told here.
+     */
+    consoleEnabled: boolean;
+  }>;
 }
 
 /**

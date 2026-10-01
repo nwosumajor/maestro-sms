@@ -28,6 +28,7 @@ import {
   attendanceRatePct,
   currencyDecimals,
   DEFAULT_PLAN,
+  MODULES,
   NON_SCHOOL_STAFF_ROLE_NAMES,
   resolveRegion,
   schoolDateString,
@@ -42,6 +43,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import {
   campusFigures,
   campusWindow,
@@ -74,6 +76,7 @@ export class GroupService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly entitlements: ModuleEntitlementService,
   ) {}
 
   private client() {
@@ -399,7 +402,8 @@ export class GroupService {
       currency ? toMajor(minor, currency).toFixed(currencyDecimals(currency)) : "";
     const header = [
       "School", "Status", "From", "To", "Window", "Students", "Staff",
-      "Attendance %", "Previous attendance %", "Registers taken", "Registers expected", "Register coverage %",
+      "Attendance %", "Previous attendance %", "Registers taken", "Registers expected", "Registers covered",
+      "Register coverage %",
       "Currency", "Collected", "Previous collected", "Owed now", "Overdue", "Overdue 60+ days",
       "Plan", "Billing", "Flags",
     ];
@@ -426,6 +430,8 @@ export class GroupService {
           blank(s.previous.attendancePct),
           String(s.registersTaken),
           blank(s.registersExpected),
+          // The count beside the %, so 2 of 589 is not read as none at all.
+          blank(s.registersCovered),
           blank(s.registerCoveragePct),
           m.currency,
           amount(m.collectedMinor, m.currency),
@@ -486,11 +492,18 @@ export class GroupService {
       client.school.findMany({ where: { id: { in: schoolIds } }, select: { id: true, name: true } }),
       client.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, email: true, name: true, school: { select: { name: true } } },
+        select: { id: true, email: true, name: true, schoolId: true, school: { select: { name: true } } },
       }),
     ]);
     const schoolOf = new Map(schools.map((s) => [s.id, s.name]));
     const userOf = new Map(users.map((u) => [u.id, u]));
+    // One entitlement read per DISTINCT director school (cached by the service).
+    const directorSchools = [...new Set(users.map((u) => u.schoolId))];
+    const enabled = new Map(
+      await Promise.all(
+        directorSchools.map(async (id) => [id, await this.entitlements.isEnabled(id, MODULES.GROUP)] as const),
+      ),
+    );
     return groups.map((g) => ({
       id: g.id,
       name: g.name,
@@ -499,7 +512,13 @@ export class GroupService {
         .sort((x, y) => x.name.localeCompare(y.name)),
       directors: g.directors.map((d) => {
         const u = userOf.get(d.userId);
-        return { userId: d.userId, name: u?.name ?? "", email: u?.email ?? d.userId, schoolName: u?.school?.name ?? "" };
+        return {
+          userId: d.userId,
+          name: u?.name ?? "",
+          email: u?.email ?? d.userId,
+          schoolName: u?.school?.name ?? "",
+          consoleEnabled: u ? (enabled.get(u.schoolId) ?? false) : false,
+        };
       }),
     }));
   }

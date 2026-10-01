@@ -12,6 +12,7 @@ import {
   GROUP_NO_SUBSCRIPTION,
 } from "@sms/types";
 import {
+  coverageText,
   deltaClass,
   moneyDelta,
   pointsDelta,
@@ -30,6 +31,15 @@ import { money, shortDate } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
+
+/** "2026-05" as "May 2026". The key is a calendar MONTH, so it is read in UTC
+ *  and never shifted by a zone. */
+function monthLabel(key: string): string {
+  const d = new Date(`${key}-01T00:00:00.000Z`);
+  return Number.isNaN(d.getTime())
+    ? key
+    : new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }).format(d);
+}
 
 /** A change against the previous period, coloured by whether it is good news. */
 function Change({ d }: { d: { text: string; dir: -1 | 0 | 1 } | null }) {
@@ -127,7 +137,7 @@ export default async function GroupSchoolPage({
                       <span
                         className={(s.registerCoveragePct ?? 0) < GROUP_LOW_REGISTER_COVERAGE_PCT ? "text-destructive" : ""}
                       >
-                        {s.registerCoveragePct}%
+                        {coverageText(s.registerCoveragePct, s.registersCovered)}
                       </span>
                     )}
                   </CardTitle>
@@ -210,7 +220,7 @@ export default async function GroupSchoolPage({
                   <tbody>
                     {s.trend.map((t) => (
                       <tr key={t.month} className="border-b last:border-0">
-                        <td className="px-4 py-2.5">{t.month}</td>
+                        <td className="px-4 py-2.5">{monthLabel(t.month)}</td>
                         <td className="tnum px-4 py-2.5 text-right">
                           {/* The currency the API restricted the trend TO, not
                               whichever money block happened to sort first. */}

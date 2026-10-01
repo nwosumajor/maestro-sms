@@ -40,6 +40,16 @@ export function windowNote(w: Serialized<GroupWindowDto>, fmt: (d: string) => st
   return `${fmt(w.fromDay)} – ${fmt(w.toDay)}`;
 }
 
+/**
+ * A coverage percentage as words. Some-but-under-half-a-percent rounds to 0, and
+ * "0%" beside "2 of 589" reads as none taken; it is "<1%".
+ */
+export function coverageText(pct: number | null, covered: number | null): string {
+  if (pct == null) return "—";
+  if (pct === 0 && (covered ?? 0) > 0) return "<1%";
+  return `${pct}%`;
+}
+
 /** Tailwind class for a delta, where `goodWhen` says which direction is good. */
 export function deltaClass(dir: -1 | 0 | 1, goodWhen: 1 | -1 = 1): string {
   if (dir === 0) return "text-muted-foreground";

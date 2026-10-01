@@ -60,11 +60,14 @@ function GroupEditor({
   group,
   schools,
   onDeleted,
+  onAct,
 }: {
   group: GroupAdminDto;
   schools: School[];
   /** The editor unmounts with its group, so the parent says it was deleted. */
   onDeleted: (outcome: Outcome) => void;
+  /** Clears the page-level message, which is about an EARLIER action. */
+  onAct: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -92,6 +95,9 @@ function GroupEditor({
 
   // Directors: chosen from the server's list of people who MAY direct.
   const [directors, setDirectors] = React.useState(group.directors.map((d) => ({ email: d.email, label: `${d.name} <${d.email}>`, schoolName: d.schoolName })));
+  // Directors whose own school lacks the module: appointed, and unable to open
+  // the console, with nothing on their side saying why.
+  const locked = group.directors.filter((d) => !d.consoleEnabled);
   const [personQ, setPersonQ] = React.useState("");
 
   // After a save the page refreshes and the server's state arrives as a NEW
@@ -108,14 +114,20 @@ function GroupEditor({
   }, [saved]);
   const [candidates, setCandidates] = React.useState<GroupDirectorCandidatePageDto | null>(null);
   const [candidateError, setCandidateError] = React.useState<string | null>(null);
+  const [searching, setSearching] = React.useState(false);
 
   React.useEffect(() => {
     const term = personQ.trim();
+    // The previous search's answer is dropped the moment the term changes: left
+    // on screen, its "Nobody matches" was read as the answer to the NEW term
+    // while that request was still in flight — found driving this screen.
+    setCandidates(null);
+    setCandidateError(null);
     if (term.length < 2) {
-      setCandidates(null);
-      setCandidateError(null);
+      setSearching(false);
       return;
     }
+    setSearching(true);
     const ctl = new AbortController();
     const t = setTimeout(async () => {
       try {
@@ -124,13 +136,13 @@ function GroupEditor({
         });
         if (!res.ok) {
           setCandidateError(await readApiError(res));
-          setCandidates(null);
+          setSearching(false);
           return;
         }
-        setCandidateError(null);
         setCandidates(await readJson<GroupDirectorCandidatePageDto>(res));
+        setSearching(false);
       } catch {
-        /* aborted by the next keystroke */
+        /* aborted by the next keystroke, which owns `searching` now */
       }
     }, 250);
     return () => {
@@ -142,6 +154,7 @@ function GroupEditor({
   const run = async (fn: () => Promise<Response>, onOk: (res: Response) => Promise<Outcome>) => {
     setBusy(true);
     setOutcome(null);
+    onAct();
     try {
       const res = await fn();
       if (res.ok) {
@@ -302,6 +315,13 @@ function GroupEditor({
             </Badge>
           ))}
         </div>
+        {locked.length > 0 && (
+          <p className="text-xs text-amber-700 dark:text-amber-400" role="note">
+            {locked.map((d) => d.name || d.email).join(", ")} cannot open the group console yet: the Group Console
+            module is not enabled for {[...new Set(locked.map((d) => d.schoolName))].join(", ")}. Enable it on that
+            school&apos;s subscription (tenant registry).
+          </p>
+        )}
         <Input
           className="h-8 w-72"
           placeholder="Find staff by name or email"
@@ -309,6 +329,7 @@ function GroupEditor({
           onChange={(e) => setPersonQ(e.target.value)}
           aria-label="Find a director"
         />
+        {searching && <p className="text-xs text-muted-foreground">Searching…</p>}
         {candidateError && <p className="text-xs text-destructive">{candidateError}</p>}
         {candidates && (
           <div className="space-y-1">
@@ -318,21 +339,30 @@ function GroupEditor({
               </p>
             )}
             <div className="flex flex-wrap gap-1.5">
-              {candidates.rows
-                .filter((c) => !directors.some((d) => d.email === c.email))
-                .map((c) => (
+              {/* Every row the server returned is drawn — one already chosen is
+                  shown disabled rather than hidden, so "Showing 20 of 75"
+                  describes what is on screen. */}
+              {candidates.rows.map((c) => {
+                const already = directors.some((d) => d.email === c.email);
+                return (
                   <button
                     key={c.userId}
                     type="button"
-                    className="rounded-md border border-border px-2 py-1 text-left text-xs hover:bg-accent"
+                    disabled={already}
+                    className="rounded-md border border-border px-2 py-1 text-left text-xs hover:bg-accent disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
                     onClick={() => {
                       setDirectors((cur) => [...cur, { email: c.email, label: `${c.name} <${c.email}>`, schoolName: c.schoolName }]);
                       setPersonQ("");
                     }}
                   >
-                    + {c.name} <span className="text-muted-foreground">&lt;{c.email}&gt; · {c.schoolName}</span>
+                    {already ? "✓" : "+"} {c.name}{" "}
+                    <span className="text-muted-foreground">
+                      &lt;{c.email}&gt; · {c.schoolName}
+                      {already ? " · already a director" : ""}
+                    </span>
                   </button>
-                ))}
+                );
+              })}
             </div>
             {candidates.total > candidates.rows.length && (
               <p className="text-xs text-muted-foreground">
@@ -399,7 +429,7 @@ export function GroupsManager({ groups, schools }: { groups: GroupAdminDto[]; sc
       </CardHeader>
       <CardContent className="space-y-5">
         {groups.map((g) => (
-          <GroupEditor key={g.id} group={g} schools={schools} onDeleted={setOutcome} />
+          <GroupEditor key={g.id} group={g} schools={schools} onDeleted={setOutcome} onAct={() => setOutcome(null)} />
         ))}
 
         <div className="flex flex-wrap items-end gap-2 border-t border-border pt-4">
