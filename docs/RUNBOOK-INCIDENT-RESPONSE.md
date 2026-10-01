@@ -553,6 +553,43 @@ idempotency key, and you will double-post under retry.
 Also check **disputes** — they carry gateway deadlines and are lost by default if
 unanswered.
 
+#### An invoice's status disagrees with its money
+
+**Symptom:** a family is chased for a bill they paid, or a bill reads PAID while
+the school's receivables still show it owed, or the nightly owner email
+"N invoices disagree with their payments".
+
+An invoice's status is a LABEL derived from its POSTED payments (refunds
+subtract; pending never counts). Every app writer applies the one rule,
+`invoiceStatusForNet`; nothing in the database enforces it. So a label goes
+wrong only when a payment row changes behind the app's back: a direct SQL
+DELETE or UPDATE, which the app role cannot do (only the superuser and the
+migrate role can). The first one found was a probe cleanup deleting scholarship
+payments on a dev database, which left their invoices PAID.
+
+1. **See them.** `/operator/ledger-integrity`: every mismatch on the platform,
+   worst first. "Marked paid, still owed" has stopped reminders. "Marked open,
+   already settled" may be chasing a family who paid.
+2. **Find how it happened before correcting it.** The app audits its own
+   writes, so look for the GAP:
+   ```sql
+   -- App actions on the invoice; a status change with no matching row here
+   -- came from outside the app.
+   SELECT action, "createdAt", metadata FROM audit_log
+    WHERE "entityId" = '<invoiceId>' OR metadata::text LIKE '%<invoiceId>%'
+    ORDER BY "createdAt";
+   ```
+   In production the database audit log (pgaudit on the privileged roles, see
+   PRODUCTION_DEPLOYMENT §8) names the session that made the change.
+3. **Correct the label.** "Correct status" on the row (step-up) sets the status
+   the ledger supports. It moves NO money and touches no payment. It is audited
+   in both the operator's and the school's trail, and tells the school's finance
+   staff. If the PAYMENT itself is what is missing (a deleted receipt), correct
+   the label first so the family is not misled, then have the school re-record
+   the payment through the normal, audited path.
+4. **Re-run the check** (button on the same page, or wait for 04:40) and confirm
+   the row is gone.
+
 ### 5.7 Nobody can log in
 
 Work outward from the smallest scope:

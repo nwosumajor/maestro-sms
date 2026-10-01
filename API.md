@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Every HTTP endpoint the NestJS API (`apps/api`) declares: **925 routes across 90 controllers.**
+Every HTTP endpoint the NestJS API (`apps/api`) declares: **928 routes across 90 controllers.**
 
 > **This file is GENERATED** — `pnpm --filter @sms/api build:api-doc`. Do not hand-edit it; a route added to a controller appears here on the next run, and `api-doc-is-current.spec.ts` fails the build if it has not been. To improve a description, edit `apps/api/scripts/api-doc-purposes.json` or write a doc comment on the handler.
 
@@ -106,6 +106,9 @@ Every HTTP endpoint the NestJS API (`apps/api`) declares: **925 routes across 90
 | PUT | `/operator/groups/:id/members` | 🔑 `platform.subscription.manage` · ⬆️ step-up | Replace a group's member schools. |
 | POST | `/operator/impersonate` | 🔑 `platform.impersonate` · ⬆️ step-up | Mint an audited, scoped impersonation token |
 | GET | `/operator/jobs` | 🔑 `platform.tenants.read` | Every scheduled job, and whether it has actually been running. |
+| GET | `/operator/ledger-integrity` | 🔑 `fee.reconcile.run` | Every invoice on the platform whose status disagrees with its payments. |
+| POST | `/operator/ledger-integrity/:invoiceId/rederive` | 🔑 `fee.reconcile.run` · ⬆️ step-up | Make ONE invoice's status say what its payments say. |
+| POST | `/operator/ledger-integrity/run` | 🔑 `fee.reconcile.run` | Run the nightly check now. |
 | POST | `/operator/maintenance/index-bloat/run` | 🔑 `platform.operate` | Reclaim index space now (it also runs weekly). |
 | GET | `/operator/message-credits` | 🔑 `platform.tenants.read` | Cross-tenant balance list — every school's current SMS/WhatsApp credit position, searchable by name. |
 | POST | `/operator/message-credits/:schoolId/adjust` | 🔑 `platform.subscription.manage` · ⬆️ step-up | Comp or debit a school's credit balance. |

@@ -105,6 +105,10 @@ export default async function OperatorPage({
           <Link href="/operator/schools"><Button variant="outline" size="sm">School directory →</Button></Link>
           <Link href="/operator/payments"><Button variant="outline" size="sm">Subscription revenue →</Button></Link>
           <Link href="/operator/message-credits"><Button variant="outline" size="sm">Message credits →</Button></Link>
+          {/* Money-ledger health: the same permission as reconciliation. */}
+          {hasPermission(user.permissions, "fee.reconcile.run") && (
+            <Link href="/operator/ledger-integrity"><Button variant="outline" size="sm">Ledger integrity →</Button></Link>
+          )}
           {canAdminScholarships && (
             <Link href="/operator/scholarships"><Button variant="outline" size="sm">Scholarship admin →</Button></Link>
           )}

@@ -129,6 +129,7 @@ describe("the catalogue matches the cron the code actually uses", () => {
     ["DEFAULT_PROGRESSION_CRON", "lms/progression/academic-progression.constants.ts", "lms.progression"],
     ["DEFAULT_RECORDING_RETENTION_CRON", "lms/recording-retention.constants.ts", "lms.recordingRetention"],
     ["DEFAULT_RECONCILE_CRON", "fees/reconciliation.service.ts", "fees.reconciliation"],
+    ["DEFAULT_LEDGER_INTEGRITY_CRON", "fees/ledger-integrity.service.ts", "fees.ledgerIntegrity"],
     ["DEFAULT_TERM_ARCHIVE_CRON", "privacy/archive.service.ts", "privacy.archive"],
     ["DEFAULT_AUDIT_PARTITION_CRON", "maintenance/maintenance.constants.ts", "maintenance.auditPartition"],
     ["DEFAULT_LATE_FEE_CRON", "fees/fee-ops.service.ts", "fees.ops"],

@@ -19775,3 +19775,55 @@ at them.
 // inputs on signed-in pages (focus never landed). The run drove the page
 // through its own DOM events instead, which still exercises the React handlers,
 // the BFF and the API.
+
+### An invoice marked PAID with money owed — and nothing that would ever have noticed
+
+Found while checking the group console's "owed now" against a school's finance
+report (₦98,750 vs ₦99,750): one invoice was PAID with ₦1,000 of ₦1,500 unpaid,
+and its status change had no audit entry. Traced, not guessed. A scholarship
+award at 17:00:07 on 20 Aug disbursed exactly the ₦1,000 remaining, in the same
+request that changed the invoice, so the invoice was correctly PAID. The
+database now holds NO scholarship payment anywhere, every award's
+`disbursementPaymentId` is empty, and only the superuser holds DELETE on
+`payment`. A direct superuser cleanup (a probe teardown, 30 Aug) deleted the
+payments and left the labels they had justified.
+
+Not an app bug, which is the point: **a status is a label derived from the
+money, and nothing enforced that it stayed derived.** The app role cannot
+delete a payment, so every app writer was right and the label was still wrong
+for ever, with every screen believing it.
+- **One rule.** `invoiceStatusForNet` in `net-paid.ts`, next to the one
+  definition of "paid". Seven writers decided PAID, spelled five ways: four had
+  the full rule, two had no ISSUED branch (sound only because they ran after
+  money was added), and the library kept the old status so that a fine would not
+  issue a DRAFT (now the helper's `whenUnpaid` argument). Gate
+  `one-rule-for-paid` fails on a new inline spelling. Mutation: putting the
+  fee-ops ternary back fails it, naming the line.
+- **A nightly check.** `fees.ledgerIntegrity` (04:40, after reconciliation) judges
+  every billable invoice on the platform against its POSTED payments and
+  classifies each disagreement by what it costs: PAID_BUT_OWING (reminders have
+  stopped), OPEN_BUT_SETTLED (a family chased for a paid bill),
+  PARTIAL_MISLABELLED. It alerts the owners while anything disagrees, and counts
+  an alert it could not send in `failed`. Listed at `/operator/ledger-integrity`.
+- **A way out.** "Correct status" sets the label the ledger supports. It moves
+  no money, is optimistic on the status it read, step-up gated, audited in both
+  tenants, and tells the school's finance staff. A label that already agrees is
+  a 409, not a silent no-op.
+- **The rule is held in ONE place across two languages.** The check's SQL CASE
+  is `invoiceStatusForNet` in Postgres. `ledger-integrity.e2e-spec` stores an
+  invoice for each kind of net paid (refunded below zero, nothing, 1, all but
+  one, exact, overpaid) with a status the helper would NOT give it, and requires
+  every one found with the helper's answer. Changing the CASE's `>=` to `>` fails
+  it, and so does counting PENDING payments or judging zero-total invoices.
+// REJECTED: a trigger logging every status change and payment DELETE to a new
+// tenant table. Every tenant table must FK to `school` with ON DELETE RESTRICT,
+// and 35 e2e suites delete their schools in teardown, so each would need
+// rewriting — and an in-database log is the weaker form of the real control. The
+// app already audits its own writes; what is missing is attribution for writes
+// that BYPASS the app, which is pgaudit on the privileged roles plus
+// break-glass-only superuser credentials. Both are on the production
+// checklist, marked NOT YET VERIFIED, because there is no RDS here to prove them on.
+// GOTCHA: my first mutation run of this check showed four failures against
+// code whose edit had "not applied". It HAD applied: the grep confirming it
+// mis-escaped `${payScope}`. A check on a mutation is code too, and needs
+// checking.

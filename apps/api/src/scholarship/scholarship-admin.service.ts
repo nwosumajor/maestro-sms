@@ -56,6 +56,7 @@ import {
 import { Inject } from "@nestjs/common";
 import { toMinor } from "../common/money";
 import { formatMoney } from "@sms/types";
+import { invoiceStatusForNet } from "../fees/net-paid";
 
 /**
  * THE CURRENCY A SCHOLARSHIP IS DENOMINATED IN.
@@ -1058,7 +1059,7 @@ export class ScholarshipAdminService {
         const net = posted.reduce((sum, x) => sum + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor), 0);
         await db.invoice.update({
           where: { id: credit.invoiceId },
-          data: { status: net >= (invoice?.totalMinor ?? 0) ? "PAID" : net > 0 ? "PARTIALLY_PAID" : "ISSUED" },
+          data: { status: invoiceStatusForNet(net, invoice?.totalMinor ?? 0) },
         });
       }
     }
@@ -2576,7 +2577,7 @@ private libraryQuestionDto(r: Record<string, never>): ScholarshipLibraryQuestion
     const newPaid = paid + credit;
     await db.invoice.update({
       where: { id: invoice.id },
-      data: { status: newPaid >= invoice.totalMinor ? "PAID" : "PARTIALLY_PAID" },
+      data: { status: invoiceStatusForNet(newPaid, invoice.totalMinor) },
     });
     return { ok: true, kind: "INVOICE", paymentId: payment.id, amountMinor: credit };
   }

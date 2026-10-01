@@ -64,3 +64,29 @@ export async function netPaidByInvoice(
   }
   return out;
 }
+
+/**
+ * The status an invoice's money says it should carry — the ONE rule.
+ *
+ * Seven writers decided this, spelled five ways: four the full rule, two with
+ * no ISSUED branch (sound only because they ran after money was added), and the
+ * library keeping the old status rather than issuing a DRAFT. Each was right
+ * where it stood; a rule written seven times is the shape that goes wrong on
+ * the eighth. `ledger-integrity` checks stored statuses against this same rule
+ * in SQL, and `one-rule-for-paid.spec` fails on a new spelling of it.
+ *
+ * `whenUnpaid` is the status for nothing paid. ISSUED for a bill that has been
+ * issued; the library passes the invoice's CURRENT status so a fine landing on
+ * a DRAFT does not issue it as a side effect.
+ */
+export function invoiceStatusForNet(netPaidMinor: number, totalMinor: number): "PAID" | "PARTIALLY_PAID" | "ISSUED";
+export function invoiceStatusForNet<U extends string>(
+  netPaidMinor: number,
+  totalMinor: number,
+  whenUnpaid: U,
+): "PAID" | "PARTIALLY_PAID" | U;
+export function invoiceStatusForNet(netPaidMinor: number, totalMinor: number, whenUnpaid: string = "ISSUED"): string {
+  if (netPaidMinor >= totalMinor) return "PAID";
+  if (netPaidMinor > 0) return "PARTIALLY_PAID";
+  return whenUnpaid;
+}

@@ -19,6 +19,7 @@ import { MaintenanceModule } from "../maintenance/maintenance.module";
 import { OperatorPaymentsService } from "./operator-payments.service";
 import { PaymentsModule } from "../payments/payments.module";
 import { PaymentHealthModule } from "../payments/payment-health.module";
+import { LedgerIntegrityModule } from "../fees/ledger-integrity.module";
 
 // BillingModule provides PlanPricingService — the operator console reads/sets
 // the platform's per-tier pricing (one-way dep operator -> billing, no cycle).
@@ -28,7 +29,7 @@ import { PaymentHealthModule } from "../payments/payment-health.module";
 @Module({
   // PaymentsModule for the payment-channel switchboard the operator owns. It is
   // a leaf module (no imports of its own), so this cannot introduce a cycle.
-  imports: [MaintenanceModule, BillingModule, NotificationModule, PrivacyModule, GroupModule, PaymentsModule, PaymentHealthModule],
+  imports: [MaintenanceModule, BillingModule, NotificationModule, PrivacyModule, GroupModule, PaymentsModule, PaymentHealthModule, LedgerIntegrityModule],
   controllers: [OperatorController],
   providers: [OperatorService, OperatorProvisioningService, OperatorUserService, OperatorExportService, OperatorDirectoryService,
     OperatorAttentionService, PlatformDelegationService, PlatformAnalyticsService, PlatformAuditService, OperatorCreditsService, OperatorPaymentsService, SettlementReleaseService, CurrencyCoverageService],

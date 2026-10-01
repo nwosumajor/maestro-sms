@@ -10,7 +10,10 @@ import {
   PAYSTACK_CURRENCIES,
   planCurrencies,
   AGENT_COMMISSION_STATUSES,
+  FEES_PERMISSIONS,
 } from "@sms/types";
+import type { LedgerIntegrityResult, LedgerMismatchPageDto, LedgerRederiveResultDto } from "@sms/types";
+import { LedgerIntegrityService } from "../fees/ledger-integrity.service";
 import { z } from "zod";
 import {
   COUNTRIES,
@@ -286,6 +289,7 @@ export class OperatorController {
     private readonly paymentHealth: PaymentHealthService,
     private readonly growth: GrowthService,
     private readonly groups: GroupService,
+    private readonly ledgerIntegrity: LedgerIntegrityService,
     private readonly credits: OperatorCreditsService,
     private readonly settlementRelease: SettlementReleaseService,
     private readonly currencyCoverageService: CurrencyCoverageService,
@@ -1035,6 +1039,36 @@ export class OperatorController {
   @RequireStepUp()
   markCommissionPaid(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.growth.markCommissionPaid(p, id);
+  }
+
+  // --- ledger integrity: invoice status vs its payments -------------------------
+  // `fee.reconcile.run` — the platform's money-ledger health permission
+  // (super_admin only), the same one that runs reconciliation.
+
+  /** Every invoice on the platform whose status disagrees with its payments. */
+  @Get("ledger-integrity")
+  @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
+  ledgerMismatches(@Query("page") page?: string): Promise<LedgerMismatchPageDto> {
+    return this.ledgerIntegrity.list(pageNumber(page) ?? 1);
+  }
+
+  /** Run the nightly check now. Recorded on the jobs console like the timer's. */
+  @Post("ledger-integrity/run")
+  @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
+  runLedgerIntegrity(@CurrentPrincipal() p: Principal): Promise<LedgerIntegrityResult> {
+    return this.jobRuns.record("fees.ledgerIntegrity", "MANUAL", () => this.ledgerIntegrity.runManual(p));
+  }
+
+  /** Make ONE invoice's status say what its payments say. Moves no money.
+   *  Step-up: a platform write to a school's financial record. */
+  @Post("ledger-integrity/:invoiceId/rederive")
+  @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
+  @RequireStepUp()
+  rederiveInvoiceStatus(
+    @CurrentPrincipal() p: Principal,
+    @Param("invoiceId") invoiceId: string,
+  ): Promise<LedgerRederiveResultDto> {
+    return this.ledgerIntegrity.rederive(p, invoiceId);
   }
 
   // --- multi-school groups (franchise tier; owner-only writes) ----------------
