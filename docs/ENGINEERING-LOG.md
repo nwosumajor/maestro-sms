@@ -19827,3 +19827,53 @@ for ever, with every screen believing it.
 // code whose edit had "not applied". It HAD applied: the grep confirming it
 // mis-escaped `${payScope}`. A check on a mutation is code too, and needs
 // checking.
+
+### The group console at the size of a real chain — measured, and one index
+
+"Owed now" follows the finance report's definition, so it reads every billable
+invoice a campus has ever raised. That is O(the group's LIFETIME), and nobody
+had timed it on more than a dozen invoices. `scripts/seed-group-volume.sql`
+builds what a large proprietor's chain looks like, in a THROWAWAY copy of the
+test database: 30 campuses × 500 pupils, ten years of three dated terms, an
+invoice per pupil per term (420,000; 407,423 payments), and a year of daily
+registers (111,600 registers, 2.79M marks). `test/perf/group-console-at-volume`
+drives the REAL service code against it, as the privileged role production
+uses, and runs only when `PERF_DATABASE_URL` is set. It reports the median of
+five runs after a warm-up, and the cold first call separately.
+
+Before, overview median: 10 campuses ~0.5 s, **30 campuses ~1.2 s**. Campus page
+85 ms. Nightly ledger check over the whole platform ~1.04 s.
+
+Timing each part of the 30-campus overview separately named the cause rather
+than guessing it: headcount 22 ms, the windowed activity 237 / 75 ms, and
+**balances 999 ms**. EXPLAIN showed why: the "net paid per invoice" aggregate
+hashed all 407,423 payments, SPILLED 30 MB to disk (81 batches at the default
+4 MB work_mem), and each of the three parallel workers rebuilt it in full
+(`loops=3`).
+
+Tried, measured, REJECTED:
+- `work_mem` 64 MB for the query: ~1,050 ms. The spill was not the main cost.
+- No parallelism: ~1,550 ms. The join, not the aggregate, then runs on one core.
+- Index plus no parallelism: ~990 ms, for the same reason.
+
+ADOPTED: a partial covering index, `payment ("invoiceId") INCLUDE ("schoolId",
+kind, "amountMinor") WHERE status = 'POSTED'` (migration `20270401000000`, named
+in fees.prisma because Prisma cannot express it). It gives an Index Only Scan
+and a streaming GroupAggregate, so nothing spills. The balances query went
+~1,200 → ~690 ms. Write cost: 20,000 payment inserts took 1,839 ms without the
+index and 1,773 ms with it, inside the noise (the FK checks dominate an insert).
+
+After, overview median: **10 campuses ~0.34 s, 30 campuses ~0.84–0.93 s** (target
+1 s). Campus page 84 ms. Ledger check ~0.84 s. The same index serves the finance
+report's receivables and the ledger check, which aggregate the same shape.
+// GOTCHA: the finance report's own notes record a `payment` INCLUDE index
+// "never chosen" there. This one is chosen because it is PARTIAL on the
+// predicate every net-paid reader applies (`status = 'POSTED'`), so the planner
+// can satisfy the WHERE from the index alone. An index's columns are half the
+// design; its predicate is the other half.
+// STILL O(LIFETIME): this buys a constant factor, not a different curve. The
+// overview grows with every campus-year of history. At about 50 ten-year
+// campuses it will pass 1 s again, and the next step is to stop recomputing a
+// lifetime from scratch on every page load: a short cache per group, or a
+// maintained per-invoice paid figure written by the ONE settlement path.
+// Decide when a real group gets there; do not pre-build it.
