@@ -17,6 +17,7 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { WEB, makeClient, classify, errorDigests } from "./lib/stack-client.mjs";
 
 /**
  * Where the stack is.
@@ -33,8 +34,6 @@ import { join } from "node:path";
  * Defaults to the compose stack, which is what an on-call reader has. Running
  * against `next dev` is a WEB_URL away, and the failure below says so.
  */
-const WEB = process.env.WEB_URL ?? "http://localhost";
-const PASSWORD = process.env.SMOKE_PASSWORD ?? "password123";
 const DUMMY_UUID = "00000000-0000-4000-8000-000000000000";
 
 // Every demo account (CLAUDE.md). A missing login is skipped, not failed.
@@ -85,75 +84,7 @@ function discoverRoutes(dir, prefix = "") {
 //   TENANT_RATE_LIMIT_PER_MIN=100000 docker compose up -d backend
 //
 // --- login pacing -----------------------------------------------------------
-// The API rate-limits POST /auth/login (10/min per IP). Each web login triggers
-// exactly one such call, so testing >9 roles would trip it and silently under-
-// cover. A token bucket keeps us under the limit; a retry covers the boundary.
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const LOGIN_WINDOW_MS = 60_000;
-const LOGIN_MAX_PER_WINDOW = 9;
-const loginTimes = [];
-async function pace() {
-  const now = Date.now();
-  while (loginTimes.length && now - loginTimes[0] > LOGIN_WINDOW_MS) loginTimes.shift();
-  if (loginTimes.length >= LOGIN_MAX_PER_WINDOW) {
-    const wait = LOGIN_WINDOW_MS - (now - loginTimes[0]) + 500;
-    console.log(`  …pacing logins (rate limit): waiting ${Math.ceil(wait / 1000)}s`);
-    await sleep(wait);
-    return pace();
-  }
-  loginTimes.push(Date.now());
-}
-
-// --- cookie-jar HTTP with the Auth.js flow ----------------------------------
-function makeClient() {
-  const jar = new Map();
-  const header = () => [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-  const store = (res) => {
-    for (const c of res.headers.getSetCookie?.() ?? []) {
-      const [kv] = c.split(";");
-      const i = kv.indexOf("=");
-      jar.set(kv.slice(0, i), kv.slice(i + 1));
-    }
-  };
-  return {
-    async login(email) {
-      // Two attempts: the second waits out the full rate-limit window in case
-      // the bucket estimate drifted (other clients sharing the IP, clock skew).
-      for (let attempt = 0; attempt < 2; attempt++) {
-        await pace();
-        jar.clear();
-        let r = await fetch(`${WEB}/api/auth/csrf`, { headers: { cookie: header() } });
-        store(r);
-        const { csrfToken } = await r.json();
-        r = await fetch(`${WEB}/api/auth/callback/credentials`, {
-          method: "POST", redirect: "manual",
-          headers: { "content-type": "application/x-www-form-urlencoded", cookie: header() },
-          body: new URLSearchParams({ csrfToken, email, password: PASSWORD, redirect: "false", json: "true" }),
-        });
-        store(r);
-        if ([...jar.keys()].some((k) => k.includes("session-token"))) return true;
-        if (attempt === 0) { console.log(`  …retrying login for ${email} after the rate window`); await sleep(LOGIN_WINDOW_MS + 500); }
-      }
-      return false;
-    },
-    async get(path) {
-      return fetch(`${WEB}${path}`, { headers: { cookie: header() }, redirect: "manual" });
-    },
-    /** Bytes of the Auth.js session cookie(s) — the size guardrail reads this. */
-    sessionCookieBytes() {
-      let n = 0;
-      for (const [k, v] of jar.entries()) if (k.includes("session-token")) n += k.length + v.length + 1;
-      return n;
-    },
-    // Read JSON via the BFF proxy (same auth path the app uses).
-    async api(path) {
-      const r = await this.get(`/api/sms${path}`);
-      if (r.status !== 200) return null;
-      const t = await r.text();
-      return t ? JSON.parse(t) : null;
-    },
-  };
-}
+// The sign-in client and its login pacing live in ./lib/stack-client.mjs.
 
 // --- resolve one real id per dynamic route (best effort, via an admin) -------
 async function resolveIds(admin) {
@@ -190,38 +121,7 @@ function fill(route, ids) {
  *  rate-limit window to give back budget, short enough to stay usable. */
 const RETRY_PAUSE_MS = Number(process.env.SMOKE_RETRY_PAUSE_MS ?? 8000);
 
-const ERROR_RE = /Application error|server-side exception|is not a function|Cannot read propert|TypeError|__NEXT_ERROR/i;
-
-// A page that THROWS during SSR is served as a 200 carrying the error boundary,
-// and that boundary is a CLIENT component — so none of the strings above appear
-// in the HTML and the shell looks like an ordinary small page. This smoke
-// reported "all 102 routes ok" for every role while four roles were getting an
-// error screen on /workflows, because it could not see this at all.
-//
-// What a throw does leave is a serialized digest in the flight stream. Next uses
-// the same channel for ordinary CONTROL FLOW, so the digest VALUE is the signal,
-// not its presence:
-//   NEXT_NOT_FOUND               notFound()  — a missing record, correct
-//   NEXT_REDIRECT;...            redirect()  — a permission gate firing, correct
-//   NEXT_HTTP_ERROR_FALLBACK;404 the same, newer form
-//   <numeric>                    an UNCAUGHT error — the error boundary
-// Matching the presence of a digest (or React's $RX retry shim, which also fires
-// on recovered suspense) reported 917 failures, nearly all of them healthy pages
-// 404ing or redirecting exactly as designed.
-const DIGEST_RE = /E\{\\?"digest\\?":\\?"([^"\\]+)/g;
-const CONTROL_FLOW = /^(NEXT_NOT_FOUND|NEXT_REDIRECT|NEXT_HTTP_ERROR_FALLBACK)/;
-
-/** Digests that mean a real throw, ignoring Next's control-flow sentinels. */
-function errorDigests(html) {
-  return [...html.matchAll(DIGEST_RE)].map((m) => m[1]).filter((d) => !CONTROL_FLOW.test(d));
-}
-
-function classify(status, html) {
-  if (status === 500) return "FAIL";
-  if (status === 200 && ERROR_RE.test(html)) return "FAIL";
-  if (status === 200 && errorDigests(html).length) return "FAIL";
-  return "ok"; // 200-clean, 3xx redirect (perm/nav), 401/403/404 are all fine
-}
+// `classify` (and the digest rule behind it) lives in ./lib/stack-client.mjs.
 
 async function main() {
   const appDir = join(process.cwd(), "app", "(app)");
